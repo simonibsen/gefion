@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "g2"
+version = "0.1.0"
+description = "Technical analysis + ML data pipeline inspired by folly and gefjon"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "typer>=0.12",
+    "requests>=2.31",
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.1",
+    "rich>=14.0",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+g2 = "g2.cli:entrypoint"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

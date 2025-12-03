@@ -1,0 +1,11 @@
+# Env and secrets
+.env
+
+# Python artifacts
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+
+# OS noise
+.DS_Store
