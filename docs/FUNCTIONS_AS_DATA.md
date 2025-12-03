@@ -54,12 +54,193 @@ WHERE f1.feature_id = 'rsi_experimental_v1'
 
 ### 3. Meta-Learning
 
-AI can learn from successful patterns:
-```python
-# Which implementations performed best?
-# What parameters work across features?
-# Can we generate better versions automatically?
+AI can learn from successful patterns and use that knowledge to generate better features over time.
+
+**Key Insight**: Store learned patterns as data, just like features and implementations. The AI queries these patterns before generating new code.
+
+#### Schema for Learned Patterns
+
+```sql
+-- Store learned patterns about what works
+CREATE TABLE feature_patterns (
+    id SERIAL PRIMARY KEY,
+    pattern_type TEXT NOT NULL,  -- 'window_size', 'weighting_scheme', 'indicator_combo'
+    pattern_name TEXT NOT NULL,
+    description TEXT,
+    context JSONB,  -- When does this pattern apply?
+    evidence JSONB,  -- Statistical support
+    confidence NUMERIC(5,2),  -- 0-100 score
+    first_observed TIMESTAMP DEFAULT NOW(),
+    last_validated TIMESTAMP,
+    times_validated INTEGER DEFAULT 0,
+    active BOOLEAN DEFAULT TRUE,
+    UNIQUE (pattern_type, pattern_name)
+);
+
+-- Link patterns to successful implementations
+CREATE TABLE implementation_patterns (
+    implementation_id INTEGER REFERENCES function_implementations(id),
+    pattern_id INTEGER REFERENCES feature_patterns(id),
+    PRIMARY KEY (implementation_id, pattern_id)
+);
+
+-- Track pattern performance over time
+CREATE TABLE pattern_performance (
+    pattern_id INTEGER REFERENCES feature_patterns(id),
+    evaluated_at TIMESTAMP DEFAULT NOW(),
+    metric_name TEXT,  -- 'sharpe', 'information_ratio', 'feature_importance'
+    metric_value NUMERIC,
+    sample_size INTEGER,
+    test_symbols TEXT[]
+);
 ```
+
+#### Example Learned Patterns
+
+**Pattern 1: Optimal Window Sizes**
+```json
+{
+  "pattern_type": "window_size",
+  "pattern_name": "momentum_7_to_14_optimal",
+  "description": "Momentum features perform best with 7-14 day windows",
+  "context": {
+    "asset_class": "equities",
+    "feature_family": "momentum",
+    "market_regime": "any"
+  },
+  "evidence": {
+    "tested_windows": [3, 5, 7, 10, 14, 20, 30],
+    "best_performing": [7, 10, 14],
+    "avg_sharpe": {
+      "7": 1.42,
+      "10": 1.38,
+      "14": 1.35,
+      "20": 0.98
+    },
+    "sample_size": 500
+  },
+  "confidence": 85.0
+}
+```
+
+**Pattern 2: Weighting Schemes**
+```json
+{
+  "pattern_type": "weighting_scheme",
+  "pattern_name": "exponential_beats_simple",
+  "description": "Exponential weighting outperforms simple moving average for momentum",
+  "context": {
+    "feature_family": "momentum",
+    "comparison": "ema vs sma"
+  },
+  "evidence": {
+    "implementations_tested": 47,
+    "ema_avg_sharpe": 1.32,
+    "sma_avg_sharpe": 1.08,
+    "improvement": "22%",
+    "p_value": 0.003
+  },
+  "confidence": 92.0
+}
+```
+
+**Pattern 3: Feature Combinations**
+```json
+{
+  "pattern_type": "indicator_combo",
+  "pattern_name": "rsi_concavity_mean_reversion",
+  "description": "RSI + concavity signals mean reversion better than RSI alone",
+  "context": {
+    "strategy_type": "mean_reversion",
+    "required_features": ["rsi", "derivative_rsi_concavity"]
+  },
+  "evidence": {
+    "rsi_alone_sharpe": 0.87,
+    "rsi_plus_concavity_sharpe": 1.24,
+    "improvement": "43%",
+    "win_rate_improvement": "8%"
+  },
+  "confidence": 78.0
+}
+```
+
+#### Pattern-Guided Feature Generation
+
+The AI queries learned patterns before generating new implementations:
+
+```python
+async def ai_generate_momentum_feature():
+    """AI uses learned patterns to create better features."""
+
+    # 1. Query what we've learned about momentum features
+    patterns = await mcp.call(
+        'get_learned_patterns',
+        pattern_type='window_size',
+        context_filter={'feature_family': 'momentum'}
+    )
+
+    # AI sees: "7-14 day windows work best"
+    optimal_windows = patterns[0]['evidence']['best_performing']
+
+    # 2. Query weighting scheme patterns
+    weighting_patterns = await mcp.call(
+        'get_learned_patterns',
+        pattern_type='weighting_scheme'
+    )
+
+    # AI sees: "exponential weighting outperforms simple MA"
+
+    # 3. Generate code using learned patterns
+    for window in optimal_windows:
+        source_code = f"""
+def compute_momentum_exp_{window}(source_rows, momentum_specs, return_failures=False):
+    '''Exponential momentum with {window}-day window (pattern-guided).'''
+    df = pd.DataFrame(source_rows)
+    results = []
+
+    for spec in momentum_specs:
+        name = spec['name']
+        # Use exponential weighting (learned pattern)
+        df['pct_change'] = df['value'].pct_change()
+        df[name] = df['pct_change'].ewm(span={window}).mean()
+
+        # ... convert to output format
+
+    return results
+"""
+
+        # 4. Register and test
+        impl_id = await mcp.call(
+            'register_feature_implementation',
+            function_name=f'momentum_exp_{window}',
+            source_code=source_code,
+            metadata={{'guided_by_patterns': [patterns[0]['id'], weighting_patterns[0]['id']]}}
+        )
+
+        # 5. If successful, validate the pattern (reinforcement)
+        test_result = await mcp.call('test_feature_implementation', impl_id, ...)
+
+        if test_result['sharpe'] > 1.5:
+            await mcp.call(
+                'validate_pattern',
+                pattern_id=patterns[0]['id'],
+                new_evidence={{'impl_id': impl_id, 'sharpe': test_result['sharpe']}}
+            )
+```
+
+#### Reinforcement Learning Loop
+
+Each successful experiment strengthens the pattern's confidence score:
+
+```
+AI generates feature → tests on data → if successful → pattern confidence ↑
+                                    → if fails → pattern confidence ↓
+
+After N validations, pattern becomes "established" (confidence > 90)
+AI prioritizes generating features using established patterns
+```
+
+This creates a **compounding advantage**: the more the AI experiments, the smarter it gets about what to try next.
 
 ---
 
@@ -268,27 +449,209 @@ def compare_implementations(
     }
 
 @server.tool()
-def list_feature_patterns() -> List[Dict]:
+def get_learned_patterns(
+    pattern_type: Optional[str] = None,
+    min_confidence: float = 70.0,
+    context_filter: Optional[Dict] = None
+) -> List[Dict]:
     """
-    Return successful feature implementation patterns.
+    Retrieve learned patterns to guide feature generation.
 
-    AI can learn from these when creating new features.
+    AI agents call this before generating new features to incorporate
+    what the system has already learned.
+
+    Args:
+        pattern_type: Filter by pattern type ('window_size', 'weighting_scheme', etc.)
+        min_confidence: Minimum confidence score (0-100)
+        context_filter: JSONB filter for pattern context
+
+    Returns:
+        List of patterns with evidence and example implementations
     """
-    return db.query("""
+    query = """
         SELECT
-            fi.function_name,
-            fi.source_code,
-            fi.performance_metrics,
-            fi.created_at,
-            COUNT(fd.id) as usage_count
-        FROM function_implementations fi
-        LEFT JOIN feature_definitions fd ON fd.implementation_id = fi.id
-        WHERE fi.active = true
-          AND fi.approved_at IS NOT NULL
-        GROUP BY fi.id
-        ORDER BY usage_count DESC
-        LIMIT 20
-    """)
+            fp.*,
+            json_agg(
+                json_build_object(
+                    'impl_id', fi.id,
+                    'function_name', fi.function_name,
+                    'version', fi.version,
+                    'performance', fi.performance_metrics
+                )
+            ) as example_implementations
+        FROM feature_patterns fp
+        LEFT JOIN implementation_patterns ip ON ip.pattern_id = fp.id
+        LEFT JOIN function_implementations fi ON fi.id = ip.implementation_id
+        WHERE fp.active = true
+          AND fp.confidence >= %s
+    """
+
+    params = [min_confidence]
+
+    if pattern_type:
+        query += " AND fp.pattern_type = %s"
+        params.append(pattern_type)
+
+    if context_filter:
+        query += " AND fp.context @> %s"
+        params.append(json.dumps(context_filter))
+
+    query += " GROUP BY fp.id ORDER BY fp.confidence DESC"
+
+    return db.query(query, params)
+
+
+@server.tool()
+def validate_pattern(
+    pattern_id: int,
+    new_evidence: Dict
+) -> Dict:
+    """
+    Update pattern based on new experimental results.
+
+    Called after AI tests a feature that uses this pattern.
+    Performs Bayesian update of confidence score.
+
+    Args:
+        pattern_id: Pattern to validate
+        new_evidence: Results from new experiment (e.g., {'impl_id': 123, 'sharpe': 1.42})
+
+    Returns:
+        Updated pattern with new confidence score
+    """
+    # Get current pattern
+    pattern = db.query_one(
+        "SELECT * FROM feature_patterns WHERE id = %s",
+        [pattern_id]
+    )
+
+    # Bayesian update of confidence
+    prior_confidence = pattern['confidence']
+    times_validated = pattern['times_validated']
+
+    # Simple update formula (can be made more sophisticated)
+    if new_evidence.get('sharpe', 0) > 1.0:
+        # Positive evidence
+        new_confidence = min(100, prior_confidence + (100 - prior_confidence) * 0.1)
+    else:
+        # Negative evidence
+        new_confidence = max(0, prior_confidence - prior_confidence * 0.15)
+
+    # Update pattern
+    db.execute("""
+        UPDATE feature_patterns
+        SET confidence = %s,
+            last_validated = NOW(),
+            times_validated = times_validated + 1
+        WHERE id = %s
+    """, [new_confidence, pattern_id])
+
+    # Record performance metric
+    db.execute("""
+        INSERT INTO pattern_performance
+        (pattern_id, metric_name, metric_value, sample_size)
+        VALUES (%s, 'sharpe', %s, 1)
+    """, [pattern_id, new_evidence.get('sharpe')])
+
+    return {
+        'pattern_id': pattern_id,
+        'old_confidence': prior_confidence,
+        'new_confidence': new_confidence,
+        'times_validated': times_validated + 1
+    }
+
+
+@server.tool()
+def analyze_implementations(
+    function_name_pattern: str,
+    min_sample_size: int = 10
+) -> Dict:
+    """
+    Analyze existing implementations to discover patterns.
+
+    AI can periodically run this to extract new patterns from
+    the accumulated implementation history.
+
+    Args:
+        function_name_pattern: SQL LIKE pattern (e.g., 'momentum_%')
+        min_sample_size: Minimum implementations needed to establish pattern
+
+    Returns:
+        Discovered patterns with statistical evidence
+    """
+    # Find all matching implementations
+    impls = db.query("""
+        SELECT
+            function_name,
+            source_code,
+            performance_metrics,
+            approved_at
+        FROM function_implementations
+        WHERE function_name LIKE %s
+          AND active = true
+          AND approved_at IS NOT NULL
+        ORDER BY performance_metrics->>'sharpe' DESC
+    """, [function_name_pattern])
+
+    if len(impls) < min_sample_size:
+        return {
+            'status': 'insufficient_data',
+            'found': len(impls),
+            'required': min_sample_size
+        }
+
+    # Extract parameters from source code
+    # (simplified - real implementation would use AST parsing)
+    discovered_patterns = []
+
+    # Example: Discover window size patterns
+    window_performance = {}
+    for impl in impls:
+        # Parse window size from code (regex/AST)
+        window = extract_window_size(impl['source_code'])
+        sharpe = impl['performance_metrics'].get('sharpe', 0)
+
+        if window not in window_performance:
+            window_performance[window] = []
+        window_performance[window].append(sharpe)
+
+    # Calculate average performance per window
+    for window, sharpes in window_performance.items():
+        avg_sharpe = np.mean(sharpes)
+        if avg_sharpe > 1.2 and len(sharpes) >= 3:
+            # Create pattern record
+            pattern_id = db.insert("""
+                INSERT INTO feature_patterns
+                (pattern_type, pattern_name, description, evidence, confidence)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (pattern_type, pattern_name) DO UPDATE
+                SET evidence = EXCLUDED.evidence,
+                    confidence = EXCLUDED.confidence
+                RETURNING id
+            """, [
+                'window_size',
+                f'{function_name_pattern}_window_{window}_optimal',
+                f'Window size {window} performs well for {function_name_pattern} features',
+                json.dumps({
+                    'window': window,
+                    'avg_sharpe': avg_sharpe,
+                    'sample_size': len(sharpes)
+                }),
+                min(95, avg_sharpe * 50)  # Confidence based on performance
+            ])
+
+            discovered_patterns.append({
+                'pattern_id': pattern_id,
+                'type': 'window_size',
+                'window': window,
+                'avg_sharpe': avg_sharpe
+            })
+
+    return {
+        'status': 'success',
+        'analyzed': len(impls),
+        'discovered': discovered_patterns
+    }
 ```
 
 ### AI Agent Workflow
@@ -436,9 +799,10 @@ g2 functions-reject --id 123 --reason "Uses inefficient algorithm"
 ### For AI Agents
 
 1. **Rapid Iteration**: Test hundreds of variants without deployment cycle
-2. **Learning**: Access to historical successful patterns
+2. **Meta-Learning**: Access learned patterns to generate better features over time
 3. **Autonomous Experimentation**: Create features end-to-end
-4. **Feedback Loop**: Immediate results from real data
+4. **Feedback Loop**: Immediate results from real data strengthen pattern confidence
+5. **Compounding Advantage**: Each experiment makes the AI smarter about what to try next
 
 ### For Humans
 
@@ -604,16 +968,35 @@ g2 features-compute --features momentum_exp_20
 3. **Performance**: JIT compilation for hot functions?
 4. **Testing**: How comprehensive should AI-generated tests be?
 5. **Rollback**: Automatic rollback if performance degrades?
+6. **Pattern Confidence**: What's the right Bayesian update formula for pattern confidence?
+7. **Pattern Decay**: Should pattern confidence decay over time if not re-validated?
+8. **Cross-Pattern Learning**: How to discover relationships between patterns (e.g., "window_size=7 + ema weighting works well together")?
+9. **Pattern Export**: Should patterns be shareable across users/systems as JSON?
+10. **Cold Start**: How to bootstrap the system when no patterns exist yet?
 
 ---
 
 ## Next Steps
 
+### Phase 1: Foundation
 1. **Prototype**: Implement basic function_implementations table
-2. **MCP Server**: Build minimal MCP server with register/test tools
+2. **Dynamic Loading**: Update dispatcher to load functions from DB
 3. **Safety**: Implement code validation and sandboxing
-4. **AI Agent**: Create simple agent that experiments with momentum variants
-5. **Human Review**: Build CLI tool for reviewing AI-generated functions
+
+### Phase 2: MCP Server
+4. **Basic MCP Tools**: Build register/test/compare implementations
+5. **Pattern Storage**: Add feature_patterns tables
+6. **Pattern MCP Tools**: Add get_learned_patterns, validate_pattern, analyze_implementations
+
+### Phase 3: AI Agent
+7. **Simple Agent**: Create agent that experiments with momentum variants
+8. **Pattern-Guided Generation**: Agent queries patterns before generating code
+9. **Pattern Discovery**: Periodically analyze implementations to extract patterns
+
+### Phase 4: Human Review & Production
+10. **Review CLI**: Build tool for reviewing AI-generated functions
+11. **Monitoring**: Track pattern confidence and implementation performance
+12. **Deployment**: Integrate with production feature computation pipeline
 
 ---
 
@@ -621,4 +1004,9 @@ g2 features-compute --features momentum_exp_20
 
 - [ML_ROADMAP.md](ML_ROADMAP.md) - High-level ML goals
 - [FEATURE_DISPATCHER.md](FEATURE_DISPATCHER.md) - Current dispatcher architecture
+- [SECURITY_SANDBOXING.md](SECURITY_SANDBOXING.md) - Security considerations for dynamic code execution
 - MCP Protocol: https://modelcontextprotocol.io/
+
+---
+
+*Last updated: 2024-12-03 - Added comprehensive meta-learning section with pattern storage schema and MCP tools*
