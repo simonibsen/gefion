@@ -2,6 +2,84 @@
 
 New Python/Postgres project inspired by `folly` (technical analysis + calc_store pattern) and `gefjon` (modern ingestion/ML pipeline). The goal is to grow this incrementally with strict TDD and a running dev journal so work can be paused/resumed easily.
 
+## Architecture
+
+```mermaid
+graph TB
+    subgraph "Data Sources"
+        AV[AlphaVantage API]
+    end
+
+    subgraph "CLI Commands"
+        DataUpdate[g2 data-update]
+        FeaturesCompute[g2 features-compute]
+        FeaturesRegister[g2 features-register]
+    end
+
+    subgraph "Application Layer"
+        Ingestion[Ingestion Pipeline]
+        Dispatcher[Feature Dispatcher]
+        Registry[Compute Function Registry]
+    end
+
+    subgraph "Compute Functions"
+        IndicatorFn[compute_indicators]
+        DerivativeFn[compute_derivatives]
+        CustomFn[custom functions...]
+    end
+
+    subgraph "Database - TimescaleDB"
+        direction TB
+        Stocks[(stocks)]
+        Prices[(stock_prices<br/>hypertable)]
+        FeatureDefs[(feature_definitions<br/>metadata)]
+        ComputedFeatures[(computed_features<br/>hypertable)]
+
+        Stocks -->|1:N| Prices
+        Stocks -->|1:N| ComputedFeatures
+        FeatureDefs -->|1:N| ComputedFeatures
+        Prices -->|source| ComputedFeatures
+        ComputedFeatures -->|source| ComputedFeatures
+    end
+
+    %% Data ingestion flow
+    AV -->|fetch prices| DataUpdate
+    DataUpdate -->|batch insert| Ingestion
+    Ingestion -->|insert| Stocks
+    Ingestion -->|insert| Prices
+
+    %% Feature registration flow
+    FeaturesRegister -->|define| FeatureDefs
+
+    %% Feature computation flow
+    FeaturesCompute -->|dispatch| Dispatcher
+    Dispatcher -->|read metadata| FeatureDefs
+    Dispatcher -->|route by function_name| Registry
+    Registry -->|indicator| IndicatorFn
+    Registry -->|derivative| DerivativeFn
+    Registry -->|custom| CustomFn
+
+    IndicatorFn -->|fetch| Prices
+    DerivativeFn -->|fetch| ComputedFeatures
+
+    IndicatorFn -->|insert| ComputedFeatures
+    DerivativeFn -->|insert| ComputedFeatures
+    CustomFn -->|insert| ComputedFeatures
+
+    style Dispatcher fill:#e1f5ff
+    style Registry fill:#e1f5ff
+    style FeatureDefs fill:#fff4e1
+    style ComputedFeatures fill:#e8f5e9
+```
+
+### Key Concepts
+
+- **Metadata-Driven**: Features are defined as data in `feature_definitions`, not code
+- **Registry Pattern**: Compute functions register by name (e.g., "indicator", "derivative")
+- **Generic Dispatcher**: Routes computation based on `function_name` in feature definitions
+- **Hypertables**: TimescaleDB optimizes time-series queries on `stock_prices` and `computed_features`
+- **Pure Functions**: Compute functions are side-effect-free, dispatcher handles DB I/O
+
 ## Current focus
 - Capture initial domain notes (data model, sources/computed separation, calc_store-style descriptors)
 - Set up a minimal Python package + pytest harness
