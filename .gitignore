@@ -6,6 +6,9 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.pyc
+*.egg-info/
+dist/
+build/
 
 # OS noise
 .DS_Store
