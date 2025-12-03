@@ -1,0 +1,56 @@
+import os
+from pathlib import Path
+
+import pytest
+import psycopg
+from typer.testing import CliRunner
+
+from g2 import cli
+from g2.db import schema
+
+runner = CliRunner()
+fixture_path = Path(__file__).parent / "fixtures" / "demo_time_series_daily_adjusted.json"
+
+
+def require_db():
+    if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+        pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
+    try:
+        conn = psycopg.connect(schema.test_db_url())
+    except psycopg.OperationalError:
+        pytest.skip("DB not available")
+    return conn
+
+
+@pytest.fixture(autouse=True)
+def clean_db():
+    conn = require_db()
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    conn.close()
+    yield
+
+
+def test_cli_ingest_prices_inserts_rows():
+    env = {"DATABASE_URL": schema.test_db_url()}
+    result = runner.invoke(
+        cli.app,
+        [
+            "ingest-prices",
+            "--symbol",
+            "IBM",
+            "--input",
+            str(fixture_path),
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0, result.stdout
+
+    conn = require_db()
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM stock_prices;")
+        count = cur.fetchone()[0]
+    conn.close()
+    assert count > 0

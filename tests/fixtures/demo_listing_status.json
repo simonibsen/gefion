@@ -1,0 +1,31 @@
+{
+  "data": [
+    {
+      "symbol": "IBM",
+      "name": "International Business Machines",
+      "exchange": "NYSE",
+      "assetType": "Stock",
+      "ipoDate": "1915-11-11",
+      "delistingDate": null,
+      "status": "Active"
+    },
+    {
+      "symbol": "AAPL",
+      "name": "Apple Inc",
+      "exchange": "NASDAQ",
+      "assetType": "Stock",
+      "ipoDate": "1980-12-12",
+      "delistingDate": null,
+      "status": "Active"
+    },
+    {
+      "symbol": "FOO",
+      "name": "Foo Corp",
+      "exchange": "OTC",
+      "assetType": "Stock",
+      "ipoDate": "2020-01-01",
+      "delistingDate": "2023-01-01",
+      "status": "Delisted"
+    }
+  ]
+}

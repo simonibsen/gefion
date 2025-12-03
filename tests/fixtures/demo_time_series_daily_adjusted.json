@@ -1,0 +1,31 @@
+{
+  "Meta Data": {
+    "1. Information": "Daily Time Series with Splits and Dividend Events",
+    "2. Symbol": "IBM",
+    "3. Last Refreshed": "2023-07-21",
+    "4. Output Size": "Compact",
+    "5. Time Zone": "US/Eastern"
+  },
+  "Time Series (Daily)": {
+    "2023-07-21": {
+      "1. open": "135.9400",
+      "2. high": "136.6400",
+      "3. low": "135.5400",
+      "4. close": "136.0900",
+      "5. adjusted close": "136.0900",
+      "6. volume": "4731415",
+      "7. dividend amount": "0.0000",
+      "8. split coefficient": "1.0"
+    },
+    "2023-07-20": {
+      "1. open": "134.0000",
+      "2. high": "135.7800",
+      "3. low": "133.8600",
+      "4. close": "135.5300",
+      "5. adjusted close": "135.5300",
+      "6. volume": "7953201",
+      "7. dividend amount": "0.0000",
+      "8. split coefficient": "1.0"
+    }
+  }
+}

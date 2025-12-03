@@ -1,0 +1,14 @@
+{
+  "Technical Analysis: MACD": {
+    "2023-07-21": {
+      "MACD_Signal": "0.1234",
+      "MACD_Hist": "-0.0123",
+      "MACD": "0.1111"
+    },
+    "2023-07-20": {
+      "MACD_Signal": "0.1000",
+      "MACD_Hist": "0.0010",
+      "MACD": "0.1010"
+    }
+  }
+}

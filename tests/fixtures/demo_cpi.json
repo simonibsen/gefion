@@ -1,0 +1,15 @@
+{
+  "name": "Consumer Price Index for All Urban Consumers: All Items in U.S. City Average",
+  "interval": "monthly",
+  "unit": "index 1982-1984=100",
+  "data": [
+    {
+      "date": "2023-06-01",
+      "value": "304.127"
+    },
+    {
+      "date": "2023-05-01",
+      "value": "304.127"
+    }
+  ]
+}
