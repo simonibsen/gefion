@@ -113,6 +113,9 @@ python -m pytest -q
 - Copy `.env.example` to `.env` and adjust credentials as needed.
 - Start database: `docker compose up -d postgres`
 - A TimescaleDB extension is enabled via `docker/initdb.d/timescaledb.sql`.
+- **Initialize schema**: `psql -d g2 -f sql/schema.sql`
+  - Creates all tables, hypertables, and indexes
+  - Safe to run multiple times (idempotent)
 
 ## Contributing workflow (TDD-first)
 - Write a failing test that describes the behavior

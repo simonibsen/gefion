@@ -1,8 +1,27 @@
 # SQL Scripts
 
-This directory contains SQL scripts for defining features and other database operations.
+This directory contains SQL scripts for schema setup and feature definitions.
 
 ## Files
+
+### schema.sql
+
+Complete database schema for g2 application. Creates all tables, hypertables, and indexes.
+
+**Usage:**
+```bash
+# Initialize or reset database schema
+psql -d g2 -f sql/schema.sql
+```
+
+**Tables created:**
+- `stocks` - Stock symbols dimension table
+- `stock_prices` - OHLCV price data (hypertable)
+- `feature_definitions` - Feature metadata (calc_store pattern)
+- `computed_features` - Computed features (hypertable)
+- `company_fundamentals_history` - Fundamental data (hypertable)
+
+**Note:** Safe to run multiple times (idempotent). All tables use `IF NOT EXISTS`.
 
 ### derivative_features.sql
 
