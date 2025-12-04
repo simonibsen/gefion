@@ -17,7 +17,14 @@ from psycopg import sql
 from g2.alphavantage.catalog import parse_daily_adjusted, parse_listing_status
 from g2.alphavantage.client import AlphaVantageClient
 from g2.db import schema
-from g2.db.ingest import decide_outputsize, insert_stock_prices, upsert_stock, latest_price_date
+from g2.db.ingest import (
+    decide_outputsize,
+    insert_stock_prices,
+    upsert_stock,
+    latest_price_date,
+    filter_symbols_needing_update,
+    filter_new_rows,
+)
 from g2.utils.progress import ProgressReporter
 
 from datetime import date
@@ -109,6 +116,22 @@ def ingest_prices_for_symbols(
         schema.create_stocks_table(conn)
         schema.migrate_stock_tables_to_data_id(conn)
         schema.create_stock_prices_table(conn)
+
+        # Smart filtering: skip symbols that already have up-to-date data
+        # This avoids unnecessary API calls and database queries
+        if not update_existing:
+            target_date = _expected_market_date()
+            symbols_to_skip = []
+            symbols_before_filter = list(symbols)
+            symbols = filter_symbols_needing_update(conn, symbols_before_filter, target_date)
+
+            # Track skipped symbols for progress reporting
+            skipped_count = len(symbols_before_filter) - len(symbols)
+            if progress and skipped_count > 0:
+                # Report skipped symbols immediately
+                for sym in symbols_before_filter:
+                    if sym not in symbols:
+                        progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "up-to-date", "outputsize": "skip"})
     # Bounded queue prevents memory exhaustion when fetchers outpace writers
     work_queue: queue.Queue[Tuple[str, list, str]] = queue.Queue(maxsize=200)
     writer_done = object()
@@ -139,6 +162,17 @@ def ingest_prices_for_symbols(
                 if progress:
                     progress.step_done(sym, error=True, meta={"inserted": 0, "reason": "empty payload"})
                 return
+
+            # Filter to only new rows (rows newer than existing data)
+            # This avoids attempting to insert 100 rows when only 2 are new
+            with psycopg.connect(db_url) as filter_conn:
+                rows = filter_new_rows(filter_conn, data_id, rows)
+
+            if not rows:
+                if progress:
+                    progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "no new data", "outputsize": "skip"})
+                return
+
             api_latest = rows[0]["date"]
             cache_key = sym
             if cache_key in latest_cache and latest_cache[cache_key] >= api_latest:
@@ -264,7 +298,8 @@ def ingest_prices_for_symbols(
             )
             with conn.cursor() as cur:
                 cur.execute(sql_stmt, params)
-            total += len(params) // 9
+                # Use rowcount to get ACTUAL inserts (excludes ON CONFLICT skipped rows)
+                total += cur.rowcount
         conn.commit()
         return total
 

@@ -33,6 +33,121 @@ def latest_price_date(conn: psycopg.Connection, data_id: int) -> Optional[date]:
     return row[0]
 
 
+def filter_symbols_needing_update(
+    conn: psycopg.Connection,
+    symbols: Sequence[str],
+    target_date: Optional[date] = None
+) -> List[str]:
+    """
+    Filter out symbols that already have data up to the target date.
+
+    Returns a list of symbols that need updates (either missing data or stale data).
+    This is more efficient than checking each symbol individually in parallel workers.
+
+    Args:
+        conn: Database connection
+        symbols: List of symbols to check
+        target_date: Date to check against (defaults to today)
+
+    Returns:
+        List of symbols that need updates
+    """
+    if not symbols:
+        return []
+
+    if target_date is None:
+        target_date = date.today()
+
+    # Build query to get latest price date for each symbol
+    # Use LEFT JOIN to include symbols that don't exist or have no prices
+    with conn.cursor() as cur:
+        # Create a temporary table with the input symbols for efficient joining
+        placeholders = ",".join(["%s"] * len(symbols))
+        cur.execute(
+            f"""
+            WITH input_symbols AS (
+                SELECT unnest(ARRAY[{placeholders}]) AS symbol
+            )
+            SELECT
+                input_symbols.symbol,
+                MAX(sp.date) AS latest_date
+            FROM input_symbols
+            LEFT JOIN stocks s ON s.symbol = input_symbols.symbol
+            LEFT JOIN stock_prices sp ON sp.data_id = s.id
+            GROUP BY input_symbols.symbol
+            ORDER BY input_symbols.symbol
+            """,
+            list(symbols)
+        )
+        results = cur.fetchall()
+
+    # Filter to only symbols that need updates
+    symbols_needing_update = []
+    for symbol, latest_date in results:
+        # Need update if: no data exists OR data is stale
+        if latest_date is None or latest_date < target_date:
+            symbols_needing_update.append(symbol)
+
+    return symbols_needing_update
+
+
+def filter_new_rows(
+    conn: psycopg.Connection,
+    data_id: int,
+    rows: Iterable[Mapping[str, object]]
+) -> List[Mapping[str, object]]:
+    """
+    Filter API response rows to only include rows newer than existing data.
+
+    This avoids inserting duplicate rows that would be skipped by ON CONFLICT,
+    reducing database overhead.
+
+    Args:
+        conn: Database connection
+        data_id: Stock ID
+        rows: Rows from API response
+
+    Returns:
+        List of rows that are newer than existing data
+    """
+    if not rows:
+        return []
+
+    # Get the latest date we have for this symbol
+    latest = latest_price_date(conn, data_id)
+
+    # If no existing data, all rows are new
+    if latest is None:
+        return list(rows)
+
+    # Filter to only rows after the latest date
+    new_rows = []
+    for row in rows:
+        row_date = row.get("date")
+
+        # Handle different date formats
+        if isinstance(row_date, date):
+            parsed_date = row_date
+        elif isinstance(row_date, str):
+            try:
+                from datetime import datetime
+                parsed_date = datetime.fromisoformat(row_date).date()
+            except Exception:
+                # If we can't parse the date, include the row (let insert handle it)
+                new_rows.append(row)
+                continue
+        else:
+            # Unknown date format, include the row
+            new_rows.append(row)
+            continue
+
+        # Only include rows newer than latest existing date
+        if parsed_date > latest:
+            new_rows.append(row)
+
+    return new_rows
+
+
 def feature_ids_for_names(conn: psycopg.Connection, names: Sequence[str]) -> Dict[str, int]:
     """Resolve feature names to ids; returns mapping of found names."""
     placeholders = ",".join(["%s"] * len(names))
@@ -349,7 +464,8 @@ def insert_stock_prices(
             )
 
             cur.execute(sql_stmt, params)
-            total_inserted += len(batch)
+            # Use rowcount to get ACTUAL inserts (excludes ON CONFLICT skipped rows)
+            total_inserted += cur.rowcount
 
     conn.commit()
     return total_inserted
