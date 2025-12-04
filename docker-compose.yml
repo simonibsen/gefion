@@ -9,6 +9,7 @@ services:
       [
         "postgres",
         "-c", "shared_preload_libraries=timescaledb",
+        "-c", "max_locks_per_transaction=256",
       ]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-g2}
