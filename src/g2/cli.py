@@ -470,11 +470,15 @@ def db_init(
         return
 
     try:
+        # Read the schema file content
+        with open(schema_path, 'r') as f:
+            schema_sql = f.read()
+
         # Parse the database URL to get connection parameters
         from urllib.parse import urlparse
         parsed = urlparse(url)
 
-        # Build psql command
+        # Build psql command (use stdin instead of -f to avoid snap confinement issues)
         env = os.environ.copy()
         if parsed.password:
             env['PGPASSWORD'] = parsed.password
@@ -484,15 +488,16 @@ def db_init(
             '-h', parsed.hostname or 'localhost',
             '-p', str(parsed.port or 5432),
             '-U', parsed.username or 'postgres',
-            '-d', parsed.path.lstrip('/') if parsed.path else 'postgres',
-            '-f', str(schema_path)
+            '-d', parsed.path.lstrip('/') if parsed.path else 'postgres'
         ]
 
         if not json_output:
             emit("Initializing database schema...")
 
+        # Pipe schema SQL via stdin (works with snap-confined psql)
         result = subprocess.run(
             cmd,
+            input=schema_sql,
             env=env,
             capture_output=True,
             text=True
