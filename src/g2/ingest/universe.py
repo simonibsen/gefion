@@ -129,8 +129,10 @@ def ingest_prices_for_symbols(
             skipped_count = len(symbols_before_filter) - len(symbols)
             if progress and skipped_count > 0:
                 # Report skipped symbols immediately
+                # Convert to set for O(1) lookup instead of O(n) list lookup
+                symbols_set = set(symbols)
                 for sym in symbols_before_filter:
-                    if sym not in symbols:
+                    if sym not in symbols_set:
                         progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "up-to-date", "outputsize": "skip"})
     # Bounded queue prevents memory exhaustion when fetchers outpace writers
     work_queue: queue.Queue[Tuple[str, list, str]] = queue.Queue(maxsize=200)
