@@ -27,7 +27,7 @@ from g2.db.ingest import (
 )
 from g2.utils.progress import ProgressReporter
 
-from datetime import date
+from datetime import date, timedelta
 
 
 def _today_date() -> date:
@@ -39,9 +39,9 @@ def _expected_market_date() -> date:
     today = date.today()
     # Simple weekend adjustment; holidays can be added later if needed.
     if today.weekday() == 5:  # Saturday
-        return today.replace(day=today.day - 1)
+        return today - timedelta(days=1)
     if today.weekday() == 6:  # Sunday
-        return today.replace(day=today.day - 2)
+        return today - timedelta(days=2)
     return today
 
 
