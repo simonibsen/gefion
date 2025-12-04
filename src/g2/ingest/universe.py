@@ -123,17 +123,25 @@ def ingest_prices_for_symbols(
             target_date = _expected_market_date()
             symbols_to_skip = []
             symbols_before_filter = list(symbols)
+
+            # Time the SQL query
+            filter_start = time.time()
             symbols = filter_symbols_needing_update(conn, symbols_before_filter, target_date)
+            filter_elapsed = time.time() - filter_start
+            print(f"[DEBUG] Filter query took {filter_elapsed:.2f}s for {len(symbols_before_filter)} symbols")
 
             # Track skipped symbols for progress reporting
             skipped_count = len(symbols_before_filter) - len(symbols)
             if progress and skipped_count > 0:
-                # Report skipped symbols immediately
-                # Convert to set for O(1) lookup instead of O(n) list lookup
-                symbols_set = set(symbols)
-                for sym in symbols_before_filter:
-                    if sym not in symbols_set:
-                        progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "up-to-date", "outputsize": "skip"})
+                # Bulk update progress stats instead of calling step_done for each symbol
+                # This avoids 4000+ expensive terminal renders when most symbols are up-to-date
+                with progress._lock:
+                    progress.done += skipped_count
+                    progress.successes += skipped_count
+                    progress.last_ok = f"{skipped_count} up-to-date symbols"
+                # Single refresh of the display
+                if progress.live:
+                    progress.live.update(progress._build_table())
     # Bounded queue prevents memory exhaustion when fetchers outpace writers
     work_queue: queue.Queue[Tuple[str, list, str]] = queue.Queue(maxsize=200)
     writer_done = object()
