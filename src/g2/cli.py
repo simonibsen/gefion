@@ -337,9 +337,32 @@ def ingest_universe(
         default_writer=writer_workers or 1,
     )
 
+    # Do bulk filtering ONCE for all symbols before chunking
+    # This is much faster than filtering each chunk separately
+    skipped = 0
+    if not update_existing:
+        from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
+        import psycopg
+        with psycopg.connect(url) as conn:
+            from g2.db import schema
+            schema.create_stocks_table(conn)
+            schema.create_stock_prices_table(conn)
+            target_date = _expected_market_date()
+            symbols_before = len(symbols)
+            symbols = filter_symbols_needing_update(conn, symbols, target_date)
+            skipped = symbols_before - len(symbols)
+            if skipped > 0 and not json_output:
+                emit(f"Skipped {skipped} up-to-date symbols, processing {len(symbols)} symbols", json_output=False)
+
     reporter = ProgressReporter(total=len(symbols), json_output=json_output, enabled=progress)
     reporter.workers = worker_count
     reporter.mode = "api"
+    # Report skipped symbols immediately
+    if skipped > 0:
+        with reporter._lock:
+            reporter.done += skipped
+            reporter.successes += skipped
+
     live: Optional[Live] = None
     if progress and not json_output:
         live = reporter.start_live()

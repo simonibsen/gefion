@@ -116,32 +116,8 @@ def ingest_prices_for_symbols(
         schema.create_stocks_table(conn)
         schema.migrate_stock_tables_to_data_id(conn)
         schema.create_stock_prices_table(conn)
-
-        # Smart filtering: skip symbols that already have up-to-date data
-        # This avoids unnecessary API calls and database queries
-        if not update_existing:
-            target_date = _expected_market_date()
-            symbols_to_skip = []
-            symbols_before_filter = list(symbols)
-
-            # Time the SQL query
-            filter_start = time.time()
-            symbols = filter_symbols_needing_update(conn, symbols_before_filter, target_date)
-            filter_elapsed = time.time() - filter_start
-            print(f"[DEBUG] Filter query took {filter_elapsed:.2f}s for {len(symbols_before_filter)} symbols")
-
-            # Track skipped symbols for progress reporting
-            skipped_count = len(symbols_before_filter) - len(symbols)
-            if progress and skipped_count > 0:
-                # Bulk update progress stats instead of calling step_done for each symbol
-                # This avoids 4000+ expensive terminal renders when most symbols are up-to-date
-                with progress._lock:
-                    progress.done += skipped_count
-                    progress.successes += skipped_count
-                    progress.last_ok = f"{skipped_count} up-to-date symbols"
-                # Single refresh of the display
-                if progress.live:
-                    progress.live.update(progress._build_table())
+        # Note: Bulk filtering moved to CLI layer for better performance
+        # (filters once for all symbols instead of once per 50-symbol chunk)
     # Bounded queue prevents memory exhaustion when fetchers outpace writers
     work_queue: queue.Queue[Tuple[str, list, str]] = queue.Queue(maxsize=200)
     writer_done = object()
@@ -152,13 +128,7 @@ def ingest_prices_for_symbols(
         try:
             with psycopg.connect(db_url) as conn:
                 data_id = upsert_stock(conn, sym)
-                latest = latest_price_date(conn, data_id)
-                target_date = _expected_market_date()
-                # Skip only when not refreshing existing rows
-                if not update_existing and latest and latest >= target_date:
-                    if progress:
-                        progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "up-to-date", "outputsize": "skip"})
-                    return
+                # Note: up-to-date check removed - already done in bulk filtering
                 if timeframe == "auto":
                     outputsize = decide_outputsize(conn, data_id, timeframe)
                 elif timeframe == "full":
