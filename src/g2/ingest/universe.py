@@ -34,15 +34,53 @@ def _today_date() -> date:
     return date.today()
 
 
-def _expected_market_date() -> date:
-    """Return the most recent likely market day (weekend-aware)."""
+def _expected_market_date(include_today: bool = False) -> date:
+    """Return the most recent likely market day with complete data (weekend-aware).
+
+    Args:
+        include_today: If True, considers today's data available (useful after market close).
+                      If False (default), only expects data through yesterday.
+
+    Market close is 4pm ET (9pm UTC). By default, we conservatively use yesterday
+    to avoid false positives before market data is published.
+    """
+    from datetime import datetime
+    import pytz
+
     today = date.today()
-    # Simple weekend adjustment; holidays can be added later if needed.
-    if today.weekday() == 5:  # Saturday
-        return today - timedelta(days=1)
-    if today.weekday() == 6:  # Sunday
-        return today - timedelta(days=2)
-    return today
+
+    # If include_today is explicitly requested, use today
+    if include_today:
+        # Weekend adjustment for today
+        if today.weekday() == 5:  # Saturday -> Friday
+            return today - timedelta(days=1)
+        if today.weekday() == 6:  # Sunday -> Friday
+            return today - timedelta(days=2)
+        return today
+
+    # Auto-detect based on current time (after 4pm ET, assume today's data exists)
+    try:
+        et_tz = pytz.timezone('America/New_York')
+        now_et = datetime.now(et_tz)
+        market_close_hour = 16  # 4pm ET
+
+        if now_et.hour >= market_close_hour and today.weekday() < 5:  # Weekday after 4pm
+            # Weekend adjustment for today
+            if today.weekday() == 5:  # Saturday -> Friday
+                return today - timedelta(days=1)
+            return today
+    except Exception:
+        # If timezone check fails, fall through to conservative default
+        pass
+
+    # Default: use yesterday as most recent complete trading day
+    yesterday = today - timedelta(days=1)
+    # Weekend adjustment for yesterday
+    if yesterday.weekday() == 5:  # Saturday -> Friday
+        return yesterday - timedelta(days=1)
+    if yesterday.weekday() == 6:  # Sunday -> Friday
+        return yesterday - timedelta(days=2)
+    return yesterday
 
 
 def _parse_listing_csv(csv_text: str) -> List[Mapping[str, str]]:

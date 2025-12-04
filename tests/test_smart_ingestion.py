@@ -58,7 +58,7 @@ def test_filter_symbols_up_to_date():
 
     target_date = _expected_market_date()
 
-    # AAPL has data up to today - should be filtered out
+    # AAPL has data up to target_date - should be filtered out
     aapl_id = upsert_stock(conn, "AAPL")
     insert_stock_prices(conn, aapl_id, [
         {"date": target_date, "close": 150.0, "open": 149.0, "high": 151.0, "low": 148.0, "volume": 1000000}
@@ -68,7 +68,7 @@ def test_filter_symbols_up_to_date():
     upsert_stock(conn, "MSFT")
 
     symbols_needing_update = filter_symbols_needing_update(
-        conn, ["AAPL", "MSFT"]
+        conn, ["AAPL", "MSFT"], target_date
     )
 
     # Only MSFT should need updates
@@ -130,7 +130,7 @@ def test_filter_symbols_mixed():
     # (filter function should handle symbols that don't exist in stocks table)
 
     symbols_needing_update = filter_symbols_needing_update(
-        conn, ["AAPL", "MSFT", "GOOGL", "TSLA"]
+        conn, ["AAPL", "MSFT", "GOOGL", "TSLA"], target_date
     )
 
     # AAPL should be filtered out, others should remain
