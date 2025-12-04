@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -339,6 +340,7 @@ def ingest_universe(
 
     # Do bulk filtering ONCE for all symbols before chunking
     # This is much faster than filtering each chunk separately
+    symbols_before = len(symbols)
     skipped = 0
     if not update_existing:
         from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
@@ -348,20 +350,21 @@ def ingest_universe(
             schema.create_stocks_table(conn)
             schema.create_stock_prices_table(conn)
             target_date = _expected_market_date()
-            symbols_before = len(symbols)
             symbols = filter_symbols_needing_update(conn, symbols, target_date)
             skipped = symbols_before - len(symbols)
             if skipped > 0 and not json_output:
                 emit(f"Skipped {skipped} up-to-date symbols, processing {len(symbols)} symbols", json_output=False)
 
-    reporter = ProgressReporter(total=len(symbols), json_output=json_output, enabled=progress)
+    # Create reporter with initial skipped count already set
+    # Reset start time to exclude bulk filtering duration from rate calculation
+    reporter = ProgressReporter(total=symbols_before, json_output=json_output, enabled=progress)
+    if skipped > 0:
+        reporter.done = skipped
+        reporter.successes = skipped
+        # Reset timer so bulk filtering time doesn't skew the rate
+        reporter._start = time.monotonic()
     reporter.workers = worker_count
     reporter.mode = "api"
-    # Report skipped symbols immediately
-    if skipped > 0:
-        with reporter._lock:
-            reporter.done += skipped
-            reporter.successes += skipped
 
     live: Optional[Live] = None
     if progress and not json_output:
