@@ -442,6 +442,80 @@ def db_health(
     emit("DB health", data=health, json_output=json_output)
 
 
+@app.command("db-init")
+def db_init(
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Initialize database schema from sql/schema.sql.
+    Creates all tables, hypertables, and indexes. Safe to run multiple times (idempotent).
+    """
+    import subprocess
+    import sys
+
+    url = _db_url(db_url)
+
+    # Find the schema.sql file relative to the package
+    try:
+        import g2
+        package_dir = Path(g2.__file__).parent.parent.parent
+        schema_path = package_dir / "sql" / "schema.sql"
+
+        if not schema_path.exists():
+            emit_error(f"Schema file not found at {schema_path}", json_output=json_output)
+            return
+    except Exception as exc:
+        emit_error(f"Failed to locate schema file: {exc}", json_output=json_output)
+        return
+
+    try:
+        # Parse the database URL to get connection parameters
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+
+        # Build psql command
+        env = os.environ.copy()
+        if parsed.password:
+            env['PGPASSWORD'] = parsed.password
+
+        cmd = [
+            'psql',
+            '-h', parsed.hostname or 'localhost',
+            '-p', str(parsed.port or 5432),
+            '-U', parsed.username or 'postgres',
+            '-d', parsed.path.lstrip('/') if parsed.path else 'postgres',
+            '-f', str(schema_path)
+        ]
+
+        if not json_output:
+            emit("Initializing database schema...")
+
+        result = subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            emit_error(
+                f"Database initialization failed: {result.stderr}",
+                json_output=json_output,
+                data={"stderr": result.stderr, "stdout": result.stdout}
+            )
+            return
+
+        emit(
+            "Database initialized successfully",
+            data={"schema_file": str(schema_path)},
+            json_output=json_output
+        )
+
+    except Exception as exc:
+        emit_error(f"Initialization failed: {exc}", json_output=json_output)
+
+
 @app.command("db-tune")
 def db_tune(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
