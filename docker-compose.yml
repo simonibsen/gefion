@@ -8,15 +8,16 @@ services:
         "postgres",
         "-c", "shared_preload_libraries=timescaledb",
         "-c", "max_locks_per_transaction=256",
+        "-p", "6432"
       ]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-g2}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-g2pass}
       POSTGRES_DB: ${POSTGRES_DB:-g2}
     ports:
-      - "5432:5432"
+      - "6432:6432"
     volumes:
-      - ${POSTGRES_DATA_DIR:-./db}:/var/lib/postgresql/data
+      #- ${POSTGRES_DATA_DIR:-./db}:/var/lib/postgresql/data
       - ./docker/initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-g2} -d ${POSTGRES_DB:-g2}"]
