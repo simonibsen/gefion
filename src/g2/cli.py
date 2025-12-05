@@ -423,7 +423,7 @@ def db_health(
         with psycopg.connect(url) as conn:
             conn.autocommit = True
             with conn.cursor() as cur:
-                tables = ["stock_prices", "computed_features", "company_fundamentals_history"]
+                tables = ["stock_prices", "computed_features"]
                 table_status = {}
                 for t in tables:
                     cur.execute("SELECT to_regclass(%s);", (f"public.{t}",))

@@ -1,11 +1,10 @@
--- G2 Database Schema - Complete Initialization
+-- G2 Database Schema
 --
--- This script creates:
---   1. PRODUCTION TABLES: Current system (stocks, prices, features)
---   2. FUTURE TABLES: AI-driven feature engineering (functions-as-data, meta-learning)
---
--- All tables are safe to create (idempotent with IF NOT EXISTS).
--- Future tables are ready for when those features are implemented.
+-- Creates core tables for the G2 trading system:
+--   - stocks: Stock symbols and metadata
+--   - stock_prices: OHLCV price data (hypertable)
+--   - feature_definitions: Metadata-driven feature configuration
+--   - computed_features: Computed technical indicators (hypertable)
 --
 -- Prerequisites:
 --   - PostgreSQL with TimescaleDB extension
@@ -13,8 +12,6 @@
 --
 -- Usage:
 --   psql -d g2 -f sql/schema.sql
---
--- To skip future tables, comment out the "FUNCTIONS-AS-DATA TABLES" section.
 
 -- Enable TimescaleDB extension
 CREATE EXTENSION IF NOT EXISTS timescaledb;
@@ -46,99 +43,8 @@ CREATE TABLE IF NOT EXISTS feature_definitions (
     store_type TEXT DEFAULT 'double precision',
     active BOOLEAN DEFAULT TRUE,
     version TEXT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    implementation_id INTEGER      -- Optional: Link to dynamic implementation (functions-as-data)
+    created_at TIMESTAMP DEFAULT NOW()
 );
-
--- =============================================================================
--- FUNCTIONS-AS-DATA TABLES (FUTURE - NOT YET IMPLEMENTED)
--- =============================================================================
--- These tables support AI-driven feature engineering documented in:
--- docs/FUNCTIONS_AS_DATA.md
---
--- Status: Documented but not yet implemented
--- Purpose: Enable dynamic function implementations and meta-learning
---
--- To skip these tables, comment out this entire section
--- =============================================================================
-
--- Function implementations table
--- Stores compute function implementations as data (not just definitions)
--- Enables AI agents to create and test new implementations without code deployment
-CREATE TABLE IF NOT EXISTS function_implementations (
-    id SERIAL PRIMARY KEY,
-    function_name TEXT NOT NULL,   -- e.g., 'momentum_exp', 'rsi_custom'
-    version TEXT NOT NULL,         -- e.g., '2024-12-03-v1'
-    language TEXT DEFAULT 'python',
-    source_code TEXT NOT NULL,     -- Function implementation as string
-    signature JSONB,               -- Function signature/interface
-    dependencies TEXT[],           -- Required packages
-    safety_level TEXT,             -- 'safe', 'review_required', 'sandbox_only'
-    created_by TEXT,               -- 'ai_agent', 'human', 'system'
-    created_at TIMESTAMP DEFAULT NOW(),
-    test_results JSONB,            -- Unit test outcomes
-    performance_metrics JSONB,     -- Execution time, memory, sharpe ratio, etc.
-    active BOOLEAN DEFAULT FALSE,  -- Only active implementations are used
-    approved_by TEXT,              -- Human who reviewed and approved
-    approved_at TIMESTAMP,
-    UNIQUE (function_name, version)
-);
-
--- Feature patterns table
--- Stores learned patterns from successful implementations (meta-learning)
--- AI queries these patterns to generate better features over time
-CREATE TABLE IF NOT EXISTS feature_patterns (
-    id SERIAL PRIMARY KEY,
-    pattern_type TEXT NOT NULL,    -- 'window_size', 'weighting_scheme', 'indicator_combo', etc.
-    pattern_name TEXT NOT NULL,    -- e.g., 'momentum_7_to_14_optimal'
-    description TEXT,
-    context JSONB,                 -- When does this pattern apply? (asset_class, feature_family, etc.)
-    evidence JSONB,                -- Statistical support (tested_windows, avg_sharpe, p_value, etc.)
-    confidence NUMERIC(5,2),       -- 0-100 score (Bayesian updated over time)
-    first_observed TIMESTAMP DEFAULT NOW(),
-    last_validated TIMESTAMP,
-    times_validated INTEGER DEFAULT 0,
-    active BOOLEAN DEFAULT TRUE,
-    UNIQUE (pattern_type, pattern_name)
-);
-
--- Implementation-pattern link table
--- Maps which implementations use which patterns
--- Enables pattern validation and discovery
-CREATE TABLE IF NOT EXISTS implementation_patterns (
-    implementation_id INTEGER REFERENCES function_implementations(id) ON DELETE CASCADE,
-    pattern_id INTEGER REFERENCES feature_patterns(id) ON DELETE CASCADE,
-    PRIMARY KEY (implementation_id, pattern_id)
-);
-
--- Pattern performance table
--- Time-series tracking of pattern validation results
--- Enables confidence score updates and pattern decay
-CREATE TABLE IF NOT EXISTS pattern_performance (
-    id SERIAL PRIMARY KEY,
-    pattern_id INTEGER NOT NULL REFERENCES feature_patterns(id) ON DELETE CASCADE,
-    evaluated_at TIMESTAMP DEFAULT NOW(),
-    metric_name TEXT,              -- 'sharpe', 'information_ratio', 'feature_importance', etc.
-    metric_value NUMERIC,
-    sample_size INTEGER,
-    test_symbols TEXT[]            -- Which symbols were tested
-);
-
--- Add foreign key constraint for feature_definitions.implementation_id
--- (done separately to handle idempotency)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'feature_definitions_implementation_id_fkey'
-    ) THEN
-        ALTER TABLE feature_definitions
-        ADD CONSTRAINT feature_definitions_implementation_id_fkey
-        FOREIGN KEY (implementation_id)
-        REFERENCES function_implementations(id)
-        ON DELETE SET NULL;
-    END IF;
-END $$;
 
 -- =============================================================================
 -- TIME-SERIES TABLES (HYPERTABLES)
@@ -182,33 +88,6 @@ CREATE TABLE IF NOT EXISTS computed_features (
 SELECT create_hypertable('computed_features', 'date', if_not_exists => TRUE);
 SELECT set_chunk_time_interval('computed_features', INTERVAL '30 days');
 
--- Company fundamentals history hypertable (optional)
--- Wide table for fundamental data time series
-CREATE TABLE IF NOT EXISTS company_fundamentals_history (
-    id BIGSERIAL,
-    data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
-    date DATE NOT NULL,
-    market_cap DOUBLE PRECISION,
-    pe_ratio DOUBLE PRECISION,
-    peg_ratio DOUBLE PRECISION,
-    dividend_yield DOUBLE PRECISION,
-    eps DOUBLE PRECISION,
-    revenue_per_share DOUBLE PRECISION,
-    profit_margin DOUBLE PRECISION,
-    operating_margin DOUBLE PRECISION,
-    roe DOUBLE PRECISION,
-    roa DOUBLE PRECISION,
-    beta DOUBLE PRECISION,
-    shares_outstanding BIGINT,
-    source TEXT,
-    PRIMARY KEY (id, date),
-    UNIQUE (data_id, date)
-);
-
--- Convert to hypertable (30-day chunks)
-SELECT create_hypertable('company_fundamentals_history', 'date', if_not_exists => TRUE);
-SELECT set_chunk_time_interval('company_fundamentals_history', INTERVAL '30 days');
-
 -- =============================================================================
 -- INDEXES
 -- =============================================================================
@@ -235,10 +114,6 @@ CREATE INDEX IF NOT EXISTS computed_features_idx
 CREATE INDEX IF NOT EXISTS computed_features_feature_data_date_idx
     ON computed_features(feature_id, data_id, date DESC);
 
--- Company fundamentals indexes
-CREATE INDEX IF NOT EXISTS company_fundamentals_history_brin
-    ON company_fundamentals_history USING BRIN(date);
-
 -- =============================================================================
 -- SUMMARY
 -- =============================================================================
@@ -248,87 +123,31 @@ CREATE INDEX IF NOT EXISTS company_fundamentals_history_brin
 \echo 'G2 Database Initialization Complete'
 \echo '========================================='
 \echo ''
-\echo 'PRODUCTION TABLES (Current System):'
-\echo '  - stocks'
+\echo 'Tables Created:'
+\echo '  - stocks (dimension table)'
 \echo '  - stock_prices (hypertable)'
 \echo '  - feature_definitions'
 \echo '  - computed_features (hypertable)'
-\echo '  - company_fundamentals_history (hypertable)'
-\echo ''
-\echo 'FUTURE TABLES (AI-Driven Feature Engineering):'
-\echo '  - function_implementations'
-\echo '  - feature_patterns'
-\echo '  - implementation_patterns'
-\echo '  - pattern_performance'
-\echo ''
-\echo 'Documentation:'
-\echo '  - docs/FUNCTIONS_AS_DATA.md'
-\echo '  - docs/ML_ROADMAP.md'
-\echo '  - docs/SECURITY_SANDBOXING.md'
 \echo ''
 
 -- Display table counts
 SELECT
-    'PRODUCTION TABLES' as category,
-    '' as table_name,
-    NULL as row_count
-UNION ALL
-SELECT
-    '',
-    'stocks',
-    COUNT(*)
+    'stocks' as table_name,
+    COUNT(*) as row_count
 FROM stocks
 UNION ALL
 SELECT
-    '',
     'stock_prices',
     COUNT(*)
 FROM stock_prices
 UNION ALL
 SELECT
-    '',
     'feature_definitions',
     COUNT(*)
 FROM feature_definitions
 UNION ALL
 SELECT
-    '',
     'computed_features',
     COUNT(*)
 FROM computed_features
-UNION ALL
-SELECT
-    '',
-    'company_fundamentals_history',
-    COUNT(*)
-FROM company_fundamentals_history
-UNION ALL
-SELECT
-    'FUTURE TABLES',
-    '',
-    NULL
-UNION ALL
-SELECT
-    '',
-    'function_implementations',
-    COUNT(*)
-FROM function_implementations
-UNION ALL
-SELECT
-    '',
-    'feature_patterns',
-    COUNT(*)
-FROM feature_patterns
-UNION ALL
-SELECT
-    '',
-    'implementation_patterns',
-    COUNT(*)
-FROM implementation_patterns
-UNION ALL
-SELECT
-    '',
-    'pattern_performance',
-    COUNT(*)
-FROM pattern_performance
-ORDER BY category DESC, table_name;
+ORDER BY table_name;
