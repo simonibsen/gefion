@@ -50,7 +50,7 @@ def test_cli_ingest_prices_inserts_rows():
 
     conn = require_db()
     with conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM stock_prices;")
+        cur.execute("SELECT COUNT(*) FROM stock_ohlcv;")
         count = cur.fetchone()[0]
     conn.close()
     assert count > 0

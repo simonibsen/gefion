@@ -19,7 +19,7 @@ from g2.alphavantage.client import AlphaVantageClient
 from g2.db import schema
 from g2.db.ingest import (
     decide_outputsize,
-    insert_stock_prices,
+    insert_stock_ohlcv,
     upsert_stock,
     latest_price_date,
     filter_symbols_needing_update,
@@ -153,7 +153,7 @@ def ingest_prices_for_symbols(
     with psycopg.connect(db_url) as conn:
         schema.create_stocks_table(conn)
         schema.migrate_stock_tables_to_data_id(conn)
-        schema.create_stock_prices_table(conn)
+        schema.create_stock_ohlcv_table(conn)
         # Note: Bulk filtering moved to CLI layer for better performance
         # (filters once for all symbols instead of once per 50-symbol chunk)
     # Bounded queue prevents memory exhaustion when fetchers outpace writers
@@ -308,7 +308,7 @@ def ingest_prices_for_symbols(
                 else "ON CONFLICT (data_id, date) DO NOTHING"
             )
             sql_stmt = (
-                "INSERT INTO stock_prices "
+                "INSERT INTO stock_ohlcv "
                 "(data_id, date, open, high, low, close, adjusted_close, volume, source) VALUES "
                 + ",".join(values_sql)
                 + " "

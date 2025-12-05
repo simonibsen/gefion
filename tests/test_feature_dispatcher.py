@@ -86,19 +86,19 @@ def test_compute_features_filters_by_feature_names(mock_conn):
     assert len(execute_calls) > 0
 
 
-def test_compute_features_fetches_from_stock_prices(mock_conn):
-    """Test fetching source data from stock_prices table for indicators."""
+def test_compute_features_fetches_from_stock_ohlcv(mock_conn):
+    """Test fetching source data from stock_ohlcv table for indicators."""
     cursor = mock_conn.cursor.return_value.__enter__.return_value
 
-    # Mock feature definition for RSI (source_table=stock_prices)
+    # Mock feature definition for RSI (source_table=stock_ohlcv)
     cursor.fetchall.side_effect = [
         # First call: feature_definitions query
         [
             (1, 'indicator_rsi_14', 'indicator',
              {'indicator': 'rsi', 'period': 14},
-             'stock_prices', 'close', 'computed_features', 'value')
+             'stock_ohlcv', 'close', 'computed_features', 'value')
         ],
-        # Second call: stock_prices query
+        # Second call: stock_ohlcv query
         [
             (date(2024, 1, 1), 100.0),
             (date(2024, 1, 2), 102.0),
@@ -112,9 +112,9 @@ def test_compute_features_fetches_from_stock_prices(mock_conn):
 
         compute_features(mock_conn, data_id=1, function_names=['indicator'])
 
-        # Should query stock_prices table
+        # Should query stock_ohlcv table
         calls = [str(call) for call in cursor.execute.call_args_list]
-        assert any('stock_prices' in call for call in calls)
+        assert any('stock_ohlcv' in call for call in calls)
 
 
 def test_compute_features_fetches_from_computed_features(mock_conn):
@@ -161,7 +161,7 @@ def test_compute_features_incremental_mode(mock_conn):
         [
             (1, 'indicator_rsi_14', 'indicator',
              {'indicator': 'rsi', 'period': 14},
-             'stock_prices', 'close', 'computed_features', 'value')
+             'stock_ohlcv', 'close', 'computed_features', 'value')
         ],
         # Source data (only dates after latest)
         [
@@ -188,7 +188,7 @@ def test_compute_features_full_refresh_mode(mock_conn):
         [
             (1, 'indicator_rsi_14', 'indicator',
              {'indicator': 'rsi', 'period': 14},
-             'stock_prices', 'close', 'computed_features', 'value')
+             'stock_ohlcv', 'close', 'computed_features', 'value')
         ],
         # All source data
         [
@@ -215,7 +215,7 @@ def test_compute_features_calls_correct_compute_function(mock_conn):
         [
             (1, 'indicator_rsi_14', 'indicator',
              {'indicator': 'rsi', 'period': 14},
-             'stock_prices', 'close', 'computed_features', 'value')
+             'stock_ohlcv', 'close', 'computed_features', 'value')
         ],
         # Source data
         [
@@ -242,7 +242,7 @@ def test_compute_features_stores_results(mock_conn):
         [
             (1, 'indicator_rsi_14', 'indicator',
              {'indicator': 'rsi', 'period': 14},
-             'stock_prices', 'close', 'computed_features', 'value')
+             'stock_ohlcv', 'close', 'computed_features', 'value')
         ],
         # Source data
         [
@@ -275,7 +275,7 @@ def test_compute_features_returns_insert_counts(mock_conn):
         [
             (1, 'indicator_rsi_14', 'indicator',
              {'indicator': 'rsi', 'period': 14},
-             'stock_prices', 'close', 'computed_features', 'value')
+             'stock_ohlcv', 'close', 'computed_features', 'value')
         ],
         # Source data
         [(date(2024, 1, 1), 100.0)]
@@ -301,7 +301,7 @@ def test_compute_features_handles_errors(mock_conn):
         [
             (1, 'indicator_rsi_14', 'indicator',
              {'indicator': 'rsi', 'period': 14},
-             'stock_prices', 'close', 'computed_features', 'value')
+             'stock_ohlcv', 'close', 'computed_features', 'value')
         ],
         # Source data
         [(date(2024, 1, 1), 100.0)]
@@ -328,7 +328,7 @@ def test_compute_features_multiple_function_types(mock_conn):
         [
             (1, 'indicator_rsi_14', 'indicator',
              {'indicator': 'rsi', 'period': 14},
-             'stock_prices', 'close', 'computed_features', 'value'),
+             'stock_ohlcv', 'close', 'computed_features', 'value'),
             (2, 'derivative_rsi_14_slope_5', 'derivative',
              {'source_feature': 'indicator_rsi_14', 'type': 'slope', 'window': 5},
              'computed_features', 'value', 'computed_features', 'value')
@@ -368,12 +368,12 @@ def test_compute_features_groups_by_source_table(mock_conn):
         [
             (1, 'indicator_rsi_14', 'indicator',
              {'indicator': 'rsi', 'period': 14},
-             'stock_prices', 'close', 'computed_features', 'value'),
+             'stock_ohlcv', 'close', 'computed_features', 'value'),
             (2, 'indicator_macd', 'indicator',
              {'indicator': 'macd'},
-             'stock_prices', 'close', 'computed_features', 'value')
+             'stock_ohlcv', 'close', 'computed_features', 'value')
         ],
-        # Should only query stock_prices once
+        # Should only query stock_ohlcv once
         [(date(2024, 1, 1), 100.0)]
     ]
 

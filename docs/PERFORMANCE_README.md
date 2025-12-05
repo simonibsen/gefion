@@ -119,8 +119,8 @@ def _auto_indicator_workers(compute_locally, calls_per_minute):
 ### 3. Add Composite Indexes (15 min)
 ```sql
 -- In db/schema.py
-CREATE INDEX stock_prices_data_id_date_idx
-    ON stock_prices(data_id, date DESC);
+CREATE INDEX stock_ohlcv_data_id_date_idx
+    ON stock_ohlcv(data_id, date DESC);
 ```
 
 See `docs/PERFORMANCE_IMPROVEMENTS.md` for details on remaining optimizations.
@@ -141,7 +141,7 @@ import time
 
 # Measure batch insert performance
 start = time.time()
-insert_stock_prices(conn, stock_id, rows, update_existing=False)
+insert_stock_ohlcv(conn, stock_id, rows, update_existing=False)
 print(f"Inserted {len(rows)} rows in {time.time() - start:.3f}s")
 # Should be < 0.2s for 1000 rows
 

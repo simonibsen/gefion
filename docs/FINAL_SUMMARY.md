@@ -66,8 +66,8 @@ Successfully completed **6 out of 10** planned performance optimizations using s
 - **Expected Impact**: 2-5x faster single-stock queries
 - **SQL Commands Ready**:
 ```sql
-CREATE INDEX IF NOT EXISTS stock_prices_data_id_date_idx
-    ON stock_prices(data_id, date DESC);
+CREATE INDEX IF NOT EXISTS stock_ohlcv_data_id_date_idx
+    ON stock_ohlcv(data_id, date DESC);
 
 CREATE INDEX IF NOT EXISTS computed_features_feature_data_date_idx
     ON computed_features(feature_id, data_id, date DESC);

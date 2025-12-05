@@ -125,7 +125,7 @@ VALUES (
     'indicator_rsi_14',
     'indicator',
     '{"indicator": "rsi", "period": 14}'::jsonb,
-    'stock_prices',
+    'stock_ohlcv',
     'close',
     'computed_features',
     'value'
@@ -182,11 +182,11 @@ g2 features-compute --symbols AAPL --function-names indicator,derivative --incre
 
 The dispatcher automatically handles different source types:
 
-### stock_prices
+### stock_ohlcv
 Fetches OHLC data for indicators:
 ```sql
 SELECT date, open, high, low, close, adjusted_close, volume
-FROM stock_prices
+FROM stock_ohlcv
 WHERE data_id = %s
 ORDER BY date
 ```

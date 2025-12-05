@@ -28,7 +28,7 @@ def upsert_stock(conn: psycopg.Connection, symbol: str) -> int:
 
 def latest_price_date(conn: psycopg.Connection, data_id: int) -> Optional[date]:
     with conn.cursor() as cur:
-        cur.execute("SELECT MAX(date) FROM stock_prices WHERE data_id = %s;", (data_id,))
+        cur.execute("SELECT MAX(date) FROM stock_ohlcv WHERE data_id = %s;", (data_id,))
         row = cur.fetchone()
     return row[0]
 
@@ -73,7 +73,7 @@ def filter_symbols_needing_update(
                 MAX(sp.date) AS latest_date
             FROM input_symbols
             LEFT JOIN stocks s ON s.symbol = input_symbols.symbol
-            LEFT JOIN stock_prices sp ON sp.data_id = s.id
+            LEFT JOIN stock_ohlcv sp ON sp.data_id = s.id
             GROUP BY input_symbols.symbol
             ORDER BY input_symbols.symbol
             """,
@@ -197,14 +197,14 @@ def trim_feature_data(
     return total_deleted
 
 
-def trim_stock_prices(
+def trim_stock_ohlcv(
     conn: psycopg.Connection,
     before: Optional[date] = None,
     after: Optional[date] = None,
     symbols: Optional[Sequence[str]] = None,
 ) -> int:
     """
-    Trim stock_prices rows by date.
+    Trim stock_ohlcv rows by date.
     - before: drop rows strictly before this date
     - after: drop rows strictly after this date
     - symbols: optional list of symbols to restrict trimming
@@ -235,13 +235,13 @@ def trim_stock_prices(
 
         if before:
             cur.execute(
-                f"DELETE FROM stock_prices WHERE date < %s{where_ids};",
+                f"DELETE FROM stock_ohlcv WHERE date < %s{where_ids};",
                 [before, *params] if params else (before,),
             )
             total_deleted += cur.rowcount
         if after:
             cur.execute(
-                f"DELETE FROM stock_prices WHERE date > %s{where_ids};",
+                f"DELETE FROM stock_ohlcv WHERE date > %s{where_ids};",
                 [after, *params] if params else (after,),
             )
             total_deleted += cur.rowcount
@@ -375,7 +375,7 @@ def decide_outputsize(conn: psycopg.Connection, data_id: int, timeframe: str = "
     return "compact"
 
 
-def insert_stock_prices(
+def insert_stock_ohlcv(
     conn: psycopg.Connection,
     data_id: int,
     rows: Iterable[Mapping[str, object]],
@@ -413,6 +413,8 @@ def insert_stock_prices(
         low_v = safe_num(row.get("low"))
         close_v = safe_num(row.get("close"))
         adj_v = safe_num(row.get("adjusted_close"))
+        dividend_v = safe_num(row.get("dividend_amount"))
+        split_v = safe_num(row.get("split_coefficient"))
 
         # Skip rows with all NULL price values
         if all(v is None for v in [open_v, high_v, low_v, close_v, adj_v]):
@@ -426,6 +428,8 @@ def insert_stock_prices(
             low_v,
             close_v,
             adj_v,
+            dividend_v,
+            split_v,
             safe_num(row.get("volume")),
             row.get("source", "alphavantage"),
         ))
@@ -441,6 +445,7 @@ def insert_stock_prices(
         "ON CONFLICT (data_id, date) DO UPDATE SET "
         "open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, "
         "close = EXCLUDED.close, adjusted_close = EXCLUDED.adjusted_close, "
+        "dividend_amount = EXCLUDED.dividend_amount, split_coefficient = EXCLUDED.split_coefficient, "
         "volume = EXCLUDED.volume, source = EXCLUDED.source"
         if update_existing
         else "ON CONFLICT (data_id, date) DO NOTHING"
@@ -454,12 +459,12 @@ def insert_stock_prices(
             values_placeholders = []
             params = []
             for row_data in batch:
-                values_placeholders.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s)")
+                values_placeholders.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
                 params.extend(row_data)
 
             sql_stmt = (
-                "INSERT INTO stock_prices "
-                "(data_id, date, open, high, low, close, adjusted_close, volume, source) "
+                "INSERT INTO stock_ohlcv "
+                "(data_id, date, open, high, low, close, adjusted_close, dividend_amount, split_coefficient, volume, source) "
                 "VALUES " + ",".join(values_placeholders) + " " + conflict_clause
             )
 
@@ -552,7 +557,7 @@ def ensure_indicator_feature_definitions(conn: psycopg.Connection, indicators: S
                 "name": f"indicator_{col}",
                 "function_name": "indicator",
                 "params": {"indicator": ind},
-                "source_table": "stock_prices",
+                "source_table": "stock_ohlcv",
                 "source_column": "close",
                 "store_table": "computed_features",
                 "store_column": "value",

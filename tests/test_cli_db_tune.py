@@ -23,7 +23,7 @@ class FakeCursor:
         # simulate table existence checks and compression settings
         if "to_regclass" in sql_text:
             # pretend both tables exist
-            self.rows = [("public.stock_prices",)]
+            self.rows = [("public.stock_ohlcv",)]
         elif "timescaledb_information.compression_settings" in sql_text:
             # pretend compression not set yet
             self.rows = []

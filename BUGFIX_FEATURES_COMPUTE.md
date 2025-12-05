@@ -101,7 +101,7 @@ INSERT INTO feature_definitions
 VALUES
 ('indicator_rsi_14', 'indicator',
  '{"type": "rsi", "window": 14, "column": "rsi_14"}'::jsonb,  -- Added "column" field
- 'stock_prices', 'close', 'computed_features', 'value', true),
+ 'stock_ohlcv', 'close', 'computed_features', 'value', true),
 ...
 ```
 

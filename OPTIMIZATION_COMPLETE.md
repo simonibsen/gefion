@@ -165,8 +165,8 @@ work_q = queue.Queue(maxsize=200)
 ### 5. Optimized Database Schema
 ```sql
 -- Composite indexes automatically created
-CREATE INDEX stock_prices_data_id_date_idx
-    ON stock_prices(data_id, date DESC);
+CREATE INDEX stock_ohlcv_data_id_date_idx
+    ON stock_ohlcv(data_id, date DESC);
 
 CREATE INDEX computed_features_feature_data_date_idx
     ON computed_features(feature_id, data_id, date DESC);

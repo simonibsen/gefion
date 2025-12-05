@@ -8,7 +8,7 @@
 ```
 
 ### Cause
-This error occurs when the `stock_prices` table was created before TimescaleDB was properly enabled, or if the table schema conflicts with TimescaleDB's hypertable requirements.
+This error occurs when the `stock_ohlcv` table was created before TimescaleDB was properly enabled, or if the table schema conflicts with TimescaleDB's hypertable requirements.
 
 TimescaleDB requires that all UNIQUE constraints on hypertables must include the partitioning column (in this case, `date`).
 
@@ -35,7 +35,7 @@ If you prefer to fix it manually:
 psql -U g2 -d g2
 
 # Drop the problematic table
-DROP TABLE IF EXISTS stock_prices CASCADE;
+DROP TABLE IF EXISTS stock_ohlcv CASCADE;
 
 # Exit psql
 \q
@@ -46,7 +46,7 @@ g2 universe-ingest --exchange nasdaq --json
 
 ### Prevention
 
-The issue has been fixed in the codebase. The `create_stock_prices_table()` function now:
+The issue has been fixed in the codebase. The `create_stock_ohlcv_table()` function now:
 - Automatically detects if a table exists but isn't a hypertable
 - Drops and recreates it properly
 - Ensures TimescaleDB compatibility
@@ -56,7 +56,7 @@ The issue has been fixed in the codebase. The `create_stock_prices_table()` func
 You can verify the fix worked by checking:
 
 ```bash
-psql -U g2 -d g2 -c "SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name = 'stock_prices';"
+psql -U g2 -d g2 -c "SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name = 'stock_ohlcv';"
 ```
 
 You should see one row indicating the table is now a hypertable.
@@ -80,8 +80,8 @@ If you're experiencing slow performance, check:
 
 3. **Database Indexes**: Ensure composite indexes exist:
    ```sql
-   \d stock_prices
-   -- Should show: stock_prices_data_id_date_idx
+   \d stock_ohlcv
+   -- Should show: stock_ohlcv_data_id_date_idx
    ```
 
 ---

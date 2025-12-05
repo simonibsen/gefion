@@ -43,7 +43,7 @@ g2 register-feature --definition '{
   "name": "my_feature",
   "function_name": "my_fx",
   "params": {"window": 30},
-  "source_table": "stock_prices",
+  "source_table": "stock_ohlcv",
   "source_column": "close",
   "store_table": "computed_features",
   "store_column": "value",
@@ -59,7 +59,7 @@ Required keys: `name`, `function_name`, `store_table`, `store_column`. Optional:
 g2 trim-features --feature indicator_rsi_14,indicator_macd --before 2024-01-01
 g2 trim-features --feature indicator_rsi_14 --after 2024-12-31 --no-trim-prices
 ```
-Deletes rows in `computed_features` for the named features before/after the given dates. By default also trims `stock_prices` in the same window; use `--no-trim-prices` to skip price trimming.
+Deletes rows in `computed_features` for the named features before/after the given dates. By default also trims `stock_ohlcv` in the same window; use `--no-trim-prices` to skip price trimming.
 
 Trim prices only:
 ```bash
@@ -99,7 +99,7 @@ g2 data-update --exchange NASDAQ --timeframe auto --refresh-existing --local
   - Timescale tuning: `g2 db-tune --chunk-days 30 --compress-after-days 60` sets chunk interval and compression policies.
   - Concurrency: keep writer workers low (1–2). Heavy commands process symbols in chunks (~50) to avoid overwhelming the DB. `features-run` always starts with 1 fetch/1 writer, then ramps fetchers up batch-by-batch on success, and backs off on errors (even when `--max-workers` is set; it’s a ceiling).
   - Use `--max-workers` and `--limit` to reduce load while testing. Larger batch sizes are better than many writers.
-  - If performance drops after large ingests, run `VACUUM ANALYZE stock_prices computed_features`.
+  - If performance drops after large ingests, run `VACUUM ANALYZE stock_ohlcv computed_features`.
 - Indicators: if local prices are missing for a symbol, feature runs will attempt to fetch daily adjusted prices from Alpha Vantage, store them, and then compute locally.
 
 ## Verification

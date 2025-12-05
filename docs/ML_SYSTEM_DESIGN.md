@@ -46,7 +46,7 @@ Compare predicted distributions to actual returns over the prediction window usi
 
 ```
 1. Data Ingestion
-   └─> stock_prices (OHLCV data)
+   └─> stock_ohlcv (OHLCV data)
 
 2. Feature Engineering
    ├─> Absolute indicators (RSI, MACD, SMA, EMA, ...)

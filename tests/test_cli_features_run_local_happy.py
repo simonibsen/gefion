@@ -41,7 +41,7 @@ def test_features_run_local_succeeds(monkeypatch, tmp_path):
     conn = require_db()
     conn.autocommit = True
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
     ensure_all_indicator_feature_definitions(conn, indicators=["adx"])
@@ -69,7 +69,7 @@ def test_features_run_local_succeeds(monkeypatch, tmp_path):
             args.extend(r)
         placeholders = ",".join(["(%s,%s,%s,%s,%s,%s,%s,%s,%s)"] * len(rows))
         cur.execute(
-            f"INSERT INTO stock_prices (data_id, date, open, high, low, close, adjusted_close, volume, source) VALUES {placeholders}",
+            f"INSERT INTO stock_ohlcv (data_id, date, open, high, low, close, adjusted_close, volume, source) VALUES {placeholders}",
             args,
         )
     conn.close()

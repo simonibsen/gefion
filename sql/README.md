@@ -16,7 +16,7 @@ psql -d g2 -f sql/schema.sql
 
 **Production Tables:**
 - `stocks` - Stock symbols dimension table
-- `stock_prices` - OHLCV price data (hypertable, 30-day chunks)
+- `stock_ohlcv` - OHLCV price data with adjusted close, dividends, and split coefficient (hypertable, 30-day chunks)
 - `feature_definitions` - Feature metadata (calc_store pattern)
 - `computed_features` - Computed features (hypertable, 30-day chunks)
 

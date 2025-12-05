@@ -21,7 +21,7 @@ from g2.db.ingest import (
     latest_indicator_date,
     ensure_indicator_feature_definitions,
     insert_computed_features,
-    insert_stock_prices,
+    insert_stock_ohlcv,
 )
 from g2.utils.progress import ProgressReporter
 from g2.indicators.local import compute_indicators as compute_local
@@ -197,7 +197,7 @@ def ingest_indicators_for_symbols(
                     conn.autocommit = True
                     schema.create_stocks_table(conn)
                     schema.migrate_stock_tables_to_data_id(conn)
-                    schema.create_stock_prices_table(conn)
+                    schema.create_stock_ohlcv_table(conn)
                     data_id = upsert_stock(conn, sym)
                     outputsize = decide_outputsize(conn, data_id, timeframe)
                     last_ind = latest_indicator_date(conn, data_id)
@@ -207,13 +207,13 @@ def ingest_indicators_for_symbols(
                         cur = conn.cursor()
                         if last_ind is None:
                             cur.execute(
-                                "SELECT date, open, high, low, close, adjusted_close, volume FROM stock_prices WHERE data_id = %s "
+                                "SELECT date, open, high, low, close, adjusted_close, volume FROM stock_ohlcv WHERE data_id = %s "
                                 "ORDER BY date",
                                 (data_id,),
                             )
                         else:
                             cur.execute(
-                                "SELECT date, open, high, low, close, adjusted_close, volume FROM stock_prices WHERE data_id = %s "
+                                "SELECT date, open, high, low, close, adjusted_close, volume FROM stock_ohlcv WHERE data_id = %s "
                                 "AND date >= %s "
                                 "ORDER BY date",
                                 (data_id, last_ind),
@@ -242,9 +242,9 @@ def ingest_indicators_for_symbols(
                             if fetched_rows:
                                 with psycopg.connect(db_url) as conn:
                                     conn.autocommit = True
-                                    schema.create_stock_prices_table(conn)
+                                    schema.create_stock_ohlcv_table(conn)
                                     data_id = upsert_stock(conn, sym)
-                                    insert_stock_prices(conn, data_id, fetched_rows, update_existing=True)
+                                    insert_stock_ohlcv(conn, data_id, fetched_rows, update_existing=True)
                                 price_rows = sorted(
                                     [
                                         {

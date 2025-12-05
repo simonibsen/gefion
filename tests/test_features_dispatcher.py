@@ -6,7 +6,7 @@ import pytest
 import psycopg
 
 from g2.db import schema
-from g2.db.ingest import upsert_stock, insert_stock_prices
+from g2.db.ingest import upsert_stock, insert_stock_ohlcv
 from g2.features.dispatcher import compute_features
 
 
@@ -34,7 +34,7 @@ def test_compute_indicators_with_sufficient_data():
     """Test that indicators are computed when sufficient price data exists."""
     conn = require_db()
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
 
@@ -54,7 +54,7 @@ def test_compute_indicators_with_sufficient_data():
             "volume": 1000000 + i * 1000,
         })
 
-    insert_stock_prices(conn, aapl_id, price_rows)
+    insert_stock_ohlcv(conn, aapl_id, price_rows)
 
     # Create feature definitions for indicators
     with conn.cursor() as cur:
@@ -65,7 +65,7 @@ def test_compute_indicators_with_sufficient_data():
             VALUES
             ('indicator_rsi_14', 'indicator',
              '{"type": "rsi", "window": 14, "column": "rsi_14"}'::jsonb,
-             'stock_prices', 'close', 'computed_features', 'value', true)
+             'stock_ohlcv', 'close', 'computed_features', 'value', true)
         """)
 
         # SMA_50 - needs 50+ days
@@ -75,7 +75,7 @@ def test_compute_indicators_with_sufficient_data():
             VALUES
             ('indicator_sma_50', 'indicator',
              '{"type": "sma50", "window": 50, "column": "sma_50"}'::jsonb,
-             'stock_prices', 'close', 'computed_features', 'value', true)
+             'stock_ohlcv', 'close', 'computed_features', 'value', true)
         """)
 
         # SMA_200 - needs 200+ days
@@ -85,7 +85,7 @@ def test_compute_indicators_with_sufficient_data():
             VALUES
             ('indicator_sma_200', 'indicator',
              '{"type": "sma200", "window": 200, "column": "sma_200"}'::jsonb,
-             'stock_prices', 'close', 'computed_features', 'value', true)
+             'stock_ohlcv', 'close', 'computed_features', 'value', true)
         """)
 
     conn.commit()
@@ -122,7 +122,7 @@ def test_compute_indicators_with_insufficient_data():
     """Test that indicators are skipped when insufficient price data exists."""
     conn = require_db()
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
 
@@ -142,7 +142,7 @@ def test_compute_indicators_with_insufficient_data():
             "volume": 1000000 + i * 1000,
         })
 
-    insert_stock_prices(conn, aapl_id, price_rows)
+    insert_stock_ohlcv(conn, aapl_id, price_rows)
 
     # Create feature definitions
     with conn.cursor() as cur:
@@ -153,7 +153,7 @@ def test_compute_indicators_with_insufficient_data():
             VALUES
             ('indicator_rsi_14', 'indicator',
              '{"type": "rsi", "window": 14, "column": "rsi_14"}'::jsonb,
-             'stock_prices', 'close', 'computed_features', 'value', true)
+             'stock_ohlcv', 'close', 'computed_features', 'value', true)
         """)
 
         # SMA_200 - needs 200+ days (should NOT work)
@@ -163,7 +163,7 @@ def test_compute_indicators_with_insufficient_data():
             VALUES
             ('indicator_sma_200', 'indicator',
              '{"type": "sma200", "window": 200, "column": "sma_200"}'::jsonb,
-             'stock_prices', 'close', 'computed_features', 'value', true)
+             'stock_ohlcv', 'close', 'computed_features', 'value', true)
         """)
 
     conn.commit()

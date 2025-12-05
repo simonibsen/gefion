@@ -7,14 +7,14 @@ This document tracks the Test-Driven Development (TDD) implementation of perform
 
 ### ✅ IMMEDIATE #1: Batch INSERT Operations (CRITICAL)
 
-**Problem**: Row-by-row INSERT operations in `insert_stock_prices()` causing 10-100x performance degradation.
+**Problem**: Row-by-row INSERT operations in `insert_stock_ohlcv()` causing 10-100x performance degradation.
 
 **Solution**: Implemented multi-row VALUES clause batching with 200-row chunks.
 
 **Test**: `tests/test_batch_insert_performance.py`
-- `test_insert_stock_prices_is_batched`: Verifies 1000 rows insert in < 1 second
-- `test_insert_stock_prices_batch_with_update`: Tests UPDATE mode with batching
-- `test_insert_stock_prices_handles_large_batches`: Tests 5000 rows in < 3 seconds
+- `test_insert_stock_ohlcv_is_batched`: Verifies 1000 rows insert in < 1 second
+- `test_insert_stock_ohlcv_batch_with_update`: Tests UPDATE mode with batching
+- `test_insert_stock_ohlcv_handles_large_batches`: Tests 5000 rows in < 3 seconds
 
 **Results**:
 - **Before**: 1.54s for 1000 rows (row-by-row)
@@ -22,19 +22,19 @@ This document tracks the Test-Driven Development (TDD) implementation of perform
 - **Speed-up**: **12.8x faster**
 
 **Files Modified**:
-- `src/g2/db/ingest.py:262-354` - Rewrote `insert_stock_prices()` with batching
+- `src/g2/db/ingest.py:262-354` - Rewrote `insert_stock_ohlcv()` with batching
 - `src/g2/db/schema.py:22-30` - Fixed TimescaleDB extension handling
 
 **Code Changes**:
 ```python
 # Before: Row-by-row
 for row in rows:
-    cur.execute("INSERT INTO stock_prices ... VALUES (%s, ...)", (...))
+    cur.execute("INSERT INTO stock_ohlcv ... VALUES (%s, ...)", (...))
 
 # After: Batched
 values_sql = ["(%s, %s, ...)"] * len(batch)
 params = [item for row in batch for item in row]
-cur.execute(f"INSERT INTO stock_prices ... VALUES {','.join(values_sql)}", params)
+cur.execute(f"INSERT INTO stock_ohlcv ... VALUES {','.join(values_sql)}", params)
 ```
 
 ---
@@ -153,8 +153,8 @@ def _auto_indicator_workers(compute_locally: bool, calls_per_minute: int, availa
 
 **Solution**: Add indexes:
 ```sql
-CREATE INDEX IF NOT EXISTS stock_prices_data_id_date_idx
-    ON stock_prices(data_id, date DESC);
+CREATE INDEX IF NOT EXISTS stock_ohlcv_data_id_date_idx
+    ON stock_ohlcv(data_id, date DESC);
 
 CREATE INDEX IF NOT EXISTS computed_features_feature_data_date_idx
     ON computed_features(feature_id, data_id, date DESC);

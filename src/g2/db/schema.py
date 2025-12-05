@@ -45,8 +45,8 @@ def create_stocks_table(conn: Connection) -> None:
     conn.commit()
 
 
-def create_stock_prices_table(conn: Connection) -> None:
-    """Create stock_prices hypertable with unique stock/date constraint."""
+def create_stock_ohlcv_table(conn: Connection) -> None:
+    """Create stock_ohlcv hypertable with unique stock/date constraint."""
     _ensure_timescaledb(conn)
 
     # Check if table exists but is not a hypertable - if so, drop and recreate
@@ -56,7 +56,7 @@ def create_stock_prices_table(conn: Connection) -> None:
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = 'stock_prices'
+                    WHERE table_schema = 'public' AND table_name = 'stock_ohlcv'
                 );
             """)
             table_exists = cur.fetchone()[0]
@@ -66,15 +66,15 @@ def create_stock_prices_table(conn: Connection) -> None:
                 cur.execute("""
                     SELECT EXISTS (
                         SELECT FROM timescaledb_information.hypertables
-                        WHERE hypertable_schema = 'public' AND hypertable_name = 'stock_prices'
+                        WHERE hypertable_schema = 'public' AND hypertable_name = 'stock_ohlcv'
                     );
                 """)
                 is_hypertable = cur.fetchone()[0]
 
                 if not is_hypertable:
                     # Table exists but isn't a hypertable - drop and recreate
-                    print("Dropping existing stock_prices table to recreate as hypertable...")
-                    cur.execute("DROP TABLE IF EXISTS stock_prices CASCADE;")
+                    print("Dropping existing stock_ohlcv table to recreate as hypertable...")
+                    cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
                     conn.commit()
         except Exception as e:
             # If TimescaleDB queries fail, just try to continue
@@ -83,7 +83,7 @@ def create_stock_prices_table(conn: Connection) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS stock_prices (
+            CREATE TABLE IF NOT EXISTS stock_ohlcv (
                 id BIGSERIAL,
                 data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
                 date DATE NOT NULL,
@@ -92,6 +92,8 @@ def create_stock_prices_table(conn: Connection) -> None:
                 low NUMERIC(18,6),
                 close NUMERIC(18,6),
                 adjusted_close NUMERIC(18,6),
+                dividend_amount NUMERIC(18,6),
+                split_coefficient NUMERIC(18,6),
                 volume BIGINT,
                 source TEXT,
                 PRIMARY KEY (id, date),
@@ -101,20 +103,20 @@ def create_stock_prices_table(conn: Connection) -> None:
         )
         cur.execute(
             """
-            SELECT create_hypertable('stock_prices', 'date', if_not_exists => TRUE);
+            SELECT create_hypertable('stock_ohlcv', 'date', if_not_exists => TRUE);
             """
         )
         # Performance helpers: chunk interval and BRIN on date for large scans
         try:
-            cur.execute("SELECT set_chunk_time_interval('stock_prices', INTERVAL '30 days');")
+            cur.execute("SELECT set_chunk_time_interval('stock_ohlcv', INTERVAL '30 days');")
         except Exception:
             pass
-        cur.execute("CREATE INDEX IF NOT EXISTS stock_prices_brin ON stock_prices USING BRIN(date);")
+        cur.execute("CREATE INDEX IF NOT EXISTS stock_ohlcv_brin ON stock_ohlcv USING BRIN(date);")
         # Composite B-tree index for efficient single-stock time-series queries
         # Optimized for "SELECT ... WHERE data_id = X AND date BETWEEN Y AND Z ORDER BY date DESC"
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS stock_prices_data_id_date_idx
-                ON stock_prices(data_id, date DESC);
+            CREATE INDEX IF NOT EXISTS stock_ohlcv_data_id_date_idx
+                ON stock_ohlcv(data_id, date DESC);
         """)
     conn.commit()
 
@@ -186,7 +188,7 @@ def migrate_stock_tables_to_data_id(conn: Connection) -> None:
 
     Safe to run repeatedly; no-op when already migrated.
     """
-    tables = ["stock_prices", "company_fundamentals_history"]
+    tables = ["stock_ohlcv", "company_fundamentals_history"]
     with conn.cursor() as cur:
         for table in tables:
             cur.execute(

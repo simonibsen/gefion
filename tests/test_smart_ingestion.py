@@ -6,7 +6,7 @@ import pytest
 import psycopg
 
 from g2.db import schema
-from g2.db.ingest import upsert_stock, insert_stock_prices, filter_symbols_needing_update
+from g2.db.ingest import upsert_stock, insert_stock_ohlcv, filter_symbols_needing_update
 from g2.ingest.universe import _expected_market_date
 
 
@@ -34,7 +34,7 @@ def test_filter_symbols_no_existing_data():
     """Symbols with no price data should not be filtered out."""
     conn = require_db()
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
 
     # Create symbols but no price data
     upsert_stock(conn, "AAPL")
@@ -54,13 +54,13 @@ def test_filter_symbols_up_to_date():
     """Symbols with data up to expected market date should be filtered out."""
     conn = require_db()
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
 
     target_date = _expected_market_date()
 
     # AAPL has data up to target_date - should be filtered out
     aapl_id = upsert_stock(conn, "AAPL")
-    insert_stock_prices(conn, aapl_id, [
+    insert_stock_ohlcv(conn, aapl_id, [
         {"date": target_date, "close": 150.0, "open": 149.0, "high": 151.0, "low": 148.0, "volume": 1000000}
     ])
 
@@ -80,13 +80,13 @@ def test_filter_symbols_stale_data():
     """Symbols with stale data should not be filtered out."""
     conn = require_db()
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
 
     old_date = date.today() - timedelta(days=5)
 
     # AAPL has old data - should NOT be filtered out
     aapl_id = upsert_stock(conn, "AAPL")
-    insert_stock_prices(conn, aapl_id, [
+    insert_stock_ohlcv(conn, aapl_id, [
         {"date": old_date, "close": 150.0, "open": 149.0, "high": 151.0, "low": 148.0, "volume": 1000000}
     ])
 
@@ -106,20 +106,20 @@ def test_filter_symbols_mixed():
     """Mixed scenario: some up-to-date, some stale, some missing."""
     conn = require_db()
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
 
     target_date = _expected_market_date()
     old_date = date.today() - timedelta(days=10)
 
     # AAPL: up-to-date - should be filtered out
     aapl_id = upsert_stock(conn, "AAPL")
-    insert_stock_prices(conn, aapl_id, [
+    insert_stock_ohlcv(conn, aapl_id, [
         {"date": target_date, "close": 150.0, "open": 149.0, "high": 151.0, "low": 148.0, "volume": 1000000}
     ])
 
     # MSFT: stale data - should NOT be filtered out
     msft_id = upsert_stock(conn, "MSFT")
-    insert_stock_prices(conn, msft_id, [
+    insert_stock_ohlcv(conn, msft_id, [
         {"date": old_date, "close": 250.0, "open": 249.0, "high": 251.0, "low": 248.0, "volume": 2000000}
     ])
 
@@ -142,7 +142,7 @@ def test_filter_symbols_empty_list():
     """Empty symbol list should return empty list."""
     conn = require_db()
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
 
     symbols_needing_update = filter_symbols_needing_update(conn, [])
 
@@ -155,12 +155,12 @@ def test_filter_new_rows_from_api_response():
     from g2.db.ingest import filter_new_rows
     conn = require_db()
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
 
     # Insert existing data up to 5 days ago
     old_date = date.today() - timedelta(days=5)
     aapl_id = upsert_stock(conn, "AAPL")
-    insert_stock_prices(conn, aapl_id, [
+    insert_stock_ohlcv(conn, aapl_id, [
         {"date": old_date, "close": 150.0, "open": 149.0, "high": 151.0, "low": 148.0, "volume": 1000000}
     ])
 
@@ -195,7 +195,7 @@ def test_filter_new_rows_no_existing_data():
     from g2.db.ingest import filter_new_rows
     conn = require_db()
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
 
     aapl_id = upsert_stock(conn, "AAPL")
 

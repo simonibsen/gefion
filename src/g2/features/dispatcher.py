@@ -333,7 +333,7 @@ def _fetch_source_data(
     Fetch source data based on source_table and source_column.
 
     Handles different source types:
-    - stock_prices: Direct column access
+    - stock_ohlcv: Direct column access
     - computed_features: Requires feature_id lookup
     """
     source_table, source_column = source_key
@@ -342,8 +342,8 @@ def _fetch_source_data(
         return _fetch_from_computed_features(
             conn, data_id, features, start_date
         )
-    elif source_table == 'stock_prices':
-        return _fetch_from_stock_prices(
+    elif source_table == 'stock_ohlcv':
+        return _fetch_from_stock_ohlcv(
             conn, data_id, source_column, start_date
         )
     else:
@@ -409,18 +409,18 @@ def _fetch_from_computed_features(
     ]
 
 
-def _fetch_from_stock_prices(
+def _fetch_from_stock_ohlcv(
     conn: psycopg.Connection,
     data_id: int,
     column: str,
     start_date: Optional[date],
 ) -> List[Dict[str, Any]]:
-    """Fetch from stock_prices table."""
+    """Fetch from stock_ohlcv table."""
     # For indicators, we need OHLC data
     # Column might be 'close', but we fetch all price columns
     query = """
     SELECT date, open, high, low, close, adjusted_close, volume
-    FROM stock_prices
+    FROM stock_ohlcv
     WHERE data_id = %s
     """
     query_params = [data_id]

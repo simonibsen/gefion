@@ -4,7 +4,7 @@ import pytest
 from datetime import date
 
 from g2.db import schema
-from g2.db.ingest import ensure_feature_definitions, ensure_store_targets, trim_stock_prices
+from g2.db.ingest import ensure_feature_definitions, ensure_store_targets, trim_stock_ohlcv
 
 
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
@@ -39,7 +39,7 @@ def test_store_table_created_and_used():
             "name": "custom_feature",
             "function_name": "custom_fx",
             "params": {"window": 5},
-            "source_table": "stock_prices",
+            "source_table": "stock_ohlcv",
             "source_column": "close",
             "store_table": "custom_features",
             "store_column": "value",
@@ -59,5 +59,5 @@ def test_store_table_created_and_used():
         )
         cols = [r[0] for r in cur.fetchall()]
     assert cols == ["data_id", "date", "source", "value"]
-    # insert and trim through trim_stock_prices to ensure no conflict
+    # insert and trim through trim_stock_ohlcv to ensure no conflict
     conn.close()

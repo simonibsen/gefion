@@ -12,7 +12,7 @@ import psycopg
 import pytest
 
 from g2.db import schema
-from g2.db.ingest import insert_stock_prices, upsert_stock
+from g2.db.ingest import insert_stock_ohlcv, upsert_stock
 
 
 def create_connection():
@@ -37,7 +37,7 @@ def setup_tables(conn):
     """Setup minimal tables without TimescaleDB for performance testing."""
     with conn.cursor() as cur:
         # Clean existing
-        cur.execute("DROP TABLE IF EXISTS stock_prices CASCADE;")
+        cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
         cur.execute("DROP TABLE IF EXISTS stocks CASCADE;")
 
         # Create stocks table
@@ -48,9 +48,9 @@ def setup_tables(conn):
             );
         """)
 
-        # Create stock_prices table WITHOUT hypertable for simpler testing
+        # Create stock_ohlcv table WITHOUT hypertable for simpler testing
         cur.execute("""
-            CREATE TABLE stock_prices (
+            CREATE TABLE stock_ohlcv (
                 id BIGSERIAL PRIMARY KEY,
                 data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
                 date DATE NOT NULL,
@@ -59,6 +59,8 @@ def setup_tables(conn):
                 low NUMERIC(18,6),
                 close NUMERIC(18,6),
                 adjusted_close NUMERIC(18,6),
+                dividend_amount NUMERIC(18,6),
+                split_coefficient NUMERIC(18,6),
                 volume BIGINT,
                 source TEXT,
                 UNIQUE (data_id, date)
@@ -67,8 +69,8 @@ def setup_tables(conn):
     yield
 
 
-def test_insert_stock_prices_is_batched(conn):
-    """Test that insert_stock_prices uses batch inserts, not row-by-row."""
+def test_insert_stock_ohlcv_is_batched(conn):
+    """Test that insert_stock_ohlcv uses batch inserts, not row-by-row."""
 
     stock_id = upsert_stock(conn, "TEST")
 
@@ -89,7 +91,7 @@ def test_insert_stock_prices_is_batched(conn):
 
     # Time the insert
     start = time.time()
-    inserted = insert_stock_prices(conn, stock_id, rows, update_existing=False)
+    inserted = insert_stock_ohlcv(conn, stock_id, rows, update_existing=False)
     elapsed = time.time() - start
 
     assert inserted == 1000
@@ -100,12 +102,12 @@ def test_insert_stock_prices_is_batched(conn):
 
     # Verify data was actually inserted
     with conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM stock_prices WHERE data_id = %s;", (stock_id,))
+        cur.execute("SELECT COUNT(*) FROM stock_ohlcv WHERE data_id = %s;", (stock_id,))
         count = cur.fetchone()[0]
     assert count == 1000
 
 
-def test_insert_stock_prices_batch_with_update(conn):
+def test_insert_stock_ohlcv_batch_with_update(conn):
     """Test that batch insert works with update_existing=True."""
 
     stock_id = upsert_stock(conn, "TEST2")
@@ -122,7 +124,7 @@ def test_insert_stock_prices_batch_with_update(conn):
             "source": "test",
         })
 
-    inserted = insert_stock_prices(conn, stock_id, rows, update_existing=False)
+    inserted = insert_stock_ohlcv(conn, stock_id, rows, update_existing=False)
     assert inserted == 100
 
     # Update with new prices
@@ -137,7 +139,7 @@ def test_insert_stock_prices_batch_with_update(conn):
         })
 
     start = time.time()
-    inserted = insert_stock_prices(conn, stock_id, updated_rows, update_existing=True)
+    inserted = insert_stock_ohlcv(conn, stock_id, updated_rows, update_existing=True)
     elapsed = time.time() - start
 
     assert inserted == 100
@@ -146,7 +148,7 @@ def test_insert_stock_prices_batch_with_update(conn):
     # Verify data was updated
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT close, source FROM stock_prices WHERE data_id = %s AND date = %s;",
+            "SELECT close, source FROM stock_ohlcv WHERE data_id = %s AND date = %s;",
             (stock_id, base_date)
         )
         close, source = cur.fetchone()
@@ -154,7 +156,7 @@ def test_insert_stock_prices_batch_with_update(conn):
     assert source == "test_updated"
 
 
-def test_insert_stock_prices_handles_large_batches(conn):
+def test_insert_stock_ohlcv_handles_large_batches(conn):
     """Test that insert handles large datasets efficiently."""
 
     stock_id = upsert_stock(conn, "LARGE")
@@ -172,7 +174,7 @@ def test_insert_stock_prices_handles_large_batches(conn):
         })
 
     start = time.time()
-    inserted = insert_stock_prices(conn, stock_id, rows, update_existing=False)
+    inserted = insert_stock_ohlcv(conn, stock_id, rows, update_existing=False)
     elapsed = time.time() - start
 
     assert inserted == 5000

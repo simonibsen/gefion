@@ -1,14 +1,99 @@
 """Test prepared statement optimization for database inserts."""
-import psycopg
+import os
 from datetime import date
+
+import psycopg
+import pytest
+
 from g2.db.ingest import insert_computed_features
 from g2.db import schema
 from g2.db import pool
 
 
+class FakeCursor:
+    def __init__(self, conn):
+        self._rows = [(1,)]
+        self.rowcount = 0
+        self.conn = conn
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, *args, **kwargs):
+        query = args[0] if args else ""
+        # Roughly derive rowcount for insert batches
+        if "INSERT INTO computed_features" in query:
+            # Count number of value tuples
+            tuples = query.count("),(") + 1
+            self.rowcount = tuples
+            self.conn.last_inserted_count = tuples
+        elif "SELECT COUNT(*) FROM computed_features" in query:
+            count = getattr(self.conn, "last_inserted_count", 0)
+            self._rows = [(count,)]
+            self.rowcount = 1
+        else:
+            self.rowcount = 1
+
+    def fetchone(self):
+        return self._rows[0]
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class FakeConn:
+    def __init__(self):
+        self.autocommit = False
+        self.last_inserted_count = 0
+
+    def cursor(self):
+        return FakeCursor(self)
+
+    def commit(self):
+        return None
+
+    def close(self):
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class FakePool:
+    def __init__(self, *args, **kwargs):
+        self._g2_prepare_statements = kwargs.get("prepare_statements", False)
+
+    def getconn(self):
+        return FakeConn()
+
+    def putconn(self, _conn):
+        return None
+
+    def close(self):
+        return None
+
+
+@pytest.fixture(autouse=True)
+def fake_pool(monkeypatch):
+    # Replace ConnectionPool with FakePool to avoid real DB connections
+    monkeypatch.setattr(pool, "ConnectionPool", FakePool)
+    # Stub psycopg.connect to avoid hitting a real database
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: FakeConn())
+    # Reset global pool before/after
+    pool.close_pool()
+    yield
+    pool.close_pool()
+
+
 def test_pool_enables_prepared_statements():
     """Test that connection pool can be initialized with prepared statement support."""
-    db_url = "postgresql://g2:g2pass@localhost:5432/g2"
+    db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
 
     # Initialize pool with prepared statement support
     # This enables psycopg3's automatic statement caching via prepare=True
@@ -25,7 +110,7 @@ def test_pool_enables_prepared_statements():
 
 def test_insert_with_prepared_statements():
     """Test that insert_computed_features uses psycopg3 prepare=True when pool configured."""
-    db_url = "postgresql://g2:g2pass@localhost:5432/g2"
+    db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
 
     # Initialize pool with prepared statements enabled
     pool.init_pool(db_url, min_size=1, max_size=2, prepare_statements=True)
@@ -82,7 +167,7 @@ def test_insert_with_prepared_statements():
 
 def test_fallback_without_pool():
     """Test that insert_computed_features works without pool (backward compatibility)."""
-    db_url = "postgresql://g2:g2pass@localhost:5432/g2"
+    db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
 
     # Close any existing pool
     pool.close_pool()

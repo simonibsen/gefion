@@ -30,7 +30,7 @@ All changes maintain backward compatibility, follow TDD principles with comprehe
 **Technical Details**:
 ```python
 # Replaced 1000 individual INSERTs with batched multi-row VALUES:
-INSERT INTO stock_prices (...) VALUES
+INSERT INTO stock_ohlcv (...) VALUES
   (row1_data),
   (row2_data),
   ...

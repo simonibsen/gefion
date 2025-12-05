@@ -31,7 +31,7 @@ graph TB
     subgraph "Database - TimescaleDB"
         direction TB
         Stocks[(stocks)]
-        Prices[(stock_prices<br/>hypertable)]
+        Prices[(stock_ohlcv<br/>hypertable)]
         FeatureDefs[(feature_definitions<br/>metadata)]
         ComputedFeatures[(computed_features<br/>hypertable)]
 
@@ -77,7 +77,7 @@ graph TB
 - **Metadata-Driven**: Features are defined as data in `feature_definitions`, not code
 - **Registry Pattern**: Compute functions register by name (e.g., "indicator", "derivative")
 - **Generic Dispatcher**: Routes computation based on `function_name` in feature definitions
-- **Hypertables**: TimescaleDB optimizes time-series queries on `stock_prices` and `computed_features`
+- **Hypertables**: TimescaleDB optimizes time-series queries on `stock_ohlcv` and `computed_features`
 - **Pure Functions**: Compute functions are side-effect-free, dispatcher handles DB I/O
 
 ## Current focus
@@ -107,7 +107,7 @@ python -m pytest -q
   - CLI loads `.env` automatically for `ALPHAVANTAGE_API_KEY` and `DATABASE_URL`.
 - Indicators ingest:
   - `g2 ingest-indicators --exchange NASDAQ --local --indicators rsi,macd,bbands,adx,stoch,psar --refresh`
-  - Local mode (default) computes indicators from existing `stock_prices` and resumes from the last indicator date; use `--api` to fetch from AlphaVantage instead. Writer/fetch workers are auto-sized; progress shows mode and queue/fetch stats.
+  - Local mode (default) computes indicators from existing `stock_ohlcv` and resumes from the last indicator date; use `--api` to fetch from AlphaVantage instead. Writer/fetch workers are auto-sized; progress shows mode and queue/fetch stats.
 
 ## Local Postgres (TimescaleDB)
 - Copy `.env.example` to `.env` and adjust credentials as needed.

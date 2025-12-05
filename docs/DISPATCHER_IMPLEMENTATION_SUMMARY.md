@@ -89,7 +89,7 @@ Created 3 new test files with **30 tests total**:
 **test_feature_dispatcher.py** (16 tests)
 - Basic dispatcher functionality
 - Feature definition reading/filtering
-- Source data fetching (stock_prices, computed_features)
+- Source data fetching (stock_ohlcv, computed_features)
 - Incremental vs full refresh
 - Error handling
 - Multiple function types

@@ -23,11 +23,11 @@ class FakeCursor:
         self.calls += 1
         if "to_regclass" in query:
             # Return something exists
-            self._rows = [("public.stock_prices",)]
+            self._rows = [("public.stock_ohlcv",)]
         elif "timescaledb_information.hypertables" in query:
-            self._rows = [("stock_prices", 2592000000000)]  # 30 days in microseconds
+            self._rows = [("stock_ohlcv", 2592000000000)]  # 30 days in microseconds
         elif "pg_indexes" in query:
-            self._rows = [("stock_prices", "CREATE INDEX stock_prices_brin ON stock_prices USING BRIN (date)")]
+            self._rows = [("stock_ohlcv", "CREATE INDEX stock_ohlcv_brin ON stock_ohlcv USING BRIN (date)")]
         else:
             self._rows = []
 
@@ -66,5 +66,5 @@ def test_db_health_reports(monkeypatch):
     payload = json.loads(res.stdout)
     assert payload["status"] == "ok"
     assert payload["available_connections"] == 5
-    assert payload["tables"]["stock_prices"] is True
-    assert payload["brin_indexes"]["stock_prices"] is True
+    assert payload["tables"]["stock_ohlcv"] is True
+    assert payload["brin_indexes"]["stock_ohlcv"] is True

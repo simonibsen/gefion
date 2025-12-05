@@ -61,7 +61,7 @@ pool.close_pool()
 ### Batch INSERT (Automatic)
 ```python
 # Just use normally - now optimized internally!
-insert_stock_prices(conn, data_id, rows, update_existing=False)
+insert_stock_ohlcv(conn, data_id, rows, update_existing=False)
 # Now 12.8x faster with batching
 ```
 

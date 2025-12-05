@@ -21,14 +21,15 @@ from g2.alphavantage.client import AlphaVantageClient
 from g2.ingest.indicators import ingest_indicators_for_symbols, INDICATOR_FUNCTIONS
 from g2.config import load_settings
 from g2.db import schema
+from g2.db import migrate
 from g2.db.ingest import (
-    insert_stock_prices,
+    insert_stock_ohlcv,
     upsert_stock,
     ensure_all_indicator_feature_definitions,
     ensure_feature_definitions,
     delete_feature_data_only,
     trim_feature_data,
-    trim_stock_prices,
+    trim_stock_ohlcv,
     ensure_store_targets,
     drop_features,
     feature_ids_for_names,
@@ -221,9 +222,9 @@ def ingest_prices(
         try:
             with psycopg.connect(url) as conn:
                 schema.create_stocks_table(conn)
-                schema.create_stock_prices_table(conn)
+                schema.create_stock_ohlcv_table(conn)
                 stock_id = upsert_stock(conn, symbol)
-                inserted = insert_stock_prices(conn, stock_id, rows)
+                inserted = insert_stock_ohlcv(conn, stock_id, rows)
                 emit(
                     f"Inserted {inserted} price rows for {symbol}",
                     data={"symbol": symbol, "inserted": inserted},
@@ -348,7 +349,7 @@ def ingest_universe(
         with psycopg.connect(url) as conn:
             from g2.db import schema
             schema.create_stocks_table(conn)
-            schema.create_stock_prices_table(conn)
+            schema.create_stock_ohlcv_table(conn)
             target_date = _expected_market_date()
             symbols = filter_symbols_needing_update(conn, symbols, target_date)
             skipped = symbols_before - len(symbols)
@@ -423,7 +424,7 @@ def db_health(
         with psycopg.connect(url) as conn:
             conn.autocommit = True
             with conn.cursor() as cur:
-                tables = ["stock_prices", "computed_features"]
+                tables = ["stock_ohlcv", "computed_features"]
                 table_status = {}
                 for t in tables:
                     cur.execute("SELECT to_regclass(%s);", (f"public.{t}",))
@@ -561,7 +562,7 @@ def db_tune(
     Safe to re-run; ignores missing tables.
     """
     url = _db_url(db_url)
-    tables = ["stock_prices", "computed_features"]
+    tables = ["stock_ohlcv", "computed_features"]
     applied = {"chunk_interval": [], "compression": []}
     status = {}
     try:
@@ -596,7 +597,7 @@ def db_tune(
                             )
                             compression_exists = cur.fetchone() is not None
                             if not compression_exists:
-                                if t == "stock_prices":
+                                if t == "stock_ohlcv":
                                     cur.execute(
                                         sql.SQL(
                                             "ALTER TABLE {} SET (timescaledb.compress, timescaledb.compress_segmentby = 'data_id', timescaledb.compress_orderby = 'date');"
@@ -658,6 +659,69 @@ def seed_features(
         emit_error(f"Seeding failed: {exc}", json_output=json_output)
 
 
+def _normalize_feature_definition(payload: dict) -> dict:
+    """
+    Ensure feature definition has defaults and rejects legacy source table.
+    """
+    d = dict(payload)
+    if d.get("source_table") is None:
+        d["source_table"] = "stock_ohlcv"
+    if d.get("source_table") == "stock_prices":
+        raise ValueError("source_table 'stock_prices' is deprecated; use 'stock_ohlcv'")
+    d.setdefault("source_column", "close")
+    d.setdefault("store_type", "double precision")
+    d.setdefault("active", True)
+    return d
+
+
+@app.command("features-migrate-source")
+def migrate_feature_definitions_source(
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Update feature_definitions.source_table from legacy 'stock_prices' to 'stock_ohlcv'.
+    Safe to run multiple times; no effect when already migrated.
+    """
+    url = _db_url(db_url)
+    try:
+        with psycopg.connect(url) as conn:
+            conn.autocommit = True
+            schema.create_feature_definitions_table(conn)
+            updated = migrate.migrate_feature_definitions_source_table(conn)
+        emit(
+            "Migrated feature_definitions source_table",
+            data={"updated_rows": updated},
+            json_output=json_output,
+        )
+    except Exception as exc:
+        emit_error(f"Migration failed: {exc}", json_output=json_output)
+
+
+@app.command("db-migrate-stock-prices")
+def db_migrate_stock_prices(
+    drop_old: bool = typer.Option(False, "--drop-old", help="Drop legacy stock_prices after copy"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Copy legacy stock_prices data into stock_ohlcv and optionally drop old table.
+    Idempotent: skips if stock_prices is absent; re-runs won't duplicate rows.
+    """
+    url = _db_url(db_url)
+    try:
+        with psycopg.connect(url) as conn:
+            conn.autocommit = True
+            copied, dropped = migrate.migrate_stock_prices_to_ohlcv(conn, drop_old=drop_old)
+        emit(
+            "Migrated stock_prices to stock_ohlcv",
+            data={"copied_rows": copied, "dropped": bool(dropped), "drop_old": drop_old},
+            json_output=json_output,
+        )
+    except Exception as exc:
+        emit_error(f"DB migration failed: {exc}", json_output=json_output)
+
+
 @app.command("features-register")
 def register_feature(
     definition: str = typer.Option(..., "--definition", help="JSON string for a single feature definition"),
@@ -672,7 +736,7 @@ def register_feature(
         "name": "my_feature",
         "function_name": "my_fx",
         "params": {"window": 30},
-        "source_table": "stock_prices",
+        "source_table": "stock_ohlcv",
         "source_column": "close",
         "store_table": "computed_features",
         "store_column": "value",
@@ -700,8 +764,9 @@ def register_feature(
             conn.autocommit = True
             schema.create_feature_definitions_table(conn)
             schema.create_computed_features_table(conn)
-            ids = ensure_feature_definitions(conn, [payload])
-            ensure_store_targets(conn, [payload])
+            normalized = _normalize_feature_definition(payload)
+            ids = ensure_feature_definitions(conn, [normalized])
+            ensure_store_targets(conn, [normalized])
         emit(
             f"Registered feature '{payload['name']}'",
             data={"ids": ids},
@@ -716,7 +781,7 @@ def trim_features(
     feature: str = typer.Option(..., "--feature", help="Comma-separated feature names to trim"),
     before: Optional[str] = typer.Option(None, help="Drop rows before this date (YYYY-MM-DD)"),
     after: Optional[str] = typer.Option(None, help="Drop rows after this date (YYYY-MM-DD)"),
-    trim_prices: bool = typer.Option(True, "--trim-prices/--no-trim-prices", help="Also trim stock_prices for date window"),
+    trim_prices: bool = typer.Option(True, "--trim-prices/--no-trim-prices", help="Also trim stock_ohlcv for date window"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
@@ -746,8 +811,8 @@ def trim_features(
             deleted = trim_feature_data(conn, names, before=before_dt, after=after_dt)
             prices_deleted = 0
             if trim_prices:
-                schema.create_stock_prices_table(conn)
-                prices_deleted = trim_stock_prices(conn, before=before_dt, after=after_dt)
+                schema.create_stock_ohlcv_table(conn)
+                prices_deleted = trim_stock_ohlcv(conn, before=before_dt, after=after_dt)
         emit(
             f"Trimmed features {', '.join(names)}",
             data={
@@ -771,7 +836,7 @@ def trim_prices(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
-    """Trim stock_prices by date (optionally limited to symbols)."""
+    """Trim stock_ohlcv by date (optionally limited to symbols)."""
     if not before and not after:
         if json_output:
             emit_error("Specify --before and/or --after", json_output=True)
@@ -789,10 +854,10 @@ def trim_prices(
         with psycopg.connect(url) as conn:
             conn.autocommit = True
             schema.create_stocks_table(conn)
-            schema.create_stock_prices_table(conn)
-            deleted = trim_stock_prices(conn, before=before_dt, after=after_dt, symbols=sym_list)
+            schema.create_stock_ohlcv_table(conn)
+            deleted = trim_stock_ohlcv(conn, before=before_dt, after=after_dt, symbols=sym_list)
         emit(
-            "Trimmed stock_prices",
+            "Trimmed stock_ohlcv",
             data={
                 "deleted_prices": deleted,
                 "before": before,
@@ -859,7 +924,7 @@ def features_list(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, name, function_name, store_table, store_column, active, created_at
+                    SELECT id, name, function_name, source_table, source_column, store_table, store_column, active, created_at
                     FROM feature_definitions
                     ORDER BY name;
                     """
@@ -867,11 +932,13 @@ def features_list(
                 rows = cur.fetchall()
 
                 data = []
-                for fid, name, fn, store_table, store_column, active, created_at in rows:
+                for fid, name, fn, source_table, source_column, store_table, store_column, active, created_at in rows:
                     data.append(
                         {
                             "name": name,
                             "function": fn,
+                            "source_table": source_table,
+                            "source_column": source_column,
                             "store_table": store_table,
                             "store_column": store_column,
                             "active": active,
@@ -889,6 +956,8 @@ def features_list(
             table = Table(title="Features", header_style="bold cyan")
             table.add_column("Name", style="white")
             table.add_column("Function", style="magenta")
+            table.add_column("Source", style="cyan")
+            table.add_column("Source Col", style="cyan")
             table.add_column("Store", style="green")
             table.add_column("Column", style="blue")
             table.add_column("Active", style="yellow")
@@ -897,6 +966,8 @@ def features_list(
                 table.add_row(
                     d["name"] or "",
                     d["function"] or "",
+                    d.get("source_table") or "",
+                    d.get("source_column") or "",
                     d["store_table"] or "",
                     d["store_column"] or "",
                     str(d["active"]),
