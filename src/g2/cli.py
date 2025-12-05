@@ -722,6 +722,94 @@ def db_migrate_stock_prices(
         emit_error(f"DB migration failed: {exc}", json_output=json_output)
 
 
+@app.command("functions-register")
+def register_function(
+    definition: str = typer.Option(..., "--definition", help="JSON string for a feature function definition"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Register a feature function from a JSON payload.
+
+    Required keys: name, version, language, function_body.
+    """
+    try:
+        payload = json.loads(definition)
+        if not isinstance(payload, dict):
+            raise ValueError("definition must be a JSON object")
+    except Exception as exc:
+        emit_error(f"Invalid JSON: {exc}", json_output=json_output)
+        return
+
+    required = ["name", "version", "language", "function_body"]
+    missing = [k for k in required if k not in payload]
+    if missing:
+        emit_error(f"Missing required keys: {', '.join(missing)}", json_output=json_output)
+        return
+
+    url = _db_url(db_url)
+    try:
+        with psycopg.connect(url) as conn:
+            conn.autocommit = True
+            schema.create_feature_functions_table(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO feature_functions
+                    (name, version, status, description, language, function_body, inputs, output_name, output_type,
+                     param_schema, defaults, dependencies, checksum, tags, min_app_version, enabled, created_by)
+                    VALUES (%(name)s, %(version)s, %(status)s, %(description)s, %(language)s, %(function_body)s,
+                            %(inputs)s, %(output_name)s, %(output_type)s, %(param_schema)s, %(defaults)s,
+                            %(dependencies)s, %(checksum)s, %(tags)s, %(min_app_version)s, %(enabled)s, %(created_by)s)
+                    ON CONFLICT (name, version) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        description = EXCLUDED.description,
+                        language = EXCLUDED.language,
+                        function_body = EXCLUDED.function_body,
+                        inputs = EXCLUDED.inputs,
+                        output_name = EXCLUDED.output_name,
+                        output_type = EXCLUDED.output_type,
+                        param_schema = EXCLUDED.param_schema,
+                        defaults = EXCLUDED.defaults,
+                        dependencies = EXCLUDED.dependencies,
+                        checksum = EXCLUDED.checksum,
+                        tags = EXCLUDED.tags,
+                        min_app_version = EXCLUDED.min_app_version,
+                        enabled = EXCLUDED.enabled,
+                        created_by = EXCLUDED.created_by,
+                        updated_at = NOW()
+                    RETURNING id;
+                    """,
+                    {
+                        "name": payload.get("name"),
+                        "version": payload.get("version"),
+                        "status": payload.get("status", "active"),
+                        "description": payload.get("description"),
+                        "language": payload.get("language"),
+                        "function_body": payload.get("function_body"),
+                        "inputs": payload.get("inputs"),
+                        "output_name": payload.get("output_name", "value"),
+                        "output_type": payload.get("output_type", "double precision"),
+                        "param_schema": payload.get("param_schema"),
+                        "defaults": payload.get("defaults"),
+                        "dependencies": payload.get("dependencies"),
+                        "checksum": payload.get("checksum"),
+                        "tags": payload.get("tags"),
+                        "min_app_version": payload.get("min_app_version"),
+                        "enabled": payload.get("enabled", True),
+                        "created_by": payload.get("created_by", "cli"),
+                    },
+                )
+                func_id = cur.fetchone()[0]
+        emit(
+            f"Registered function '{payload['name']}' v{payload['version']}",
+            data={"id": func_id},
+            json_output=json_output,
+        )
+    except Exception as exc:
+        emit_error(f"Register function failed: {exc}", json_output=json_output)
+
+
 @app.command("features-register")
 def register_feature(
     definition: str = typer.Option(..., "--definition", help="JSON string for a single feature definition"),

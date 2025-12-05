@@ -46,6 +46,31 @@ CREATE TABLE IF NOT EXISTS feature_definitions (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Function registry for reusable feature functions
+CREATE TABLE IF NOT EXISTS feature_functions (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    status TEXT DEFAULT 'active',
+    description TEXT,
+    language TEXT NOT NULL,        -- e.g., python_expr, sql_expr, udf
+    function_body TEXT NOT NULL,   -- code or template
+    inputs JSONB,                  -- expected inputs schema
+    output_name TEXT DEFAULT 'value',
+    output_type TEXT DEFAULT 'double precision',
+    param_schema JSONB,            -- JSON schema for params
+    defaults JSONB,                -- default params
+    dependencies JSONB,            -- packages/UDFs needed
+    checksum TEXT,                 -- hash of body+version
+    tags TEXT[],                   -- e.g., {volume, indicator}
+    min_app_version TEXT,
+    enabled BOOLEAN DEFAULT TRUE,
+    created_by TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(name, version)
+);
+
 -- =============================================================================
 -- TIME-SERIES TABLES (HYPERTABLES)
 -- =============================================================================

@@ -145,6 +145,39 @@ def create_feature_definitions_table(conn: Connection) -> None:
     conn.commit()
 
 
+def create_feature_functions_table(conn: Connection) -> None:
+    """Function registry for reusable feature functions."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS feature_functions (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                description TEXT,
+                language TEXT NOT NULL,
+                function_body TEXT NOT NULL,
+                inputs JSONB,
+                output_name TEXT DEFAULT 'value',
+                output_type TEXT DEFAULT 'double precision',
+                param_schema JSONB,
+                defaults JSONB,
+                dependencies JSONB,
+                checksum TEXT,
+                tags TEXT[],
+                min_app_version TEXT,
+                enabled BOOLEAN DEFAULT TRUE,
+                created_by TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(name, version)
+            );
+            """
+        )
+    conn.commit()
+
+
 def create_computed_features_table(conn: Connection) -> None:
     """Tall table for computed feature values."""
     _ensure_timescaledb(conn)
