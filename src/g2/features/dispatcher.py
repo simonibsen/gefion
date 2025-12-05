@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Callable, Any, Tuple
 from datetime import date
+import warnings
+import inspect
 import psycopg
 from psycopg import sql
 
@@ -17,6 +19,8 @@ from g2.db.ingest import insert_computed_features
 
 # Registry mapping function_name -> compute function
 COMPUTE_FUNCTIONS: Dict[str, Callable] = {}
+_FUNCTION_CACHE: Dict[str, Callable] = {}
+_FUNCTION_CACHE_SOURCE: Dict[str, str] = {}
 
 
 def register_compute_function(function_name: str, compute_func: Callable) -> None:
@@ -62,6 +66,10 @@ def compute_features(
             'summary': {'total_inserted': 150, 'total_errors': 0}
         }
     """
+    # Ensure fresh resolution per run (cache still used within this call)
+    _FUNCTION_CACHE.clear()
+    _FUNCTION_CACHE_SOURCE.clear()
+
     results: Dict[str, Any] = {}
     total_inserted = 0
     total_errors: List[Dict[str, Any]] = []
@@ -187,8 +195,8 @@ def _process_function_group(
 
     Returns: {'inserted': count, 'errors': [...]}
     """
-    # Get compute function
-    compute_func = COMPUTE_FUNCTIONS.get(function_name)
+    # Get compute function (DB overrides code registry)
+    compute_func = _resolve_compute_function(conn, function_name)
 
     if not compute_func:
         return {
@@ -282,6 +290,129 @@ def _process_function_group(
         'inserted': total_inserted,
         'errors': errors,
     }
+
+
+def _resolve_compute_function(conn: psycopg.Connection, function_name: str) -> Optional[Callable]:
+    """
+    Resolve a compute function, preferring DB-registered functions over code registry.
+    Cached to avoid repeated DB lookups and exec.
+    """
+    if function_name in _FUNCTION_CACHE:
+        return _FUNCTION_CACHE[function_name]
+
+    db_func = _load_db_function(conn, function_name)
+    if db_func:
+        fn, version = db_func
+        if function_name in COMPUTE_FUNCTIONS:
+            warnings.warn(f"Using DB function '{function_name}' (version {version}) overriding code registry")
+        _FUNCTION_CACHE[function_name] = fn
+        _FUNCTION_CACHE_SOURCE[function_name] = f"db:{version}" if version else "db"
+        return fn
+
+    code_func = COMPUTE_FUNCTIONS.get(function_name)
+    if code_func:
+        _FUNCTION_CACHE[function_name] = code_func
+        _FUNCTION_CACHE_SOURCE[function_name] = "code"
+        return code_func
+
+    return None
+
+
+def _load_db_function(conn: psycopg.Connection, function_name: str) -> Optional[Tuple[Callable, Optional[str]]]:
+    """Load a compute function from feature_functions table if present."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT language, function_body, version
+            FROM feature_functions
+            WHERE enabled = TRUE AND status = 'active' AND name = %s
+            ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+            LIMIT 1;
+            """,
+            (function_name,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    language, body, version = row
+    if language not in ("python_expr", "python"):
+        warnings.warn(f"Ignoring feature_function '{function_name}' with unsupported language '{language}'")
+        return None
+    local_env: Dict[str, Any] = {}
+    try:
+        exec(body, {}, local_env)
+    except Exception as exc:
+        warnings.warn(f"Failed to exec feature_function '{function_name}': {exc}")
+        return None
+    fn = local_env.get("compute") or local_env.get(function_name)
+    if not callable(fn):
+        warnings.warn(f"feature_function '{function_name}' did not define a callable 'compute'")
+        return None
+    return _wrap_db_function(fn), version
+
+
+def _wrap_db_function(fn: Callable) -> Callable:
+    """
+    Adapt a DB function to dispatcher signature (rows, specs).
+
+    Supports two patterns:
+    - existing dispatcher-style (rows, specs) -> list of row dicts
+    - simple pandas-style functions: compute(df, **params) -> series/iterable
+      In this case, we build rows per spec with column name from spec/feature.
+    """
+    sig = inspect.signature(fn)
+    params = list(sig.parameters.values())
+    if params:
+        first, *rest = params
+        if first.kind == inspect.Parameter.VAR_POSITIONAL:
+            return fn
+        if len(params) >= 2 and first.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            second = params[1]
+            # Dispatcher-style signature rows/specs: pass through
+            if first.name in ("rows", "source_rows") and second.name in ("specs", "features", "feature_specs"):
+                return fn
+            if second.name in ("specs", "features", "feature_specs"):
+                return fn
+
+    def adapter(rows: List[Dict[str, Any]], specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not rows or not specs:
+            return []
+        try:
+            import pandas as pd
+        except Exception as exc:
+            warnings.warn(f"feature_function pandas import failed: {exc}")
+            return []
+        df = pd.DataFrame(rows)
+        if df.empty:
+            return []
+        # Normalize column names
+        df.columns = [str(c) for c in df.columns]
+        if "date" not in df.columns:
+            return []
+        out: List[Dict[str, Any]] = []
+        for spec in specs:
+            # Strip dispatcher-specific keys
+            params = {k: v for k, v in spec.items() if k not in ("name", "feature_id")}
+            try:
+                series = fn(df, **params)
+            except Exception as exc:
+                warnings.warn(f"feature_function '{fn.__name__}' execution failed: {exc}")
+                continue
+            if series is None:
+                continue
+            try:
+                iterable = list(series)
+            except Exception:
+                continue
+            col_name = spec.get("column") or spec.get("name")
+            for d, v in zip(df["date"], iterable):
+                out.append({"date": d, col_name: v, "source": "fx"})
+        return out
+
+    return adapter
 
 
 def _get_latest_feature_date(

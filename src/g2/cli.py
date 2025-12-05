@@ -21,6 +21,7 @@ from g2.alphavantage.client import AlphaVantageClient
 from g2.ingest.indicators import ingest_indicators_for_symbols, INDICATOR_FUNCTIONS
 from g2.config import load_settings
 from g2.db import schema
+from psycopg.types.json import Json
 from g2.db import migrate
 from g2.db.ingest import (
     insert_stock_ohlcv,
@@ -799,12 +800,12 @@ def register_function(
                         "description": payload.get("description"),
                         "language": payload.get("language"),
                         "function_body": payload.get("function_body"),
-                        "inputs": payload.get("inputs"),
+                        "inputs": Json(payload.get("inputs")) if payload.get("inputs") is not None else None,
                         "output_name": payload.get("output_name", "value"),
                         "output_type": payload.get("output_type", "double precision"),
-                        "param_schema": payload.get("param_schema"),
-                        "defaults": payload.get("defaults"),
-                        "dependencies": payload.get("dependencies"),
+                        "param_schema": Json(payload.get("param_schema")) if payload.get("param_schema") is not None else None,
+                        "defaults": Json(payload.get("defaults")) if payload.get("defaults") is not None else None,
+                        "dependencies": Json(payload.get("dependencies")) if payload.get("dependencies") is not None else None,
                         "checksum": payload.get("checksum"),
                         "tags": payload.get("tags"),
                         "min_app_version": payload.get("min_app_version"),

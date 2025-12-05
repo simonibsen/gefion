@@ -136,7 +136,7 @@ def test_compute_features_fetches_from_computed_features(mock_conn):
     ]
     cursor.fetchone.return_value = (1,)  # source feature_id
 
-    with patch('g2.features.dispatcher.COMPUTE_FUNCTIONS') as mock_funcs:
+    with patch('g2.features.dispatcher.COMPUTE_FUNCTIONS') as mock_funcs, patch('g2.features.dispatcher._load_db_function', return_value=None):
         mock_compute = Mock(return_value=[])
         mock_funcs.__getitem__.return_value = mock_compute
         mock_funcs.get.return_value = mock_compute
