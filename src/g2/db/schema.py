@@ -119,49 +119,6 @@ def create_stock_prices_table(conn: Connection) -> None:
     conn.commit()
 
 
-def create_company_fundamentals_history_table(conn: Connection) -> None:
-    """Create wide fundamentals history table."""
-    _ensure_timescaledb(conn)
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS company_fundamentals_history (
-                id BIGSERIAL,
-                data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
-                date DATE NOT NULL,
-                market_cap DOUBLE PRECISION,
-                pe_ratio DOUBLE PRECISION,
-                peg_ratio DOUBLE PRECISION,
-                dividend_yield DOUBLE PRECISION,
-                eps DOUBLE PRECISION,
-                revenue_per_share DOUBLE PRECISION,
-                profit_margin DOUBLE PRECISION,
-                operating_margin DOUBLE PRECISION,
-                roe DOUBLE PRECISION,
-                roa DOUBLE PRECISION,
-                beta DOUBLE PRECISION,
-                shares_outstanding BIGINT,
-                source TEXT,
-                PRIMARY KEY (id, date),
-                UNIQUE (data_id, date)
-            );
-            """
-        )
-        cur.execute(
-            """
-            SELECT create_hypertable('company_fundamentals_history', 'date', if_not_exists => TRUE);
-            """
-        )
-        try:
-            cur.execute("SELECT set_chunk_time_interval('company_fundamentals_history', INTERVAL '30 days');")
-        except Exception:
-            pass
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS company_fundamentals_history_brin ON company_fundamentals_history USING BRIN(date);"
-        )
-    conn.commit()
-
-
 def create_feature_definitions_table(conn: Connection) -> None:
     """Descriptor table for computed features."""
     with conn.cursor() as cur:

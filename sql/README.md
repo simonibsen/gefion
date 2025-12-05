@@ -6,7 +6,7 @@ This directory contains SQL scripts for schema setup and feature definitions.
 
 ### schema.sql
 
-Complete database initialization script for g2 application. Creates all tables, hypertables, and indexes.
+Complete database initialization script for g2 application. Creates all production tables, hypertables, and indexes.
 
 **Usage:**
 ```bash
@@ -14,26 +14,22 @@ Complete database initialization script for g2 application. Creates all tables, 
 psql -d g2 -f sql/schema.sql
 ```
 
-**Production Tables (Current System):**
+**Production Tables:**
 - `stocks` - Stock symbols dimension table
 - `stock_prices` - OHLCV price data (hypertable, 30-day chunks)
 - `feature_definitions` - Feature metadata (calc_store pattern)
 - `computed_features` - Computed features (hypertable, 30-day chunks)
-- `company_fundamentals_history` - Fundamental data (hypertable, 30-day chunks)
-
-**Future Tables (AI-Driven Feature Engineering):**
-- `function_implementations` - Dynamic function implementations as data
-- `feature_patterns` - Learned patterns from successful implementations
-- `implementation_patterns` - Links implementations to patterns
-- `pattern_performance` - Time-series tracking of pattern validation
-
-See [docs/FUNCTIONS_AS_DATA.md](../docs/FUNCTIONS_AS_DATA.md) for details on future tables.
 
 **Notes:**
 - All tables are idempotent (use `IF NOT EXISTS`)
-- Future tables are created but not yet used by the application
-- To skip future tables, comment out that section in the script
 - Includes comprehensive indexes for query performance
+- TimescaleDB hypertables optimize time-series queries
+
+**Future Tables:**
+
+The schema previously included tables for AI-driven feature engineering (functions-as-data pattern). These have been moved to documentation as future directions:
+- See [docs/FUNCTIONS_AS_DATA.md](../docs/FUNCTIONS_AS_DATA.md) for ML meta-learning architecture
+- See [docs/FUTURE_DIRECTIONS.md](../docs/FUTURE_DIRECTIONS.md) for implementation roadmap
 
 ### derivative_features.sql
 

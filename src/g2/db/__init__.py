@@ -3,7 +3,6 @@
 from .schema import (
     create_stocks_table,
     create_stock_prices_table,
-    create_company_fundamentals_history_table,
     create_feature_definitions_table,
     create_computed_features_table,
     migrate_stock_tables_to_data_id,
@@ -15,7 +14,6 @@ from .ingest import upsert_stock, insert_stock_prices, decide_outputsize
 __all__ = [
     "create_stocks_table",
     "create_stock_prices_table",
-    "create_company_fundamentals_history_table",
     "create_feature_definitions_table",
     "create_computed_features_table",
     "migrate_stock_tables_to_data_id",
