@@ -68,9 +68,22 @@ def _psar(high: pd.Series, low: pd.Series, step: float = 0.02, max_step: float =
 
 def compute_indicators(
     price_rows: Iterable[Mapping[str, object]],
-    indicators: Iterable[str],
+    indicators: Iterable[str | Mapping[str, object]],
     return_failures: bool = False,
 ) -> List[Dict[str, object]] | tuple[List[Dict[str, object]], List[tuple[str, str]]]:
+    """
+    Compute technical indicators from price data.
+
+    Args:
+        price_rows: Price data rows (OHLCV)
+        indicators: Either a list of indicator type strings (e.g., ["rsi", "sma200"])
+                   or a list of compute spec dicts from feature_definitions
+                   (e.g., [{"type": "rsi", "name": "indicator_rsi_14", ...}])
+        return_failures: If True, return (results, failures) tuple
+
+    Returns:
+        List of computed indicator rows, or (rows, failures) if return_failures=True
+    """
     df = pd.DataFrame(price_rows)
     if df.empty:
         return ([], []) if return_failures else []
@@ -194,14 +207,23 @@ def compute_indicators(
 
     # Compute requested indicators with individual error handling
     # This prevents one failing indicator from breaking all others
-    for indicator in indicators:
-        if indicator in indicator_dispatch:
+    for indicator_spec in indicators:
+        # Handle both string format and dict format (from dispatcher)
+        if isinstance(indicator_spec, str):
+            indicator_type = indicator_spec
+            indicator_name = indicator_spec
+        else:
+            # Dict format from dispatcher: {"type": "rsi", "name": "indicator_rsi_14", ...}
+            indicator_type = indicator_spec.get("type", "")
+            indicator_name = indicator_spec.get("name", indicator_type)
+
+        if indicator_type in indicator_dispatch:
             try:
-                indicator_dispatch[indicator]()
+                indicator_dispatch[indicator_type]()
             except Exception as e:
                 error_msg = str(e)
-                logger.debug(f"Failed to compute feature '{indicator}': {error_msg}")
-                failed_features.append((indicator, error_msg))
+                logger.debug(f"Failed to compute feature '{indicator_name}': {error_msg}")
+                failed_features.append((indicator_name, error_msg))
                 # Skip failed feature, continue with others
 
     # Add source column before conversion

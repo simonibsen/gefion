@@ -242,7 +242,16 @@ def _process_function_group(
                     continue
 
                 # Build feature_map for insert
-                feature_map = {f[1]: f[0] for f in source_features}
+                # Map output column names to feature IDs
+                # Use params.column if specified, otherwise use feature name
+                feature_map = {}
+                for f in source_features:
+                    feature_id = f[0]
+                    feature_name = f[1]
+                    params = f[3]  # params dict
+                    # Use column name from params, or fall back to feature name
+                    column_name = params.get('column', feature_name)
+                    feature_map[column_name] = feature_id
 
                 # Insert results
                 inserted = insert_computed_features(
