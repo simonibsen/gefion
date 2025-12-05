@@ -561,7 +561,7 @@ def db_tune(
     Safe to re-run; ignores missing tables.
     """
     url = _db_url(db_url)
-    tables = ["stock_prices", "computed_features", "company_fundamentals_history"]
+    tables = ["stock_prices", "computed_features"]
     applied = {"chunk_interval": [], "compression": []}
     status = {}
     try:
