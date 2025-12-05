@@ -181,10 +181,10 @@ def ingest_prices_for_symbols(
                     progress.step_done(sym, error=True, meta={"inserted": 0, "reason": "empty payload"})
                 return
 
-            # Filter to only new rows (rows newer than existing data)
-            # This avoids attempting to insert 100 rows when only 2 are new
-            with psycopg.connect(db_url) as filter_conn:
-                rows = filter_new_rows(filter_conn, data_id, rows)
+            # Filter to only new rows unless we are explicitly refreshing/upserting
+            if not update_existing:
+                with psycopg.connect(db_url) as filter_conn:
+                    rows = filter_new_rows(filter_conn, data_id, rows)
 
             if not rows:
                 if progress:
