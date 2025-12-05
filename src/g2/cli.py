@@ -722,7 +722,7 @@ def db_migrate_stock_prices(
         emit_error(f"DB migration failed: {exc}", json_output=json_output)
 
 
-@app.command("functions-register")
+@app.command("features-fx-register")
 def register_function(
     definition: str = typer.Option(..., "--definition", help="JSON string for a feature function definition"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
@@ -732,6 +732,18 @@ def register_function(
     Register a feature function from a JSON payload.
 
     Required keys: name, version, language, function_body.
+
+    Example:
+      --definition '{
+        "name": "volume_zscore",
+        "version": "1.0.0",
+        "language": "python_expr",
+        "function_body": "def compute(df, window=20):\\n  import pandas as pd\\n  return ((df['volume'] - df['volume'].rolling(window).mean()) / df['volume'].rolling(window).std()).fillna(0)",
+        "description": "Volume z-score over rolling window",
+        "tags": ["volume", "indicator"],
+        "param_schema": {"type": "object", "properties": {"window": {"type": "integer", "minimum": 1}}},
+        "defaults": {"window": 20}
+      }'
     """
     try:
         payload = json.loads(definition)

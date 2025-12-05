@@ -53,7 +53,7 @@ def test_functions_register_inserts(monkeypatch):
         "language": "python_expr",
         "function_body": "def compute(df): return df['close']",
     }
-    res = runner.invoke(cli.app, ["functions-register", "--definition", json.dumps(payload), "--json"])
+    res = runner.invoke(cli.app, ["features-fx-register", "--definition", json.dumps(payload), "--json"])
     assert res.exit_code == 0, res.stdout
     assert "obv" in res.stdout
     assert calls["params"]["name"] == "obv"
@@ -96,6 +96,6 @@ def test_functions_register_sets_default_created_by(monkeypatch):
         "language": "python_expr",
         "function_body": "def compute(df): return df['vol']",
     }
-    res = runner.invoke(cli.app, ["functions-register", "--definition", json.dumps(payload), "--json"])
+    res = runner.invoke(cli.app, ["features-fx-register", "--definition", json.dumps(payload), "--json"])
     assert res.exit_code == 0, res.stdout
     assert calls["params"]["created_by"] == "cli"
