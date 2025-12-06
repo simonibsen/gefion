@@ -102,7 +102,13 @@ def emit_json(payload: dict) -> None:
     typer.echo(json.dumps(payload))
 
 
-def _export_feature_functions(conn) -> list[dict]:
+def _export_feature_functions(conn, names: Optional[List[str]] = None) -> list[dict]:
+    where = ""
+    params: List[str] = []
+    if names:
+        placeholders = ",".join(["%s"] * len(names))
+        where = f"WHERE name IN ({placeholders})"
+        params = list(names)
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -110,12 +116,16 @@ def _export_feature_functions(conn) -> list[dict]:
                    output_name, output_type, param_schema, defaults, dependencies,
                    checksum, tags, min_app_version, enabled, created_by
             FROM feature_functions
+            {where}
             ORDER BY name, version;
-            """
+            """.format(where=where),
+            params or None,
         )
         rows = cur.fetchall()
     data = []
     for r in rows:
+        if names and r[0] not in names:
+            continue
         data.append(
             {
                 "name": r[0],
@@ -140,19 +150,29 @@ def _export_feature_functions(conn) -> list[dict]:
     return data
 
 
-def _export_feature_definitions(conn) -> list[dict]:
+def _export_feature_definitions(conn, names: Optional[List[str]] = None) -> list[dict]:
+    where = ""
+    params: List[str] = []
+    if names:
+        placeholders = ",".join(["%s"] * len(names))
+        where = f"WHERE name IN ({placeholders})"
+        params = list(names)
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT name, function_name, params, source_table, source_column,
                    store_table, store_column, store_type, active, version
             FROM feature_definitions
+            {where}
             ORDER BY name;
-            """
+            """.format(where=where),
+            params or None,
         )
         rows = cur.fetchall()
     data = []
     for r in rows:
+        if names and r[0] not in names:
+            continue
         data.append(
             {
                 "name": r[0],
@@ -1051,10 +1071,14 @@ def register_feature(
 def features_export(
     dir: Path = typer.Option(..., "--dir", help="Directory to write feature data"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    functions: Optional[str] = typer.Option(None, "--functions", help="Comma list of function names to export"),
+    features: Optional[str] = typer.Option(None, "--features", help="Comma list of feature names to export"),
 ) -> None:
     """
     Export feature_functions and feature_definitions to JSON files for source control.
     """
+    fx_filter = [s.strip() for s in functions.split(",")] if functions else None
+    feat_filter = [s.strip() for s in features.split(",")] if features else None
     target_dir = Path(dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     url = _db_url(db_url)
@@ -1063,17 +1087,17 @@ def features_export(
         with psycopg.connect(url) as conn:
             conn.autocommit = True
             schema.create_feature_functions_table(conn)
-            functions = _export_feature_functions(conn)
+            functions_data = _export_feature_functions(conn, fx_filter)
 
         # Export definitions
         with psycopg.connect(url) as conn:
             conn.autocommit = True
             schema.create_feature_definitions_table(conn)
-            definitions = _export_feature_definitions(conn)
+            definitions = _export_feature_definitions(conn, feat_filter)
 
-        (target_dir / "feature_functions.json").write_text(json.dumps(functions, indent=2))
+        (target_dir / "feature_functions.json").write_text(json.dumps(functions_data, indent=2))
         (target_dir / "feature_definitions.json").write_text(json.dumps(definitions, indent=2))
-        emit(f"Exported {len(functions)} functions and {len(definitions)} definitions to {target_dir}")
+        emit(f"Exported {len(functions_data)} functions and {len(definitions)} definitions to {target_dir}")
     except Exception as exc:
         emit_error(f"Export failed: {exc}")
 

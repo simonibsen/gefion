@@ -63,7 +63,26 @@ def test_features_export_writes_files(tmp_path, monkeypatch):
             "0.1.0",
             True,
             "cli",
-        )
+        ),
+        (
+            "fx_b",
+            "1.0.0",
+            "active",
+            "desc2",
+            "python_expr",
+            "body2",
+            None,
+            "value",
+            "double precision",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            True,
+            "cli",
+        ),
     ]
     defs = [
         (
@@ -77,7 +96,19 @@ def test_features_export_writes_files(tmp_path, monkeypatch):
             "double precision",
             True,
             "1.0.0",
-        )
+        ),
+        (
+            "feat_b",
+            "fx_b",
+            {"window": 10},
+            "stock_ohlcv",
+            "close",
+            "computed_features",
+            "value",
+            "double precision",
+            True,
+            "1.0.0",
+        ),
     ]
 
     def fake_connect(url):
@@ -104,7 +135,10 @@ def test_features_export_writes_files(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.schema, "create_feature_functions_table", lambda conn: None)
     monkeypatch.setattr(cli.schema, "create_feature_definitions_table", lambda conn: None)
 
-    res = runner.invoke(cli.app, ["features-export", "--dir", str(tmp_path)])
+    res = runner.invoke(
+        cli.app,
+        ["features-export", "--dir", str(tmp_path), "--functions", "fx_a", "--features", "feat_a"],
+    )
     assert res.exit_code == 0, res.stdout
 
     funcs_path = tmp_path / "feature_functions.json"
@@ -116,8 +150,8 @@ def test_features_export_writes_files(tmp_path, monkeypatch):
     funcs_data = json.loads(funcs_path.read_text())
     defs_data = json.loads(defs_path.read_text())
 
-    assert funcs_data[0]["name"] == "fx_a"
-    assert defs_data[0]["name"] == "feat_a"
+    assert {f["name"] for f in funcs_data} == {"fx_a"}
+    assert {d["name"] for d in defs_data} == {"feat_a"}
     assert defs_data[0]["function_name"] == "fx_a"
 
 
