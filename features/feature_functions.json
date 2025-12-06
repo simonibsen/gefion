@@ -1,0 +1,204 @@
+[
+  {
+    "name": "signed_volume_trend",
+    "version": "1.0.0",
+    "status": "active",
+    "description": "EMA of price-direction-signed volume; positive when volume backs up price advances, negative when it backs up declines.",
+    "language": "python_expr",
+    "function_body": "def compute(df, window=10):\n  import pandas as pd\n  vol = pd.Series(df[\"volume\"])\n  price = pd.Series(df.get(\"close\", df.get(\"adjusted_close\")))\n  dirn = price.diff().fillna(0).apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))\n  signed = dirn * vol\n  trend = signed.ewm(span=window, adjust=False).mean()\n  return trend.fillna(0)\n",
+    "inputs": null,
+    "output_name": "value",
+    "output_type": "double precision",
+    "param_schema": {
+      "type": "object",
+      "properties": {
+        "window": {
+          "type": "integer",
+          "minimum": 2
+        }
+      }
+    },
+    "defaults": {
+      "window": 10
+    },
+    "dependencies": null,
+    "checksum": null,
+    "tags": [
+      "volume",
+      "trend",
+      "confirmation"
+    ],
+    "min_app_version": null,
+    "enabled": true,
+    "created_by": "cli"
+  },
+  {
+    "name": "volume_curvature",
+    "version": "1.0.0",
+    "status": "active",
+    "description": "Quadratic-fit second derivative of volume; captures acceleration/deceleration of participation.",
+    "language": "python_expr",
+    "function_body": "def compute(df, window=10):\n  import numpy as np\n  import pandas as pd\n  v = pd.Series(df[\"volume\"])\n  def _curv(x):\n    if len(x) < window or np.isnan(x).any():\n      return np.nan\n    a, b, c = np.polyfit(np.arange(window), x.values, 2)\n    return 2 * a\n  out = v.rolling(window, min_periods=window).apply(_curv, raw=False)\n  return out.fillna(0)\n",
+    "inputs": null,
+    "output_name": "value",
+    "output_type": "double precision",
+    "param_schema": {
+      "type": "object",
+      "properties": {
+        "window": {
+          "type": "integer",
+          "minimum": 3
+        }
+      }
+    },
+    "defaults": {
+      "window": 10
+    },
+    "dependencies": null,
+    "checksum": null,
+    "tags": [
+      "volume",
+      "trend",
+      "acceleration"
+    ],
+    "min_app_version": null,
+    "enabled": true,
+    "created_by": "cli"
+  },
+  {
+    "name": "volume_mad_score",
+    "version": "1.0.0",
+    "status": "active",
+    "description": "Median/MAD-based volume z-score; robust to outliers for spike/dry-up detection.",
+    "language": "python_expr",
+    "function_body": "def compute(df, window=20):\n  import numpy as np\n  import pandas as pd\n  v = pd.Series(df[\"volume\"])\n  med = v.rolling(window, min_periods=window).median()\n  mad = v.rolling(window, min_periods=window).apply(lambda x: (x.sub(x.median()).abs().median()), raw=False)\n  scale = 1.4826\n  score = (v - med) / (mad * scale)\n  score = score.replace([np.inf, -np.inf], np.nan)\n  return score.fillna(0)\n",
+    "inputs": null,
+    "output_name": "value",
+    "output_type": "double precision",
+    "param_schema": {
+      "type": "object",
+      "properties": {
+        "window": {
+          "type": "integer",
+          "minimum": 3
+        }
+      }
+    },
+    "defaults": {
+      "window": 20
+    },
+    "dependencies": null,
+    "checksum": null,
+    "tags": [
+      "volume",
+      "robust",
+      "spike"
+    ],
+    "min_app_version": null,
+    "enabled": true,
+    "created_by": "cli"
+  },
+  {
+    "name": "volume_percentile_rank",
+    "version": "1.0.0",
+    "status": "active",
+    "description": "Rolling percentile rank of volume within the last window; 1.0 = top of window, 0 = bottom.",
+    "language": "python_expr",
+    "function_body": "def compute(df, window=20):\n  import pandas as pd\n  v = pd.Series(df[\"volume\"])\n  out = v.rolling(window, min_periods=window).apply(lambda x: x.rank(pct=True).iloc[-1], raw=False)\n  return out.fillna(0)\n",
+    "inputs": null,
+    "output_name": "value",
+    "output_type": "double precision",
+    "param_schema": {
+      "type": "object",
+      "properties": {
+        "window": {
+          "type": "integer",
+          "minimum": 2
+        }
+      }
+    },
+    "defaults": {
+      "window": 20
+    },
+    "dependencies": null,
+    "checksum": null,
+    "tags": [
+      "volume",
+      "regime",
+      "spike"
+    ],
+    "min_app_version": null,
+    "enabled": true,
+    "created_by": "cli"
+  },
+  {
+    "name": "volume_slope",
+    "version": "1.0.0",
+    "status": "active",
+    "description": "Rolling linear regression slope of volume; positive = increasing participation.",
+    "language": "python_expr",
+    "function_body": "def compute(df, window=10):\n  import numpy as np\n  import pandas as pd\n  v = pd.Series(df[\"volume\"]); idx = np.arange(window)\n  def _slope(x):\n    if len(x) < window or np.isnan(x).any():\n      return np.nan\n    n = float(window); sum_x = idx.sum(); sum_y = x.sum(); sum_xy = (idx * x.values).sum(); sum_x2 = (idx * idx).sum(); denom = n * sum_x2 - sum_x * sum_x\n    if denom == 0: return np.nan\n    return (n * sum_xy - sum_x * sum_y) / denom\n  out = v.rolling(window, min_periods=window).apply(_slope, raw=False)\n  return out.fillna(0)\n",
+    "inputs": null,
+    "output_name": "value",
+    "output_type": "double precision",
+    "param_schema": {
+      "type": "object",
+      "properties": {
+        "window": {
+          "type": "integer",
+          "minimum": 2
+        }
+      }
+    },
+    "defaults": {
+      "window": 10
+    },
+    "dependencies": null,
+    "checksum": null,
+    "tags": [
+      "volume",
+      "trend"
+    ],
+    "min_app_version": null,
+    "enabled": true,
+    "created_by": "cli"
+  },
+  {
+    "name": "volume_zscore",
+    "version": "1.0.0",
+    "status": "active",
+    "description": "Rolling z-score of volume to flag unusual participation",
+    "language": "python_expr",
+    "function_body": "def compute(df, window=20):\n    import pandas as pd\n    vol = df['volume'].astype(float)\n    z = (vol - vol.rolling(window).mean()) / vol.rolling(window).std()\n    return z.fillna(0)",
+    "inputs": {
+      "optional": [],
+      "required": [
+        "volume"
+      ]
+    },
+    "output_name": "value",
+    "output_type": "double precision",
+    "param_schema": {
+      "type": "object",
+      "properties": {
+        "window": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1
+        }
+      }
+    },
+    "defaults": {
+      "window": 20
+    },
+    "dependencies": null,
+    "checksum": null,
+    "tags": [
+      "volume",
+      "indicator"
+    ],
+    "min_app_version": null,
+    "enabled": true,
+    "created_by": "cli"
+  }
+]

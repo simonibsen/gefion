@@ -1,0 +1,450 @@
+[
+  {
+    "name": "indicator_adx_14",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "adx"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_bb_lower",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "bbands"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_bb_middle",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "bbands"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_bb_upper",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "bbands"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_ema_12",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "ema12"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_ema_26",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "ema26"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_macd",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "macd"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_macd_hist",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "macd"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_macd_signal",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "macd"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_psar",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "psar"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_rsi_14",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "rsi"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_sma_20",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "sma20"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_sma_200",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "sma200"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_sma_50",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "sma50"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_stoch_d",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "stoch"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "indicator_stoch_k",
+    "function_name": "indicator",
+    "params": {
+      "indicator": "stoch"
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "close",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "signed_volume_trend_30",
+    "function_name": "signed_volume_trend",
+    "params": {
+      "window": 30
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "signed_volume_trend_7",
+    "function_name": "signed_volume_trend",
+    "params": {
+      "window": 7
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "signed_volume_trend_90",
+    "function_name": "signed_volume_trend",
+    "params": {
+      "window": 90
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_curvature_30",
+    "function_name": "volume_curvature",
+    "params": {
+      "window": 30
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_curvature_7",
+    "function_name": "volume_curvature",
+    "params": {
+      "window": 7
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_curvature_90",
+    "function_name": "volume_curvature",
+    "params": {
+      "window": 90
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_mad_score_30",
+    "function_name": "volume_mad_score",
+    "params": {
+      "window": 30
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_mad_score_7",
+    "function_name": "volume_mad_score",
+    "params": {
+      "window": 7
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_mad_score_90",
+    "function_name": "volume_mad_score",
+    "params": {
+      "window": 90
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_percentile_rank_30",
+    "function_name": "volume_percentile_rank",
+    "params": {
+      "window": 30
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_percentile_rank_7",
+    "function_name": "volume_percentile_rank",
+    "params": {
+      "window": 7
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_percentile_rank_90",
+    "function_name": "volume_percentile_rank",
+    "params": {
+      "window": 90
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_slope_30",
+    "function_name": "volume_slope",
+    "params": {
+      "window": 30
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_slope_7",
+    "function_name": "volume_slope",
+    "params": {
+      "window": 7
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_slope_90",
+    "function_name": "volume_slope",
+    "params": {
+      "window": 90
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  },
+  {
+    "name": "volume_zscore_20",
+    "function_name": "volume_zscore",
+    "params": {
+      "window": 20
+    },
+    "source_table": "stock_ohlcv",
+    "source_column": "volume",
+    "store_table": "computed_features",
+    "store_column": "value",
+    "store_type": "double precision",
+    "active": true,
+    "version": null
+  }
+]
