@@ -102,6 +102,74 @@ def emit_json(payload: dict) -> None:
     typer.echo(json.dumps(payload))
 
 
+def _export_feature_functions(conn) -> list[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT name, version, status, description, language, function_body, inputs,
+                   output_name, output_type, param_schema, defaults, dependencies,
+                   checksum, tags, min_app_version, enabled, created_by
+            FROM feature_functions
+            ORDER BY name, version;
+            """
+        )
+        rows = cur.fetchall()
+    data = []
+    for r in rows:
+        data.append(
+            {
+                "name": r[0],
+                "version": r[1],
+                "status": r[2],
+                "description": r[3],
+                "language": r[4],
+                "function_body": r[5],
+                "inputs": r[6],
+                "output_name": r[7],
+                "output_type": r[8],
+                "param_schema": r[9],
+                "defaults": r[10],
+                "dependencies": r[11],
+                "checksum": r[12],
+                "tags": list(r[13]) if r[13] is not None else None,
+                "min_app_version": r[14],
+                "enabled": r[15],
+                "created_by": r[16],
+            }
+        )
+    return data
+
+
+def _export_feature_definitions(conn) -> list[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT name, function_name, params, source_table, source_column,
+                   store_table, store_column, store_type, active, version
+            FROM feature_definitions
+            ORDER BY name;
+            """
+        )
+        rows = cur.fetchall()
+    data = []
+    for r in rows:
+        data.append(
+            {
+                "name": r[0],
+                "function_name": r[1],
+                "params": r[2],
+                "source_table": r[3],
+                "source_column": r[4],
+                "store_table": r[5],
+                "store_column": r[6],
+                "store_type": r[7],
+                "active": r[8],
+                "version": r[9],
+            }
+        )
+    return data
+
+
 def _parse_date_or_error(val: Optional[str], json_output: Optional[bool]):
     if val is None:
         return None
@@ -977,6 +1045,144 @@ def register_feature(
         )
     except Exception as exc:
         emit_error(f"Register failed: {exc}", json_output=json_output)
+
+
+@app.command("features-export")
+def features_export(
+    dir: Path = typer.Option(..., "--dir", help="Directory to write feature data"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+) -> None:
+    """
+    Export feature_functions and feature_definitions to JSON files for source control.
+    """
+    target_dir = Path(dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    url = _db_url(db_url)
+    try:
+        # Export functions
+        with psycopg.connect(url) as conn:
+            conn.autocommit = True
+            schema.create_feature_functions_table(conn)
+            functions = _export_feature_functions(conn)
+
+        # Export definitions
+        with psycopg.connect(url) as conn:
+            conn.autocommit = True
+            schema.create_feature_definitions_table(conn)
+            definitions = _export_feature_definitions(conn)
+
+        (target_dir / "feature_functions.json").write_text(json.dumps(functions, indent=2))
+        (target_dir / "feature_definitions.json").write_text(json.dumps(definitions, indent=2))
+        emit(f"Exported {len(functions)} functions and {len(definitions)} definitions to {target_dir}")
+    except Exception as exc:
+        emit_error(f"Export failed: {exc}")
+
+
+def _upsert_feature_function(conn: psycopg.Connection, payload: dict) -> None:
+    required = ["name", "version", "language", "function_body"]
+    missing = [k for k in required if k not in payload]
+    if missing:
+        raise ValueError(f"Missing required keys for feature_function: {', '.join(missing)}")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO feature_functions
+            (name, version, status, description, language, function_body, inputs, output_name, output_type,
+             param_schema, defaults, dependencies, checksum, tags, min_app_version, enabled, created_by)
+            VALUES (%(name)s, %(version)s, %(status)s, %(description)s, %(language)s, %(function_body)s,
+                    %(inputs)s, %(output_name)s, %(output_type)s, %(param_schema)s, %(defaults)s,
+                    %(dependencies)s, %(checksum)s, %(tags)s, %(min_app_version)s, %(enabled)s, %(created_by)s)
+            ON CONFLICT (name, version) DO UPDATE SET
+                status = EXCLUDED.status,
+                description = EXCLUDED.description,
+                language = EXCLUDED.language,
+                function_body = EXCLUDED.function_body,
+                inputs = EXCLUDED.inputs,
+                output_name = EXCLUDED.output_name,
+                output_type = EXCLUDED.output_type,
+                param_schema = EXCLUDED.param_schema,
+                defaults = EXCLUDED.defaults,
+                dependencies = EXCLUDED.dependencies,
+                checksum = EXCLUDED.checksum,
+                tags = EXCLUDED.tags,
+                min_app_version = EXCLUDED.min_app_version,
+                enabled = EXCLUDED.enabled,
+                created_by = EXCLUDED.created_by,
+                updated_at = NOW();
+            """,
+            {
+                "name": payload.get("name"),
+                "version": payload.get("version"),
+                "status": payload.get("status", "active"),
+                "description": payload.get("description"),
+                "language": payload.get("language"),
+                "function_body": payload.get("function_body"),
+                "inputs": Json(payload.get("inputs")) if payload.get("inputs") is not None else None,
+                "output_name": payload.get("output_name", "value"),
+                "output_type": payload.get("output_type", "double precision"),
+                "param_schema": Json(payload.get("param_schema")) if payload.get("param_schema") is not None else None,
+                "defaults": Json(payload.get("defaults")) if payload.get("defaults") is not None else None,
+                "dependencies": Json(payload.get("dependencies")) if payload.get("dependencies") is not None else None,
+                "checksum": payload.get("checksum"),
+                "tags": payload.get("tags"),
+                "min_app_version": payload.get("min_app_version"),
+                "enabled": payload.get("enabled", True),
+                "created_by": payload.get("created_by", "cli"),
+            },
+        )
+
+
+@app.command("features-import")
+def features_import(
+    dir: Path = typer.Option(..., "--dir", help="Directory containing exported feature JSON files"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+) -> None:
+    """
+    Import feature_functions and feature_definitions from JSON files.
+    Idempotent: re-running will upsert by (name, version) and refresh definitions.
+    """
+    src_dir = Path(dir)
+    fx_path = src_dir / "feature_functions.json"
+    defs_path = src_dir / "feature_definitions.json"
+    if not fx_path.exists() and not defs_path.exists():
+        emit_error(f"No feature files found in {src_dir}")
+        return
+
+    url = _db_url(db_url)
+
+    try:
+        with psycopg.connect(url) as conn:
+            conn.autocommit = True
+            schema.create_feature_functions_table(conn)
+            if fx_path.exists():
+                fx_payload = json.loads(fx_path.read_text())
+                for f in fx_payload:
+                    _upsert_feature_function(conn, f)
+
+        definitions = []
+        if defs_path.exists():
+            definitions = json.loads(defs_path.read_text())
+            definitions = [_normalize_feature_definition(d) for d in definitions]
+
+        if definitions:
+            with psycopg.connect(url) as conn:
+                conn.autocommit = True
+                schema.create_feature_definitions_table(conn)
+                schema.create_computed_features_table(conn)
+                ensure_feature_definitions(conn, definitions)
+                ensure_store_targets(conn, definitions)
+
+        emit(
+            "Imported features",
+            data={
+                "functions": len(json.loads(fx_path.read_text())) if fx_path.exists() else 0,
+                "definitions": len(definitions),
+            },
+            json_output=True,
+        )
+    except Exception as exc:
+        emit_error(f"Import failed: {exc}")
 
 
 @app.command("features-trim")
