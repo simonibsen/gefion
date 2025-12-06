@@ -97,6 +97,11 @@ def emit_error(message: str, json_output: Optional[bool] = None, data: Optional[
     raise typer.Exit(code=1)
 
 
+def emit_json(payload: dict) -> None:
+    """Lightweight JSON emitter to mirror emit() when only a payload is needed."""
+    typer.echo(json.dumps(payload))
+
+
 def _parse_date_or_error(val: Optional[str], json_output: Optional[bool]):
     if val is None:
         return None
@@ -821,6 +826,103 @@ def register_function(
         )
     except Exception as exc:
         emit_error(f"Register function failed: {exc}", json_output=json_output)
+
+
+@app.command("features-fx-list")
+def list_functions(
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+    feature: Optional[str] = typer.Option(None, "--feature", help="Optional function name to filter"),
+    show_body: bool = typer.Option(False, "--show-body/--no-show-body", help="Include function_body in output"),
+) -> None:
+    """List registered feature functions."""
+    url = _db_url(db_url)
+    try:
+        with psycopg.connect(url) as conn:
+            conn.autocommit = True
+            schema.create_feature_functions_table(conn)
+            with conn.cursor() as cur:
+                select_cols = "name, version, status, language, enabled, description, tags, updated_at"
+                if show_body:
+                    select_cols += ", function_body"
+                params: Dict[str, object] = {}
+                where_clause = ""
+                if feature:
+                    where_clause = "WHERE name = %(feature)s"
+                    params["feature"] = feature
+                cur.execute(
+                    f"""
+                    SELECT {select_cols}
+                    FROM feature_functions
+                    {where_clause}
+                    ORDER BY name, version;
+                    """,
+                    params or None,
+                )
+                rows = cur.fetchall()
+
+        data = []
+        for r in rows:
+            entry = {
+                "name": r[0],
+                "version": r[1],
+                "status": r[2],
+                "language": r[3],
+                "enabled": r[4],
+                "description": r[5],
+                "tags": list(r[6]) if r[6] is not None else None,
+                "updated_at": r[7].isoformat() if len(r) > 7 and r[7] else None,
+            }
+            if show_body and len(r) > 8:
+                entry["function_body"] = r[8]
+            data.append(entry)
+
+        if json_output:
+            emit("Feature functions", data={"functions": data}, json_output=True)
+            return
+
+        console = Console()
+        if not data:
+            console.print("[yellow]No feature functions found.[/yellow]")
+            return
+
+        if show_body:
+            for d in data:
+                header = f"[bold]{d['name']}[/bold] v{d['version']} ({d['status']})"
+                header += f" [{'ENABLED' if d['enabled'] else 'DISABLED'}]"
+                header += f" [{d['language']}]"
+                console.print(header)
+                if d.get("tags"):
+                    console.print(f"tags: {', '.join(d['tags'])}", style="blue")
+                if d.get("updated_at"):
+                    console.print(f"updated: {d['updated_at']}", style="dim")
+                if d.get("description"):
+                    console.print(d["description"])
+                body = d.get("function_body") or ""
+                console.print(body, style="cyan")
+                console.print()
+        else:
+            table = Table(title="Feature Functions", header_style="bold cyan")
+            table.add_column("Name", style="white")
+            table.add_column("Version", style="magenta")
+            table.add_column("Status", style="green")
+            table.add_column("Enabled", style="yellow")
+            table.add_column("Language", style="cyan")
+            table.add_column("Tags", style="blue")
+            table.add_column("Updated", style="dim")
+            for d in data:
+                table.add_row(
+                    d["name"] or "",
+                    d["version"] or "",
+                    d["status"] or "",
+                    str(d["enabled"]),
+                    d["language"] or "",
+                    ",".join(d["tags"]) if d.get("tags") else "",
+                    d["updated_at"] or "",
+                )
+            console.print(table)
+    except Exception as exc:
+        emit_error(f"List functions failed: {exc}", json_output=json_output)
 
 
 @app.command("features-register")
