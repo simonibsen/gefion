@@ -46,6 +46,7 @@ from rich.live import Live
 from g2.utils.db_load import get_available_connections, plan_workers
 from g2.utils.adaptive import AdaptiveLimiter, chunked
 from typing import Dict, Any
+from g2.db import pool as db_pool
 
 
 class SortedGroup(TyperGroup):
@@ -1545,6 +1546,13 @@ def features_compute(
             if not json_output and progress:
                 emit(f"Available connections: {available or 'unknown'}, Max workers: {max_w}")
 
+            # Initialize connection pool to reuse prepared statements across symbols
+            pool_needed = db_pool.get_pool() is None
+            if pool_needed:
+                min_pool = max(2, max_w)
+                max_pool = max(max_w + 2, min_pool)
+                db_pool.init_pool(url, min_size=min_pool, max_size=max_pool, prepare_statements=True)
+
             # Adaptive worker scaling (start at a fraction of max to allow ramp-up)
             start_workers = max(1, min(max_w, max(2, (max_w + 1) // 2)))
             limiter = AdaptiveLimiter(start_workers=start_workers, max_workers=max_w)
@@ -1575,7 +1583,7 @@ def features_compute(
                 for attempt in range(max_retries):
                     try:
                         start_time = time.monotonic()
-                        with psycopg.connect(url) as worker_conn:
+                        with db_pool.get_connection() as worker_conn:
                             worker_conn.autocommit = True
 
                             # Get data_id
