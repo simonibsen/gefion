@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional
 from contextlib import contextmanager
 
+import os
 from psycopg_pool import ConnectionPool
 import psycopg
 
@@ -57,8 +58,16 @@ def get_pool() -> Optional[ConnectionPool]:
 
 
 def should_prepare_statements() -> bool:
-    """Check if prepared statements are enabled for the current pool."""
-    return _pool is not None and getattr(_pool, "_g2_prepare_statements", False)
+    """
+    Check if prepared statements are enabled.
+    Priority:
+      1) Pool flag when a pool is initialized.
+      2) Env override G2_PREPARE_STATEMENTS (defaults to 1/true).
+    """
+    if _pool is not None:
+        return bool(getattr(_pool, "_g2_prepare_statements", False))
+    env = os.getenv("G2_PREPARE_STATEMENTS", "1").lower()
+    return env in ("1", "true", "yes", "on")
 
 
 def close_pool() -> None:
