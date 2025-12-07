@@ -17,7 +17,7 @@ import psycopg
 _pool: Optional[ConnectionPool] = None
 
 
-def init_pool(conninfo: str, min_size: int = 2, max_size: int = 10, timeout: float = 30.0, prepare_statements: bool = False) -> ConnectionPool:
+def init_pool(conninfo: str, min_size: int = 2, max_size: int = 10, timeout: float = 30.0, prepare_statements: bool = True) -> ConnectionPool:
     """
     Initialize the global connection pool.
 
