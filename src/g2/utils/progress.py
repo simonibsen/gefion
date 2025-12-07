@@ -133,6 +133,8 @@ class ProgressReporter:
             table.add_row("Writers", str(self.writer_workers))
         if hasattr(self, "mode") and self.mode:
             table.add_row("Mode", self.mode)
+        if hasattr(self, "batch_size") and self.batch_size:
+            table.add_row("Batch size", str(self.batch_size))
         if self.queue_depth is not None:
             table.add_row("Queue", f"{self.queue_depth}")
         if self.fetch_completed is not None:

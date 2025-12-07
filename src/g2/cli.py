@@ -1463,6 +1463,8 @@ def features_compute(
     incremental: bool = typer.Option(True, "--incremental/--full", help="Incremental (only new dates) or full refresh"),
     update_existing: bool = typer.Option(False, "--update-existing", help="Update existing rows on conflict"),
     max_workers: Optional[int] = typer.Option(None, help="Max parallel workers (auto if not set)"),
+    feature_batch_size: int = typer.Option(2000, "--batch-size", help="DB insert batch size for computed_features"),
+    profile: bool = typer.Option(False, "--profile/--no-profile", help="Include per-symbol timing in output"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress updates"),
@@ -1543,17 +1545,20 @@ def features_compute(
             if not json_output and progress:
                 emit(f"Available connections: {available or 'unknown'}, Max workers: {max_w}")
 
-            # Adaptive worker scaling
-            limiter = AdaptiveLimiter(start_workers=1, max_workers=max_w)
+            # Adaptive worker scaling (start at a fraction of max to allow ramp-up)
+            start_workers = max(1, min(max_w, max(2, (max_w + 1) // 2)))
+            limiter = AdaptiveLimiter(start_workers=start_workers, max_workers=max_w)
 
             total_inserted = 0
             errors = []
+            profiles: List[Dict[str, Any]] = []
 
             # Set up progress reporting
             reporter = ProgressReporter(total=len(symbol_list), json_output=json_output, enabled=progress)
             reporter.mode = "dispatcher"
-            reporter.workers = 1
+            reporter.workers = start_workers
             reporter.max_workers = max_w
+            reporter.batch_size = feature_batch_size
             live: Optional[Live] = None
             if progress and not json_output:
                 live = reporter.start_live()
@@ -1569,6 +1574,7 @@ def features_compute(
 
                 for attempt in range(max_retries):
                     try:
+                        start_time = time.monotonic()
                         with psycopg.connect(url) as worker_conn:
                             worker_conn.autocommit = True
 
@@ -1596,10 +1602,21 @@ def features_compute(
                                 incremental=incremental,
                                 full_refresh=not incremental,
                                 update_existing=update_existing,
+                                feature_batch_size=feature_batch_size,
                             )
 
                             inserted = result.get('summary', {}).get('total_inserted', 0)
                             has_errors = result.get('summary', {}).get('total_errors', 0) > 0
+                            duration = time.monotonic() - start_time
+
+                            if profile:
+                                profiles.append(
+                                    {
+                                        "symbol": symbol,
+                                        "inserted": inserted,
+                                        "duration_sec": round(duration, 3),
+                                    }
+                                )
 
                             return {
                                 "symbol": symbol,
@@ -1607,6 +1624,7 @@ def features_compute(
                                 "inserted": inserted,
                                 "has_feature_errors": has_errors,
                                 "feature_error_count": result.get('summary', {}).get('total_errors', 0),
+                                "duration_sec": duration,
                             }
 
                     except psycopg.OperationalError as exc:
@@ -1674,7 +1692,7 @@ def features_compute(
                                 reporter.step_done(
                                     label=symbol,
                                     error=False,
-                                    meta={"inserted": result["inserted"]}
+                                    meta={"inserted": result["inserted"], "duration_sec": result.get("duration_sec")}
                                 )
 
                     # Adjust workers based on RESOURCE errors only
@@ -1694,10 +1712,18 @@ def features_compute(
                     "total_inserted": total_inserted,
                     "stocks_processed": len(symbol_list),
                     "errors": errors,
+                    "batch_size": feature_batch_size,
                 }
+                if profile:
+                    output["profiles"] = profiles
                 emit_json(output)
             else:
-                emit(f"\nTotal: {total_inserted} rows inserted across {len(symbol_list)} stocks")
+                emit(f"\nTotal: {total_inserted} rows inserted across {len(symbol_list)} stocks (batch_size={feature_batch_size})")
+                if profile and profiles:
+                    slowest = sorted(profiles, key=lambda p: p.get("duration_sec", 0), reverse=True)[:5]
+                    emit("Profile (top 5 by duration):")
+                    for p in slowest:
+                        emit(f"  {p['symbol']}: {p.get('duration_sec', 0):.3f}s, inserted={p.get('inserted', 0)}")
                 if errors:
                     emit(f"Errors: {len(errors)}")
 

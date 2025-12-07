@@ -42,6 +42,7 @@ def compute_features(
     incremental: bool = True,
     full_refresh: bool = False,
     update_existing: bool = False,
+    feature_batch_size: int = 2000,
 ) -> Dict[str, Any]:
     """
     Generic feature computation dispatcher.
@@ -268,6 +269,7 @@ def _process_function_group(
                     rows=computed_rows,
                     feature_map=feature_map,
                     update_existing=update_existing,
+                    batch_size=feature_batch_size,
                 )
 
                 total_inserted += inserted

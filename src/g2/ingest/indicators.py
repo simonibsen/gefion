@@ -33,6 +33,7 @@ def compute_indicators_via_dispatcher(
     data_id: int,
     incremental: bool = True,
     update_existing: bool = False,
+    feature_batch_size: int = 2000,
 ) -> int:
     """
     Compute indicators for a stock using the generic dispatcher.
@@ -62,6 +63,7 @@ def compute_indicators_via_dispatcher(
         function_names=['indicator'],
         incremental=incremental,
         update_existing=update_existing,
+        feature_batch_size=feature_batch_size,
     )
 
     return result.get('summary', {}).get('total_inserted', 0)
