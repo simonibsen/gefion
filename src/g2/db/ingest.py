@@ -691,7 +691,7 @@ def insert_computed_features(
     chunk_size = max(1, batch_size)
     total = 0
 
-    if use_copy:
+    if use_copy and not update_existing and len(prepared) >= 500:
         # COPY path uses CSV to reduce per-row bind overhead
         import io
 
@@ -708,8 +708,9 @@ def insert_computed_features(
                 cur.copy_expert(copy_sql, buf)
             conn.commit()
             return len(prepared)
-        except Exception as exc:
-            raise Exception(f"insert_computed_features COPY failed: {exc}") from exc
+        except Exception:
+            # fall back to standard inserts if COPY fails (e.g., duplicate key)
+            pass
 
     # Check if prepared statements are enabled via the pool
     from g2.db import pool as db_pool
