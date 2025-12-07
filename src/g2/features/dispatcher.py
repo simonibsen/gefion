@@ -87,6 +87,11 @@ def compute_features(
             'summary': {'total_inserted': 0, 'total_errors': 0}
         }
 
+    latest_by_feature: Dict[int, Optional[date]] = {}
+    if incremental and not full_refresh:
+        feature_ids = [f[0] for f in feature_defs]
+        latest_by_feature = _latest_dates_for_features(conn, data_id, feature_ids)
+
     # Step 2: Group by function_name
     grouped_by_function = _group_by_function_name(feature_defs)
 
@@ -100,6 +105,8 @@ def compute_features(
                 features,
                 incremental=incremental and not full_refresh,
                 update_existing=update_existing,
+                latest_by_feature=latest_by_feature,
+                feature_batch_size=feature_batch_size,
             )
 
             results[func_name] = func_result
@@ -190,6 +197,8 @@ def _process_function_group(
     features: List[Tuple],
     incremental: bool,
     update_existing: bool,
+    latest_by_feature: Dict[int, Optional[date]],
+    feature_batch_size: int,
 ) -> Dict[str, Any]:
     """
     Process all features for a given function_name.
@@ -208,11 +217,6 @@ def _process_function_group(
             }]
         }
 
-    # Determine latest date if incremental
-    latest_date = None
-    if incremental:
-        latest_date = _get_latest_feature_date(conn, data_id, function_name)
-
     # Group by source_table for efficient data fetching
     grouped_by_source = _group_by_source(features)
 
@@ -221,13 +225,18 @@ def _process_function_group(
 
     for source_key, source_features in grouped_by_source.items():
         try:
+            start_date: Optional[date] = None
+            if incremental:
+                dates = [latest_by_feature.get(f[0]) for f in source_features if f[0] in latest_by_feature]
+                dates = [d for d in dates if d is not None]
+                start_date = min(dates) if dates else None
             # Fetch source data
             source_rows = _fetch_source_data(
                 conn,
                 data_id,
                 source_key,
                 source_features,
-                start_date=latest_date,
+                start_date=start_date,
             )
 
             if not source_rows:
@@ -417,25 +426,26 @@ def _wrap_db_function(fn: Callable) -> Callable:
     return adapter
 
 
-def _get_latest_feature_date(
+def _latest_dates_for_features(
     conn: psycopg.Connection,
     data_id: int,
-    function_name: str,
-) -> Optional[date]:
-    """Get latest date for features of this function_name."""
-    query = """
-    SELECT MAX(cf.date)
-    FROM computed_features cf
-    JOIN feature_definitions fd ON fd.id = cf.feature_id
-    WHERE cf.data_id = %s
-      AND fd.function_name = %s
-      AND fd.active = TRUE
+    feature_ids: List[int],
+) -> Dict[int, Optional[date]]:
+    """Return per-feature latest date for the given data_id."""
+    if not feature_ids:
+        return {}
+    placeholders = ",".join(["%s"] * len(feature_ids))
+    query = f"""
+    SELECT feature_id, MAX(date)
+    FROM computed_features
+    WHERE data_id = %s AND feature_id IN ({placeholders})
+    GROUP BY feature_id
     """
-
+    params: List[Any] = [data_id] + feature_ids
     with conn.cursor() as cur:
-        cur.execute(query, (data_id, function_name))
-        row = cur.fetchone()
-        return row[0] if row else None
+        cur.execute(query, params)
+        rows = cur.fetchall()
+    return {fid: dt for fid, dt in rows}
 
 
 def _group_by_source(features: List[Tuple]) -> Dict[Tuple[str, str], List[Tuple]]:
