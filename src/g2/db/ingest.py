@@ -698,8 +698,8 @@ def insert_computed_features(
         batch = prepared[i : i + chunk_size]
         batch_size_actual = len(batch)
 
-        # Use prepared statements for common batch sizes when enabled
-        use_prepared = prepare_enabled and batch_size_actual in [50, 100, 200, 500, 1000, 2000]
+        # Use prepared statements whenever enabled
+        use_prepared = prepare_enabled
 
         params: List[object] = []
         for fid, did, dt, val, source in batch:
