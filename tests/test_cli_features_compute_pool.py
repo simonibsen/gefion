@@ -41,7 +41,8 @@ def test_features_compute_uses_pool(monkeypatch):
             return False
 
     class DummyPool:
-        pass
+        def close(self):
+            calls["closed"] = True
 
     def fake_init_pool(url, min_size=2, max_size=10, timeout=30.0, prepare_statements=True):
         calls["init_pool"] = {

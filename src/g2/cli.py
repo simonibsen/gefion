@@ -1550,8 +1550,8 @@ def features_compute(
             # Initialize connection pool to reuse prepared statements across symbols
             pool_needed = db_pool.get_pool() is None
             if pool_needed:
-                min_pool = max(2, max_w)
-                max_pool = max(max_w + 2, min_pool)
+                min_pool = 2
+                max_pool = max(max_w + 2, min_pool + 2)
                 db_pool.init_pool(url, min_size=min_pool, max_size=max_pool, prepare_statements=True)
 
             # Adaptive worker scaling (start at a fraction of max to allow ramp-up)
@@ -1739,6 +1739,9 @@ def features_compute(
 
     except Exception as exc:
         emit_error(f"Computation failed: {exc}", json_output=json_output)
+    finally:
+        # Ensure pool is closed to release idle connections/threads
+        db_pool.close_pool()
 
 
 @app.command("data-update")
