@@ -15,7 +15,10 @@ def test_insert_always_prepares_when_enabled(monkeypatch):
             return False
 
         def execute(self, stmt, params=None, prepare=False):
-            called.setdefault("prepare_flags", []).append(prepare)
+            # Only track prepare flags for INSERT statements, not SET/RESET
+            stmt_str = str(stmt).strip().upper()
+            if stmt_str.startswith("INSERT"):
+                called.setdefault("prepare_flags", []).append(prepare)
 
     class FakeConn:
         def __init__(self):
