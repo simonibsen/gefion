@@ -105,12 +105,15 @@ def compute_features(
     writer_threads: List[threading.Thread] = []
     stop_token = object()
     writer_errors: List[Exception] = []
-    timings: Dict[str, float] = {"fetch": 0.0, "compute": 0.0, "write": 0.0, "queue_wait": 0.0, "writer": 0.0}
+    writer_events: List[threading.Event] = []
+    timings: Dict[str, float] = {"fetch": 0.0, "compute": 0.0, "write": 0.0, "queue_wait": 0.0, "writer": 0.0, "writer_wait": 0.0}
 
     def enqueue_or_write(rows, feature_map):
         if write_queue is not None:
             q_start = time.monotonic()
-            write_queue.put({"rows": rows, "feature_map": feature_map, "queue_ts": q_start})
+            evt = threading.Event()
+            writer_events.append(evt)
+            write_queue.put({"rows": rows, "feature_map": feature_map, "queue_ts": q_start, "event": evt})
             if timings is not None:
                 timings["queue_wait"] += time.monotonic() - q_start
             return len(rows)
@@ -144,6 +147,9 @@ def compute_features(
                     )
                     if timings is not None:
                         timings["writer"] += time.monotonic() - start
+                    evt = item.get("event")
+                    if evt:
+                        evt.set()
                 except Exception as exc:
                     writer_errors.append(exc)
                 finally:
@@ -185,11 +191,16 @@ def compute_features(
 
     # Drain writer queue
     if write_queue is not None:
+        wait_start = time.monotonic()
         for _ in writer_threads:
             write_queue.put(stop_token)
         write_queue.join()
+        for evt in writer_events:
+            evt.wait()
         for t in writer_threads:
             t.join(timeout=5)
+        if timings is not None:
+            timings["writer_wait"] += time.monotonic() - wait_start
         if writer_errors:
             total_errors.extend([{"error": str(e)} for e in writer_errors])
 

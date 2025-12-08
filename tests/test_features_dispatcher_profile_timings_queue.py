@@ -35,3 +35,4 @@ def test_compute_features_timings_include_queue_and_writer(monkeypatch):
     timing = res["summary"]["timing"]
     assert timing["writer"] >= 0.01
     assert timing["queue_wait"] >= 0
+    assert timing["writer_wait"] > 0
