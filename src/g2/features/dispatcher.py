@@ -106,7 +106,9 @@ def compute_features(
     stop_token = object()
     writer_errors: List[Exception] = []
     writer_events: List[threading.Event] = []
-    timings: Dict[str, float] = {"fetch": 0.0, "compute": 0.0, "write": 0.0, "queue_wait": 0.0, "writer": 0.0, "writer_wait": 0.0}
+    timings: Optional[Dict[str, float]] = None
+    if profile:
+        timings = {"fetch": 0.0, "compute": 0.0, "write": 0.0, "queue_wait": 0.0, "writer": 0.0, "writer_wait": 0.0}
 
     def enqueue_or_write(rows, feature_map):
         if write_queue is not None:
