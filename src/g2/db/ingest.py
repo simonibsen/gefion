@@ -695,55 +695,71 @@ def insert_computed_features(
     from g2.db import pool as db_pool
     prepare_enabled = db_pool.should_prepare_statements()
 
-    for i in range(0, len(prepared), chunk_size):
-        batch = prepared[i : i + chunk_size]
-        batch_size_actual = len(batch)
-
-        # Use prepared statements whenever enabled
-        use_prepared = prepare_enabled
-
-        params: List[object] = []
-        for fid, did, dt, val, source in batch:
-            params.extend([fid, did, dt, val, source])
-
-        try:
-            if not sync_commit:
-                with conn.cursor() as cur:
-                    cur.execute("SET LOCAL synchronous_commit TO OFF;")
-            # Build the SQL statement
-            conflict = (
-                "ON CONFLICT (feature_id, data_id, date) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source"
-                if update_existing
-                else "ON CONFLICT (feature_id, data_id, date) DO NOTHING"
-            )
-            values_sql = ",".join(["(%s::int, %s::int, %s::date, %s::double precision, %s::text)"] * batch_size_actual)
-            stmt = (
-                "INSERT INTO computed_features (feature_id, data_id, date, value, source) VALUES "
-                + values_sql
-                + " "
-                + conflict
-            )
-
+    # Disable synchronous_commit for the entire operation if requested
+    # Must use SET (session-level) not SET LOCAL when in autocommit mode
+    # because SET LOCAL only works inside a transaction block
+    sync_commit_changed = False
+    try:
+        if not sync_commit:
             with conn.cursor() as cur:
-                # Use psycopg3's automatic prepared statement caching for common batch sizes
-                # This reduces parsing overhead by 10-30%
-                if use_prepared:
-                    cur.execute(stmt, params, prepare=True)
-                else:
-                    cur.execute(stmt, params)
-        except Exception as exc:
-            sample = batch[:3]
-            sample_types = [
-                {
-                    "feature_id": type(x[0]).__name__,
-                    "data_id": type(x[1]).__name__,
-                    "date": type(x[2]).__name__,
-                    "value": type(x[3]).__name__,
-                    "source": type(x[4]).__name__,
-                }
-                for x in sample
-            ]
-            raise Exception(f"insert_computed_features failed: {exc}; sample_types={sample_types}; sample={sample}") from exc
-        total += len(batch)
-    conn.commit()
-    return total
+                cur.execute("SET synchronous_commit TO OFF;")
+            sync_commit_changed = True
+
+        for i in range(0, len(prepared), chunk_size):
+            batch = prepared[i : i + chunk_size]
+            batch_size_actual = len(batch)
+
+            # Use prepared statements whenever enabled
+            use_prepared = prepare_enabled
+
+            params: List[object] = []
+            for fid, did, dt, val, source in batch:
+                params.extend([fid, did, dt, val, source])
+
+            try:
+                # Build the SQL statement
+                conflict = (
+                    "ON CONFLICT (feature_id, data_id, date) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source"
+                    if update_existing
+                    else "ON CONFLICT (feature_id, data_id, date) DO NOTHING"
+                )
+                values_sql = ",".join(["(%s::int, %s::int, %s::date, %s::double precision, %s::text)"] * batch_size_actual)
+                stmt = (
+                    "INSERT INTO computed_features (feature_id, data_id, date, value, source) VALUES "
+                    + values_sql
+                    + " "
+                    + conflict
+                )
+
+                with conn.cursor() as cur:
+                    # Use psycopg3's automatic prepared statement caching for common batch sizes
+                    # This reduces parsing overhead by 10-30%
+                    if use_prepared:
+                        cur.execute(stmt, params, prepare=True)
+                    else:
+                        cur.execute(stmt, params)
+            except Exception as exc:
+                sample = batch[:3]
+                sample_types = [
+                    {
+                        "feature_id": type(x[0]).__name__,
+                        "data_id": type(x[1]).__name__,
+                        "date": type(x[2]).__name__,
+                        "value": type(x[3]).__name__,
+                        "source": type(x[4]).__name__,
+                    }
+                    for x in sample
+                ]
+                raise Exception(f"insert_computed_features failed: {exc}; sample_types={sample_types}; sample={sample}") from exc
+            total += len(batch)
+        conn.commit()
+        return total
+    finally:
+        # Reset synchronous_commit back to default if we changed it
+        if sync_commit_changed:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("RESET synchronous_commit;")
+            except Exception:
+                # Ignore errors during reset (connection might be closed)
+                pass
