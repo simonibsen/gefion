@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Callable, Any, Tuple
 import queue
 import threading
+import time
 from datetime import date
 import warnings
 import inspect
@@ -46,6 +47,7 @@ def compute_features(
     update_existing: bool = False,
     feature_batch_size: int = 2000,
     writer_workers: int = 0,
+    profile: bool = False,
 ) -> Dict[str, Any]:
     """
     Generic feature computation dispatcher.
@@ -103,6 +105,7 @@ def compute_features(
     writer_threads: List[threading.Thread] = []
     stop_token = object()
     writer_errors: List[Exception] = []
+    timings: Dict[str, float] = {"fetch": 0.0, "compute": 0.0, "write": 0.0}
 
     def enqueue_or_write(rows, feature_map):
         if write_queue is not None:
@@ -158,6 +161,7 @@ def compute_features(
                 latest_by_feature=latest_by_feature,
                 feature_batch_size=feature_batch_size,
                 writer=enqueue_or_write,
+                timings=timings if profile else None,
             )
 
             results[func_name] = func_result
@@ -188,6 +192,8 @@ def compute_features(
         'total_inserted': total_inserted,
         'total_errors': len(total_errors),
     }
+    if profile and timings:
+        results['summary']['timing'] = {k: round(v, 6) for k, v in timings.items()}
 
     return results
 
@@ -261,6 +267,7 @@ def _process_function_group(
     latest_by_feature: Dict[int, Optional[date]],
     feature_batch_size: int,
     writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int]], int]] = None,
+    timings: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
     Process all features for a given function_name.
@@ -293,6 +300,7 @@ def _process_function_group(
                 dates = [d for d in dates if d is not None]
                 start_date = min(dates) if dates else None
             # Fetch source data
+            fetch_start = time.monotonic()
             source_rows = _fetch_source_data(
                 conn,
                 data_id,
@@ -300,6 +308,8 @@ def _process_function_group(
                 source_features,
                 start_date=start_date,
             )
+            if timings is not None:
+                timings["fetch"] += time.monotonic() - fetch_start
 
             if not source_rows:
                 continue
@@ -316,7 +326,10 @@ def _process_function_group(
 
             # Call compute function
             try:
+                compute_start = time.monotonic()
                 computed_rows = compute_func(source_rows, compute_specs)
+                if timings is not None:
+                    timings["compute"] += time.monotonic() - compute_start
 
                 if not computed_rows:
                     continue
@@ -335,8 +348,12 @@ def _process_function_group(
 
                 # Insert results (pipelined if writer provided)
                 if writer:
+                    write_start = time.monotonic()
                     inserted = writer(computed_rows, feature_map)
+                    if timings is not None:
+                        timings["write"] += time.monotonic() - write_start
                 else:
+                    write_start = time.monotonic()
                     inserted = insert_computed_features(
                         conn,
                         data_id=data_id,
@@ -345,6 +362,8 @@ def _process_function_group(
                         update_existing=update_existing,
                         batch_size=feature_batch_size,
                     )
+                    if timings is not None:
+                        timings["write"] += time.monotonic() - write_start
 
                 total_inserted += inserted
 
