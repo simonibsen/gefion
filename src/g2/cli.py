@@ -1466,6 +1466,7 @@ def features_compute(
     max_workers: Optional[int] = typer.Option(None, help="Max parallel workers (auto if not set)"),
     feature_batch_size: int = typer.Option(2000, "--batch-size", help="DB insert batch size for computed_features"),
     profile: bool = typer.Option(False, "--profile/--no-profile", help="Include per-symbol timing in output"),
+    sync_commit: bool = typer.Option(False, "--sync-commit/--no-sync-commit", help="Use synchronous_commit for inserts (default off for speed)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress updates"),
@@ -1585,6 +1586,9 @@ def features_compute(
                         start_time = time.monotonic()
                         with db_pool.get_connection() as worker_conn:
                             worker_conn.autocommit = True
+                            if not sync_commit:
+                                with worker_conn.cursor() as cur:
+                                    cur.execute("SET LOCAL synchronous_commit TO OFF;")
 
                             # Get data_id
                             with worker_conn.cursor() as cur:
