@@ -1467,6 +1467,7 @@ def features_compute(
     feature_batch_size: int = typer.Option(2000, "--batch-size", help="DB insert batch size for computed_features"),
     profile: bool = typer.Option(False, "--profile/--no-profile", help="Include per-symbol timing in output"),
     sync_commit: bool = typer.Option(False, "--sync-commit/--no-sync-commit", help="Use synchronous_commit for inserts (default off for speed)"),
+    writer_workers: int = typer.Option(2, "--writer-workers", help="Number of writer threads for pipelined inserts"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress updates"),
@@ -1550,7 +1551,7 @@ def features_compute(
             # Initialize connection pool to reuse prepared statements across symbols
             pool_needed = db_pool.get_pool() is None
             if pool_needed:
-                min_pool = 2
+                min_pool = max(2, writer_workers)
                 max_pool = max(max_w + 2, min_pool + 2)
                 db_pool.init_pool(url, min_size=min_pool, max_size=max_pool, prepare_statements=True)
 
@@ -1615,6 +1616,7 @@ def features_compute(
                                 full_refresh=not incremental,
                                 update_existing=update_existing,
                                 feature_batch_size=feature_batch_size,
+                                writer_workers=writer_workers,
                             )
 
                             inserted = result.get('summary', {}).get('total_inserted', 0)
