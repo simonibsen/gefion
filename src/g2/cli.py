@@ -1549,10 +1549,17 @@ def features_compute(
                 emit(f"Available connections: {available or 'unknown'}, Max workers: {max_w}")
 
             # Initialize connection pool to reuse prepared statements across symbols
+            # Pool sizing: Each worker needs 1 main connection + writer_workers writer threads
+            # Total connections needed = max_workers * (1 + writer_workers) + buffer
             pool_needed = db_pool.get_pool() is None
             if pool_needed:
                 min_pool = max(2, writer_workers)
-                max_pool = max(max_w + 2, min_pool + 2)
+                buffer = 2
+                # Fix: Account for writer threads PER worker, not total
+                max_pool = max(
+                    max_w * (1 + writer_workers) + buffer,
+                    min_pool + buffer
+                )
                 db_pool.init_pool(url, min_size=min_pool, max_size=max_pool, prepare_statements=True)
 
             # Adaptive worker scaling (start at a fraction of max to allow ramp-up)
@@ -1588,9 +1595,8 @@ def features_compute(
                         start_time = time.monotonic()
                         with db_pool.get_connection() as worker_conn:
                             worker_conn.autocommit = True
-                            if not sync_commit:
-                                with worker_conn.cursor() as cur:
-                                    cur.execute("SET LOCAL synchronous_commit TO OFF;")
+                            # Note: synchronous_commit is handled by compute_features() -> insert_computed_features()
+                            # No need to set it here
 
                             # Get data_id
                             with worker_conn.cursor() as cur:
@@ -1754,8 +1760,9 @@ def features_compute(
     except Exception as exc:
         emit_error(f"Computation failed: {exc}", json_output=json_output)
     finally:
-        # Ensure pool is closed to release idle connections/threads
-        db_pool.close_pool()
+        # Only close pool if we initialized it (don't close pools managed by caller)
+        if pool_needed:
+            db_pool.close_pool()
 
 
 @app.command("data-update")
