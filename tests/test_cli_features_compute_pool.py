@@ -73,12 +73,11 @@ def test_features_compute_uses_pool(monkeypatch):
     monkeypatch.setattr(cli.schema, "create_computed_features_table", lambda conn: None)
     monkeypatch.setattr(cli, "get_available_connections", lambda url: (10,))
 
-    def fake_compute(conn, data_id, function_names=None, feature_names=None, incremental=True, full_refresh=False, update_existing=False, feature_batch_size=2000, use_copy=False):
+    def fake_compute(conn, data_id, function_names=None, feature_names=None, incremental=True, full_refresh=False, update_existing=False, feature_batch_size=2000):
         calls["compute_features"] = {
             "data_id": data_id,
             "feature_names": feature_names,
             "batch": feature_batch_size,
-            "use_copy": use_copy,
         }
         return {"summary": {"total_inserted": 0, "total_errors": 0}}
 
@@ -86,7 +85,7 @@ def test_features_compute_uses_pool(monkeypatch):
 
     res = runner.invoke(
         cli.app,
-        ["features-compute", "--symbols", "AAA", "--features", "feat1", "--json", "--copy"],
+        ["features-compute", "--symbols", "AAA", "--features", "feat1", "--json"],
     )
 
     assert res.exit_code == 0, res.stdout
@@ -95,4 +94,3 @@ def test_features_compute_uses_pool(monkeypatch):
     assert calls.get("used_pool") is True
     assert calls["init_pool"]["prepare"] is True
     assert calls["compute_features"]["feature_names"] == ["feat1"]
-    assert calls["compute_features"]["use_copy"] is True

@@ -634,7 +634,6 @@ def insert_computed_features(
     update_existing: bool = False,
     skip_before: Optional[date] = None,
     batch_size: int = 200,
-    use_copy: bool = False,
 ) -> int:
     """
     Insert tall computed feature rows using feature_map of column -> feature_id.
@@ -690,27 +689,6 @@ def insert_computed_features(
 
     chunk_size = max(1, batch_size)
     total = 0
-
-    if use_copy and not update_existing and len(prepared) >= 500:
-        # COPY path uses CSV to reduce per-row bind overhead
-        import io
-
-        buf = io.StringIO()
-        for fid, did, dt, val, source in prepared:
-            buf.write(f"{fid}\t{did}\t{dt}\t{val}\t{source}\n")
-        buf.seek(0)
-        try:
-            with conn.cursor() as cur:
-                copy_sql = (
-                    "COPY computed_features (feature_id, data_id, date, value, source) "
-                    "FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t')"
-                )
-                cur.copy_expert(copy_sql, buf)
-            conn.commit()
-            return len(prepared)
-        except Exception:
-            # fall back to standard inserts if COPY fails (e.g., duplicate key)
-            pass
 
     # Check if prepared statements are enabled via the pool
     from g2.db import pool as db_pool

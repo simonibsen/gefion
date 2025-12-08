@@ -1466,7 +1466,6 @@ def features_compute(
     max_workers: Optional[int] = typer.Option(None, help="Max parallel workers (auto if not set)"),
     feature_batch_size: int = typer.Option(2000, "--batch-size", help="DB insert batch size for computed_features"),
     profile: bool = typer.Option(False, "--profile/--no-profile", help="Include per-symbol timing in output"),
-    use_copy: bool = typer.Option(False, "--copy/--no-copy", help="Use COPY for inserts (fewer binds, faster)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress updates"),
@@ -1612,7 +1611,6 @@ def features_compute(
                                 full_refresh=not incremental,
                                 update_existing=update_existing,
                                 feature_batch_size=feature_batch_size,
-                                use_copy=use_copy,
                             )
 
                             inserted = result.get('summary', {}).get('total_inserted', 0)

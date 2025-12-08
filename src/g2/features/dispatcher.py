@@ -43,7 +43,6 @@ def compute_features(
     full_refresh: bool = False,
     update_existing: bool = False,
     feature_batch_size: int = 2000,
-    use_copy: bool = False,
 ) -> Dict[str, Any]:
     """
     Generic feature computation dispatcher.
@@ -108,7 +107,6 @@ def compute_features(
                 update_existing=update_existing,
                 latest_by_feature=latest_by_feature,
                 feature_batch_size=feature_batch_size,
-                use_copy=use_copy,
             )
 
             results[func_name] = func_result
@@ -201,7 +199,6 @@ def _process_function_group(
     update_existing: bool,
     latest_by_feature: Dict[int, Optional[date]],
     feature_batch_size: int,
-    use_copy: bool,
 ) -> Dict[str, Any]:
     """
     Process all features for a given function_name.
@@ -282,7 +279,6 @@ def _process_function_group(
                     feature_map=feature_map,
                     update_existing=update_existing,
                     batch_size=feature_batch_size,
-                    use_copy=use_copy,
                 )
 
                 total_inserted += inserted
