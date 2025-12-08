@@ -634,6 +634,7 @@ def insert_computed_features(
     update_existing: bool = False,
     skip_before: Optional[date] = None,
     batch_size: int = 200,
+    sync_commit: bool = False,
 ) -> int:
     """
     Insert tall computed feature rows using feature_map of column -> feature_id.
@@ -706,6 +707,9 @@ def insert_computed_features(
             params.extend([fid, did, dt, val, source])
 
         try:
+            if not sync_commit:
+                with conn.cursor() as cur:
+                    cur.execute("SET LOCAL synchronous_commit TO OFF;")
             # Build the SQL statement
             conflict = (
                 "ON CONFLICT (feature_id, data_id, date) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source"

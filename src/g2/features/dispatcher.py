@@ -48,6 +48,7 @@ def compute_features(
     feature_batch_size: int = 2000,
     writer_workers: int = 0,
     profile: bool = False,
+    sync_commit: bool = False,
 ) -> Dict[str, Any]:
     """
     Generic feature computation dispatcher.
@@ -146,6 +147,7 @@ def compute_features(
                         feature_map=item["feature_map"],
                         update_existing=update_existing,
                         batch_size=feature_batch_size,
+                        sync_commit=sync_commit,
                     )
                     if timings is not None:
                         timings["writer"] += time.monotonic() - start
