@@ -1562,6 +1562,7 @@ def features_compute(
             total_inserted = 0
             errors = []
             profiles: List[Dict[str, Any]] = []
+            timings_totals: Dict[str, float] = {}
 
             # Set up progress reporting
             reporter = ProgressReporter(total=len(symbol_list), json_output=json_output, enabled=progress)
@@ -1617,18 +1618,24 @@ def features_compute(
                                 update_existing=update_existing,
                                 feature_batch_size=feature_batch_size,
                                 writer_workers=writer_workers,
+                                profile=profile,
                             )
 
                             inserted = result.get('summary', {}).get('total_inserted', 0)
                             has_errors = result.get('summary', {}).get('total_errors', 0) > 0
+                            timing = result.get('summary', {}).get('timing') if profile else None
                             duration = time.monotonic() - start_time
 
                             if profile:
+                                if timing:
+                                    for k, v in timing.items():
+                                        timings_totals[k] = timings_totals.get(k, 0.0) + float(v)
                                 profiles.append(
                                     {
                                         "symbol": symbol,
                                         "inserted": inserted,
                                         "duration_sec": round(duration, 3),
+                                        "timing": timing,
                                     }
                                 )
 
@@ -1730,6 +1737,8 @@ def features_compute(
                 }
                 if profile:
                     output["profiles"] = profiles
+                    if timings_totals:
+                        output["timing"] = {k: round(v, 6) for k, v in timings_totals.items()}
                 emit_json(output)
             else:
                 emit(f"\nTotal: {total_inserted} rows inserted across {len(symbol_list)} stocks (batch_size={feature_batch_size})")

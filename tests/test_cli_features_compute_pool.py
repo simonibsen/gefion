@@ -83,6 +83,7 @@ def test_features_compute_uses_pool(monkeypatch):
         update_existing=False,
         feature_batch_size=2000,
         writer_workers=2,
+        profile=False,
     ):
         calls["compute_features"] = {
             "data_id": data_id,
