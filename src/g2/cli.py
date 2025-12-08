@@ -1713,7 +1713,7 @@ def features_compute(
                                 reporter.step_done(
                                     label=symbol,
                                     error=False,
-                                    meta={"inserted": result["inserted"], "duration_sec": result.get("duration_sec")}
+                                    meta={"inserted": result["inserted"], "duration_sec": result.get("duration_sec"), "timing": result.get("timing")}
                                 )
 
                     # Adjust workers based on RESOURCE errors only
