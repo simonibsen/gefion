@@ -108,8 +108,10 @@ def compute_features(
     writer_errors: List[Exception] = []
     writer_events: List[threading.Event] = []
     timings: Optional[Dict[str, float]] = None
+    timings_lock: Optional[threading.Lock] = None
     if profile:
         timings = {"fetch": 0.0, "compute": 0.0, "write": 0.0, "queue_wait": 0.0, "writer": 0.0, "writer_wait": 0.0}
+        timings_lock = threading.Lock()  # Protect timings dict from concurrent updates
 
     def enqueue_or_write(rows, feature_map):
         if write_queue is not None:
@@ -117,8 +119,10 @@ def compute_features(
             evt = threading.Event()
             writer_events.append(evt)
             write_queue.put({"rows": rows, "feature_map": feature_map, "queue_ts": q_start, "event": evt})
-            if timings is not None:
-                timings["queue_wait"] += time.monotonic() - q_start
+            if timings is not None and timings_lock is not None:
+                elapsed = time.monotonic() - q_start
+                with timings_lock:
+                    timings["queue_wait"] += elapsed
             return len(rows)
         return insert_computed_features(
             conn,
@@ -130,34 +134,48 @@ def compute_features(
         )
 
     if writer_workers and writer_workers > 0:
-        write_queue = queue.Queue(maxsize=writer_workers * 2)
+        # Use a larger queue size (200) to provide adequate buffering between
+        # compute and write stages. Small queues (e.g., writer_workers * 2)
+        # cause frequent blocking and reduce pipeline efficiency.
+        write_queue = queue.Queue(maxsize=200)
 
         def writer_loop():
-            while True:
-                item = write_queue.get()
-                if item is stop_token:
-                    write_queue.task_done()
-                    break
-                try:
-                    start = time.monotonic()
-                    insert_computed_features(
-                        conn,
-                        data_id=data_id,
-                        rows=item["rows"],
-                        feature_map=item["feature_map"],
-                        update_existing=update_existing,
-                        batch_size=feature_batch_size,
-                        sync_commit=sync_commit,
-                    )
-                    if timings is not None:
-                        timings["writer"] += time.monotonic() - start
-                    evt = item.get("event")
-                    if evt:
-                        evt.set()
-                except Exception as exc:
-                    writer_errors.append(exc)
-                finally:
-                    write_queue.task_done()
+            # Each writer thread gets its own connection from the pool
+            # to avoid thread-safety violations (psycopg connections are not thread-safe)
+            from g2.db import pool as db_pool
+            try:
+                with db_pool.get_connection() as writer_conn:
+                    writer_conn.autocommit = True
+                    while True:
+                        item = write_queue.get()
+                        if item is stop_token:
+                            write_queue.task_done()
+                            break
+                        try:
+                            start = time.monotonic()
+                            insert_computed_features(
+                                writer_conn,  # Use thread-local connection, not shared conn
+                                data_id=data_id,
+                                rows=item["rows"],
+                                feature_map=item["feature_map"],
+                                update_existing=update_existing,
+                                batch_size=feature_batch_size,
+                                sync_commit=sync_commit,
+                            )
+                            if timings is not None and timings_lock is not None:
+                                elapsed = time.monotonic() - start
+                                with timings_lock:
+                                    timings["writer"] += elapsed
+                            evt = item.get("event")
+                            if evt:
+                                evt.set()
+                        except Exception as exc:
+                            writer_errors.append(exc)
+                        finally:
+                            write_queue.task_done()
+            except Exception as exc:
+                # Connection acquisition failure
+                writer_errors.append(exc)
 
         for _ in range(writer_workers):
             t = threading.Thread(target=writer_loop, daemon=True)
@@ -178,6 +196,7 @@ def compute_features(
                 feature_batch_size=feature_batch_size,
                 writer=enqueue_or_write,
                 timings=timings if profile else None,
+                timings_lock=timings_lock if profile else None,
             )
 
             results[func_name] = func_result
@@ -203,10 +222,19 @@ def compute_features(
             evt.wait()
         for t in writer_threads:
             t.join(timeout=5)
-        if timings is not None:
-            timings["writer_wait"] += time.monotonic() - wait_start
+        if timings is not None and timings_lock is not None:
+            elapsed = time.monotonic() - wait_start
+            with timings_lock:
+                timings["writer_wait"] += elapsed
+
+        # Writer errors are fatal - we can't trust the results if writers failed
         if writer_errors:
-            total_errors.extend([{"error": str(e)} for e in writer_errors])
+            error_messages = [str(e) for e in writer_errors]
+            raise RuntimeError(
+                f"Writer thread errors occurred during feature computation: "
+                f"{len(writer_errors)} error(s): {'; '.join(error_messages[:3])}"
+                + (f" (and {len(error_messages) - 3} more)" if len(error_messages) > 3 else "")
+            )
 
     # Summary
     results['summary'] = {
@@ -289,6 +317,7 @@ def _process_function_group(
     feature_batch_size: int,
     writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int]], int]] = None,
     timings: Optional[Dict[str, float]] = None,
+    timings_lock: Optional[threading.Lock] = None,
 ) -> Dict[str, Any]:
     """
     Process all features for a given function_name.
@@ -329,8 +358,10 @@ def _process_function_group(
                 source_features,
                 start_date=start_date,
             )
-            if timings is not None:
-                timings["fetch"] += time.monotonic() - fetch_start
+            if timings is not None and timings_lock is not None:
+                elapsed = time.monotonic() - fetch_start
+                with timings_lock:
+                    timings["fetch"] += elapsed
 
             if not source_rows:
                 continue
@@ -349,8 +380,10 @@ def _process_function_group(
             try:
                 compute_start = time.monotonic()
                 computed_rows = compute_func(source_rows, compute_specs)
-                if timings is not None:
-                    timings["compute"] += time.monotonic() - compute_start
+                if timings is not None and timings_lock is not None:
+                    elapsed = time.monotonic() - compute_start
+                    with timings_lock:
+                        timings["compute"] += elapsed
 
                 if not computed_rows:
                     continue
@@ -371,8 +404,10 @@ def _process_function_group(
                 if writer:
                     write_start = time.monotonic()
                     inserted = writer(computed_rows, feature_map)
-                    if timings is not None:
-                        timings["write"] += time.monotonic() - write_start
+                    if timings is not None and timings_lock is not None:
+                        elapsed = time.monotonic() - write_start
+                        with timings_lock:
+                            timings["write"] += elapsed
                 else:
                     write_start = time.monotonic()
                     inserted = insert_computed_features(
@@ -383,8 +418,10 @@ def _process_function_group(
                         update_existing=update_existing,
                         batch_size=feature_batch_size,
                     )
-                    if timings is not None:
-                        timings["write"] += time.monotonic() - write_start
+                    if timings is not None and timings_lock is not None:
+                        elapsed = time.monotonic() - write_start
+                        with timings_lock:
+                            timings["write"] += elapsed
 
                 total_inserted += inserted
 
@@ -454,9 +491,67 @@ def _load_db_function(conn: psycopg.Connection, function_name: str) -> Optional[
     if language not in ("python_expr", "python"):
         warnings.warn(f"Ignoring feature_function '{function_name}' with unsupported language '{language}'")
         return None
+
+    # Create a restricted execution environment to prevent malicious code
+    # Block dangerous built-ins: file I/O, imports, eval, exec, compile
+    safe_builtins = {
+        # Type constructors
+        'int': int,
+        'float': float,
+        'str': str,
+        'bool': bool,
+        'list': list,
+        'dict': dict,
+        'tuple': tuple,
+        'set': set,
+        'frozenset': frozenset,
+        # Utility functions
+        'len': len,
+        'range': range,
+        'enumerate': enumerate,
+        'zip': zip,
+        'map': map,
+        'filter': filter,
+        'sum': sum,
+        'min': min,
+        'max': max,
+        'abs': abs,
+        'round': round,
+        'sorted': sorted,
+        'reversed': reversed,
+        'any': any,
+        'all': all,
+        # Type checking
+        'isinstance': isinstance,
+        'issubclass': issubclass,
+        'type': type,
+        # Exceptions (needed for try/except)
+        'Exception': Exception,
+        'ValueError': ValueError,
+        'TypeError': TypeError,
+        'KeyError': KeyError,
+        'IndexError': IndexError,
+        'AttributeError': AttributeError,
+        'ZeroDivisionError': ZeroDivisionError,
+        # Other safe built-ins
+        'None': None,
+        'True': True,
+        'False': False,
+    }
+
+    # Explicitly block dangerous operations
+    # By not including them in safe_builtins, they won't be accessible
+    # Blocked: open, __import__, eval, exec, compile, input, file, etc.
+
+    safe_globals = {
+        '__builtins__': safe_builtins,
+        # Allow access to datetime for date operations
+        'datetime': __import__('datetime'),
+    }
+
     local_env: Dict[str, Any] = {}
     try:
-        exec(body, {}, local_env)
+        exec(body, safe_globals, local_env)
     except Exception as exc:
         warnings.warn(f"Failed to exec feature_function '{function_name}': {exc}")
         return None
