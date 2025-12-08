@@ -43,6 +43,7 @@ def compute_features(
     full_refresh: bool = False,
     update_existing: bool = False,
     feature_batch_size: int = 2000,
+    writer_workers: int = 0,
 ) -> Dict[str, Any]:
     """
     Generic feature computation dispatcher.
@@ -95,6 +96,53 @@ def compute_features(
     # Step 2: Group by function_name
     grouped_by_function = _group_by_function_name(feature_defs)
 
+    # Optional writer queue for pipelined writes
+    write_queue: Optional[queue.Queue] = None
+    writer_threads: List[threading.Thread] = []
+    stop_token = object()
+    writer_errors: List[Exception] = []
+
+    def enqueue_or_write(rows, feature_map):
+        if write_queue is not None:
+            write_queue.put({"rows": rows, "feature_map": feature_map})
+            return len(rows)
+        return insert_computed_features(
+            conn,
+            data_id=data_id,
+            rows=rows,
+            feature_map=feature_map,
+            update_existing=update_existing,
+            batch_size=feature_batch_size,
+        )
+
+    if writer_workers and writer_workers > 0:
+        write_queue = queue.Queue(maxsize=writer_workers * 2)
+
+        def writer_loop():
+            while True:
+                item = write_queue.get()
+                if item is stop_token:
+                    write_queue.task_done()
+                    break
+                try:
+                    insert_computed_features(
+                        conn,
+                        data_id=data_id,
+                        rows=item["rows"],
+                        feature_map=item["feature_map"],
+                        update_existing=update_existing,
+                        batch_size=feature_batch_size,
+                    )
+                except Exception as exc:
+                    writer_errors.append(exc)
+                finally:
+                    write_queue.task_done()
+
+        for _ in range(writer_workers):
+            t = threading.Thread(target=writer_loop, daemon=True)
+            t.start()
+            writer_threads.append(t)
+
     # Step 3: Process each function_name group
     for func_name, features in grouped_by_function.items():
         try:
@@ -107,6 +155,7 @@ def compute_features(
                 update_existing=update_existing,
                 latest_by_feature=latest_by_feature,
                 feature_batch_size=feature_batch_size,
+                writer=enqueue_or_write,
             )
 
             results[func_name] = func_result
@@ -121,6 +170,16 @@ def compute_features(
             }
             results[func_name] = {'inserted': 0, 'errors': [error]}
             total_errors.append(error)
+
+    # Drain writer queue
+    if write_queue is not None:
+        for _ in writer_threads:
+            write_queue.put(stop_token)
+        write_queue.join()
+        for t in writer_threads:
+            t.join(timeout=5)
+        if writer_errors:
+            total_errors.extend([{"error": str(e)} for e in writer_errors])
 
     # Summary
     results['summary'] = {
@@ -199,6 +258,7 @@ def _process_function_group(
     update_existing: bool,
     latest_by_feature: Dict[int, Optional[date]],
     feature_batch_size: int,
+    writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int]], int]] = None,
 ) -> Dict[str, Any]:
     """
     Process all features for a given function_name.
@@ -271,15 +331,18 @@ def _process_function_group(
                     column_name = params.get('column', feature_name)
                     feature_map[column_name] = feature_id
 
-                # Insert results
-                inserted = insert_computed_features(
-                    conn,
-                    data_id=data_id,
-                    rows=computed_rows,
-                    feature_map=feature_map,
-                    update_existing=update_existing,
-                    batch_size=feature_batch_size,
-                )
+                # Insert results (pipelined if writer provided)
+                if writer:
+                    inserted = writer(computed_rows, feature_map)
+                else:
+                    inserted = insert_computed_features(
+                        conn,
+                        data_id=data_id,
+                        rows=computed_rows,
+                        feature_map=feature_map,
+                        update_existing=update_existing,
+                        batch_size=feature_batch_size,
+                    )
 
                 total_inserted += inserted
 
