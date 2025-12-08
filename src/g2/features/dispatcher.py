@@ -545,8 +545,13 @@ def _load_db_function(conn: psycopg.Connection, function_name: str) -> Optional[
 
     safe_globals = {
         '__builtins__': safe_builtins,
-        # Allow access to datetime for date operations
+        # Pre-import commonly needed modules for feature computations
+        # This avoids __import__ warnings while maintaining security
         'datetime': __import__('datetime'),
+        'np': __import__('numpy'),
+        'pd': __import__('pandas'),
+        'numpy': __import__('numpy'),
+        'pandas': __import__('pandas'),
     }
 
     local_env: Dict[str, Any] = {}
