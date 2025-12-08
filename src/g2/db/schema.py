@@ -175,6 +175,15 @@ def create_feature_functions_table(conn: Connection) -> None:
             );
             """
         )
+        # Create composite index for efficient lookups by (enabled, status, name)
+        # This optimizes the common query pattern in dispatcher:
+        # WHERE enabled = TRUE AND status = 'active' AND name = %s
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_feature_functions_enabled_status_name
+            ON feature_functions (enabled, status, name);
+            """
+        )
     conn.commit()
 
 
