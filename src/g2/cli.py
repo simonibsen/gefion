@@ -1646,6 +1646,7 @@ def features_compute(
                                 "has_feature_errors": has_errors,
                                 "feature_error_count": result.get('summary', {}).get('total_errors', 0),
                                 "duration_sec": duration,
+                                "timing": timing,
                             }
 
                     except psycopg.OperationalError as exc:

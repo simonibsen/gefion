@@ -86,6 +86,8 @@ def test_profile_includes_latest_symbol_timing_in_progress(monkeypatch):
     )
     assert res.exit_code == 0, res.stdout
     lines = res.stdout.strip().splitlines()
-    # last line is final payload
+    # First line is progress, last line is final payload
+    progress = json.loads(lines[0])
     payload = json.loads(lines[-1])
+    assert progress["timing"]["compute"] == 0.2
     assert payload["profiles"][0]["timing"]["compute"] == 0.2
