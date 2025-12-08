@@ -105,11 +105,14 @@ def compute_features(
     writer_threads: List[threading.Thread] = []
     stop_token = object()
     writer_errors: List[Exception] = []
-    timings: Dict[str, float] = {"fetch": 0.0, "compute": 0.0, "write": 0.0}
+    timings: Dict[str, float] = {"fetch": 0.0, "compute": 0.0, "write": 0.0, "queue_wait": 0.0, "writer": 0.0}
 
     def enqueue_or_write(rows, feature_map):
         if write_queue is not None:
-            write_queue.put({"rows": rows, "feature_map": feature_map})
+            q_start = time.monotonic()
+            write_queue.put({"rows": rows, "feature_map": feature_map, "queue_ts": q_start})
+            if timings is not None:
+                timings["queue_wait"] += time.monotonic() - q_start
             return len(rows)
         return insert_computed_features(
             conn,
@@ -130,6 +133,7 @@ def compute_features(
                     write_queue.task_done()
                     break
                 try:
+                    start = time.monotonic()
                     insert_computed_features(
                         conn,
                         data_id=data_id,
@@ -138,6 +142,8 @@ def compute_features(
                         update_existing=update_existing,
                         batch_size=feature_batch_size,
                     )
+                    if timings is not None:
+                        timings["writer"] += time.monotonic() - start
                 except Exception as exc:
                     writer_errors.append(exc)
                 finally:
