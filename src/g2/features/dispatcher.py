@@ -113,6 +113,11 @@ def compute_features(
         timings = {"fetch": 0.0, "compute": 0.0, "write": 0.0, "queue_wait": 0.0, "writer": 0.0, "writer_wait": 0.0}
         timings_lock = threading.Lock()  # Protect timings dict from concurrent updates
 
+    # Create cache for intermediate calculations shared across all features for this stock
+    # This allows features to reuse expensive computations (e.g., moving averages)
+    # Cache is stock-specific and persists across all function groups
+    cache: Dict[str, Any] = {}
+
     def enqueue_or_write(rows, feature_map):
         if write_queue is not None:
             q_start = time.monotonic()
@@ -197,6 +202,7 @@ def compute_features(
                 writer=enqueue_or_write,
                 timings=timings if profile else None,
                 timings_lock=timings_lock if profile else None,
+                cache=cache,  # Pass cache to share across all functions for this stock
             )
 
             results[func_name] = func_result
@@ -318,9 +324,13 @@ def _process_function_group(
     writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int]], int]] = None,
     timings: Optional[Dict[str, float]] = None,
     timings_lock: Optional[threading.Lock] = None,
+    cache: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Process all features for a given function_name.
+
+    Args:
+        cache: Optional cache for intermediate calculations shared across features
 
     Returns: {'inserted': count, 'errors': [...]}
     """
@@ -379,7 +389,11 @@ def _process_function_group(
             # Call compute function
             try:
                 compute_start = time.monotonic()
-                computed_rows = compute_func(source_rows, compute_specs)
+                # Pass cache if available to allow features to share intermediate calculations
+                if cache is not None:
+                    computed_rows = compute_func(source_rows, compute_specs, cache=cache)
+                else:
+                    computed_rows = compute_func(source_rows, compute_specs)
                 if timings is not None and timings_lock is not None:
                     elapsed = time.monotonic() - compute_start
                     with timings_lock:
@@ -606,15 +620,23 @@ def _load_db_function(conn: psycopg.Connection, function_name: str) -> Optional[
 
 def _wrap_db_function(fn: Callable) -> Callable:
     """
-    Adapt a DB function to dispatcher signature (rows, specs).
+    Adapt a DB function to dispatcher signature (rows, specs, cache=None).
 
     Supports two patterns:
-    - existing dispatcher-style (rows, specs) -> list of row dicts
-    - simple pandas-style functions: compute(df, **params) -> series/iterable
+    - existing dispatcher-style (rows, specs, cache=None) -> list of row dicts
+    - simple pandas-style functions: compute(df, cache=None, **params) -> series/iterable
       In this case, we build rows per spec with column name from spec/feature.
+
+    Caching support:
+    - If the function accepts a 'cache' parameter, it will be passed through
+    - This allows features to cache expensive intermediate calculations
+    - Cache is shared across all features for a given stock
     """
     sig = inspect.signature(fn)
     params = list(sig.parameters.values())
+    param_names = [p.name for p in params]
+    accepts_cache = 'cache' in param_names
+
     if params:
         first, *rest = params
         if first.kind == inspect.Parameter.VAR_POSITIONAL:
@@ -630,7 +652,7 @@ def _wrap_db_function(fn: Callable) -> Callable:
             if second.name in ("specs", "features", "feature_specs"):
                 return fn
 
-    def adapter(rows: List[Dict[str, Any]], specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def adapter(rows: List[Dict[str, Any]], specs: List[Dict[str, Any]], cache: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         if not rows or not specs:
             return []
         try:
@@ -649,6 +671,11 @@ def _wrap_db_function(fn: Callable) -> Callable:
         for spec in specs:
             # Strip dispatcher-specific keys
             params = {k: v for k, v in spec.items() if k not in ("name", "feature_id")}
+
+            # Add cache if function accepts it
+            if accepts_cache and cache is not None:
+                params['cache'] = cache
+
             try:
                 series = fn(df, **params)
             except Exception as exc:
