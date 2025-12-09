@@ -1306,38 +1306,83 @@ def trim_prices(
 
 @app.command("features-drop")
 def drop_features_cmd(
-    feature: str = typer.Option(..., "--feature", help="Comma-separated feature names to drop"),
+    feature: Optional[str] = typer.Option(None, "--feature", help="Comma-separated feature names to drop"),
+    all_features: bool = typer.Option(False, "--all", help="Drop all features (use with caution!)"),
     data_only: bool = typer.Option(False, "--data-only", help="Delete data rows only; keep feature definitions/schema"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
     Drop feature definitions and their data.
+
     WARNING: This deletes rows from computed_features and any custom store tables defined for the feature.
     Use --data-only to remove data rows without dropping definitions/schema.
+
+    Examples:
+        # Drop specific features
+        g2 features-drop --feature indicator_rsi_14,indicator_macd
+
+        # Drop all feature data but keep definitions
+        g2 features-drop --all --data-only
+
+        # Drop all features completely (DANGEROUS!)
+        g2 features-drop --all
     """
-    names = [n.strip() for n in feature.split(",") if n.strip()]
-    if not names:
-        emit_error("No feature names provided", json_output=json_output)
-        return
     url = _db_url(db_url)
+
     try:
         with psycopg.connect(url) as conn:
             conn.autocommit = True
             schema.create_feature_definitions_table(conn)
             schema.create_computed_features_table(conn)
+
+            # Determine which features to drop
+            if all_features:
+                # Get all feature names from database
+                with conn.cursor() as cur:
+                    cur.execute("SELECT name FROM feature_definitions ORDER BY name")
+                    names = [row[0] for row in cur.fetchall()]
+
+                if not names:
+                    emit("No features found to drop", json_output=json_output)
+                    return
+
+                # Confirm for safety
+                if not json_output:
+                    action = "delete data for" if data_only else "completely drop"
+                    emit(f"WARNING: About to {action} ALL {len(names)} features!")
+
+            elif feature:
+                names = [n.strip() for n in feature.split(",") if n.strip()]
+                if not names:
+                    emit_error("No feature names provided", json_output=json_output)
+                    return
+            else:
+                emit_error("Must specify either --feature or --all", json_output=json_output)
+                return
+
+            # Execute the drop
             if data_only:
                 deleted = delete_feature_data_only(conn, names)
                 emit(
-                    f"Deleted data for features {', '.join(names)}",
-                    data={"deleted_rows": deleted, "definitions_kept": True},
+                    f"Deleted data for {len(names)} feature(s)",
+                    data={
+                        "deleted_rows": deleted,
+                        "definitions_kept": True,
+                        "features": names,
+                        "count": len(names)
+                    },
                     json_output=json_output,
                 )
             else:
                 deleted = drop_features(conn, names)
                 emit(
-                    f"Dropped features {', '.join(names)}",
-                    data={"deleted": deleted},
+                    f"Dropped {len(names)} feature(s)",
+                    data={
+                        "deleted": deleted,
+                        "features": names,
+                        "count": len(names)
+                    },
                     json_output=json_output,
                 )
     except Exception as exc:
