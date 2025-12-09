@@ -1,6 +1,6 @@
 # Parallelization Implementation Guide
 
-## Current Status: **Design Complete, Implementation Pending**
+## Current Status: **IMPLEMENTED** ✅
 
 ## Overview
 
@@ -186,12 +186,29 @@ This limits total parallel function executions to `num_cores`, avoiding connecti
 
 ## Implementation Steps
 
-1. **Add cache_lock parameter** to adapter and feature execution path ✅ (tested)
-2. **Create wrapper function** `_process_function_group_with_connection()` to acquire own connection
-3. **Replace sequential loop** with `ThreadPoolExecutor` execution
-4. **Update connection pool sizing** to account for parallel functions
-5. **Add configuration flag** `--parallel-functions` to enable (default: False for safety)
-6. **Test thoroughly** with real workload to verify thread safety
+1. ✅ **Add cache_lock parameter** to adapter and feature execution path
+2. ✅ **Create wrapper function** `_process_function_group_with_connection()` to acquire own connection
+3. ✅ **Replace sequential loop** with `ThreadPoolExecutor` execution
+4. ⏭️ **Update connection pool sizing** to account for parallel functions (not needed - uses existing pool)
+5. ✅ **Add configuration flag** `--parallel-functions` to enable (default: False for safety)
+6. ⏭️ **Test thoroughly** with real workload to verify thread safety (ready for testing)
+
+## Usage
+
+Enable parallel function execution with the CLI flag:
+
+```bash
+# Enable parallel function execution (uses cpu_count - 2 workers)
+g2 features-compute --all-features --parallel-functions
+
+# Limit parallel function workers
+g2 features-compute --all-features --parallel-functions --max-parallel-functions 4
+```
+
+**Note**: Parallel function execution is disabled by default for safety. Enable it when you have:
+- Multiple function groups per stock (e.g., indicator + derivative)
+- Sufficient CPU cores available
+- Confirmed thread-safe feature functions
 
 ## Performance Testing Plan
 
@@ -252,4 +269,4 @@ Since pandas/numpy release GIL for operations, threads should work well.
 
 ---
 
-**Status**: Design complete, ready for implementation when capacity allows
+**Status**: Implementation complete, ready for testing with production workloads

@@ -4,6 +4,8 @@
 
 ### 1. ✅ Caching Infrastructure (IMPLEMENTED)
 
+**Commit**: `1e0549ba` - perf(dispatcher): add caching for intermediate calculations
+
 **Problem**: Multiple features compute the same intermediate values (e.g., MA(20))
 
 **Solution**:
@@ -29,43 +31,39 @@ def compute(df, cache=None):
 
 **Commit**: `1e0549ba` - perf(dispatcher): add caching for intermediate calculations
 
+### 2. ✅ Parallelization (Function-Level) - IMPLEMENTED
+
+**Commit**: TBD - feat(dispatcher): add parallel function group execution
+
+**Status**: Fully implemented with thread-safe cache access
+
+**Features**:
+- ThreadPoolExecutor for parallel execution of function groups
+- Each worker gets own database connection from pool
+- Thread-safe cache with `threading.Lock`
+- CLI flags: `--parallel-functions` and `--max-parallel-functions`
+- Defaults to `cpu_count - 2` workers
+
+**Usage**:
+```bash
+# Enable parallel function execution
+g2 features-compute --all-features --parallel-functions
+
+# Limit parallel workers
+g2 features-compute --all-features --parallel-functions --max-parallel-functions 4
+```
+
+**Expected Impact**: 2-4x speedup when you have multiple function groups
+
+**Implementation Details**:
+- `_process_function_group_with_connection()` wrapper acquires own connection
+- Cache protected with `threading.Lock` for concurrent access
+- Feature functions can optionally accept `cache_lock` parameter
+- Sequential execution used as fallback when parallel disabled
+
 ---
 
 ## Recommended Next Steps
-
-### 2. Parallelization (Function-Level)
-
-**Current**: Features processed sequentially by function group
-**Proposed**: Process function groups in parallel using ThreadPoolExecutor
-
-**Implementation**:
-```python
-# In compute_features(), replace sequential loop:
-for func_name, features in grouped_by_function.items():
-    func_result = _process_function_group(...)
-
-# With parallel execution:
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-with ThreadPoolExecutor(max_workers=4) as executor:
-    future_to_func = {
-        executor.submit(_process_function_group, conn, data_id, func_name, features, ...): func_name
-        for func_name, features in grouped_by_function.items()
-    }
-    for future in as_completed(future_to_func):
-        func_name = future_to_func[future]
-        func_result = future.result()
-        results[func_name] = func_result
-```
-
-**Expected Impact**: 2-4x speedup if you have multiple function groups and CPU cores
-
-**Considerations**:
-- Need to handle connection safety (each thread needs own connection)
-- Cache would need thread-safe access (use threading.Lock)
-- Or create separate cache per thread and merge
-
----
 
 ### 3. Vectorization Detection
 
@@ -137,8 +135,8 @@ def compute(df):
 ## Action Items
 
 1. ✅ **Caching** - DONE
-2. **Parallelization** - Implement ThreadPoolExecutor for function groups
+2. ✅ **Parallelization** - DONE
 3. **Vectorization** - Audit existing feature functions, create vectorization guide
 4. **Numba** - Create examples and templates for users
 
-Would you like me to continue implementing parallelization, or would you prefer to test the caching optimization first on your real workload?
+**Next Steps**: Test optimizations on real workload to measure actual performance improvements.

@@ -1538,6 +1538,8 @@ def features_compute(
     profile: bool = typer.Option(False, "--profile/--no-profile", help="Include per-symbol timing in output"),
     sync_commit: bool = typer.Option(False, "--sync-commit/--no-sync-commit", help="Use synchronous_commit for inserts (default off for speed)"),
     writer_workers: int = typer.Option(2, "--writer-workers", help="Number of writer threads for pipelined inserts"),
+    parallel_functions: bool = typer.Option(False, "--parallel-functions/--no-parallel-functions", help="Process function groups in parallel (experimental)"),
+    max_parallel_functions: Optional[int] = typer.Option(None, "--max-parallel-functions", help="Max parallel function groups (defaults to cpu_count - 2)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress updates"),
@@ -1695,6 +1697,9 @@ def features_compute(
                                 feature_batch_size=feature_batch_size,
                                 writer_workers=writer_workers,
                                 profile=profile,
+                                sync_commit=sync_commit,
+                                parallel_functions=parallel_functions,
+                                max_parallel_functions=max_parallel_functions,
                             )
 
                             inserted = result.get('summary', {}).get('total_inserted', 0)
