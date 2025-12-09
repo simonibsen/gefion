@@ -19,6 +19,12 @@ import inspect
 import psycopg
 from psycopg import sql
 
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 from g2.db.ingest import insert_computed_features
 
 
@@ -82,6 +88,32 @@ def compute_features(
     # Ensure fresh resolution per run (cache still used within this call)
     _FUNCTION_CACHE.clear()
     _FUNCTION_CACHE_SOURCE.clear()
+
+    # Memory safety check (if psutil available)
+    if PSUTIL_AVAILABLE:
+        try:
+            mem = psutil.virtual_memory()
+            available_gb = mem.available / (1024 ** 3)
+
+            # Warn if available memory is low
+            if available_gb < 2.0:
+                warnings.warn(
+                    f"Low memory warning: Only {available_gb:.1f} GB available. "
+                    f"Feature computation may fail or cause system slowdown. "
+                    f"Consider reducing --max-workers, --writer-workers, or --batch-size."
+                )
+
+            # Error if critically low (< 500 MB)
+            if available_gb < 0.5:
+                raise MemoryError(
+                    f"Critically low memory: Only {available_gb:.1f} GB available. "
+                    f"Cannot safely proceed with feature computation. "
+                    f"Free up memory and try again with lower settings."
+                )
+        except Exception as e:
+            # Don't fail on memory check errors, just warn
+            if not isinstance(e, MemoryError):
+                warnings.warn(f"Memory check failed: {e}")
 
     results: Dict[str, Any] = {}
     total_inserted = 0
