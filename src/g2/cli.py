@@ -1370,7 +1370,7 @@ def drop_features_cmd(
 
             # Execute the drop with progress indicator
             if data_only:
-                # Delete data only (can be done in batch)
+                # Delete data only (fast batch operation)
                 if not json_output and len(names) > 1:
                     emit(f"Deleting data for {len(names)} features...")
                 deleted = delete_feature_data_only(conn, names)
@@ -1385,12 +1385,20 @@ def drop_features_cmd(
                     json_output=json_output,
                 )
             else:
-                # Drop features one by one with progress
+                # Drop features in batches with progress
+                # Batch size balances performance vs progress visibility
+                batch_size = 10
                 total_deleted = 0
-                for i, name in enumerate(names, 1):
-                    if not json_output and len(names) > 1:
-                        emit(f"[{i}/{len(names)}] Dropping {name}...")
-                    deleted = drop_features(conn, [name])
+
+                if not json_output and len(names) > 1:
+                    emit(f"Dropping {len(names)} features in batches of {batch_size}...")
+
+                for i in range(0, len(names), batch_size):
+                    batch = names[i:i + batch_size]
+                    if not json_output and len(names) > batch_size:
+                        emit(f"[{i+1}-{min(i+batch_size, len(names))}/{len(names)}] Dropping batch...")
+
+                    deleted = drop_features(conn, batch)
                     total_deleted += deleted
 
                 emit(
