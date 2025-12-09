@@ -201,6 +201,15 @@ def compute_features(
         max_parallel = max_parallel_functions or max(2, num_cores - 2)
         max_parallel = min(max_parallel, len(grouped_by_function))  # Don't spawn more workers than groups
 
+        # Safety limit: cap at 4 workers to prevent resource exhaustion
+        # This prevents thread explosion when combined with writer_workers
+        if max_parallel > 4:
+            warnings.warn(
+                f"Limiting parallel_functions workers from {max_parallel} to 4 to prevent resource exhaustion. "
+                f"With writer_workers={writer_workers}, total threads would be {max_parallel * (1 + writer_workers)}."
+            )
+            max_parallel = 4
+
         with ThreadPoolExecutor(max_workers=max_parallel) as executor:
             # Submit all function groups for parallel execution
             future_to_func = {}
