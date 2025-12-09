@@ -492,8 +492,25 @@ def _load_db_function(conn: psycopg.Connection, function_name: str) -> Optional[
         warnings.warn(f"Ignoring feature_function '{function_name}' with unsupported language '{language}'")
         return None
 
+    # Create a safe __import__ that only allows whitelisted modules
+    SAFE_MODULES = {
+        'numpy', 'np', 'pandas', 'pd', 'datetime', 'math', 'statistics',
+        'talib', 'scipy', 'sklearn', 'json', 're', 'itertools', 'functools',
+        'operator', 'collections', 'typing'
+    }
+
+    # Capture the real __import__ before we override __builtins__
+    real_import = __builtins__['__import__'] if isinstance(__builtins__, dict) else __builtins__.__import__
+
+    def safe_import(name, *args, **kwargs):
+        """Only allow imports of safe, pre-approved modules."""
+        if name.split('.')[0] not in SAFE_MODULES:
+            raise ImportError(f"Import of '{name}' is not allowed for security reasons")
+        return real_import(name, *args, **kwargs)
+
     # Create a restricted execution environment to prevent malicious code
-    # Block dangerous built-ins: file I/O, imports, eval, exec, compile
+    # Block dangerous built-ins: file I/O, eval, exec, compile
+    # But allow safe imports via safe_import function
     safe_builtins = {
         # Type constructors
         'int': int,
@@ -537,21 +554,41 @@ def _load_db_function(conn: psycopg.Connection, function_name: str) -> Optional[
         'None': None,
         'True': True,
         'False': False,
+        # Safe import function (allows whitelisted modules only)
+        '__import__': safe_import,
     }
 
-    # Explicitly block dangerous operations
-    # By not including them in safe_builtins, they won't be accessible
-    # Blocked: open, __import__, eval, exec, compile, input, file, etc.
+    # Pre-import commonly needed modules for feature computations
+    # This avoids __import__ warnings while maintaining security
+    safe_modules = {}
+    try:
+        safe_modules['datetime'] = __import__('datetime')
+        safe_modules['np'] = __import__('numpy')
+        safe_modules['pd'] = __import__('pandas')
+        safe_modules['numpy'] = __import__('numpy')
+        safe_modules['pandas'] = __import__('pandas')
+    except ImportError:
+        pass  # Optional dependencies
+
+    # Try to import optional but common libraries
+    try:
+        safe_modules['talib'] = __import__('talib')
+    except ImportError:
+        pass
+
+    try:
+        safe_modules['scipy'] = __import__('scipy')
+    except ImportError:
+        pass
+
+    try:
+        safe_modules['sklearn'] = __import__('sklearn')
+    except ImportError:
+        pass
 
     safe_globals = {
         '__builtins__': safe_builtins,
-        # Pre-import commonly needed modules for feature computations
-        # This avoids __import__ warnings while maintaining security
-        'datetime': __import__('datetime'),
-        'np': __import__('numpy'),
-        'pd': __import__('pandas'),
-        'numpy': __import__('numpy'),
-        'pandas': __import__('pandas'),
+        **safe_modules,
     }
 
     local_env: Dict[str, Any] = {}
