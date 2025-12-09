@@ -1351,6 +1351,13 @@ def drop_features_cmd(
                 if not json_output:
                     action = "delete data for" if data_only else "completely drop"
                     emit(f"WARNING: About to {action} ALL {len(names)} features!")
+                    emit(f"Features: {', '.join(names[:5])}{' ...' if len(names) > 5 else ''}")
+
+                    # Interactive confirmation
+                    confirmation = input(f"\nType 'yes' to confirm: ").strip().lower()
+                    if confirmation != 'yes':
+                        emit("Operation cancelled.")
+                        return
 
             elif feature:
                 names = [n.strip() for n in feature.split(",") if n.strip()]
@@ -1361,8 +1368,11 @@ def drop_features_cmd(
                 emit_error("Must specify either --feature or --all", json_output=json_output)
                 return
 
-            # Execute the drop
+            # Execute the drop with progress indicator
             if data_only:
+                # Delete data only (can be done in batch)
+                if not json_output and len(names) > 1:
+                    emit(f"Deleting data for {len(names)} features...")
                 deleted = delete_feature_data_only(conn, names)
                 emit(
                     f"Deleted data for {len(names)} feature(s)",
@@ -1375,11 +1385,18 @@ def drop_features_cmd(
                     json_output=json_output,
                 )
             else:
-                deleted = drop_features(conn, names)
+                # Drop features one by one with progress
+                total_deleted = 0
+                for i, name in enumerate(names, 1):
+                    if not json_output and len(names) > 1:
+                        emit(f"[{i}/{len(names)}] Dropping {name}...")
+                    deleted = drop_features(conn, [name])
+                    total_deleted += deleted
+
                 emit(
                     f"Dropped {len(names)} feature(s)",
                     data={
-                        "deleted": deleted,
+                        "deleted": total_deleted,
                         "features": names,
                         "count": len(names)
                     },
