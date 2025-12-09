@@ -59,6 +59,8 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
         available_db_connections: Optional[int] = None,
         writer_workers: int = 2,
         user_max_writer_workers: Optional[int] = None,
+        batch_size: int = 2000,
+        user_max_batch_size: Optional[int] = None,
         memory_per_worker_mb: float = 125.0,
         memory_buffer_gb: float = 2.0,
         cpu_buffer: int = 2,
@@ -75,6 +77,8 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
             available_db_connections: Total DB connections available (None = no limit)
             writer_workers: Initial number of writer threads per worker
             user_max_writer_workers: User's max limit for writer workers (None = auto)
+            batch_size: Initial batch size for database operations
+            user_max_batch_size: User's max limit for batch size (None = auto)
             memory_per_worker_mb: Estimated memory per worker in MB
             memory_buffer_gb: Memory buffer to reserve for OS/other processes (GB)
             cpu_buffer: Number of CPU cores to reserve
@@ -88,6 +92,8 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
         self.available_db_connections = available_db_connections
         self.writer_workers = writer_workers
         self.user_max_writer_workers = user_max_writer_workers
+        self.batch_size = batch_size
+        self.user_max_batch_size = user_max_batch_size
         self.memory_per_worker_mb = memory_per_worker_mb
         self.memory_buffer_gb = memory_buffer_gb
         self.cpu_buffer = cpu_buffer
@@ -98,21 +104,23 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
         self.last_check_time = time.time()  # Initialize to current time
         self.last_resource_max = max_workers
         self.last_writer_workers = writer_workers
+        self.last_batch_size = batch_size
 
         # Do initial resource check
         self._update_resource_limits()
 
-    def _calculate_optimal_workers_and_writers(self) -> tuple[int, int]:
+    def _calculate_optimal_workers_and_writers(self) -> tuple[int, int, int]:
         """
-        Calculate optimal max workers and writer_workers based on current system resources.
+        Calculate optimal max workers, writer_workers, and batch_size based on current system resources.
 
         This performs an iterative optimization:
         1. Try different combinations of (max_workers, writer_workers)
         2. Find the combination that maximizes throughput while respecting resource limits
         3. Consider CPU, memory, and DB connection constraints
+        4. Calculate optimal batch_size based on available memory per worker
 
         Returns:
-            Tuple of (optimal_max_workers, optimal_writer_workers)
+            Tuple of (optimal_max_workers, optimal_writer_workers, optimal_batch_size)
         """
         # Start with baseline limits
         cpu_cores = multiprocessing.cpu_count()
@@ -177,16 +185,49 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
                 best_max_workers = max_workers_for_this_config
                 best_writer_workers = test_writers
 
-        return (best_max_workers, best_writer_workers)
+        # Calculate optimal batch_size based on available memory per worker
+        # Each batch uses approximately: batch_size × num_features × 8 bytes per value
+        # Assume average of 50 features and 8 bytes per value
+        # Memory per batch ≈ batch_size × 50 × 8 / 1024 / 1024 MB ≈ batch_size × 0.0004 MB
+        # With available memory per worker, calculate safe batch size
+        if PSUTIL_AVAILABLE:
+            try:
+                mem = psutil.virtual_memory()
+                available_gb = mem.available / (1024 ** 3)
+                usable_gb = max(0.5, available_gb - self.memory_buffer_gb)
+
+                # Allocate memory budget per worker
+                if best_max_workers > 0:
+                    memory_per_worker_gb = usable_gb / best_max_workers
+                    # Each batch row uses ~400 bytes (50 features × 8 bytes)
+                    # Leave headroom for computation (use 20% of worker memory for batches)
+                    batch_memory_gb = memory_per_worker_gb * 0.2
+                    optimal_batch_size = int((batch_memory_gb * 1024 * 1024 * 1024) / 400)
+
+                    # Clamp to reasonable range: 500 - 10000
+                    optimal_batch_size = max(500, min(optimal_batch_size, 10000))
+
+                    # Respect user's max if specified
+                    if self.user_max_batch_size is not None:
+                        optimal_batch_size = min(optimal_batch_size, self.user_max_batch_size)
+                else:
+                    optimal_batch_size = 2000  # Default fallback
+            except Exception:
+                optimal_batch_size = 2000  # Default on error
+        else:
+            # No psutil: use conservative default
+            optimal_batch_size = 2000
+
+        return (best_max_workers, best_writer_workers, optimal_batch_size)
 
     def _update_resource_limits(self) -> bool:
         """
-        Check current resources and update max_workers and writer_workers if needed.
+        Check current resources and update max_workers, writer_workers, and batch_size if needed.
 
         Returns:
             True if any limits changed, False otherwise
         """
-        optimal_max, optimal_writers = self._calculate_optimal_workers_and_writers()
+        optimal_max, optimal_writers, optimal_batch = self._calculate_optimal_workers_and_writers()
 
         changed = False
 
@@ -224,6 +265,20 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
 
             changed = True
 
+        # Check if batch_size changed
+        if optimal_batch != self.last_batch_size:
+            old_batch = self.last_batch_size
+            self.batch_size = optimal_batch
+            self.last_batch_size = optimal_batch
+
+            # Emit message about batch size scaling
+            if optimal_batch < old_batch:
+                self.emit(f"⚠️  Scaling down: batch size {old_batch} → {optimal_batch} (memory constraints)")
+            else:
+                self.emit(f"✓ Scaling up: batch size {old_batch} → {optimal_batch} (memory available)")
+
+            changed = True
+
         return changed
 
     def record_batch(self, errors: int) -> int:
@@ -255,6 +310,8 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
             "user_max": self.user_max_workers,
             "writer_workers": self.writer_workers,
             "user_max_writer_workers": self.user_max_writer_workers,
+            "batch_size": self.batch_size,
+            "user_max_batch_size": self.user_max_batch_size,
         }
 
         if PSUTIL_AVAILABLE:
@@ -277,3 +334,12 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
             Current number of writer workers per compute worker
         """
         return self.writer_workers
+
+    def get_batch_size(self) -> int:
+        """
+        Get current batch_size value.
+
+        Returns:
+            Current batch size for database operations
+        """
+        return self.batch_size

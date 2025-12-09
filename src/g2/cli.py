@@ -1610,15 +1610,22 @@ def features_compute(
             avail_tuple = get_available_connections(url)
             available = avail_tuple[0] if isinstance(avail_tuple, tuple) else None
 
-            # Reserve at least 5 connections (2 for main, 3 buffer)
-            budget = max(1, (available or 10) - 5) if available else 2
-
-            # Default to 2 workers (conservative) unless user specifies more
-            auto_workers = min(2, budget if budget > 0 else 2)
-            max_w = max(1, max_workers or auto_workers)
+            # If user specified max_workers, respect it as absolute limit
+            # Otherwise, let ResourceAwareAdaptiveLimiter calculate optimal based on resources
+            if max_workers is not None:
+                # User explicitly specified max_workers
+                max_w = max(1, max_workers)
+                user_specified_limit = True
+            else:
+                # No user specification - use a high default to let resource limiter decide
+                # Calculate reasonable upper bound based on DB connections
+                budget = max(1, (available or 100) - 5) if available else 50
+                max_w = min(budget, 50)  # Cap at 50 as reasonable upper bound
+                user_specified_limit = False
 
             if not json_output and progress:
-                emit(f"Available connections: {available or 'unknown'}, Max workers: {max_w}")
+                limit_type = "user-specified" if user_specified_limit else "auto (resource-based)"
+                emit(f"Available connections: {available or 'unknown'}, Max workers: {max_w} ({limit_type})")
 
             # Initialize connection pool to reuse prepared statements across symbols
             # Pool sizing: Each worker needs 1 main connection + writer_workers writer threads
@@ -1638,18 +1645,25 @@ def features_compute(
                 db_pool.init_pool(url, min_size=min_pool, max_size=max_pool, prepare_statements=True)
 
             # Adaptive worker scaling with resource awareness
-            # Start at a fraction of max to allow ramp-up
-            start_workers = max(1, min(max_w, max(2, (max_w + 1) // 2)))
+            # Start conservatively and let the limiter scale up based on actual resource availability
+            # ResourceAwareAdaptiveLimiter will:
+            # - Calculate optimal workers based on CPU, memory, and DB connections
+            # - Scale up when resources are available
+            # - Scale down when resources are constrained
+            # - Respect user's max_workers as absolute limit (if specified)
+            start_workers = 2  # Always start conservatively
 
             # Use resource-aware limiter for dynamic scaling based on system resources
             # This will periodically check CPU, memory, and DB connections
-            # and adjust max_workers and writer_workers accordingly
+            # and adjust max_workers, writer_workers, and batch_size accordingly
             limiter = ResourceAwareAdaptiveLimiter(
                 start_workers=start_workers,
-                max_workers=max_w,
+                max_workers=max_w,  # Either user-specified limit or calculated upper bound
                 available_db_connections=available,
                 writer_workers=writer_workers,
                 user_max_writer_workers=None,  # Allow auto-scaling of writer workers
+                batch_size=feature_batch_size,
+                user_max_batch_size=None,  # Allow auto-scaling of batch_size
                 check_interval_seconds=30.0,   # Check resources every 30 seconds
                 emit_func=emit if progress and not json_output else None,
             )
@@ -1701,8 +1715,9 @@ def features_compute(
 
                             data_id = row[0]
 
-                            # Get current writer_workers from limiter (dynamically scaled)
+                            # Get current dynamically-scaled values from limiter
                             current_writer_workers = limiter.get_writer_workers()
+                            current_batch_size = limiter.get_batch_size()
 
                             # Compute features via dispatcher
                             result = compute_features(
@@ -1713,7 +1728,7 @@ def features_compute(
                                 incremental=incremental,
                                 full_refresh=not incremental,
                                 update_existing=update_existing,
-                                feature_batch_size=feature_batch_size,
+                                feature_batch_size=current_batch_size,
                                 writer_workers=current_writer_workers,
                                 profile=profile,
                                 sync_commit=sync_commit,
@@ -1785,7 +1800,9 @@ def features_compute(
                 # Process stocks in batches with adaptive worker scaling
                 for batch_symbols in chunked(symbol_list, 50):
                     current_workers = limiter.value()
+                    current_batch_size = limiter.get_batch_size()
                     reporter.workers = current_workers
+                    reporter.batch_size = current_batch_size
 
                     prev_resource_errors = reporter.resource_errors
 
