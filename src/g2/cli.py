@@ -44,7 +44,7 @@ from g2.ingest.universe import (
 from g2.utils.progress import ProgressReporter
 from rich.live import Live
 from g2.utils.db_load import get_available_connections, plan_workers
-from g2.utils.adaptive import AdaptiveLimiter, chunked
+from g2.utils.adaptive import AdaptiveLimiter, ResourceAwareAdaptiveLimiter, chunked
 from typing import Dict, Any
 from g2.db import pool as db_pool
 
@@ -1622,21 +1622,37 @@ def features_compute(
 
             # Initialize connection pool to reuse prepared statements across symbols
             # Pool sizing: Each worker needs 1 main connection + writer_workers writer threads
-            # Total connections needed = max_workers * (1 + writer_workers) + buffer
+            # With dynamic scaling, writer_workers can increase, so size pool generously
+            # Use max possible writer_workers (8) for pool sizing calculation
             pool_needed = db_pool.get_pool() is None
             if pool_needed:
+                # Conservative pool size that allows for dynamic writer_workers scaling
+                max_possible_writers = 8  # Reasonable upper bound
                 min_pool = max(2, writer_workers)
-                buffer = 2
-                # Fix: Account for writer threads PER worker, not total
+                buffer = 5  # Increased buffer for safety
+                # Calculate pool size assuming max_workers and max_possible_writers
                 max_pool = max(
-                    max_w * (1 + writer_workers) + buffer,
+                    max_w * (1 + max_possible_writers) + buffer,
                     min_pool + buffer
                 )
                 db_pool.init_pool(url, min_size=min_pool, max_size=max_pool, prepare_statements=True)
 
-            # Adaptive worker scaling (start at a fraction of max to allow ramp-up)
+            # Adaptive worker scaling with resource awareness
+            # Start at a fraction of max to allow ramp-up
             start_workers = max(1, min(max_w, max(2, (max_w + 1) // 2)))
-            limiter = AdaptiveLimiter(start_workers=start_workers, max_workers=max_w)
+
+            # Use resource-aware limiter for dynamic scaling based on system resources
+            # This will periodically check CPU, memory, and DB connections
+            # and adjust max_workers and writer_workers accordingly
+            limiter = ResourceAwareAdaptiveLimiter(
+                start_workers=start_workers,
+                max_workers=max_w,
+                available_db_connections=available,
+                writer_workers=writer_workers,
+                user_max_writer_workers=None,  # Allow auto-scaling of writer workers
+                check_interval_seconds=30.0,   # Check resources every 30 seconds
+                emit_func=emit if progress and not json_output else None,
+            )
 
             total_inserted = 0
             errors = []
@@ -1685,6 +1701,9 @@ def features_compute(
 
                             data_id = row[0]
 
+                            # Get current writer_workers from limiter (dynamically scaled)
+                            current_writer_workers = limiter.get_writer_workers()
+
                             # Compute features via dispatcher
                             result = compute_features(
                                 worker_conn,
@@ -1695,7 +1714,7 @@ def features_compute(
                                 full_refresh=not incremental,
                                 update_existing=update_existing,
                                 feature_batch_size=feature_batch_size,
-                                writer_workers=writer_workers,
+                                writer_workers=current_writer_workers,
                                 profile=profile,
                                 sync_commit=sync_commit,
                                 parallel_functions=parallel_functions,
