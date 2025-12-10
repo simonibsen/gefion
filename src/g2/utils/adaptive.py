@@ -203,9 +203,11 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
                 if total_threads > self.max_total_threads:
                     max_workers_for_this_config = max(1, self.max_total_threads // (1 + test_writers))
 
-            # Score this configuration: max_workers * writer_workers
-            # This approximates throughput (parallel stocks * parallel writes per stock)
-            score = max_workers_for_this_config * test_writers
+            # Score this configuration: heavily prefer more workers
+            # More workers = more parallel stock processing (primary bottleneck)
+            # More writer_workers = faster writes per stock (secondary optimization)
+            # Weight workers 10x more than writer_workers to prefer parallelism
+            score = max_workers_for_this_config * 10 + test_writers
 
             if score > best_score:
                 best_score = score
