@@ -1682,11 +1682,12 @@ def features_compute(
             # This will periodically check CPU, memory, and DB connections
             # and adjust max_workers, writer_workers, and batch_size accordingly
 
-            # Calculate conservative hard limit on total threads to prevent system hang
-            # Allow up to 1.5x CPU count in total threads (workers + writer threads)
+            # Calculate hard limit on total threads to prevent system hang
+            # Allow up to 2x CPU count in total threads (workers + writer threads)
+            # This matches the previous behavior but now with emergency brake protection
             import multiprocessing
             cpu_count = multiprocessing.cpu_count()
-            max_total_threads = max(4, int(cpu_count * 1.5))  # At least 4, but scale with CPUs
+            max_total_threads = max(4, int(cpu_count * 2))  # At least 4, but scale with CPUs
 
             limiter = ResourceAwareAdaptiveLimiter(
                 start_workers=start_workers,
