@@ -215,11 +215,26 @@ def compute_features(
                                 evt.set()
                         except Exception as exc:
                             writer_errors.append(exc)
+                            # Still set the event even on error to avoid deadlock
+                            evt = item.get("event")
+                            if evt:
+                                evt.set()
                         finally:
                             write_queue.task_done()
             except Exception as exc:
-                # Connection acquisition failure
+                # Connection acquisition failure - critical error
+                # Drain the queue and set all events to prevent deadlock
                 writer_errors.append(exc)
+                try:
+                    while True:
+                        item = write_queue.get_nowait()
+                        if item is not stop_token:
+                            evt = item.get("event")
+                            if evt:
+                                evt.set()
+                        write_queue.task_done()
+                except queue.Empty:
+                    pass
 
         for _ in range(writer_workers):
             t = threading.Thread(target=writer_loop, daemon=True)
