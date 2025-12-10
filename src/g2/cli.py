@@ -650,16 +650,21 @@ def db_tune(
     compress_after_days: int = typer.Option(
         60, help="Add compression policy for chunks older than this many days (set to 0 to skip)"
     ),
+    show_chunk_ranges: bool = typer.Option(False, "--show-chunk-ranges", help="Display current chunk date ranges"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
     Apply Timescale tuning: set chunk intervals and optional compression policies.
     Safe to re-run; ignores missing tables.
     """
+    from g2.utils.timescale import get_chunk_date_range
+
     url = _db_url(db_url)
     tables = ["stock_ohlcv", "computed_features"]
     applied = {"chunk_interval": [], "compression": []}
     status = {}
+    chunk_ranges = {}
+
     try:
         with psycopg.connect(url) as conn:
             conn.autocommit = True
@@ -671,6 +676,18 @@ def db_tune(
                     if not exists:
                         status[t] = table_result
                         continue
+
+                    # Get chunk date range for this table
+                    if show_chunk_ranges or True:  # Always collect for reporting
+                        min_date, max_date = get_chunk_date_range(conn, t)
+                        if min_date and max_date:
+                            chunk_ranges[t] = {
+                                "min_date": min_date.isoformat(),
+                                "max_date": max_date.isoformat()
+                            }
+                        else:
+                            chunk_ranges[t] = {"min_date": None, "max_date": None}
+
                     try:
                         cur.execute(
                             "SELECT set_chunk_time_interval(%s, %s::interval);",
@@ -722,9 +739,17 @@ def db_tune(
     except Exception as exc:
         emit_error(f"DB tune failed: {exc}", json_output=json_output)
         return
+
+    result_data = {
+        "chunk_interval": applied["chunk_interval"],
+        "compression": applied["compression"],
+        "table_status": status,
+        "chunk_ranges": chunk_ranges
+    }
+
     emit(
         "DB tuning applied",
-        data={"chunk_interval": applied["chunk_interval"], "compression": applied["compression"], "table_status": status},
+        data=result_data,
         json_output=json_output,
     )
 
@@ -1656,6 +1681,13 @@ def features_compute(
             # Use resource-aware limiter for dynamic scaling based on system resources
             # This will periodically check CPU, memory, and DB connections
             # and adjust max_workers, writer_workers, and batch_size accordingly
+
+            # Calculate conservative hard limit on total threads to prevent system hang
+            # Allow up to 1.5x CPU count in total threads (workers + writer threads)
+            import multiprocessing
+            cpu_count = multiprocessing.cpu_count()
+            max_total_threads = max(4, int(cpu_count * 1.5))  # At least 4, but scale with CPUs
+
             limiter = ResourceAwareAdaptiveLimiter(
                 start_workers=start_workers,
                 max_workers=max_w,  # Either user-specified limit or calculated upper bound
@@ -1666,6 +1698,9 @@ def features_compute(
                 user_max_batch_size=None,  # Allow auto-scaling of batch_size
                 check_interval_seconds=30.0,   # Check resources every 30 seconds
                 emit_func=emit if progress and not json_output else None,
+                max_total_threads=max_total_threads,  # Hard limit to prevent thread explosion
+                min_memory_threshold_gb=2.0,  # Emergency brake if memory drops below 2GB
+                enable_emergency_brake=True,  # Enable automatic emergency scaling down
             )
 
             total_inserted = 0
