@@ -62,11 +62,16 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
         batch_size: int = 2000,
         user_max_batch_size: Optional[int] = None,
         memory_per_worker_mb: float = 125.0,
-        memory_buffer_gb: float = 2.0,
-        cpu_buffer: int = 2,
-        db_buffer: int = 5,
+        memory_buffer_gb: float = 4.0,  # Increased from 2.0 for safety
+        cpu_buffer: int = 4,  # Increased from 2 for safety
+        db_buffer: int = 10,  # Increased from 5 for safety
         check_interval_seconds: float = 30.0,
         emit_func: Optional[Callable[[str], None]] = None,
+        max_error_rate: float = 0.5,  # Stop scaling if error rate exceeds 50%
+        error_window_size: int = 10,  # Track last N batches for error rate
+        max_total_threads: Optional[int] = None,  # Hard limit on total threads
+        min_memory_threshold_gb: float = 2.0,  # Emergency brake if memory below this
+        enable_emergency_brake: bool = True,  # Enable automatic emergency scaling down
     ):
         """
         Initialize resource-aware adaptive limiter.
@@ -85,6 +90,11 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
             db_buffer: Number of DB connections to reserve
             check_interval_seconds: How often to check resources
             emit_func: Function to call for outputting messages (e.g., progress.emit)
+            max_error_rate: Maximum acceptable error rate before stopping scale-up
+            error_window_size: Number of recent batches to track for error rate
+            max_total_threads: Hard limit on total threads (workers + writers), None = auto
+            min_memory_threshold_gb: Emergency brake threshold - stop if memory below this
+            enable_emergency_brake: Enable automatic emergency scaling down on resource pressure
         """
         super().__init__(start_workers, max_workers)
 
@@ -100,6 +110,17 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
         self.db_buffer = db_buffer
         self.check_interval = check_interval_seconds
         self.emit = emit_func or (lambda msg: None)
+
+        # Error tracking for circuit breaker
+        self.max_error_rate = max_error_rate
+        self.error_window_size = error_window_size
+        self.recent_errors: list[int] = []  # Track error counts per batch
+
+        # Emergency brake settings
+        self.max_total_threads = max_total_threads
+        self.min_memory_threshold_gb = min_memory_threshold_gb
+        self.enable_emergency_brake = enable_emergency_brake
+        self.emergency_brake_triggered = False
 
         self.last_check_time = time.time()  # Initialize to current time
         self.last_resource_max = max_workers
@@ -175,6 +196,12 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
             if total_threads > available_cpus * 2:  # Allow 2x oversubscription
                 # Scale back max_workers to fit CPU constraint
                 max_workers_for_this_config = max(1, available_cpus * 2 // (1 + test_writers))
+
+            # Hard limit on total threads if specified
+            if self.max_total_threads is not None:
+                total_threads = max_workers_for_this_config * (1 + test_writers)
+                if total_threads > self.max_total_threads:
+                    max_workers_for_this_config = max(1, self.max_total_threads // (1 + test_writers))
 
             # Score this configuration: max_workers * writer_workers
             # This approximates throughput (parallel stocks * parallel writes per stock)
@@ -287,7 +314,60 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
 
         This is called after each batch, so it's a good place to periodically
         check resources without adding a separate monitoring thread.
+
+        Also tracks error rate and prevents scale-up if errors are too high.
         """
+        # Emergency brake: check memory pressure
+        if self.enable_emergency_brake and PSUTIL_AVAILABLE:
+            try:
+                mem = psutil.virtual_memory()
+                available_gb = mem.available / (1024 ** 3)
+
+                if available_gb < self.min_memory_threshold_gb:
+                    if not self.emergency_brake_triggered:
+                        self.emergency_brake_triggered = True
+                        self.emit(
+                            f"🚨 EMERGENCY BRAKE: Available memory critically low ({available_gb:.2f} GB). "
+                            f"Scaling down to minimum workers to prevent system crash."
+                        )
+
+                    # Emergency scale-down to 1 worker
+                    if self.current > 1:
+                        self.current = 1
+                        self.emit(f"   Emergency: Reduced to {self.current} worker")
+
+                    # Don't allow scale-up while emergency brake is active
+                    return self.current
+                else:
+                    # Reset emergency brake if memory recovers
+                    if self.emergency_brake_triggered:
+                        self.emergency_brake_triggered = False
+                        self.emit(f"✓ Emergency brake released. Memory recovered to {available_gb:.2f} GB")
+            except Exception:
+                pass  # Fail silently if psutil fails
+
+        # Track errors for circuit breaker
+        self.recent_errors.append(errors)
+        if len(self.recent_errors) > self.error_window_size:
+            self.recent_errors.pop(0)
+
+        # Calculate error rate
+        if len(self.recent_errors) >= 3:  # Need at least 3 batches
+            total_errors = sum(self.recent_errors)
+            error_rate = total_errors / len(self.recent_errors)
+
+            # If error rate is too high, prevent scale-up
+            if error_rate > self.max_error_rate:
+                if self.current > 1:
+                    old_workers = self.current
+                    self.current = max(1, self.current // 2)
+                    self.emit(
+                        f"⚠️  High error rate detected ({error_rate:.1f} errors/batch). "
+                        f"Scaling down from {old_workers} to {self.current} workers."
+                    )
+                # Don't scale up - return current without calling parent
+                return self.current
+
         # Check if it's time to re-evaluate resources
         current_time = time.time()
         if current_time - self.last_check_time >= self.check_interval:
@@ -304,6 +384,8 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
         Returns:
             Dictionary with resource usage info
         """
+        total_threads = self.current * (1 + self.writer_workers)
+
         info = {
             "current_workers": self.current,
             "max_workers": self.max_workers,
@@ -312,17 +394,29 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
             "user_max_writer_workers": self.user_max_writer_workers,
             "batch_size": self.batch_size,
             "user_max_batch_size": self.user_max_batch_size,
+            "total_threads": total_threads,
+            "max_total_threads": self.max_total_threads,
+            "emergency_brake_triggered": self.emergency_brake_triggered,
         }
 
         if PSUTIL_AVAILABLE:
             try:
                 mem = psutil.virtual_memory()
                 cpu_percent = psutil.cpu_percent(interval=0.1)
-                info["memory_available_gb"] = mem.available / (1024 ** 3)
+                available_gb = mem.available / (1024 ** 3)
+                info["memory_available_gb"] = available_gb
                 info["memory_percent_used"] = mem.percent
                 info["cpu_percent"] = cpu_percent
+                info["memory_critical"] = available_gb < self.min_memory_threshold_gb
             except Exception:
                 pass
+
+        # Add error rate info
+        if len(self.recent_errors) >= 3:
+            total_errors = sum(self.recent_errors)
+            error_rate = total_errors / len(self.recent_errors)
+            info["error_rate"] = error_rate
+            info["high_error_rate"] = error_rate > self.max_error_rate
 
         return info
 

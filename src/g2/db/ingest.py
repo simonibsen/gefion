@@ -688,6 +688,35 @@ def insert_computed_features(
     if not prepared:
         return 0
 
+    # Ensure chunks exist for the date range we're about to insert
+    # This prevents "chunk not found" errors by creating missing chunks automatically
+    from g2.utils.timescale import ensure_chunks_for_date_range
+    try:
+        # Find the date range of data we're inserting
+        dates = [dt for _, _, dt, _, _ in prepared]
+        if dates:
+            min_date = min(dates)
+            max_date = max(dates)
+
+            # Add a small buffer to ensure we cover the full range
+            from datetime import timedelta
+            buffer = timedelta(days=1)
+
+            # Ensure chunks exist for this date range
+            # This will create chunks if they don't exist, preventing insert errors
+            ensure_chunks_for_date_range(
+                conn,
+                "computed_features",
+                min_date - buffer,
+                max_date + buffer,
+                chunk_interval_days=30
+            )
+    except Exception as e:
+        # If chunk creation fails, log but continue with insert
+        # The insert might still succeed if chunks already exist
+        import warnings
+        warnings.warn(f"Failed to ensure chunks before insert: {e}")
+
     chunk_size = max(1, batch_size)
     total = 0
 
