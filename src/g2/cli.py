@@ -1714,6 +1714,7 @@ def features_compute(
             reporter.mode = "dispatcher"
             reporter.workers = start_workers
             reporter.max_workers = max_w
+            reporter.writer_workers = writer_workers
             reporter.batch_size = feature_batch_size
             live: Optional[Live] = None
             if progress and not json_output:
@@ -1836,8 +1837,12 @@ def features_compute(
                 # Process stocks in batches with adaptive worker scaling
                 for batch_symbols in chunked(symbol_list, 50):
                     current_workers = limiter.value()
+                    current_max_workers = limiter.max_workers
+                    current_writer_workers = limiter.get_writer_workers()
                     current_batch_size = limiter.get_batch_size()
                     reporter.workers = current_workers
+                    reporter.max_workers = current_max_workers
+                    reporter.writer_workers = current_writer_workers
                     reporter.batch_size = current_batch_size
 
                     prev_resource_errors = reporter.resource_errors
