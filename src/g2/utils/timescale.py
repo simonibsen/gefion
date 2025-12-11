@@ -278,14 +278,18 @@ def create_chunks_for_date_range(
                         (data_id, chunk_start, "__chunk_creation__")
                     )
 
-            conn.commit()
+            # Only commit if not in autocommit mode
+            if not conn.autocommit:
+                conn.commit()
             created += 1
             chunk_ranges.append(f"{chunk_start.isoformat()} to {chunk_end.isoformat()}")
 
         except Exception as e:
             # If chunk creation fails, log but continue
             warnings.warn(f"Failed to create chunk for {chunk_start}: {e}")
-            conn.rollback()
+            # Only rollback if not in autocommit mode
+            if not conn.autocommit:
+                conn.rollback()
 
     return created, chunk_ranges
 
