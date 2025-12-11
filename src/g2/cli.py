@@ -1900,14 +1900,32 @@ def features_compute(
                         output["timing"] = {k: round(v, 6) for k, v in timings_totals.items()}
                 emit_json(output)
             else:
-                emit(f"\nTotal: {total_inserted} rows inserted across {len(symbol_list)} stocks (batch_size={feature_batch_size})")
+                # Summary with colors
+                console = Console()
+                console.print()
+                console.print(f"[bold green]✓[/bold green] Total: [cyan]{total_inserted:,}[/cyan] rows inserted across [cyan]{len(symbol_list)}[/cyan] stocks (batch_size={feature_batch_size})")
+
                 if profile and profiles:
                     slowest = sorted(profiles, key=lambda p: p.get("duration_sec", 0), reverse=True)[:5]
-                    emit("Profile (top 5 by duration):")
+                    console.print("\n[bold]Profile (top 5 by duration):[/bold]")
                     for p in slowest:
-                        emit(f"  {p['symbol']}: {p.get('duration_sec', 0):.3f}s, inserted={p.get('inserted', 0)}")
+                        console.print(f"  [yellow]{p['symbol']}[/yellow]: {p.get('duration_sec', 0):.3f}s, inserted={p.get('inserted', 0):,}")
+
                 if errors:
-                    emit(f"Errors: {len(errors)}")
+                    # Count complete failures vs partial failures
+                    complete_failures = sum(1 for e in errors if "error" in e and e["error"])
+                    partial_failures = len(errors) - complete_failures
+
+                    if complete_failures > 0:
+                        console.print(f"\n[bold red]✗[/bold red] Complete failures: [red]{complete_failures}[/red] stocks failed to process")
+
+                    if partial_failures > 0:
+                        console.print(f"[bold yellow]⚠[/bold yellow]  Feature errors: [yellow]{partial_failures}[/yellow] stocks had some features fail (but data was inserted)")
+
+                    if partial_failures > 0 and complete_failures == 0:
+                        console.print(f"[dim]   (These stocks processed successfully but some individual features had errors)[/dim]")
+                else:
+                    console.print(f"[bold green]✓[/bold green] No errors!")
 
     except Exception as exc:
         emit_error(f"Computation failed: {exc}", json_output=json_output)
