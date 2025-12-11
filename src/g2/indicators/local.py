@@ -16,7 +16,7 @@ def _rsi(series: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
     rs = avg_gain / avg_loss.replace(0, pd.NA)
     rsi = 100 - (100 / (1 + rs))
-    rsi = pd.to_numeric(rsi, errors="coerce").fillna(100.0)
+    rsi = pd.to_numeric(rsi, errors="coerce").fillna(100.0).infer_objects(copy=False)
     return rsi
 
 
@@ -94,7 +94,7 @@ def compute_indicators(
     df = df.dropna(subset=["close", "adjusted_close"], how="all")
     if df.empty:
         return ([], []) if return_failures else []
-    close = df["adjusted_close"].fillna(df["close"])
+    close = df["adjusted_close"].fillna(df["close"]).infer_objects(copy=False)
     high = df.get("high")
     low = df.get("low")
 
@@ -137,7 +137,7 @@ def compute_indicators(
         down_move = -low.diff()
         plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
         minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
-        tr = (high.combine(low, max) - low.combine(high, min)).fillna(0)
+        tr = (high.combine(low, max) - low.combine(high, min)).fillna(0).infer_objects(copy=False)
         tr_sum = tr.rolling(14, min_periods=14).sum()
         tr_sum = tr_sum.replace(0, pd.NA)
         plus_di = 100 * (plus_dm.rolling(14, min_periods=14).sum() / tr_sum)
@@ -188,7 +188,7 @@ def compute_indicators(
             return
         if high.notna().sum() < 2 or low.notna().sum() < 2:
             return
-        df["psar"] = _psar(high.ffill(), low.ffill())
+        df["psar"] = _psar(high.ffill().infer_objects(copy=False), low.ffill().infer_objects(copy=False))
 
     # Dispatch table mapping indicator names to computation functions
     indicator_dispatch = {
