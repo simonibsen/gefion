@@ -204,6 +204,16 @@ def ingest_indicators_for_symbols(
                     outputsize = decide_outputsize(conn, data_id, timeframe)
                     last_ind = latest_indicator_date(conn, data_id)
 
+                    # Skip if indicators are already up-to-date (unless explicitly refreshing)
+                    if not refresh and not update_existing and last_ind is not None:
+                        from datetime import date
+                        days_old = (date.today() - last_ind).days
+                        # If indicator data is from today or yesterday, skip
+                        if days_old <= 1:
+                            if progress:
+                                progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "up-to-date", "latest": str(last_ind)})
+                            return
+
                 if compute_locally:
                     with psycopg.connect(db_url) as conn:
                         cur = conn.cursor()
