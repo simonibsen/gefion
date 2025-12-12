@@ -143,8 +143,25 @@ def ingest_prices_for_symbols(
     timeframe: str = "auto",
     update_existing: bool = False,
     progress: Optional[ProgressReporter] = None,
+    status: Optional[str] = "Active",
 ) -> int:
-    """Fetch and ingest prices for symbols in parallel."""
+    """
+    Fetch and ingest prices for symbols in parallel.
+
+    Args:
+        db_url: Database connection URL
+        client: AlphaVantage API client
+        symbols: List of symbols to ingest
+        max_workers: Number of parallel API fetch workers
+        writer_workers: Number of parallel database writer workers
+        timeframe: Timeframe for fetching data ('auto', 'full', or 'compact')
+        update_existing: Whether to update existing price data
+        progress: Optional progress reporter
+        status: Stock status to set (defaults to 'Active'). Set to None to not update status.
+
+    Returns:
+        Total number of rows inserted
+    """
     inserted_total = 0
 
     fetch_count = 0
@@ -165,7 +182,7 @@ def ingest_prices_for_symbols(
         nonlocal fetch_count
         try:
             with psycopg.connect(db_url) as conn:
-                data_id = upsert_stock(conn, sym)
+                data_id = upsert_stock(conn, sym, status=status)
 
                 if timeframe == "auto":
                     outputsize = decide_outputsize(conn, data_id, timeframe)
@@ -216,7 +233,7 @@ def ingest_prices_for_symbols(
                 if item is writer_done:
                     break
                 sym, rows, outputsize = item
-                data_id = upsert_stock(conn, sym)
+                data_id = upsert_stock(conn, sym, status=status)
                 try:
                     retries = 0
                     backoff = 0.1

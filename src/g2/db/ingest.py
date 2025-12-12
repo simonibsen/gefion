@@ -10,20 +10,43 @@ from psycopg import errors
 from psycopg.types.json import Json
 
 
-def upsert_stock(conn: psycopg.Connection, symbol: str) -> int:
-    """Insert symbol into stocks if missing; return id."""
+def upsert_stock(conn: psycopg.Connection, symbol: str, status: Optional[str] = None) -> int:
+    """
+    Insert or update symbol in stocks table; return id.
+
+    Args:
+        conn: Database connection
+        symbol: Stock symbol
+        status: Optional status (e.g., 'Active', 'Inactive'). If None, status is not updated.
+
+    Returns:
+        Stock ID
+    """
     with conn.cursor() as cur:
-        # Try insert first - returns ID if successful
-        cur.execute(
-            "INSERT INTO stocks (symbol) VALUES (%s) ON CONFLICT (symbol) DO NOTHING RETURNING id",
-            (symbol,),
-        )
-        row = cur.fetchone()
-        if row:
-            return row[0]
-        # If insert was skipped (conflict), fetch existing ID
-        cur.execute("SELECT id FROM stocks WHERE symbol = %s", (symbol,))
-        return cur.fetchone()[0]
+        if status is not None:
+            # Insert with status, or update status on conflict
+            cur.execute(
+                """
+                INSERT INTO stocks (symbol, status)
+                VALUES (%s, %s)
+                ON CONFLICT (symbol) DO UPDATE SET status = EXCLUDED.status
+                RETURNING id
+                """,
+                (symbol, status),
+            )
+            return cur.fetchone()[0]
+        else:
+            # Insert without status (leaves it NULL), or do nothing on conflict
+            cur.execute(
+                "INSERT INTO stocks (symbol) VALUES (%s) ON CONFLICT (symbol) DO NOTHING RETURNING id",
+                (symbol,),
+            )
+            row = cur.fetchone()
+            if row:
+                return row[0]
+            # If insert was skipped (conflict), fetch existing ID
+            cur.execute("SELECT id FROM stocks WHERE symbol = %s", (symbol,))
+            return cur.fetchone()[0]
 
 
 def latest_price_date(conn: psycopg.Connection, data_id: int) -> Optional[date]:
@@ -60,6 +83,7 @@ def filter_symbols_needing_update(
 
     # Build query to get latest price date for each symbol
     # Use LEFT JOIN to include symbols that don't exist or have no prices
+    # Exclude symbols with status='Inactive' (delisted/dead tickers)
     with conn.cursor() as cur:
         # Create a temporary table with the input symbols for efficient joining
         placeholders = ",".join(["%s"] * len(symbols))
@@ -74,6 +98,7 @@ def filter_symbols_needing_update(
             FROM input_symbols
             LEFT JOIN stocks s ON s.symbol = input_symbols.symbol
             LEFT JOIN stock_ohlcv sp ON sp.data_id = s.id
+            WHERE s.id IS NULL OR s.status IS DISTINCT FROM 'Inactive'
             GROUP BY input_symbols.symbol
             ORDER BY input_symbols.symbol
             """,
@@ -376,10 +401,14 @@ def filter_symbols_needing_indicators(
 
     with conn.cursor() as cur:
         # Query to find symbols with stale or missing indicator data
+        # Exclude symbols with status='Inactive' (delisted/dead tickers)
         cur.execute(
             """
             WITH symbol_ids AS (
-                SELECT id, symbol FROM stocks WHERE symbol = ANY(%s)
+                SELECT s.id, s.symbol
+                FROM stocks s
+                WHERE s.symbol = ANY(%s)
+                  AND s.status IS DISTINCT FROM 'Inactive'
             ),
             latest_indicators AS (
                 SELECT
