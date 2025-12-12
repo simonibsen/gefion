@@ -12,6 +12,8 @@ from g2.cli_helpers import (
     upsert_feature_function,
     setup_progress_reporter,
     validate_date_range,
+    db_connection,
+    init_schema_tables,
 )
 from g2.db import schema
 
@@ -331,3 +333,87 @@ class TestValidateDateRange:
 
         assert before is None
         assert after is None
+
+
+class TestDBConnection:
+    """Test database connection helper."""
+
+    def test_connection_with_default_url(self):
+        """Test connection using default DATABASE_URL."""
+        with db_connection(None) as conn:
+            assert conn is not None
+            assert not conn.closed
+            # Verify autocommit is on by default
+            assert conn.autocommit is True
+
+    def test_connection_with_custom_url(self):
+        """Test connection with custom URL."""
+        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        with db_connection(url) as conn:
+            assert conn is not None
+            assert not conn.closed
+
+    def test_connection_closes_on_exit(self):
+        """Test that connection closes when exiting context."""
+        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        with db_connection(url) as conn:
+            assert not conn.closed
+        # Connection should be closed after exiting context
+        assert conn.closed
+
+    def test_connection_with_autocommit_disabled(self):
+        """Test connection with autocommit disabled."""
+        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        with db_connection(url, autocommit=False) as conn:
+            assert conn.autocommit is False
+
+
+class TestInitSchemaTables:
+    """Test schema initialization helper."""
+
+    def test_init_single_table(self):
+        """Test initializing a single table."""
+        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        with db_connection(url) as conn:
+            init_schema_tables(conn, ["stocks"])
+            # Verify stocks table exists
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = 'stocks'
+                    )
+                """)
+                exists = cur.fetchone()[0]
+                assert exists is True
+
+    def test_init_multiple_tables(self):
+        """Test initializing multiple tables."""
+        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        with db_connection(url) as conn:
+            init_schema_tables(conn, ["stocks", "feature_functions"])
+            # Verify both tables exist
+            with conn.cursor() as cur:
+                for table in ["stocks", "feature_functions"]:
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_schema = 'public' AND table_name = %s
+                        )
+                    """, (table,))
+                    exists = cur.fetchone()[0]
+                    assert exists is True, f"Table {table} should exist"
+
+    def test_init_with_empty_list(self):
+        """Test that empty list doesn't cause errors."""
+        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        with db_connection(url) as conn:
+            # Should not raise any errors
+            init_schema_tables(conn, [])
+
+    def test_init_with_unknown_table_raises_error(self):
+        """Test that unknown table name raises appropriate error."""
+        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        with db_connection(url) as conn:
+            with pytest.raises(ValueError, match="Unknown table"):
+                init_schema_tables(conn, ["nonexistent_table_xyz"])
