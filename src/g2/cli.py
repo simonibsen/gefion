@@ -191,6 +191,84 @@ def _export_feature_definitions(conn, names: Optional[List[str]] = None) -> list
     return data
 
 
+def export_functions_to_directory(
+    conn,
+    directory: Path,
+    function_names: Optional[List[str]] = None
+) -> int:
+    """
+    Export feature functions to individual JSON files in a directory.
+
+    Args:
+        conn: Database connection
+        directory: Target directory for exports (created if doesn't exist)
+        function_names: Optional list of specific function names to export
+
+    Returns:
+        Number of functions exported
+    """
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    # Get functions from database
+    functions = _export_feature_functions(conn, function_names)
+
+    # Write each function to its own file
+    for func in functions:
+        # Filename format: functionname_vX.Y.json
+        name = func["name"]
+        version = func["version"]
+        filename = f"{name}_v{version}.json"
+        filepath = directory / filename
+
+        filepath.write_text(json.dumps(func, indent=2))
+
+    return len(functions)
+
+
+def import_functions_from_directory(
+    conn,
+    directory: Path,
+    function_names: Optional[List[str]] = None
+) -> int:
+    """
+    Import feature functions from JSON files in a directory.
+
+    Args:
+        conn: Database connection
+        directory: Source directory containing JSON files
+        function_names: Optional list of specific function names to import
+
+    Returns:
+        Number of functions imported
+    """
+    directory = Path(directory)
+    if not directory.exists():
+        return 0
+
+    # Find all JSON files in directory
+    json_files = list(directory.glob("*.json"))
+
+    imported_count = 0
+    for json_file in json_files:
+        try:
+            payload = json.loads(json_file.read_text())
+
+            # Skip if filtering by names and this isn't in the list
+            if function_names and payload.get("name") not in function_names:
+                continue
+
+            # Upsert the function (idempotent)
+            _upsert_feature_function(conn, payload)
+            imported_count += 1
+
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            # Skip invalid JSON files or files missing required fields
+            continue
+
+    return imported_count
+
+
 def _parse_date_or_error(val: Optional[str], json_output: Optional[bool]):
     if val is None:
         return None
@@ -1095,35 +1173,27 @@ def register_feature(
 
 @app.command("features-export")
 def features_export(
-    dir: Path = typer.Option(..., "--dir", help="Directory to write feature data"),
+    dir: Optional[Path] = typer.Option(None, "--dir", help="Directory to write feature files (default: feature-functions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
-    functions: Optional[str] = typer.Option(None, "--functions", help="Comma list of function names to export"),
-    features: Optional[str] = typer.Option(None, "--features", help="Comma list of feature names to export"),
+    functions: Optional[str] = typer.Option(None, "--functions", help="Comma-separated list of function names to export"),
 ) -> None:
     """
-    Export feature_functions and feature_definitions to JSON files for source control.
+    Export feature_functions to individual JSON files (one per function).
+
+    By default, exports all functions to the 'feature-functions/' directory.
+    Each function is saved as <name>_v<version>.json.
     """
+    target_dir = Path(dir) if dir else Path("feature-functions")
     fx_filter = [s.strip() for s in functions.split(",")] if functions else None
-    feat_filter = [s.strip() for s in features.split(",")] if features else None
-    target_dir = Path(dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
     url = _db_url(db_url)
+
     try:
-        # Export functions
         with psycopg.connect(url) as conn:
             conn.autocommit = True
             schema.create_feature_functions_table(conn)
-            functions_data = _export_feature_functions(conn, fx_filter)
+            exported_count = export_functions_to_directory(conn, target_dir, fx_filter)
 
-        # Export definitions
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_definitions_table(conn)
-            definitions = _export_feature_definitions(conn, feat_filter)
-
-        (target_dir / "feature_functions.json").write_text(json.dumps(functions_data, indent=2))
-        (target_dir / "feature_definitions.json").write_text(json.dumps(definitions, indent=2))
-        emit(f"Exported {len(functions_data)} functions and {len(definitions)} definitions to {target_dir}")
+        emit(f"Exported {exported_count} function(s) to {target_dir}")
     except Exception as exc:
         emit_error(f"Export failed: {exc}")
 
@@ -1185,52 +1255,30 @@ def _upsert_feature_function(conn: psycopg.Connection, payload: dict) -> None:
 
 @app.command("features-import")
 def features_import(
-    dir: Path = typer.Option(..., "--dir", help="Directory containing exported feature JSON files"),
+    dir: Optional[Path] = typer.Option(None, "--dir", help="Directory containing feature JSON files (default: feature-functions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    functions: Optional[str] = typer.Option(None, "--functions", help="Comma-separated list of function names to import"),
 ) -> None:
     """
-    Import feature_functions and feature_definitions from JSON files.
-    Idempotent: re-running will upsert by (name, version) and refresh definitions.
-    """
-    src_dir = Path(dir)
-    fx_path = src_dir / "feature_functions.json"
-    defs_path = src_dir / "feature_definitions.json"
-    if not fx_path.exists() and not defs_path.exists():
-        emit_error(f"No feature files found in {src_dir}")
-        return
+    Import feature_functions from individual JSON files.
 
+    By default, imports all JSON files from the 'feature-functions/' directory.
+    Idempotent: re-running will upsert by (name, version).
+    """
+    src_dir = Path(dir) if dir else Path("feature-functions")
+    fx_filter = [s.strip() for s in functions.split(",")] if functions else None
     url = _db_url(db_url)
 
     try:
         with psycopg.connect(url) as conn:
             conn.autocommit = True
             schema.create_feature_functions_table(conn)
-            if fx_path.exists():
-                fx_payload = json.loads(fx_path.read_text())
-                for f in fx_payload:
-                    _upsert_feature_function(conn, f)
+            imported_count = import_functions_from_directory(conn, src_dir, fx_filter)
 
-        definitions = []
-        if defs_path.exists():
-            definitions = json.loads(defs_path.read_text())
-            definitions = [_normalize_feature_definition(d) for d in definitions]
-
-        if definitions:
-            with psycopg.connect(url) as conn:
-                conn.autocommit = True
-                schema.create_feature_definitions_table(conn)
-                schema.create_computed_features_table(conn)
-                ensure_feature_definitions(conn, definitions)
-                ensure_store_targets(conn, definitions)
-
-        emit(
-            "Imported features",
-            data={
-                "functions": len(json.loads(fx_path.read_text())) if fx_path.exists() else 0,
-                "definitions": len(definitions),
-            },
-            json_output=True,
-        )
+        if imported_count == 0:
+            emit(f"No functions found in {src_dir}")
+        else:
+            emit(f"Imported {imported_count} function(s) from {src_dir}")
     except Exception as exc:
         emit_error(f"Import failed: {exc}")
 
