@@ -18,6 +18,7 @@ from rich.table import Table
 
 from g2.alphavantage.catalog import parse_daily_adjusted
 from g2.alphavantage.client import AlphaVantageClient
+from g2.cli_helpers import parse_comma_separated
 from g2.ingest.indicators import ingest_indicators_for_symbols, INDICATOR_FUNCTIONS
 from g2.config import load_settings
 from g2.db import schema
@@ -1184,7 +1185,7 @@ def features_export(
     Each function is saved as <name>_v<version>.json.
     """
     target_dir = Path(dir) if dir else Path("feature-functions")
-    fx_filter = [s.strip() for s in functions.split(",")] if functions else None
+    fx_filter = parse_comma_separated(functions)
     url = _db_url(db_url)
 
     try:
@@ -1266,7 +1267,7 @@ def features_import(
     Idempotent: re-running will upsert by (name, version).
     """
     src_dir = Path(dir) if dir else Path("feature-functions")
-    fx_filter = [s.strip() for s in functions.split(",")] if functions else None
+    fx_filter = parse_comma_separated(functions)
     url = _db_url(db_url)
 
     try:
@@ -1304,7 +1305,7 @@ def trim_features(
     before_dt = _parse_date_or_error(before, json_output)
     after_dt = _parse_date_or_error(after, json_output)
 
-    names = [n.strip() for n in feature.split(",") if n.strip()]
+    names = parse_comma_separated(feature, required=True)
     if not names:
         emit_error("No feature names provided", json_output=json_output)
         return
@@ -1353,7 +1354,7 @@ def trim_prices(
     after_dt = _parse_date_or_error(after, json_output)
     sym_list = None
     if symbols:
-        sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+        sym_list = parse_comma_separated(symbols, required=True)
         if not sym_list:
             sym_list = None
     url = _db_url(db_url)
@@ -1433,7 +1434,7 @@ def drop_features_cmd(
                         return
 
             elif feature:
-                names = [n.strip() for n in feature.split(",") if n.strip()]
+                names = parse_comma_separated(feature, required=True)
                 if not names:
                     emit_error("No feature names provided", json_output=json_output)
                     return
@@ -1640,19 +1641,13 @@ def features_compute(
     url = _db_url(db_url)
 
     # Parse feature names
-    feature_name_list = None
-    if features:
-        feature_name_list = [s.strip() for s in features.split(",") if s.strip()]
+    feature_name_list = parse_comma_separated(features)
 
     # Parse function names
-    function_name_list = None
-    if function_names:
-        function_name_list = [s.strip() for s in function_names.split(",") if s.strip()]
+    function_name_list = parse_comma_separated(function_names)
 
     # Parse symbols
-    symbol_list = None
-    if symbols:
-        symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    symbol_list = parse_comma_separated(symbols)
 
     try:
         with psycopg.connect(url) as conn:
@@ -2015,7 +2010,7 @@ def update_all(
         timeframe = "full"
         refresh_existing = True
 
-    indicator_list = [s.strip().lower() for s in indicators.split(",") if s.strip()]
+    indicator_list = parse_comma_separated(indicators, lowercase=True, required=True)
     unknown = [s for s in indicator_list if s not in INDICATOR_FUNCTIONS]
     if unknown:
         emit(f"Unknown indicators: {', '.join(unknown)}", json_output=json_output, error=True)
