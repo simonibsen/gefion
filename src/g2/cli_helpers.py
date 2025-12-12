@@ -6,6 +6,8 @@ updates simpler and reduce code duplication.
 """
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import date, datetime
+from contextlib import contextmanager
+import os
 import psycopg
 from psycopg.types.json import Json
 
@@ -278,3 +280,77 @@ def validate_date_range(
             raise ValueError(f"Invalid date format for 'after': {after}") from exc
 
     return before_dt, after_dt
+
+
+@contextmanager
+def db_connection(url: Optional[str], autocommit: bool = True):
+    """
+    Context manager for database connections.
+
+    Consolidates the repeated pattern of connecting to the database with
+    standard configuration.
+
+    Args:
+        url: Database URL or None to use default (from settings/env)
+        autocommit: Whether to enable autocommit mode (default: True)
+
+    Yields:
+        psycopg.Connection: Database connection
+
+    Example:
+        >>> with db_connection(None) as conn:
+        ...     with conn.cursor() as cur:
+        ...         cur.execute("SELECT 1")
+    """
+    from g2.config import load_settings
+    from g2.db import schema
+
+    # Determine database URL (same logic as _db_url in cli.py)
+    SETTINGS = load_settings()
+    db_url = url or SETTINGS.database_url or os.getenv("DATABASE_URL") or schema.test_db_url()
+
+    conn = psycopg.connect(db_url)
+    if autocommit:
+        conn.autocommit = True
+
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def init_schema_tables(conn: psycopg.Connection, tables: List[str]) -> None:
+    """
+    Initialize required schema tables.
+
+    Consolidates the repeated pattern of calling create_*_table() functions
+    for required tables.
+
+    Args:
+        conn: Database connection
+        tables: List of table names to initialize
+            Valid values: "stocks", "stock_ohlcv", "feature_functions",
+            "feature_definitions", "computed_features"
+
+    Raises:
+        ValueError: If unknown table name is provided
+
+    Example:
+        >>> with db_connection(None) as conn:
+        ...     init_schema_tables(conn, ["stocks", "feature_functions"])
+    """
+    from g2.db import schema
+
+    # Map table names to their creation functions
+    table_creators = {
+        "stocks": schema.create_stocks_table,
+        "stock_ohlcv": schema.create_stock_ohlcv_table,
+        "feature_functions": schema.create_feature_functions_table,
+        "feature_definitions": schema.create_feature_definitions_table,
+        "computed_features": schema.create_computed_features_table,
+    }
+
+    for table in tables:
+        if table not in table_creators:
+            raise ValueError(f"Unknown table: {table}. Valid tables: {list(table_creators.keys())}")
+        table_creators[table](conn)
