@@ -18,7 +18,7 @@ from rich.table import Table
 
 from g2.alphavantage.catalog import parse_daily_adjusted
 from g2.alphavantage.client import AlphaVantageClient
-from g2.cli_helpers import parse_comma_separated
+from g2.cli_helpers import parse_comma_separated, upsert_feature_function as upsert_feature_function_helper
 from g2.ingest.indicators import ingest_indicators_for_symbols, INDICATOR_FUNCTIONS
 from g2.config import load_settings
 from g2.db import schema
@@ -963,55 +963,7 @@ def register_function(
         with psycopg.connect(url) as conn:
             conn.autocommit = True
             schema.create_feature_functions_table(conn)
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO feature_functions
-                    (name, version, status, description, language, function_body, inputs, output_name, output_type,
-                     param_schema, defaults, dependencies, checksum, tags, min_app_version, enabled, created_by)
-                    VALUES (%(name)s, %(version)s, %(status)s, %(description)s, %(language)s, %(function_body)s,
-                            %(inputs)s, %(output_name)s, %(output_type)s, %(param_schema)s, %(defaults)s,
-                            %(dependencies)s, %(checksum)s, %(tags)s, %(min_app_version)s, %(enabled)s, %(created_by)s)
-                    ON CONFLICT (name, version) DO UPDATE SET
-                        status = EXCLUDED.status,
-                        description = EXCLUDED.description,
-                        language = EXCLUDED.language,
-                        function_body = EXCLUDED.function_body,
-                        inputs = EXCLUDED.inputs,
-                        output_name = EXCLUDED.output_name,
-                        output_type = EXCLUDED.output_type,
-                        param_schema = EXCLUDED.param_schema,
-                        defaults = EXCLUDED.defaults,
-                        dependencies = EXCLUDED.dependencies,
-                        checksum = EXCLUDED.checksum,
-                        tags = EXCLUDED.tags,
-                        min_app_version = EXCLUDED.min_app_version,
-                        enabled = EXCLUDED.enabled,
-                        created_by = EXCLUDED.created_by,
-                        updated_at = NOW()
-                    RETURNING id;
-                    """,
-                    {
-                        "name": payload.get("name"),
-                        "version": payload.get("version"),
-                        "status": payload.get("status", "active"),
-                        "description": payload.get("description"),
-                        "language": payload.get("language"),
-                        "function_body": payload.get("function_body"),
-                        "inputs": Json(payload.get("inputs")) if payload.get("inputs") is not None else None,
-                        "output_name": payload.get("output_name", "value"),
-                        "output_type": payload.get("output_type", "double precision"),
-                        "param_schema": Json(payload.get("param_schema")) if payload.get("param_schema") is not None else None,
-                        "defaults": Json(payload.get("defaults")) if payload.get("defaults") is not None else None,
-                        "dependencies": Json(payload.get("dependencies")) if payload.get("dependencies") is not None else None,
-                        "checksum": payload.get("checksum"),
-                        "tags": payload.get("tags"),
-                        "min_app_version": payload.get("min_app_version"),
-                        "enabled": payload.get("enabled", True),
-                        "created_by": payload.get("created_by", "cli"),
-                    },
-                )
-                func_id = cur.fetchone()[0]
+            func_id = upsert_feature_function_helper(conn, payload, return_id=True)
         emit(
             f"Registered function '{payload['name']}' v{payload['version']}",
             data={"id": func_id},
@@ -1200,58 +1152,13 @@ def features_export(
 
 
 def _upsert_feature_function(conn: psycopg.Connection, payload: dict) -> None:
+    """Upsert feature function using consolidated helper."""
     required = ["name", "version", "language", "function_body"]
     missing = [k for k in required if k not in payload]
     if missing:
         raise ValueError(f"Missing required keys for feature_function: {', '.join(missing)}")
 
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO feature_functions
-            (name, version, status, description, language, function_body, inputs, output_name, output_type,
-             param_schema, defaults, dependencies, checksum, tags, min_app_version, enabled, created_by)
-            VALUES (%(name)s, %(version)s, %(status)s, %(description)s, %(language)s, %(function_body)s,
-                    %(inputs)s, %(output_name)s, %(output_type)s, %(param_schema)s, %(defaults)s,
-                    %(dependencies)s, %(checksum)s, %(tags)s, %(min_app_version)s, %(enabled)s, %(created_by)s)
-            ON CONFLICT (name, version) DO UPDATE SET
-                status = EXCLUDED.status,
-                description = EXCLUDED.description,
-                language = EXCLUDED.language,
-                function_body = EXCLUDED.function_body,
-                inputs = EXCLUDED.inputs,
-                output_name = EXCLUDED.output_name,
-                output_type = EXCLUDED.output_type,
-                param_schema = EXCLUDED.param_schema,
-                defaults = EXCLUDED.defaults,
-                dependencies = EXCLUDED.dependencies,
-                checksum = EXCLUDED.checksum,
-                tags = EXCLUDED.tags,
-                min_app_version = EXCLUDED.min_app_version,
-                enabled = EXCLUDED.enabled,
-                created_by = EXCLUDED.created_by,
-                updated_at = NOW();
-            """,
-            {
-                "name": payload.get("name"),
-                "version": payload.get("version"),
-                "status": payload.get("status", "active"),
-                "description": payload.get("description"),
-                "language": payload.get("language"),
-                "function_body": payload.get("function_body"),
-                "inputs": Json(payload.get("inputs")) if payload.get("inputs") is not None else None,
-                "output_name": payload.get("output_name", "value"),
-                "output_type": payload.get("output_type", "double precision"),
-                "param_schema": Json(payload.get("param_schema")) if payload.get("param_schema") is not None else None,
-                "defaults": Json(payload.get("defaults")) if payload.get("defaults") is not None else None,
-                "dependencies": Json(payload.get("dependencies")) if payload.get("dependencies") is not None else None,
-                "checksum": payload.get("checksum"),
-                "tags": payload.get("tags"),
-                "min_app_version": payload.get("min_app_version"),
-                "enabled": payload.get("enabled", True),
-                "created_by": payload.get("created_by", "cli"),
-            },
-        )
+    upsert_feature_function_helper(conn, payload, return_id=False)
 
 
 @app.command("features-import")
