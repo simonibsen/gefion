@@ -2077,8 +2077,11 @@ def update_all(
         default_writer=writer_workers or 1,
     )
 
+    # Save original symbols list for indicator filtering
+    all_symbols = symbols.copy()
+
     # Bulk filter symbols that don't need price updates (skip API calls for up-to-date symbols)
-    symbols_before = len(symbols)
+    price_symbols = symbols
     price_skipped = 0
     if not refresh_existing:
         from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
@@ -2086,13 +2089,13 @@ def update_all(
             schema.create_stocks_table(conn)
             schema.create_stock_ohlcv_table(conn)
             target_date = _expected_market_date()
-            symbols = filter_symbols_needing_update(conn, symbols, target_date)
-            price_skipped = symbols_before - len(symbols)
+            price_symbols = filter_symbols_needing_update(conn, symbols, target_date)
+            price_skipped = len(symbols) - len(price_symbols)
             if price_skipped > 0 and not json_output:
-                emit(f"Skipped {price_skipped} up-to-date symbols, processing {len(symbols)} symbols for prices", json_output=False)
+                emit(f"Skipped {price_skipped} up-to-date symbols, processing {len(price_symbols)} symbols for prices", json_output=False)
 
     # Prices
-    price_reporter = ProgressReporter(total=len(symbols), json_output=json_output, enabled=progress)
+    price_reporter = ProgressReporter(total=len(price_symbols), json_output=json_output, enabled=progress)
     price_reporter.skipped = price_skipped
     price_reporter.workers = price_fetch
     price_reporter.mode = "api"
@@ -2105,7 +2108,7 @@ def update_all(
         if client is None:
             client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key, calls_per_minute=calls_per_minute)
         price_inserted = 0
-        for sym_chunk in chunked(symbols, 50):
+        for sym_chunk in chunked(price_symbols, 50):
             price_inserted += ingest_prices_for_symbols(
                 db_url=url,
                 client=client,
@@ -2127,8 +2130,25 @@ def update_all(
         if price_live:
             price_live.__exit__(None, None, None)
 
+    # Bulk filter symbols that don't need indicator updates
+    indicator_symbols = all_symbols
+    indicator_skipped = 0
+    if not refresh_existing and not refresh:
+        from g2.db.ingest import filter_symbols_needing_indicators
+        from datetime import date
+        with psycopg.connect(url) as conn:
+            schema.create_stocks_table(conn)
+            schema.create_feature_definitions_table(conn)
+            schema.create_computed_features_table(conn)
+            target_date = date.today()
+            indicator_symbols = filter_symbols_needing_indicators(conn, all_symbols, target_date)
+            indicator_skipped = len(all_symbols) - len(indicator_symbols)
+            if indicator_skipped > 0 and not json_output:
+                emit(f"Skipped {indicator_skipped} up-to-date symbols, processing {len(indicator_symbols)} symbols for indicators", json_output=False)
+
     # Indicators
-    indicator_reporter = ProgressReporter(total=len(symbols), json_output=json_output, enabled=progress)
+    indicator_reporter = ProgressReporter(total=len(indicator_symbols), json_output=json_output, enabled=progress)
+    indicator_reporter.skipped = indicator_skipped
     indicator_reporter.workers = feature_fetch
     indicator_reporter.mode = "local" if compute_locally else "api"
     ind_live: Optional[Live] = None
@@ -2138,7 +2158,7 @@ def update_all(
             ind_live.__enter__()
     try:
         indicator_inserted = 0
-        for sym_chunk in chunked(symbols, 50):
+        for sym_chunk in chunked(indicator_symbols, 50):
             indicator_inserted += ingest_indicators_for_symbols(
                 db_url=url,
                 client=client,

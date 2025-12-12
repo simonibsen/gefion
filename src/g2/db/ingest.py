@@ -356,6 +356,56 @@ def latest_indicator_date(conn: psycopg.Connection, data_id: int) -> Optional[da
     return row[0]
 
 
+def filter_symbols_needing_indicators(
+    conn: psycopg.Connection,
+    symbols: Sequence[str],
+    target_date: Optional[date] = None
+) -> List[str]:
+    """
+    Filter out symbols that already have up-to-date indicator data.
+
+    Returns a list of symbols that need indicator computation (either missing data or stale data).
+    This is more efficient than checking each symbol individually in parallel workers.
+    """
+    from datetime import date as date_type
+    if target_date is None:
+        target_date = date_type.today()
+
+    if not symbols:
+        return []
+
+    with conn.cursor() as cur:
+        # Query to find symbols with stale or missing indicator data
+        cur.execute(
+            """
+            WITH symbol_ids AS (
+                SELECT id, symbol FROM stocks WHERE symbol = ANY(%s)
+            ),
+            latest_indicators AS (
+                SELECT
+                    cf.data_id,
+                    MAX(cf.date) as latest_date
+                FROM computed_features cf
+                WHERE cf.data_id IN (SELECT id FROM symbol_ids)
+                  AND cf.feature_id IN (
+                      SELECT id FROM feature_definitions
+                      WHERE function_name = 'indicator' AND active = TRUE
+                  )
+                GROUP BY cf.data_id
+            )
+            SELECT s.symbol
+            FROM symbol_ids s
+            LEFT JOIN latest_indicators li ON s.id = li.data_id
+            WHERE li.latest_date IS NULL
+               OR li.latest_date < %s;
+            """,
+            (symbols, target_date)
+        )
+        needs_update = [row[0] for row in cur.fetchall()]
+
+    return needs_update
+
+
 def decide_outputsize(conn: psycopg.Connection, data_id: int, timeframe: str = "auto") -> str:
     """
     Decide AlphaVantage outputsize based on existing data.
