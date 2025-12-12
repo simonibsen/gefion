@@ -4,7 +4,8 @@ Helper functions for CLI commands.
 These helpers consolidate repeated patterns across CLI commands to make
 updates simpler and reduce code duplication.
 """
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
+from datetime import date, datetime
 import psycopg
 from psycopg.types.json import Json
 
@@ -159,3 +160,121 @@ def upsert_feature_function(
         if return_id:
             return cur.fetchone()[0]
         return None
+
+
+def setup_progress_reporter(
+    total: int,
+    progress: bool,
+    json_output: bool,
+    mode: str = "api",
+    **kwargs
+) -> Tuple[Any, Optional[Any]]:
+    """
+    Set up progress reporter and live display.
+
+    Consolidates the repeated pattern of creating a ProgressReporter and
+    starting the live display context.
+
+    Args:
+        total: Total items to process
+        progress: Enable progress display
+        json_output: Suppress progress for JSON output
+        mode: Progress mode ("api", "local", "dispatcher")
+        **kwargs: Additional reporter attributes (workers, batch_size, max_workers, etc.)
+
+    Returns:
+        Tuple of (reporter, live_context)
+        - reporter: ProgressReporter instance
+        - live_context: Live display context or None
+
+    Example:
+        >>> reporter, live = setup_progress_reporter(
+        ...     total=100,
+        ...     progress=True,
+        ...     json_output=False,
+        ...     mode="api",
+        ...     workers=4,
+        ...     max_workers=8
+        ... )
+        >>> # Use reporter for progress tracking
+        >>> if live:
+        ...     live.__exit__(None, None, None)  # Clean up
+    """
+    from g2.utils.progress import ProgressReporter
+
+    reporter = ProgressReporter(total=total, json_output=json_output, enabled=progress)
+    reporter.mode = mode
+
+    # Set additional attributes from kwargs
+    for key, value in kwargs.items():
+        if hasattr(reporter, key):
+            setattr(reporter, key, value)
+
+    # Start live display if appropriate
+    live = None
+    if progress and not json_output:
+        live = reporter.start_live()
+        if live:
+            live.__enter__()
+
+    return reporter, live
+
+
+def validate_date_range(
+    before: Optional[str],
+    after: Optional[str],
+    allow_both_missing: bool = True
+) -> Tuple[Optional[date], Optional[date]]:
+    """
+    Validate and parse date range options.
+
+    Consolidates the repeated pattern of parsing and validating before/after
+    date parameters in CLI commands.
+
+    Args:
+        before: ISO date string (YYYY-MM-DD) or None
+        after: ISO date string (YYYY-MM-DD) or None
+        allow_both_missing: If False, require at least one date
+
+    Returns:
+        Tuple of (before_date, after_date) as date objects or None
+
+    Raises:
+        ValueError: If dates are invalid or both missing when not allowed
+
+    Example:
+        >>> before, after = validate_date_range("2024-01-15", "2024-01-01")
+        >>> # before = date(2024, 1, 15), after = date(2024, 1, 1)
+
+        >>> before, after = validate_date_range(None, None, allow_both_missing=False)
+        Traceback (most recent call last):
+            ...
+        ValueError: At least one date required
+    """
+    # Treat empty strings as None
+    before = before if before and before.strip() else None
+    after = after if after and after.strip() else None
+
+    # Check if both are missing when not allowed
+    if not before and not after:
+        if not allow_both_missing:
+            raise ValueError("At least one date required")
+        return None, None
+
+    # Parse before date
+    before_dt = None
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before).date()
+        except (ValueError, AttributeError) as exc:
+            raise ValueError(f"Invalid date format for 'before': {before}") from exc
+
+    # Parse after date
+    after_dt = None
+    if after:
+        try:
+            after_dt = datetime.fromisoformat(after).date()
+        except (ValueError, AttributeError) as exc:
+            raise ValueError(f"Invalid date format for 'after': {after}") from exc
+
+    return before_dt, after_dt
