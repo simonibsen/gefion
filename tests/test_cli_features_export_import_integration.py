@@ -12,7 +12,7 @@ from g2.cli import _upsert_feature_function
 from g2.db import schema
 
 
-runner = CliRunner()
+runner = CliRunner(env={"DATABASE_URL": "postgresql://g2:g2pass@localhost:6432/g2"})
 
 
 @pytest.fixture
