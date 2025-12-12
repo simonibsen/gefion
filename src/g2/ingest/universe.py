@@ -167,18 +167,6 @@ def ingest_prices_for_symbols(
             with psycopg.connect(db_url) as conn:
                 data_id = upsert_stock(conn, sym)
 
-                # Skip API call if stock is already up-to-date (unless explicitly refreshing)
-                if not update_existing:
-                    latest = latest_price_date(conn, data_id)
-                    if latest is not None:
-                        days_old = (date.today() - latest).days
-                        # If data is from today or yesterday, skip API call
-                        # (yesterday is acceptable if markets haven't closed yet)
-                        if days_old <= 1:
-                            if progress:
-                                progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "up-to-date", "latest": str(latest)})
-                            return
-
                 if timeframe == "auto":
                     outputsize = decide_outputsize(conn, data_id, timeframe)
                 elif timeframe == "full":
