@@ -6,7 +6,13 @@ These helpers consolidate repeated patterns across CLI commands.
 import os
 import pytest
 import psycopg
-from g2.cli_helpers import parse_comma_separated, upsert_feature_function
+from datetime import date
+from g2.cli_helpers import (
+    parse_comma_separated,
+    upsert_feature_function,
+    setup_progress_reporter,
+    validate_date_range,
+)
 from g2.db import schema
 
 
@@ -190,3 +196,138 @@ class TestUpsertFeatureFunction:
             )
             row = cur.fetchone()
             assert row is not None
+
+
+class TestSetupProgressReporter:
+    """Test progress reporter setup helper."""
+
+    def test_setup_basic_reporter(self):
+        """Test basic progress reporter setup."""
+        reporter, live = setup_progress_reporter(
+            total=100,
+            progress=True,
+            json_output=False,
+            mode="api"
+        )
+
+        assert reporter.total == 100
+        assert reporter.mode == "api"
+        assert reporter.enabled is True
+        # Live context is created when progress=True and json_output=False
+        assert live is not None
+
+    def test_setup_with_json_output_no_live(self):
+        """Test that JSON output suppresses live display."""
+        reporter, live = setup_progress_reporter(
+            total=50,
+            progress=True,
+            json_output=True,
+            mode="local"
+        )
+
+        assert reporter.total == 50
+        assert reporter.mode == "local"
+        # Live should be None when json_output=True
+        assert live is None
+
+    def test_setup_with_progress_disabled(self):
+        """Test that disabled progress suppresses live display."""
+        reporter, live = setup_progress_reporter(
+            total=50,
+            progress=False,
+            json_output=False,
+            mode="api"
+        )
+
+        assert reporter.total == 50
+        # Live should be None when progress=False
+        assert live is None
+
+    def test_setup_with_kwargs(self):
+        """Test that additional kwargs are set as attributes if they exist."""
+        reporter, live = setup_progress_reporter(
+            total=200,
+            progress=False,
+            json_output=False,
+            mode="dispatcher",
+            # These attributes exist on ProgressReporter
+            enabled=True
+        )
+
+        assert reporter.mode == "dispatcher"
+        # The helper only sets attributes that already exist on the reporter
+        # Test that enabled was set
+        assert reporter.enabled is True
+
+
+class TestValidateDateRange:
+    """Test date range validation helper."""
+
+    def test_validate_both_dates_provided(self):
+        """Test validation with both before and after dates."""
+        before, after = validate_date_range(
+            before="2024-01-15",
+            after="2024-01-01"
+        )
+
+        assert before == date(2024, 1, 15)
+        assert after == date(2024, 1, 1)
+
+    def test_validate_only_before(self):
+        """Test validation with only before date."""
+        before, after = validate_date_range(
+            before="2024-01-15",
+            after=None
+        )
+
+        assert before == date(2024, 1, 15)
+        assert after is None
+
+    def test_validate_only_after(self):
+        """Test validation with only after date."""
+        before, after = validate_date_range(
+            before=None,
+            after="2024-01-01"
+        )
+
+        assert before is None
+        assert after == date(2024, 1, 1)
+
+    def test_validate_both_none_allowed(self):
+        """Test that both None is allowed when allow_both_missing=True."""
+        before, after = validate_date_range(
+            before=None,
+            after=None,
+            allow_both_missing=True
+        )
+
+        assert before is None
+        assert after is None
+
+    def test_validate_both_none_not_allowed(self):
+        """Test that both None raises error when allow_both_missing=False."""
+        with pytest.raises(ValueError, match="At least one date required"):
+            validate_date_range(
+                before=None,
+                after=None,
+                allow_both_missing=False
+            )
+
+    def test_validate_invalid_date_format(self):
+        """Test that invalid date format raises error."""
+        with pytest.raises(ValueError, match="Invalid date format"):
+            validate_date_range(
+                before="not-a-date",
+                after=None
+            )
+
+    def test_validate_empty_string_treated_as_none(self):
+        """Test that empty strings are treated as None."""
+        before, after = validate_date_range(
+            before="",
+            after="",
+            allow_both_missing=True
+        )
+
+        assert before is None
+        assert after is None
