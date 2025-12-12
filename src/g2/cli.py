@@ -18,7 +18,12 @@ from rich.table import Table
 
 from g2.alphavantage.catalog import parse_daily_adjusted
 from g2.alphavantage.client import AlphaVantageClient
-from g2.cli_helpers import parse_comma_separated, upsert_feature_function as upsert_feature_function_helper
+from g2.cli_helpers import (
+    parse_comma_separated,
+    upsert_feature_function as upsert_feature_function_helper,
+    db_connection,
+    init_schema_tables,
+)
 from g2.ingest.indicators import ingest_indicators_for_symbols, INDICATOR_FUNCTIONS
 from g2.config import load_settings
 from g2.db import schema
@@ -386,7 +391,6 @@ def ingest_prices(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
     """Ingest daily adjusted prices from AlphaVantage. If --input is provided, load from file; otherwise fetch via API."""
-    url = _db_url(db_url)
     if input:
         payload = json.loads(input.read_text())
         rows = parse_daily_adjusted(symbol=symbol, payload=payload)
@@ -394,9 +398,8 @@ def ingest_prices(
             emit("No rows parsed; nothing to ingest.", json_output=json_output, error=True)
             raise typer.Exit(code=1)
         try:
-            with psycopg.connect(url) as conn:
-                schema.create_stocks_table(conn)
-                schema.create_stock_ohlcv_table(conn)
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["stocks", "stock_ohlcv"])
                 stock_id = upsert_stock(conn, symbol)
                 inserted = insert_stock_ohlcv(conn, stock_id, rows)
                 emit(
@@ -408,6 +411,7 @@ def ingest_prices(
             emit(f"Database connection failed: {exc}", json_output=json_output, error=True)
             raise typer.Exit(code=2)
     else:
+        url = _db_url(db_url)
         try:
             client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key)
         except ValueError as exc:
@@ -519,11 +523,8 @@ def ingest_universe(
     skipped = 0
     if not update_existing:
         from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
-        import psycopg
-        with psycopg.connect(url) as conn:
-            from g2.db import schema
-            schema.create_stocks_table(conn)
-            schema.create_stock_ohlcv_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["stocks", "stock_ohlcv"])
             target_date = _expected_market_date()
             symbols = filter_symbols_needing_update(conn, symbols, target_date)
             skipped = symbols_before - len(symbols)
@@ -841,13 +842,9 @@ def seed_features(
     """
     Create metadata tables and seed feature_definitions for all known indicators.
     """
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_stocks_table(conn)
-            schema.create_feature_definitions_table(conn)
-            schema.create_computed_features_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["stocks", "feature_definitions", "computed_features"])
             feature_map = ensure_all_indicator_feature_definitions(conn)
         emit(
             "Seeded indicator feature definitions",
@@ -882,11 +879,9 @@ def migrate_feature_definitions_source(
     Update feature_definitions.source_table from legacy 'stock_prices' to 'stock_ohlcv'.
     Safe to run multiple times; no effect when already migrated.
     """
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_definitions_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_definitions"])
             updated = migrate.migrate_feature_definitions_source_table(conn)
         emit(
             "Migrated feature_definitions source_table",
@@ -907,10 +902,8 @@ def db_migrate_stock_prices(
     Copy legacy stock_prices data into stock_ohlcv and optionally drop old table.
     Idempotent: skips if stock_prices is absent; re-runs won't duplicate rows.
     """
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
+        with db_connection(db_url) as conn:
             copied, dropped = migrate.migrate_stock_prices_to_ohlcv(conn, drop_old=drop_old)
         emit(
             "Migrated stock_prices to stock_ohlcv",
@@ -958,11 +951,9 @@ def register_function(
         emit_error(f"Missing required keys: {', '.join(missing)}", json_output=json_output)
         return
 
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_functions_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_functions"])
             func_id = upsert_feature_function_helper(conn, payload, return_id=True)
         emit(
             f"Registered function '{payload['name']}' v{payload['version']}",
@@ -981,11 +972,9 @@ def list_functions(
     show_body: bool = typer.Option(False, "--show-body/--no-show-body", help="Include function_body in output"),
 ) -> None:
     """List registered feature functions."""
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_functions_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_functions"])
             with conn.cursor() as cur:
                 select_cols = "name, version, status, language, enabled, description, tags, updated_at"
                 if show_body:
@@ -1106,12 +1095,9 @@ def register_feature(
         emit_error(f"Missing required keys: {', '.join(missing)}", json_output=json_output)
         return
 
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_definitions_table(conn)
-            schema.create_computed_features_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_definitions", "computed_features"])
             normalized = _normalize_feature_definition(payload)
             ids = ensure_feature_definitions(conn, [normalized])
             ensure_store_targets(conn, [normalized])
@@ -1138,12 +1124,10 @@ def features_export(
     """
     target_dir = Path(dir) if dir else Path("feature-functions")
     fx_filter = parse_comma_separated(functions)
-    url = _db_url(db_url)
 
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_functions_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_functions"])
             exported_count = export_functions_to_directory(conn, target_dir, fx_filter)
 
         emit(f"Exported {exported_count} function(s) to {target_dir}")
@@ -1175,12 +1159,10 @@ def features_import(
     """
     src_dir = Path(dir) if dir else Path("feature-functions")
     fx_filter = parse_comma_separated(functions)
-    url = _db_url(db_url)
 
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_functions_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_functions"])
             imported_count = import_functions_from_directory(conn, src_dir, fx_filter)
 
         if imported_count == 0:
@@ -1217,16 +1199,13 @@ def trim_features(
         emit_error("No feature names provided", json_output=json_output)
         return
 
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_definitions_table(conn)
-            schema.create_computed_features_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_definitions", "computed_features"])
             deleted = trim_feature_data(conn, names, before=before_dt, after=after_dt)
             prices_deleted = 0
             if trim_prices:
-                schema.create_stock_ohlcv_table(conn)
+                init_schema_tables(conn, ["stock_ohlcv"])
                 prices_deleted = trim_stock_ohlcv(conn, before=before_dt, after=after_dt)
         emit(
             f"Trimmed features {', '.join(names)}",
@@ -1264,12 +1243,9 @@ def trim_prices(
         sym_list = parse_comma_separated(symbols, required=True)
         if not sym_list:
             sym_list = None
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_stocks_table(conn)
-            schema.create_stock_ohlcv_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["stocks", "stock_ohlcv"])
             deleted = trim_stock_ohlcv(conn, before=before_dt, after=after_dt, symbols=sym_list)
         emit(
             "Trimmed stock_ohlcv",
@@ -1309,13 +1285,9 @@ def drop_features_cmd(
         # Drop all features completely (DANGEROUS!)
         g2 features-drop --all
     """
-    url = _db_url(db_url)
-
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_definitions_table(conn)
-            schema.create_computed_features_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_definitions", "computed_features"])
 
             # Determine which features to drop
             if all_features:
@@ -1401,11 +1373,9 @@ def features_list(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """List feature definitions."""
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_definitions_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_definitions"])
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -1470,11 +1440,9 @@ def features_show(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """Show a single feature definition."""
-    url = _db_url(db_url)
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_definitions_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_definitions"])
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -1557,10 +1525,8 @@ def features_compute(
     symbol_list = parse_comma_separated(symbols)
 
     try:
-        with psycopg.connect(url) as conn:
-            conn.autocommit = True
-            schema.create_feature_definitions_table(conn)
-            schema.create_computed_features_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_definitions", "computed_features"])
 
             # If all_features, get all active feature names
             if all_features and not feature_name_list:
@@ -1935,9 +1901,8 @@ def update_all(
             # If exchange not provided, try to infer from existing stocks
             if exchange is None:
                 try:
-                    with psycopg.connect(url) as conn:
-                        conn.autocommit = True
-                        schema.create_stocks_table(conn)
+                    with db_connection(url) as conn:
+                        init_schema_tables(conn, ["stocks"])
                         with conn.cursor() as cur:
                             cur.execute("SELECT DISTINCT symbol FROM stocks;")
                             symbols = [r[0] for r in cur.fetchall()]
@@ -1987,9 +1952,8 @@ def update_all(
     price_skipped = 0
     if not refresh_existing:
         from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
-        with psycopg.connect(url) as conn:
-            schema.create_stocks_table(conn)
-            schema.create_stock_ohlcv_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["stocks", "stock_ohlcv"])
             target_date = _expected_market_date()
             price_symbols = filter_symbols_needing_update(conn, symbols, target_date)
             price_skipped = len(symbols) - len(price_symbols)
@@ -2038,10 +2002,8 @@ def update_all(
     if not refresh_existing and not refresh:
         from g2.db.ingest import filter_symbols_needing_indicators
         from datetime import date
-        with psycopg.connect(url) as conn:
-            schema.create_stocks_table(conn)
-            schema.create_feature_definitions_table(conn)
-            schema.create_computed_features_table(conn)
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["stocks", "feature_definitions", "computed_features"])
             target_date = date.today()
             indicator_symbols = filter_symbols_needing_indicators(conn, all_symbols, target_date)
             indicator_skipped = len(all_symbols) - len(indicator_symbols)
