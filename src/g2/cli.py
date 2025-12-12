@@ -2077,8 +2077,23 @@ def update_all(
         default_writer=writer_workers or 1,
     )
 
+    # Bulk filter symbols that don't need price updates (skip API calls for up-to-date symbols)
+    symbols_before = len(symbols)
+    price_skipped = 0
+    if not refresh_existing:
+        from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
+        with psycopg.connect(url) as conn:
+            schema.create_stocks_table(conn)
+            schema.create_stock_ohlcv_table(conn)
+            target_date = _expected_market_date()
+            symbols = filter_symbols_needing_update(conn, symbols, target_date)
+            price_skipped = symbols_before - len(symbols)
+            if price_skipped > 0 and not json_output:
+                emit(f"Skipped {price_skipped} up-to-date symbols, processing {len(symbols)} symbols for prices", json_output=False)
+
     # Prices
     price_reporter = ProgressReporter(total=len(symbols), json_output=json_output, enabled=progress)
+    price_reporter.skipped = price_skipped
     price_reporter.workers = price_fetch
     price_reporter.mode = "api"
     price_live: Optional[Live] = None
