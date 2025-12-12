@@ -1,5 +1,10 @@
 # g2: ML-Driven Financial Trend Signal Analysis
 
+> **Current Status (December 2025)**: Phase 1 complete, Phase 2 infrastructure complete.
+> Data pipeline is production-ready with ~5,600 NASDAQ stocks tracked daily.
+> Ready to begin ML implementation (feature engineering, label generation, model training).
+> See [PROGRESS.md](PROGRESS.md) for detailed current state assessment.
+
 ## Project Vision
 
 g2 modernizes the rule-based technical analysis approach from the legacy Folly project by applying PyTorch-based machine learning to predict trend signal strength. Rather than manually crafting rules to identify momentum patterns, g2 will learn these patterns from historical data and provide probabilistic predictions for multiple time horizons.
@@ -126,69 +131,109 @@ The multi-output approach directly answers your use case: "Given current conditi
     - Premium: 75-1200 requests/minute depending on tier
   - **Critical**: Must implement batching and caching strategies (see Data Ingestion Strategy below)
 
-**Storage Options (to be decided):**
-- **Option A: PostgreSQL + TimescaleDB**
-  - Pros: ACID compliance, excellent time-series extensions, SQL familiarity
-  - Cons: Heavier weight, requires separate installation
+**Storage (Current Implementation):**
 
-- **PostgreSQL (Current Implementation)**
-  - Pros: Embedded, blazing fast analytics, excellent Parquet integration, zero config
-  - Cons: Less mature ecosystem, fewer ML integrations
+- **PostgreSQL + TimescaleDB**
+  - ACID compliance with excellent time-series extensions
+  - Automatic hypertable partitioning with 30-day chunks
+  - Connection pooling for production-grade concurrent access
+  - BRIN indexes for time-based queries
+  - Composite B-tree indexes for data_id + date queries
 
-- **Option C: SQLite + Extensions**
-  - Pros: Simplest deployment, zero config, good Python support
-  - Cons: Not optimized for time-series, limited concurrent writes
+**Schema Design (Current Implementation):**
 
-**Current Implementation**: PostgreSQL with connection pooling for production-grade concurrent access.
+g2 uses a normalized, registry-based design for efficient storage and flexible feature engineering:
 
-**Schema Design:**
 ```sql
--- Raw OHLCV data
-CREATE TABLE stock_prices (
-    symbol VARCHAR,
-    date DATE,
-    open DECIMAL,
-    high DECIMAL,
-    low DECIMAL,
-    close DECIMAL,
-    volume BIGINT,
-    PRIMARY KEY (symbol, date)
+-- Stock dimension table (normalized design using integer IDs)
+CREATE TABLE stocks (
+    id SERIAL PRIMARY KEY,
+    symbol VARCHAR UNIQUE NOT NULL,
+    status VARCHAR DEFAULT 'Active'
 );
 
--- Technical indicators (wide format for efficiency)
-CREATE TABLE technical_indicators (
-    symbol VARCHAR,
-    date DATE,
-    rsi_14 DECIMAL,
-    adx_14 DECIMAL,
-    psar DECIMAL,
-    sma_20 DECIMAL,
-    sma_50 DECIMAL,
-    sma_200 DECIMAL,
-    ema_12 DECIMAL,
-    ema_26 DECIMAL,
-    macd DECIMAL,
-    macd_signal DECIMAL,
-    bb_upper DECIMAL,
-    bb_middle DECIMAL,
-    bb_lower DECIMAL,
-    stoch_k DECIMAL,
-    stoch_d DECIMAL,
-    PRIMARY KEY (symbol, date)
+-- OHLCV time-series data (TimescaleDB hypertable with 30-day chunks)
+CREATE TABLE stock_ohlcv (
+    id BIGSERIAL,
+    data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    open NUMERIC(18,6),
+    high NUMERIC(18,6),
+    low NUMERIC(18,6),
+    close NUMERIC(18,6),
+    adjusted_close NUMERIC(18,6),
+    dividend_amount NUMERIC(18,6),
+    split_coefficient NUMERIC(18,6),
+    volume BIGINT,
+    source TEXT,
+    PRIMARY KEY (id, date),
+    UNIQUE (data_id, date)
+);
+
+-- Convert to TimescaleDB hypertable with 30-day chunks
+SELECT create_hypertable('stock_ohlcv', 'date', if_not_exists => TRUE);
+SELECT set_chunk_time_interval('stock_ohlcv', INTERVAL '30 days');
+
+-- Indexes for efficient time-series queries
+CREATE INDEX stock_ohlcv_brin ON stock_ohlcv USING BRIN(date);
+CREATE INDEX stock_ohlcv_data_id_date_idx ON stock_ohlcv(data_id, date DESC);
+
+-- Feature registry (defines available features and their computation)
+CREATE TABLE feature_definitions (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    function_name TEXT NOT NULL,
+    params JSONB,
+    source_table TEXT,
+    source_column TEXT,
+    store_table TEXT DEFAULT 'computed_features',
+    store_column TEXT,
+    store_type TEXT DEFAULT 'double precision',
+    active BOOLEAN DEFAULT TRUE,
+    version TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Computed features (tall format for flexibility - stores all indicator values)
+CREATE TABLE computed_features (
+    data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    feature_id INTEGER NOT NULL REFERENCES feature_definitions(id),
+    value DOUBLE PRECISION,
+    source TEXT,
+    PRIMARY KEY (data_id, date, feature_id)
+);
+
+-- Function registry (maps function names to Python implementations)
+CREATE TABLE feature_functions (
+    name TEXT PRIMARY KEY,
+    module_path TEXT NOT NULL,
+    description TEXT,
+    incremental_capable BOOLEAN DEFAULT FALSE,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Model predictions (for backtesting and monitoring)
+-- Note: This table is planned but not yet implemented
 CREATE TABLE predictions (
     symbol VARCHAR,
     prediction_date DATE,
     model_name VARCHAR,
     horizon_days INTEGER,
     signal_strength DECIMAL,
-    actual_return DECIMAL,  -- filled after horizon passes
+    actual_return DECIMAL,
     PRIMARY KEY (symbol, prediction_date, model_name)
 );
 
--- Extended data sources (added as needed)
+```
+
+**Future Schema Enhancements (Planned):**
+
+The following tables represent planned enhancements for cross-sectional features and metadata:
+
+```sql
+-- Market-level indicators (VIX, breadth, sentiment)
 CREATE TABLE market_indicators (
     date DATE PRIMARY KEY,
     vix DECIMAL,
@@ -197,7 +242,7 @@ CREATE TABLE market_indicators (
     put_call_ratio DECIMAL
 );
 
--- Sector ETF data (for cross-sectional features)
+-- Sector ETF data for relative strength and sector rotation signals
 CREATE TABLE sector_etfs (
     etf_symbol VARCHAR,
     date DATE,
@@ -209,189 +254,23 @@ CREATE TABLE sector_etfs (
     PRIMARY KEY (etf_symbol, date)
 );
 
--- Sector mapping and metadata
-CREATE TABLE sector_mapping (
-    sector_name VARCHAR PRIMARY KEY,
-    etf_symbol VARCHAR,  -- e.g., 'XLK' for Technology
-    description VARCHAR
-);
-
--- Stock to sector assignments (initial data)
-INSERT INTO stock_metadata (symbol, sector, sector_etf) VALUES
-    ('AAPL', 'Technology', 'XLK'),
-    ('MSFT', 'Technology', 'XLK'),
-    ('NVDA', 'Technology', 'XLK'),
-    ('JNJ', 'Healthcare', 'XLV'),
-    ('PFE', 'Healthcare', 'XLV'),
-    ('JPM', 'Financials', 'XLF'),
-    -- ... etc for all stocks
-
--- ============================================
--- Flexible Entity Hierarchy & Metadata System
--- ============================================
--- Supports arbitrary hierarchies: market → sector → industry → sub-industry → stock
--- Allows custom attributes at any level without schema changes
-
-CREATE TABLE entity_types (
-    type_id VARCHAR PRIMARY KEY,
-    type_name VARCHAR,
-    parent_type VARCHAR,  -- NULL for root types
-    description VARCHAR
-);
-
--- Define hierarchy levels
-INSERT INTO entity_types VALUES
-    ('market', 'Market', NULL, 'Entire market (e.g., US, Europe)'),
-    ('sector', 'Sector', 'market', 'GICS Level 1 (e.g., Technology, Healthcare)'),
-    ('industry', 'Industry', 'sector', 'GICS Level 2 (e.g., Software, Pharma)'),
-    ('sub_industry', 'Sub-Industry', 'industry', 'GICS Level 3 (e.g., Semiconductors)'),
-    ('stock', 'Individual Stock', 'sub_industry', 'Tradeable security');
-
-CREATE TABLE entities (
-    entity_id VARCHAR PRIMARY KEY,
-    entity_type VARCHAR REFERENCES entity_types(type_id),
-    name VARCHAR,
-    parent_id VARCHAR REFERENCES entities(entity_id),  -- Hierarchical parent
-    created_at TIMESTAMP,
-    active BOOLEAN DEFAULT TRUE
-);
-
--- Example hierarchy:
--- us_market (market)
---   └─ technology (sector)
---       └─ semiconductors (industry)
---           └─ chip_design (sub_industry)
---               ├─ NVDA (stock)
---               └─ AMD (stock)
-
--- Flexible key-value attributes (no schema changes needed to add new metadata)
-CREATE TABLE entity_attributes (
-    entity_id VARCHAR REFERENCES entities(entity_id),
-    attribute_key VARCHAR,
-    attribute_value TEXT,
-    value_type VARCHAR,  -- 'string', 'number', 'date', 'boolean', 'json'
-    source VARCHAR,      -- Where data came from (e.g., 'alphavantage', 'manual', 'sec_filing')
-    updated_at TIMESTAMP,
-    PRIMARY KEY (entity_id, attribute_key)
-);
-
--- Examples of extensible attributes at different levels:
-
--- Stock-level attributes
-INSERT INTO entity_attributes (entity_id, attribute_key, attribute_value, value_type, source, updated_at) VALUES
-    -- Fundamental data
-    ('AAPL', 'market_cap', '3000000000000', 'number', 'alphavantage', NOW()),
-    ('AAPL', 'country', 'USA', 'string', 'manual', NOW()),
-    ('AAPL', 'ipo_date', '1980-12-12', 'date', 'manual', NOW()),
-    ('AAPL', 'primary_exchange', 'NASDAQ', 'string', 'manual', NOW()),
-    ('AAPL', 'ceo', 'Tim Cook', 'string', 'manual', NOW()),
-    ('AAPL', 'employees', '164000', 'number', 'sec_filing', NOW()),
-
-    -- Index membership
-    ('AAPL', 'is_sp500', 'true', 'boolean', 'manual', NOW()),
-    ('AAPL', 'is_dow30', 'true', 'boolean', 'manual', NOW()),
-    ('AAPL', 'is_nasdaq100', 'true', 'boolean', 'manual', NOW()),
-
-    -- Business characteristics
-    ('AAPL', 'business_model', 'hardware + services', 'string', 'manual', NOW()),
-    ('AAPL', 'competitive_moat', 'brand + ecosystem', 'string', 'manual', NOW()),
-    ('AAPL', 'revenue_model', '{"hardware": 0.7, "services": 0.2, "other": 0.1}', 'json', 'manual', NOW()),
-
--- Sector-level attributes
-    ('technology', 'etf_symbol', 'XLK', 'string', 'manual', NOW()),
-    ('technology', 'typical_pe_ratio', '25', 'number', 'manual', NOW()),
-    ('technology', 'is_cyclical', 'false', 'boolean', 'manual', NOW()),
-    ('technology', 'interest_rate_sensitivity', 'high', 'string', 'manual', NOW()),
-
--- Sub-industry attributes
-    ('semiconductors', 'capital_intensive', 'true', 'boolean', 'manual', NOW()),
-    ('semiconductors', 'avg_rd_pct', '15', 'number', 'manual', NOW()),
-    ('semiconductors', 'key_suppliers', '["TSMC", "Samsung", "Intel"]', 'json', 'manual', NOW()),
-    ('semiconductors', 'avg_cycle_length_months', '48', 'number', 'manual', NOW()),
-    ('semiconductors', 'lead_indicators', '["chip_orders", "PC_sales"]', 'json', 'manual', NOW());
-
--- Time-varying entity attributes (things that change over time)
-CREATE TABLE entity_time_series (
-    entity_id VARCHAR REFERENCES entities(entity_id),
-    attribute_key VARCHAR,
-    date DATE,
-    value TEXT,
-    value_type VARCHAR,
-    source VARCHAR,
-    PRIMARY KEY (entity_id, attribute_key, date)
-);
-
--- Examples of time-varying attributes:
-INSERT INTO entity_time_series VALUES
-    -- Analyst data
-    ('AAPL', 'analyst_rating', '2024-01-15', '4.2', 'number', 'bloomberg'),  -- 1-5 scale
-    ('AAPL', 'price_target_median', '2024-01-15', '195', 'number', 'bloomberg'),
-    ('AAPL', 'num_analysts', '2024-01-15', '45', 'number', 'bloomberg'),
-
-    -- ESG and sentiment
-    ('AAPL', 'esg_score', '2024-01-15', '78', 'number', 'msci'),  -- 0-100
-    ('AAPL', 'news_sentiment', '2024-01-15', '0.65', 'number', 'news_api'),  -- -1 to 1
-
-    -- Short interest
-    ('AAPL', 'short_interest_pct', '2024-01-15', '1.2', 'number', 'nasdaq'),
-    ('AAPL', 'days_to_cover', '2024-01-15', '2.5', 'number', 'nasdaq'),
-
-    -- Options activity
-    ('AAPL', 'put_call_ratio', '2024-01-15', '0.85', 'number', 'cboe'),
-    ('AAPL', 'implied_volatility_30d', '2024-01-15', '22.5', 'number', 'cboe'),
-
-    -- Sector-level time series
-    ('technology', 'sector_sentiment', '2024-01-15', '0.72', 'number', 'news_api'),
-    ('technology', 'relative_strength_spy', '2024-01-15', '1.15', 'number', 'calculated'),
-
-    -- Sub-industry metrics
-    ('semiconductors', 'capacity_utilization', '2024-01-15', '87', 'number', 'semi_association');
-
-CREATE TABLE sector_performance (
+-- Stock metadata and sector assignments
+CREATE TABLE stock_metadata (
+    symbol VARCHAR PRIMARY KEY REFERENCES stocks(symbol),
     sector VARCHAR,
-    date DATE,
-    return DECIMAL,
-    relative_to_spy DECIMAL,
-    volatility DECIMAL,
-    PRIMARY KEY (sector, date)
-);
-
-CREATE TABLE earnings_calendar (
-    symbol VARCHAR,
-    date DATE,
-    eps_estimate DECIMAL,
-    eps_actual DECIMAL,
-    surprise_pct DECIMAL,
-    sentiment_score DECIMAL,
-    PRIMARY KEY (symbol, date)
-);
-
-CREATE TABLE sentiment_scores (
-    symbol VARCHAR,
-    date DATE,
-    news_score DECIMAL,
-    twitter_score DECIMAL,
-    article_count INTEGER,
-    PRIMARY KEY (symbol, date)
-);
-
--- Feature versioning (for model compatibility)
-CREATE TABLE feature_providers (
-    name VARCHAR PRIMARY KEY,
-    version VARCHAR,
-    enabled BOOLEAN,
-    config JSON,
-    last_updated TIMESTAMP
-);
-
-CREATE TABLE feature_snapshots (
-    model_version VARCHAR PRIMARY KEY,
-    created_at TIMESTAMP,
-    feature_providers JSON,
-    feature_count INTEGER,
-    feature_names JSON
+    industry VARCHAR,
+    market_cap_category VARCHAR,  -- large/mid/small cap
+    is_sp500 BOOLEAN,
+    country VARCHAR
 );
 ```
+
+These enhancements will enable:
+
+- **Cross-sectional features**: Sector relative strength, market breadth indicators
+- **Fundamental data**: Earnings, analyst ratings, company metadata
+- **Alternative data**: News sentiment, social media signals, options flow
+- **Feature versioning**: Track feature definitions for model reproducibility
 
 ### 2. Data Pipeline
 
@@ -2970,21 +2849,25 @@ tests/
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Weeks 1-2)
-- [ ] Project setup (repo structure, dependencies, configs)
-- [ ] Database schema and connection layer
-- [ ] AlphaVantage API client with rate limiting
-- [ ] Basic ingestion for single stock
-- [ ] Test framework setup
-- **Deliverable**: Can download and store data for one stock
+### Phase 1: Foundation (✓ COMPLETED)
 
-### Phase 2: Data Pipeline (Weeks 3-4)
-- [ ] Multi-symbol ingestion
-- [ ] Feature engineering module
-- [ ] Data validation and cleaning
-- [ ] Dataset builder with rolling windows
-- [ ] Label generation (actual returns)
-- **Deliverable**: Training-ready datasets for multiple stocks
+- [x] Project setup (repo structure, dependencies, configs)
+- [x] Database schema and connection layer (PostgreSQL + TimescaleDB)
+- [x] AlphaVantage API client with rate limiting
+- [x] Basic ingestion for single stock
+- [x] Test framework setup
+- **Deliverable**: ✓ Can download and store data for one stock
+
+### Phase 2: Data Pipeline (⚙️ IN PROGRESS)
+
+- [x] Multi-symbol ingestion (parallel workers, connection pooling)
+- [x] Technical indicators (local computation + API fallback)
+- [x] Data validation and cleaning
+- [x] Feature dispatcher system (registry-based, incremental updates)
+- [ ] **Feature engineering module** (normalization, derived features)
+- [ ] **Dataset builder with rolling windows** (PyTorch DataLoader)
+- [ ] **Label generation** (forward returns for supervised learning)
+- **Status**: Infrastructure complete, ML preparation needed
 
 ### Phase 3: Model Development (Weeks 5-7)
 - [ ] Baseline model (simple LSTM)
@@ -3042,25 +2925,28 @@ tests/
 7. **Database design**: Time-series optimization, efficient queries, extensible schemas
 8. **Software architecture**: Plugin patterns, registry pattern, separation of concerns, extensibility
 
-## Key Design Decisions to Make
+## Key Design Decisions
 
-### Critical (Phase 1)
-1. **Database choice**: PostgreSQL (production-ready) vs PostgreSQL+TimescaleDB vs SQLite
-2. **Model architecture**: LSTM (recommended start) vs TCN vs Transformer
-3. **Feature set**: Which AlphaVantage indicators to include initially
+### Completed (Phase 1-2)
 
-### Important (Phase 2-3)
-4. **Feature engineering**: Which derived features (slopes, ratios) inspired by Folly
-5. **Training window**: How much history to use (recommend: 10 years for robust patterns)
-6. **Universe selection**: Which stocks to train on (recommend: All NASDAQ + Dow Jones ≈3,500 stocks)
-   - Phase 1: Start with NASDAQ-100 (100 stocks) to prove concept
-   - Phase 2: Scale to full NASDAQ + Dow (3,500 stocks) for production
-7. **Lookback window**: How many days of history for each prediction (recommend: 60 days)
+1. ✅ **Database choice**: PostgreSQL + TimescaleDB (30-day chunks, BRIN indexes)
+2. ✅ **Feature set**: RSI, MACD, Bollinger Bands, ADX, Stochastic, SMA (20/50/200), EMA (12/26), PSAR
+3. ✅ **Universe selection**: ~5,600 NASDAQ stocks actively tracked
+4. ✅ **Data pipeline**: Parallel ingestion with connection pooling, bulk filtering, incremental updates
+5. ✅ **Feature storage**: Registry-based tall format with feature_definitions + computed_features
+
+### To Decide (Phase 2-3)
+
+1. **Model architecture**: LSTM (recommended start) vs TCN vs Transformer
+2. **Feature engineering**: Which derived features (slopes, ratios, cross-sectional)
+3. **Training window**: How much history to use (recommend: 10 years for robust patterns)
+4. **Lookback window**: How many days of history for each prediction (recommend: 60 days)
 
 ### Refinement (Phase 4+)
-8. **Retraining frequency**: How often to retrain (recommend: monthly initially)
-9. **Quantile selection**: Stick with [10%, 50%, 90%] or add more (25%, 75%)?
-10. **Multi-model strategy**: When to split into separate horizon models
+
+1. **Retraining frequency**: How often to retrain (recommend: monthly initially)
+2. **Quantile selection**: Stick with [10%, 50%, 90%] or add more (25%, 75%)?
+3. **Multi-model strategy**: When to split into separate horizon models
 
 ## Scalability Analysis
 
