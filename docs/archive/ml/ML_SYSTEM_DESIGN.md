@@ -58,7 +58,7 @@ Compare predicted distributions to actual returns over the prediction window usi
 
 4. Model Training
    ├─> Quantile regression (predict q10, q50, q90)
-   └─> Separate models per horizon
+   └─> One multi-output model (3 heads: 7d/30d/90d)
 
 5. Prediction Generation
    └─> Store quantile predictions in database
@@ -544,13 +544,13 @@ g2 model-validate --model-id 1 --start 2020-01-01 --end 2024-01-01
 
 ### 2. Multiple Horizons (7d, 30d, 90d)
 
-**Decision:** Train separate models per horizon rather than single multi-output model.
+**Decision:** Start with one multi-output model (shared encoder + separate output heads for 7d/30d/90d), and fall back to separate models only if multi-output materially underperforms.
 
 **Rationale:**
-- Different features matter at different horizons
-- Easier to tune and debug
-- Can optimize each model independently
-- Simpler deployment (can deploy 30d model first, add others later)
+- Single training/deploy surface (one artifact, one pipeline)
+- Shared representation improves sample efficiency and consistency across horizons
+- Still allows horizon-specific specialization via separate heads
+- Fallback is straightforward if validation loss is meaningfully worse than separate models
 
 ### 3. LightGBM First, PyTorch Later
 

@@ -19,64 +19,14 @@ Build a production-grade ML trading system using the existing metadata-driven fe
 
 ## Architecture Extensions
 
-### 1. Quantile Distribution Storage
+### 1. Quantile Distribution Storage (Decision)
 
-**Problem**: Store full probability distributions, not just point estimates.
+**Decision**: Store ML predictions in **dedicated prediction tables** (not as `computed_features`).
 
-**Option A: Separate Features (Simple)**
-```sql
--- Three features per prediction
-INSERT INTO feature_definitions (name, function_name, params, ...)
-VALUES
-    ('prediction_return_7d_q10', 'ml_predict', '{"model": "xgb_v1", "quantile": 0.1}'),
-    ('prediction_return_7d_q50', 'ml_predict', '{"model": "xgb_v1", "quantile": 0.5}'),
-    ('prediction_return_7d_q90', 'ml_predict', '{"model": "xgb_v1", "quantile": 0.9}');
-```
+- Primary tables: `quantile_predictions`, `prediction_outcomes`, `model_performance`
+- Rationale: prediction rows have different semantics and lifecycle than feature engineering (model versioning, PIT evaluation, feature snapshots, calibration metrics).
 
-**Pros:**
-- ✅ Works with existing schema
-- ✅ Easy to query specific quantiles
-- ✅ Clear semantics
-
-**Cons:**
-- ❌ 3x storage for full distributions
-- ❌ Must register multiple features
-
-**Option B: JSONB Distribution (Flexible)**
-```sql
--- One feature with full distribution
-INSERT INTO feature_definitions (name, function_name, params, ...)
-VALUES ('prediction_return_7d', 'ml_predict',
-        '{"model": "xgb_v1", "output": "distribution"}');
-
--- Value stored as: {"q10": 0.02, "q25": 0.04, "q50": 0.05, "q75": 0.07, "q90": 0.12}
-```
-
-**Pros:**
-- ✅ Compact storage
-- ✅ Can add quantiles without schema changes
-- ✅ PostgreSQL JSONB is fast
-
-**Cons:**
-- ❌ Slightly more complex queries
-- ❌ Less type-safe
-
-**Option C: Array Column (Space-Efficient)**
-```sql
-ALTER TABLE computed_features ADD COLUMN distribution DOUBLE PRECISION[];
-
--- Store as [q10, q25, q50, q75, q90]
-```
-
-**Pros:**
-- ✅ Most space-efficient
-- ✅ Native array operations
-
-**Cons:**
-- ❌ Requires schema change
-- ❌ Array indexing less intuitive
-
-**Recommendation**: Start with **Option A** (separate features) for simplicity. Migrate to **Option B** (JSONB) if storage becomes an issue.
+Schema and details live in `docs/archive/ml/ML_SYSTEM_DESIGN.md`.
 
 ---
 
@@ -392,6 +342,9 @@ g2 backtest-compare \
 ## Implementation Phases
 
 ### Phase 1: ML Predictions (Foundation)
+- [ ] Implement dataset builder (rolling windows → Parquet / PyTorch DataLoader)
+- [ ] Implement label generation (forward returns for 7/30/90d)
+- [ ] Define point-in-time splits (walk-forward / rolling validation)
 - [ ] Register `ml_predict` compute function
 - [ ] Add model versioning tables
 - [ ] Implement quantile regression predictions

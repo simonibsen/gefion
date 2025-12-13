@@ -26,7 +26,7 @@ g2 modernizes the rule-based technical analysis approach from the legacy Folly p
 - **Enhanced Data Sources**: Leverage AlphaVantage API for pre-calculated indicators, eliminating custom computation
 - **Modern Storage**: Use performant time-series database (PostgreSQL with TimescaleDB)
 - **PyTorch Models**: Train neural networks to predict trend signal strength instead of hand-coding rules
-- **Multi-Horizon Predictions**: Separate models for 10-day, 30-day, and 90-day trend predictions
+- **Multi-Horizon Predictions**: Start with one multi-output model for 7/30/90-day horizons (fallback: separate models only if multi-output underperforms)
 - **Self-Validating**: Use rolling windows to measure model accuracy against actual future returns
 - **TDD Approach**: Build with test-driven development for reliability and maintainability
 - **Modern Development Practices**: Follow contemporary software engineering best practices including containerization, runtime flexibility, single source of truth, CI/CD automation, and cloud-native architecture
@@ -215,16 +215,9 @@ CREATE TABLE feature_functions (
 );
 
 -- Model predictions (for backtesting and monitoring)
--- Note: This table is planned but not yet implemented
-CREATE TABLE predictions (
-    symbol VARCHAR,
-    prediction_date DATE,
-    model_name VARCHAR,
-    horizon_days INTEGER,
-    signal_strength DECIMAL,
-    actual_return DECIMAL,
-    PRIMARY KEY (symbol, prediction_date, model_name)
-);
+-- Decision: store predictions in dedicated tables (not as computed_features).
+-- See docs/archive/ml/ML_SYSTEM_DESIGN.md for canonical schemas:
+--   quantile_predictions, prediction_outcomes, model_performance
 
 ```
 
