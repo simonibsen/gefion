@@ -107,14 +107,14 @@ g2 supports **database-stored feature functions** that can be written in multipl
 #    (via g2 CLI, web UI, or direct SQL)
 
 # 2. Export to git for version control
-g2 features-export --dir feature-functions
+g2 features-fx-export --dir feature-functions
 
 # 3. Review and commit changes
 git add feature-functions/
 git commit -m "Update price_change_pct feature function"
 
 # 4. Deploy to other environments
-g2 features-import --dir feature-functions
+g2 features-fx-import --dir feature-functions
 ```
 
 ### Example: Creating a Custom Feature Function
@@ -136,7 +136,7 @@ Create a JSON file in `feature-functions/`:
 Import to database:
 
 ```bash
-g2 features-import --dir feature-functions
+g2 features-fx-import --dir feature-functions
 ```
 
 ### Security & Sandboxing
