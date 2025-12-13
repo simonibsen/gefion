@@ -1110,8 +1110,8 @@ def register_feature(
         emit_error(f"Register failed: {exc}", json_output=json_output)
 
 
-@app.command("features-export")
-def features_export(
+@app.command("features-fx-export")
+def features_fx_export(
     dir: Optional[Path] = typer.Option(None, "--dir", help="Directory to write feature files (default: feature-functions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     functions: Optional[str] = typer.Option(None, "--functions", help="Comma-separated list of function names to export"),
@@ -1145,8 +1145,8 @@ def _upsert_feature_function(conn: psycopg.Connection, payload: dict) -> None:
     upsert_feature_function_helper(conn, payload, return_id=False)
 
 
-@app.command("features-import")
-def features_import(
+@app.command("features-fx-import")
+def features_fx_import(
     dir: Optional[Path] = typer.Option(None, "--dir", help="Directory containing feature JSON files (default: feature-functions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     functions: Optional[str] = typer.Option(None, "--functions", help="Comma-separated list of function names to import"),
