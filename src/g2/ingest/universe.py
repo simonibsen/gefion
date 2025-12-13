@@ -192,6 +192,14 @@ def ingest_prices_for_symbols(
                     outputsize = "compact"
 
             payload = client.fetch_daily_adjusted(sym, outputsize=outputsize)
+
+            # Check for API error responses (rate limits, invalid symbols, etc.)
+            if any(k in payload for k in ("Note", "Error Message", "Information")):
+                error_msg = payload.get("Note") or payload.get("Error Message") or payload.get("Information")
+                if progress:
+                    progress.step_done(sym, error=True, meta={"inserted": 0, "reason": error_msg})
+                return
+
             rows = parse_daily_adjusted(symbol=sym, payload=payload)
             if not rows:
                 if progress:
