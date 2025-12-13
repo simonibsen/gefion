@@ -13,7 +13,6 @@ graph TB
     subgraph "CLI Commands"
         DataUpdate[g2 data-update]
         FeaturesCompute[g2 feat-compute]
-        FeaturesRegister[g2 features-register]
     end
 
     subgraph "Application Layer"
