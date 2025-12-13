@@ -82,7 +82,7 @@ def test_profile_includes_latest_symbol_timing_in_progress(monkeypatch):
 
     res = runner.invoke(
         cli.app,
-        ["features-compute", "--symbols", "AAA", "--features", "feat1", "--json", "--profile"],
+        ["feat-compute", "--symbols", "AAA", "--features", "feat1", "--json", "--profile"],
     )
     assert res.exit_code == 0, res.stdout
     lines = res.stdout.strip().splitlines()

@@ -83,7 +83,7 @@ def test_features_compute_starts_at_max_workers(monkeypatch):
 
     res = runner.invoke(
         cli.app,
-        ["features-compute", "--symbols", "AAA", "--features", "feat1", "--max-workers", "5", "--batch-size", "3000", "--json"],
+        ["feat-compute", "--symbols", "AAA", "--features", "feat1", "--max-workers", "5", "--batch-size", "3000", "--json"],
     )
 
     assert res.exit_code == 0, res.stdout

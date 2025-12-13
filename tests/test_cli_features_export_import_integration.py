@@ -74,7 +74,7 @@ def test_export_with_default_directory(setup_test_data, tmp_path, monkeypatch):
     """Test that features-fx-export uses default 'feature-functions' directory."""
     monkeypatch.chdir(tmp_path)
 
-    result = runner.invoke(cli.app, ["features-fx-export"])
+    result = runner.invoke(cli.app, ["feat-fx-export"])
 
     assert result.exit_code == 0
     assert "Exported" in result.stdout
@@ -92,7 +92,7 @@ def test_export_with_custom_directory(setup_test_data, tmp_path):
     """Test that features-fx-export works with custom directory."""
     export_dir = tmp_path / "custom-export"
 
-    result = runner.invoke(cli.app, ["features-fx-export", "--dir", str(export_dir)])
+    result = runner.invoke(cli.app, ["feat-fx-export", "--dir", str(export_dir)])
 
     assert result.exit_code == 0
     assert "Exported" in result.stdout
@@ -104,7 +104,7 @@ def test_export_filtered_functions(setup_test_data, tmp_path, monkeypatch):
     """Test exporting specific functions only."""
     monkeypatch.chdir(tmp_path)
 
-    result = runner.invoke(cli.app, ["features-fx-export", "--functions", "cli_test_func1"])
+    result = runner.invoke(cli.app, ["feat-fx-export", "--functions", "cli_test_func1"])
 
     assert result.exit_code == 0
     assert "Exported 1" in result.stdout
@@ -135,7 +135,7 @@ def test_import_with_default_directory(db_conn, tmp_path, monkeypatch):
 
     (func_dir / "cli_test_imported_v1.0.json").write_text(json.dumps(test_func, indent=2))
 
-    result = runner.invoke(cli.app, ["features-fx-import"])
+    result = runner.invoke(cli.app, ["feat-fx-import"])
 
     assert result.exit_code == 0
     assert "Imported 1" in result.stdout
@@ -164,7 +164,7 @@ def test_import_with_custom_directory(db_conn, tmp_path):
 
     (import_dir / "cli_test_custom_imported_v1.0.json").write_text(json.dumps(test_func, indent=2))
 
-    result = runner.invoke(cli.app, ["features-fx-import", "--dir", str(import_dir)])
+    result = runner.invoke(cli.app, ["feat-fx-import", "--dir", str(import_dir)])
 
     assert result.exit_code == 0
     assert "Imported 1" in result.stdout
@@ -201,7 +201,7 @@ def test_import_filtered_functions(db_conn, tmp_path, monkeypatch):
     (func_dir / "cli_test_import2_v1.0.json").write_text(json.dumps(func2, indent=2))
 
     # Import only func1
-    result = runner.invoke(cli.app, ["features-fx-import", "--functions", "cli_test_import1"])
+    result = runner.invoke(cli.app, ["feat-fx-import", "--functions", "cli_test_import1"])
 
     assert result.exit_code == 0
     assert "Imported 1" in result.stdout
@@ -235,12 +235,12 @@ def test_import_is_idempotent_via_cli(db_conn, tmp_path, monkeypatch):
     (func_dir / "cli_test_idempotent_v1.0.json").write_text(json.dumps(test_func, indent=2))
 
     # First import
-    result1 = runner.invoke(cli.app, ["features-fx-import"])
+    result1 = runner.invoke(cli.app, ["feat-fx-import"])
     assert result1.exit_code == 0
     assert "Imported 1" in result1.stdout
 
     # Second import - should succeed
-    result2 = runner.invoke(cli.app, ["features-fx-import"])
+    result2 = runner.invoke(cli.app, ["feat-fx-import"])
     assert result2.exit_code == 0
     assert "Imported 1" in result2.stdout
 
@@ -256,7 +256,7 @@ def test_export_import_roundtrip(setup_test_data, db_conn, tmp_path, monkeypatch
     monkeypatch.chdir(tmp_path)
 
     # Export only test functions
-    result_export = runner.invoke(cli.app, ["features-fx-export", "--functions", "cli_test_func1,cli_test_func2"])
+    result_export = runner.invoke(cli.app, ["feat-fx-export", "--functions", "cli_test_func1,cli_test_func2"])
     assert result_export.exit_code == 0
 
     # Clear database
@@ -269,7 +269,7 @@ def test_export_import_roundtrip(setup_test_data, db_conn, tmp_path, monkeypatch
         assert cur.fetchone()[0] == 0
 
     # Import
-    result_import = runner.invoke(cli.app, ["features-fx-import"])
+    result_import = runner.invoke(cli.app, ["feat-fx-import"])
     assert result_import.exit_code == 0
     assert "Imported 2" in result_import.stdout
 
@@ -288,7 +288,7 @@ def test_import_from_nonexistent_directory(tmp_path, monkeypatch):
     """Test import gracefully handles nonexistent directory."""
     monkeypatch.chdir(tmp_path)
 
-    result = runner.invoke(cli.app, ["features-fx-import", "--dir", "nonexistent"])
+    result = runner.invoke(cli.app, ["feat-fx-import", "--dir", "nonexistent"])
 
     assert result.exit_code == 0
     assert "No functions found" in result.stdout

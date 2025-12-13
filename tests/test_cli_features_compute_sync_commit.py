@@ -67,7 +67,7 @@ def test_features_compute_sets_sync_commit(monkeypatch):
 
     res = runner.invoke(
         cli.app,
-        ["features-compute", "--symbols", "AAA", "--features", "feat1", "--json"],
+        ["feat-compute", "--symbols", "AAA", "--features", "feat1", "--json"],
     )
     assert res.exit_code == 0, res.stdout
 

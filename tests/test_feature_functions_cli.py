@@ -53,7 +53,7 @@ def test_functions_register_inserts(monkeypatch):
         "language": "python_expr",
         "function_body": "def compute(df): return df['close']",
     }
-    res = runner.invoke(cli.app, ["features-fx-register", "--definition", json.dumps(payload), "--json"])
+    res = runner.invoke(cli.app, ["feat-fx-register", "--definition", json.dumps(payload), "--json"])
     assert res.exit_code == 0, res.stdout
     assert "obv" in res.stdout
     assert calls["params"]["name"] == "obv"
@@ -96,7 +96,7 @@ def test_functions_register_sets_default_created_by(monkeypatch):
         "language": "python_expr",
         "function_body": "def compute(df): return df['vol']",
     }
-    res = runner.invoke(cli.app, ["features-fx-register", "--definition", json.dumps(payload), "--json"])
+    res = runner.invoke(cli.app, ["feat-fx-register", "--definition", json.dumps(payload), "--json"])
     assert res.exit_code == 0, res.stdout
     assert calls["params"]["created_by"] == "cli"
 
@@ -159,7 +159,7 @@ def test_functions_list(monkeypatch):
     monkeypatch.setattr(cli.psycopg, "connect", fake_connect)
     monkeypatch.setattr(cli.schema, "create_feature_functions_table", fake_create)
 
-    res = runner.invoke(cli.app, ["features-fx-list", "--json", "--show-body", "--feature", "obv"])
+    res = runner.invoke(cli.app, ["feat-fx-list", "--json", "--show-body", "--feature", "obv"])
     assert res.exit_code == 0, res.stdout
     assert "WHERE name =" in calls["query"]
     assert calls.get("created") is True

@@ -83,7 +83,7 @@ def test_features_compute_json_includes_profiles_and_timing(monkeypatch):
 
     res = runner.invoke(
         cli.app,
-        ["features-compute", "--symbols", "AAA", "--features", "feat1", "--json", "--profile", "--no-progress"],
+        ["feat-compute", "--symbols", "AAA", "--features", "feat1", "--json", "--profile", "--no-progress"],
     )
     assert res.exit_code == 0, res.stdout
     payload = json.loads(res.stdout.strip().splitlines()[-1])
