@@ -20,14 +20,20 @@ ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
 
 
 class RateLimiter:
-    """Token-bucket rate limiter with dual per-minute and per-second limits."""
+    """Rate limiter with minimum spacing to prevent burst patterns.
+
+    AlphaVantage requires requests to be spread evenly across the 1-minute window,
+    not just under 5/sec. We enforce minimum spacing between consecutive requests.
+    """
 
     def __init__(self, calls_per_minute: int, calls_per_second: int = 4):
         self.capacity = calls_per_minute
         self.tokens = calls_per_minute
         self.updated = time.monotonic()
-        self.calls_per_second = calls_per_second
-        self.recent_calls = []  # Track timestamps of recent calls
+        # Enforce minimum spacing: for 75/min, that's 0.8 sec/call
+        # Add 25% buffer for safety: 0.8 * 1.25 = 1.0 second minimum spacing
+        self.min_spacing = (60.0 / calls_per_minute) * 1.25
+        self.last_request = 0.0  # Track last request time
         self.lock = threading.Lock()
 
     def acquire(self) -> None:
@@ -41,27 +47,28 @@ class RateLimiter:
                 self.tokens = min(self.capacity, self.tokens + refill)
                 self.updated = now
 
-            # Per-second sliding window: remove calls older than 1 second
-            cutoff = now - 1.0
-            self.recent_calls = [t for t in self.recent_calls if t > cutoff]
+            # Check minimum spacing since last request
+            time_since_last = now - self.last_request
 
-            # Check if we can make a request
-            if self.tokens >= 1 and len(self.recent_calls) < self.calls_per_second:
+            # Can proceed if we have tokens AND enough time has passed
+            if self.tokens >= 1 and time_since_last >= self.min_spacing:
                 self.tokens -= 1
-                self.recent_calls.append(now)
+                self.last_request = now
                 return
 
             # Calculate how long to wait
             if self.tokens < 1:
-                # Wait for per-minute limit
-                sleep_for = (1 - self.tokens) * (60.0 / self.capacity)
+                # Wait for per-minute token bucket to refill
+                wait_for_tokens = (1 - self.tokens) * (60.0 / self.capacity)
             else:
-                # Wait for per-second limit (oldest call to age out)
-                if self.recent_calls:
-                    oldest = self.recent_calls[0]
-                    sleep_for = max(0.0, 1.0 - (now - oldest)) + 0.01
-                else:
-                    sleep_for = 0.01
+                wait_for_tokens = 0.0
+
+            # Wait for minimum spacing
+            wait_for_spacing = max(0.0, self.min_spacing - time_since_last)
+
+            # Wait for the longer of the two constraints
+            sleep_for = max(wait_for_tokens, wait_for_spacing)
+
         time.sleep(sleep_for)
         self.acquire()
 
