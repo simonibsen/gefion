@@ -2,6 +2,22 @@
 
 New Python/Postgres project inspired by `folly` (technical analysis + calc_store pattern) and `gefjon` (modern ingestion/ML pipeline). The goal is to grow this incrementally with strict TDD and a running dev journal so work can be paused/resumed easily.
 
+## First run (10-minute quickstart)
+
+```bash
+make venv                               # create/upgrade venv + dev deps
+cp .env.example .env                    # set DATABASE_URL and ALPHAVANTAGE_API_KEY
+docker compose up -d postgres           # start TimescaleDB locally
+psql -d g2 -f sql/schema.sql            # idempotent schema init
+g2 seed-features                        # seed indicator feature definitions
+g2 prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_adjusted.json
+g2 run-features --features indicator_rsi_14 --exchange NASDAQ --local --refresh-existing
+```
+
+Notes:
+- The ingest command above stays offline by using the bundled fixture; swap in `--exchange NASDAQ --timeframe auto` when you want live API calls.
+- CLI commands load `.env` automatically for DB/API credentials.
+
 ## Architecture
 
 ```mermaid
@@ -175,6 +191,8 @@ DB functions override code registry functions with the same name.
 ```bash
 python -m pytest -q
 ```
+- Quick no-DB smoke: `pytest -q tests -k "not db"` (uses bundled fixtures like `tests/fixtures/demo_time_series_daily_adjusted.json`)
+- DB-enabled: `ENABLE_DB_TESTS=1 pytest -q` with TimescaleDB running
 
 ### Make targets
 - `make venv` — create/upgrade the venv and install dev deps

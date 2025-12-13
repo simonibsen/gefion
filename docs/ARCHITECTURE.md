@@ -87,6 +87,13 @@ computed_features (
 )
 ```
 
+### Data model at a glance
+- `stocks`: one row per symbol (`id` PK, `symbol`, `name`, `exchange`)
+- `stock_ohlcv`: Timescale hypertable keyed by (`data_id`, `date`), with OHLCV columns and a composite index on `data_id, date DESC`
+- `feature_functions`: registry of callable implementations (`name`, `version`, `language`, `function_body`, `enabled`, `status`, `inputs`, `param_schema`, `output_name`, `output_type`), indexed on `enabled, status, name`
+- `feature_definitions`: configuration of what to compute (`name`, `function_name`, `params`, `source_table`, `source_column`, `store_table`, `active`)
+- `computed_features`: tall store for outputs (`data_id`, `date`, `feature_id`, `value`), composite index on `data_id, feature_id, date DESC`
+
 ### Indexing Strategy
 
 **Optimized for**:
@@ -180,6 +187,10 @@ exec(function_body, restricted_globals, {})
 - Resource limits (CPU, memory, time)
 - Process isolation (separate processes per function)
 - Output validation (type checking, range limits)
+
+### Security checklist
+- Enforced now: blocked builtins (`open`, `exec`, `eval`, `compile`, `__import__`), no filesystem or network modules (`os`, `pathlib`, `requests`, `socket`), sandbox globals limited to pandas/numpy/talib/math/datetime/statistics, functions executed in isolated namespace.
+- Not yet enforced (planned): per-function CPU/memory/time limits, process isolation instead of threads, stronger output validation (schema and bounds checking), explicit import allowlist for any new packages.
 
 ## Export/Import System
 
