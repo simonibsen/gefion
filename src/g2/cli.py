@@ -275,6 +275,83 @@ def import_functions_from_directory(
     return imported_count
 
 
+def export_definitions_to_directory(
+    conn,
+    directory: Path,
+    feature_names: Optional[List[str]] = None
+) -> int:
+    """
+    Export feature definitions to individual JSON files in a directory.
+
+    Args:
+        conn: Database connection
+        directory: Target directory for exports (created if doesn't exist)
+        feature_names: Optional list of specific feature names to export
+
+    Returns:
+        Number of definitions exported
+    """
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    # Get definitions from database
+    definitions = _export_feature_definitions(conn, feature_names)
+
+    # Write each definition to its own file
+    for defn in definitions:
+        # Filename format: featurename.json (no version in filename since name is unique)
+        name = defn["name"]
+        filename = f"{name}.json"
+        filepath = directory / filename
+
+        filepath.write_text(json.dumps(defn, indent=2))
+
+    return len(definitions)
+
+
+def import_definitions_from_directory(
+    conn,
+    directory: Path,
+    feature_names: Optional[List[str]] = None
+) -> int:
+    """
+    Import feature definitions from JSON files in a directory.
+
+    Args:
+        conn: Database connection
+        directory: Source directory containing JSON files
+        feature_names: Optional list of specific feature names to import
+
+    Returns:
+        Number of definitions imported
+    """
+    directory = Path(directory)
+    if not directory.exists():
+        return 0
+
+    # Find all JSON files in directory
+    json_files = list(directory.glob("*.json"))
+
+    imported_count = 0
+    for json_file in json_files:
+        try:
+            payload = json.loads(json_file.read_text())
+
+            # Skip if filtering by names and this isn't in the list
+            if feature_names and payload.get("name") not in feature_names:
+                continue
+
+            # Upsert the definition
+            _upsert_feature_definition(conn, payload)
+            imported_count += 1
+
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            # Skip invalid JSON files or files missing required fields
+            continue
+
+    return imported_count
+
+
 def _parse_date_or_error(val: Optional[str], json_output: Optional[bool]):
     if val is None:
         return None
@@ -834,7 +911,7 @@ def db_tune(
     )
 
 
-@app.command("features-seed")
+@app.command("feat-seed")
 def seed_features(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
@@ -870,7 +947,7 @@ def _normalize_feature_definition(payload: dict) -> dict:
     return d
 
 
-@app.command("features-migrate-source")
+@app.command("feat-migrate-source")
 def migrate_feature_definitions_source(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
@@ -914,7 +991,7 @@ def db_migrate_stock_prices(
         emit_error(f"DB migration failed: {exc}", json_output=json_output)
 
 
-@app.command("features-fx-register")
+@app.command("feat-fx-register")
 def register_function(
     definition: str = typer.Option(..., "--definition", help="JSON string for a feature function definition"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
@@ -964,7 +1041,7 @@ def register_function(
         emit_error(f"Register function failed: {exc}", json_output=json_output)
 
 
-@app.command("features-fx-list")
+@app.command("feat-fx-list")
 def list_functions(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
@@ -1059,58 +1136,7 @@ def list_functions(
         emit_error(f"List functions failed: {exc}", json_output=json_output)
 
 
-@app.command("features-register")
-def register_feature(
-    definition: str = typer.Option(..., "--definition", help="JSON string for a single feature definition"),
-    db_url: Optional[str] = typer.Option(None, help="Database URL"),
-    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
-) -> None:
-    """
-    Register a single feature definition from a JSON payload.
-
-    Example:
-      --definition '{
-        "name": "my_feature",
-        "function_name": "my_fx",
-        "params": {"window": 30},
-        "source_table": "stock_ohlcv",
-        "source_column": "close",
-        "store_table": "computed_features",
-        "store_column": "value",
-        "store_type": "double precision",
-        "active": true
-      }'
-    """
-    try:
-        payload = json.loads(definition)
-        if not isinstance(payload, dict):
-            raise ValueError("definition must be a JSON object")
-    except Exception as exc:
-        emit_error(f"Invalid JSON: {exc}", json_output=json_output)
-        return
-
-    required = ["name", "function_name", "store_table", "store_column"]
-    missing = [k for k in required if k not in payload]
-    if missing:
-        emit_error(f"Missing required keys: {', '.join(missing)}", json_output=json_output)
-        return
-
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_definitions", "computed_features"])
-            normalized = _normalize_feature_definition(payload)
-            ids = ensure_feature_definitions(conn, [normalized])
-            ensure_store_targets(conn, [normalized])
-        emit(
-            f"Registered feature '{payload['name']}'",
-            data={"ids": ids},
-            json_output=json_output,
-        )
-    except Exception as exc:
-        emit_error(f"Register failed: {exc}", json_output=json_output)
-
-
-@app.command("features-fx-export")
+@app.command("feat-fx-export")
 def features_fx_export(
     dir: Optional[Path] = typer.Option(None, "--dir", help="Directory to write feature files (default: feature-functions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
@@ -1145,7 +1171,19 @@ def _upsert_feature_function(conn: psycopg.Connection, payload: dict) -> None:
     upsert_feature_function_helper(conn, payload, return_id=False)
 
 
-@app.command("features-fx-import")
+def _upsert_feature_definition(conn: psycopg.Connection, payload: dict) -> None:
+    """Upsert feature definition."""
+    required = ["name", "function_name", "store_table", "store_column"]
+    missing = [k for k in required if k not in payload]
+    if missing:
+        raise ValueError(f"Missing required keys for feature_definition: {', '.join(missing)}")
+
+    normalized = _normalize_feature_definition(payload)
+    ensure_feature_definitions(conn, [normalized])
+    ensure_store_targets(conn, [normalized])
+
+
+@app.command("feat-fx-import")
 def features_fx_import(
     dir: Optional[Path] = typer.Option(None, "--dir", help="Directory containing feature JSON files (default: feature-functions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
@@ -1173,7 +1211,60 @@ def features_fx_import(
         emit_error(f"Import failed: {exc}")
 
 
-@app.command("features-trim")
+@app.command("feat-def-export")
+def feat_def_export(
+    dir: Optional[Path] = typer.Option(None, "--dir", help="Directory to write feature definition files (default: feature-definitions)"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    features: Optional[str] = typer.Option(None, "--features", help="Comma-separated list of feature names to export"),
+) -> None:
+    """
+    Export feature_definitions to individual JSON files (one per feature).
+
+    By default, exports all definitions to the 'feature-definitions/' directory.
+    Each definition is saved as <name>.json.
+    """
+    target_dir = Path(dir) if dir else Path("feature-definitions")
+    feat_filter = parse_comma_separated(features)
+
+    try:
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_definitions"])
+            exported_count = export_definitions_to_directory(conn, target_dir, feat_filter)
+
+        emit(f"Exported {exported_count} definition(s) to {target_dir}")
+    except Exception as exc:
+        emit_error(f"Export failed: {exc}")
+
+
+@app.command("feat-def-import")
+def feat_def_import(
+    dir: Optional[Path] = typer.Option(None, "--dir", help="Directory containing feature definition JSON files (default: feature-definitions)"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    features: Optional[str] = typer.Option(None, "--features", help="Comma-separated list of feature names to import"),
+) -> None:
+    """
+    Import feature_definitions from individual JSON files.
+
+    By default, imports all JSON files from the 'feature-definitions/' directory.
+    Idempotent: re-running will upsert by name.
+    """
+    src_dir = Path(dir) if dir else Path("feature-definitions")
+    feat_filter = parse_comma_separated(features)
+
+    try:
+        with db_connection(db_url) as conn:
+            init_schema_tables(conn, ["feature_definitions", "computed_features"])
+            imported_count = import_definitions_from_directory(conn, src_dir, feat_filter)
+
+        if imported_count == 0:
+            emit(f"No definitions found in {src_dir}")
+        else:
+            emit(f"Imported {imported_count} definition(s) from {src_dir}")
+    except Exception as exc:
+        emit_error(f"Import failed: {exc}")
+
+
+@app.command("feat-trim")
 def trim_features(
     feature: str = typer.Option(..., "--feature", help="Comma-separated feature names to trim"),
     before: Optional[str] = typer.Option(None, help="Drop rows before this date (YYYY-MM-DD)"),
@@ -1261,7 +1352,7 @@ def trim_prices(
         emit_error(f"Trim prices failed: {exc}", json_output=json_output)
 
 
-@app.command("features-drop")
+@app.command("feat-drop")
 def drop_features_cmd(
     feature: Optional[str] = typer.Option(None, "--feature", help="Comma-separated feature names to drop"),
     all_features: bool = typer.Option(False, "--all", help="Drop all features (use with caution!)"),
@@ -1367,7 +1458,7 @@ def drop_features_cmd(
         emit_error(f"Drop features failed: {exc}", json_output=json_output)
 
 
-@app.command("features-list")
+@app.command("feat-def-list")
 def features_list(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
@@ -1433,7 +1524,7 @@ def features_list(
         emit_error(f"List failed: {exc}", json_output=json_output)
 
 
-@app.command("features-show")
+@app.command("feat-def-show")
 def features_show(
     feature: str = typer.Option(..., "--feature", help="Feature name"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
@@ -1474,7 +1565,7 @@ def features_show(
         emit_error(f"Show failed: {exc}", json_output=json_output)
 
 
-@app.command("features-compute")
+@app.command("feat-compute")
 def features_compute(
     symbols: Optional[str] = typer.Option(None, help="Comma-separated list of stock symbols (e.g., AAPL,MSFT)"),
     features: Optional[str] = typer.Option(None, "--features", help="Comma list of feature names to compute"),
