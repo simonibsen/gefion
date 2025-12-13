@@ -20,28 +20,48 @@ ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
 
 
 class RateLimiter:
-    """Token-bucket rate limiter."""
+    """Token-bucket rate limiter with dual per-minute and per-second limits."""
 
-    def __init__(self, calls_per_minute: int):
+    def __init__(self, calls_per_minute: int, calls_per_second: int = 4):
         self.capacity = calls_per_minute
         self.tokens = calls_per_minute
         self.updated = time.monotonic()
+        self.calls_per_second = calls_per_second
+        self.recent_calls = []  # Track timestamps of recent calls
         self.lock = threading.Lock()
 
     def acquire(self) -> None:
         with self.lock:
             now = time.monotonic()
             elapsed = now - self.updated
-            # refill tokens
+
+            # Per-minute token bucket: refill tokens
             refill = (self.capacity / 60.0) * elapsed
             if refill > 0:
                 self.tokens = min(self.capacity, self.tokens + refill)
                 self.updated = now
-            if self.tokens >= 1:
+
+            # Per-second sliding window: remove calls older than 1 second
+            cutoff = now - 1.0
+            self.recent_calls = [t for t in self.recent_calls if t > cutoff]
+
+            # Check if we can make a request
+            if self.tokens >= 1 and len(self.recent_calls) < self.calls_per_second:
                 self.tokens -= 1
+                self.recent_calls.append(now)
                 return
-            # wait for next token
-            sleep_for = (1 - self.tokens) * (60.0 / self.capacity)
+
+            # Calculate how long to wait
+            if self.tokens < 1:
+                # Wait for per-minute limit
+                sleep_for = (1 - self.tokens) * (60.0 / self.capacity)
+            else:
+                # Wait for per-second limit (oldest call to age out)
+                if self.recent_calls:
+                    oldest = self.recent_calls[0]
+                    sleep_for = max(0.0, 1.0 - (now - oldest)) + 0.01
+                else:
+                    sleep_for = 0.01
         time.sleep(sleep_for)
         self.acquire()
 
