@@ -348,3 +348,70 @@ You have excellent infrastructure. The ML part is now the bottleneck. Begin by:
 4. **Next Week**: Train first model on test dataset
 
 Your data pipeline is solid. Time to put it to use! 🚀
+
+---
+
+## Future Work / Technical Debt
+
+### Feature Management Enhancements
+
+**Status**: Deferred for future implementation
+
+#### Enable/Disable CLI Commands
+
+Currently, enabling/disabling features requires editing JSON files and re-importing. Need dedicated commands:
+
+```bash
+# Feature Functions
+g2 feat-fx-enable --name indicator --version 1.0
+g2 feat-fx-disable --name indicator --version 1.0
+
+# Feature Definitions
+g2 feat-def-enable --name indicator_rsi_14
+g2 feat-def-disable --name indicator_rsi_14
+```
+
+**Implementation Notes**:
+
+- Simple UPDATE queries on `feature_functions.enabled` and `feature_definitions.active`
+- Add `--all` flag for bulk operations
+- Consider `--status` option for feature_functions (active/deprecated/archived)
+
+#### Inactive Function Handling
+
+Feature definitions can reference feature functions that are disabled or missing. Need proper error handling:
+
+**Current State**:
+
+- No validation when feature definitions reference inactive functions
+- May fail silently or with unclear errors during computation
+
+**Required Improvements**:
+
+1. **Validation on Import**: Check that referenced functions exist and are enabled
+2. **Runtime Checks**: Skip or warn when computing features with inactive functions
+3. **List Command Enhancement**: Show function status in `feat-def-list` output
+
+   ```text
+   indicator_rsi_14 (function: indicator v1.0 [DISABLED])
+   ```
+
+4. **Bulk Operations**: Commands to find and fix orphaned feature definitions
+
+   ```bash
+   g2 feat-def-validate  # Find definitions with inactive/missing functions
+   g2 feat-def-fix       # Disable definitions with inactive functions
+   ```
+
+**Test Cases Needed**:
+
+- [ ] Feature definition with disabled function (should warn/skip)
+- [ ] Feature definition with missing function (should error clearly)
+- [ ] Enabling function should make dependent definitions work again
+- [ ] Bulk validation across all definitions
+
+**Related Files**:
+
+- [src/g2/cli.py](src/g2/cli.py) - Add new commands
+- [src/g2/ingest/dispatcher.py](src/g2/ingest/dispatcher.py) - Add runtime validation
+- [src/g2/cli_helpers.py](src/g2/cli_helpers.py) - Add validation helper functions
