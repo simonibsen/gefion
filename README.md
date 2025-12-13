@@ -79,8 +79,95 @@ graph TB
 - **Generic Dispatcher**: Routes computation based on `function_name` in feature definitions
 - **Hypertables**: TimescaleDB optimizes time-series queries on `stock_ohlcv` and `computed_features`
 - **Pure Functions**: Compute functions are side-effect-free, dispatcher handles DB I/O
+- **DB-First Functions**: Custom feature functions stored in database with git backup for version control
+
+## Feature Functions (DB-First Architecture)
+
+### Overview
+
+g2 supports **database-stored feature functions** that can be written in multiple languages (Python, SQL, etc.) and executed in a sandboxed environment. The database is the source of truth, with periodic exports to git for version control and code review.
+
+### Architecture Layers
+
+1. **Core Compute Engines** (in code): `indicator`, `derivative`
+   - Built-in functions that need full system access
+   - Registered at runtime via `register_compute_function()`
+   - Cannot be overridden by DB functions
+
+2. **Custom Feature Functions** (in database): User-defined logic
+   - Stored in `feature_functions` table as code text
+   - Loaded and executed in sandboxed environment
+   - Can override code registry or add new functions
+   - Support multiple languages: `python`, `python_expr`, `sql` (extensible)
+
+### DB-First Workflow
+
+```bash
+# 1. Create/modify feature functions in the database
+#    (via g2 CLI, web UI, or direct SQL)
+
+# 2. Export to git for version control
+g2 features-export --dir feature-functions
+
+# 3. Review and commit changes
+git add feature-functions/
+git commit -m "Update price_change_pct feature function"
+
+# 4. Deploy to other environments
+g2 features-import --dir feature-functions
+```
+
+### Example: Creating a Custom Feature Function
+
+Create a JSON file in `feature-functions/`:
+
+```json
+{
+  "name": "price_change_pct",
+  "version": "1.0",
+  "language": "python",
+  "description": "Calculate percentage price change",
+  "status": "active",
+  "enabled": true,
+  "function_body": "import pandas as pd\n\ndef compute(rows, specs):\n    df = pd.DataFrame(rows)\n    df['price_change_pct'] = df['close'].pct_change() * 100\n    return df.to_dict('records')\n"
+}
+```
+
+Import to database:
+
+```bash
+g2 features-import --dir feature-functions
+```
+
+### Security & Sandboxing
+
+DB-stored functions execute in a restricted environment:
+
+- **Allowed**: pandas, numpy, scipy, sklearn, talib, math, statistics, datetime
+- **Blocked**: file I/O, eval(), exec(), compile(), arbitrary imports
+- **Safe**: Each function runs in isolated namespace
+
+### Priority Order
+
+When loading functions, the dispatcher checks:
+
+1. **Function cache** (performance optimization)
+2. **Database** (`feature_functions` table) — **highest priority**
+3. **Code registry** (hardcoded via `register_compute_function()`)
+
+DB functions override code registry functions with the same name.
+
+### Best Practices
+
+- **Core engines stay in code**: Don't try to move `indicator` or `derivative` to DB
+- **Custom logic goes to DB**: User-defined features, experiments, prototypes
+- **Version control**: Export regularly, commit to git
+- **Idempotent imports**: Safe to re-import; uses `ON CONFLICT DO UPDATE`
+- **Clear descriptions**: Document what each function does
+- **Test before deploy**: Verify functions in dev before production import
 
 ## Current focus
+
 - Capture initial domain notes (data model, sources/computed separation, calc_store-style descriptors)
 - Set up a minimal Python package + pytest harness
 - Keep AlphaVantage credentials in `.env` (reused from `../gefjon/.env`, never printed or committed)
