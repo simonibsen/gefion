@@ -5,18 +5,21 @@
 g2 is a production-ready database-first technical analysis platform with:
 
 ### Data Infrastructure
+
 - **5,600+ NASDAQ stocks** tracked daily
 - **TimescaleDB** for efficient time-series storage
 - **AlphaVantage API** integration with rate limiting
 - **Optimized ingestion**: 91% skip rate, ~5 min full update
 
 ### Feature Engineering
+
 - **17 technical indicators** computed locally (RSI, MACD, Bollinger Bands, ADX, PSAR, Stochastic, etc.)
 - **DB-first architecture**: Functions and definitions stored in database, exported to git
 - **Sandboxed execution**: Feature functions run in restricted Python environment
 - **Versioned exports**: One JSON file per function/definition for clean git diffs
 
 ### CLI Tools
+
 - `g2 data-update` - Update prices and compute indicators
 - `g2 feat-fx-export/import` - Version control for feature functions
 - `g2 feat-def-export/import` - Version control for feature definitions
@@ -26,6 +29,7 @@ g2 is a production-ready database-first technical analysis platform with:
 - `g2 feat-compute` - Compute features for symbols
 
 ### Performance
+
 - **Parallel processing**: Adaptive worker scaling (2-16 workers)
 - **Bulk operations**: Single query filters 5,600 symbols in <1s
 - **Rate limiting**: 1.0s minimum spacing prevents API throttling
@@ -34,18 +38,22 @@ g2 is a production-ready database-first technical analysis platform with:
 ## Recent Changes
 
 ### December 13, 2025
+
 - **Rate limiting fix**: Added minimum 1.0s spacing to prevent burst pattern errors
 - **Error detection**: AlphaVantage API errors now properly detected and reported (vs misleading "empty payload")
 - **Documentation consolidation**: Reorganized docs/ into focused architecture/performance guides + archive/
 
 ### December 12, 2025
+
 - **Feature management**: Added Future Work section for enable/disable commands and inactive function handling
 
 ### December 10, 2025
+
 - **DB-first architecture complete**: Feature functions and definitions fully exportable/importable
 - **18 integration tests passing**: Full export/import workflow validated
 
 ### December 9, 2025
+
 - **Project organization**: Moved docs to docs/, scripts to scripts/, removed duplicate files
 - **Feature definitions exported**: Created feature-definitions/ directory with 17 definitions
 
@@ -54,6 +62,7 @@ g2 is a production-ready database-first technical analysis platform with:
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system design.
 
 **Key Concepts**:
+
 - **Database as Source of Truth**: All features stored in PostgreSQL, exported to git
 - **Sandboxed Execution**: Feature functions run in restricted environment
 - **Dispatcher Pattern**: Parallel feature computation with error isolation
@@ -75,6 +84,7 @@ See [docs/archive/ml/HIGHLEVEL.md](docs/archive/ml/HIGHLEVEL.md) for ML-driven a
 **Goal**: ML-powered return distribution prediction and trend classification
 
 **Systems**:
+
 1. **Quantile Regression**: Predict return distributions (q10, q50, q90) for 7/30/90-day horizons
 2. **Trend Classification**: Identify stocks likely to make strong directional moves
 
