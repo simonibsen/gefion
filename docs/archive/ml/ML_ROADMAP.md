@@ -345,8 +345,11 @@ g2 backtest-compare \
 - [ ] Implement dataset builder (rolling windows → Parquet / PyTorch DataLoader)
 - [ ] Implement label generation (forward returns for 7/30/90d)
 - [ ] Define point-in-time splits (walk-forward / rolling validation)
+- [ ] Add lineage tables: `ml_datasets`, `ml_runs`, `ml_models`
+- [ ] Add `g2 ml` CLI group: `ml init`, `ml dataset-build`, `ml train`, `ml predict`, `ml eval`
+- [ ] Implement 5-class trend labels (per-horizon weak/strong thresholds) and store classifier predictions
 - [ ] Register `ml_predict` compute function
-- [ ] Add model versioning tables
+- [ ] Register trained model artifacts in `ml_models`
 - [ ] Implement quantile regression predictions
 - [ ] Generate first predictions for 7d horizon
 

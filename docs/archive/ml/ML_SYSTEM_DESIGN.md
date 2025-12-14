@@ -83,6 +83,77 @@ Compare predicted distributions to actual returns over the prediction window usi
 
 ## Database Schema Design
 
+### 0. Model Registry + Dataset/Run Lineage (MVP)
+
+The ML system needs two things beyond storing predictions:
+
+1. **Reproducibility**: know exactly what dataset, labels, splits, and feature set produced a model.
+2. **Traceability**: connect a training run → model artifact → generated predictions → realized outcomes/metrics.
+
+For that, store **dataset manifests** and **run configs** explicitly, then reference them from models and predictions.
+
+```sql
+-- Dataset manifests (what data was built/exported)
+CREATE TABLE ml_datasets (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,                    -- e.g. 'nasdaq100_v1'
+    version TEXT NOT NULL,                 -- e.g. '2025-12-14'
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    -- What went into the dataset
+    universe JSONB,                        -- selection criteria (exchange, symbol list, filters)
+    feature_names TEXT[] NOT NULL,
+    lookback_days INTEGER NOT NULL,        -- rolling window length
+    horizons_days INTEGER[] NOT NULL,      -- e.g. {7,30,90}
+    label_spec JSONB NOT NULL,             -- forward returns + optional thresholds
+    split_spec JSONB NOT NULL,             -- walk-forward/rolling split definition (PIT)
+
+    -- Where it lives (Parquet + manifest)
+    artifact_uri TEXT NOT NULL,            -- file path or object-store URI
+    checksum TEXT,                         -- hash of manifest/artifacts
+
+    UNIQUE (name, version)
+);
+
+-- Runs (train/eval/predict) with config + environment metadata
+CREATE TABLE ml_runs (
+    id SERIAL PRIMARY KEY,
+    run_type TEXT NOT NULL,                -- 'train' | 'predict' | 'eval'
+    status TEXT NOT NULL DEFAULT 'running',
+    created_at TIMESTAMP DEFAULT NOW(),
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+
+    dataset_id INTEGER REFERENCES ml_datasets(id),
+    run_config JSONB NOT NULL,             -- hyperparams, feature filtering, horizons, etc.
+    code_version TEXT,                     -- git SHA
+    notes TEXT
+);
+
+-- Models (artifacts) produced by training runs
+CREATE TABLE ml_models (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,                    -- 'trend_quantiles'
+    version TEXT NOT NULL,                 -- '2025-12-14_v1'
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    train_run_id INTEGER REFERENCES ml_runs(id),
+    dataset_id INTEGER REFERENCES ml_datasets(id),
+
+    algorithm TEXT,                        -- 'pytorch' (initial target)
+    hyperparams JSONB,
+    metrics JSONB,
+    artifact_uri TEXT NOT NULL,            -- path/URI to saved model
+    active BOOLEAN DEFAULT TRUE,
+
+    UNIQUE (name, version)
+);
+```
+
+Notes:
+- `ml_datasets` and `ml_runs` are the “config layer” so the CLI can stay flexible without hardcoding feature sets.
+- For MVP, `artifact_uri` can be a local path (e.g. `models/...`); later it can move to S3/GCS.
+
 ### 1. Quantile Predictions Table
 
 Stores model outputs (the predicted distributions).
@@ -113,6 +184,55 @@ CREATE INDEX quantile_predictions_symbol_date_idx
     ON quantile_predictions(data_id, prediction_date, horizon_days);
 ```
 
+Recommendation (MVP): add a run reference for traceability.
+
+```sql
+ALTER TABLE quantile_predictions
+ADD COLUMN run_id INTEGER REFERENCES ml_runs(id);
+```
+
+### 1b. Trend Classification Predictions (5-class)
+
+For “trend strength” screening, store classifier outputs separately from quantiles. Use **per-horizon weak/strong thresholds** to label outcomes and train a 5-class model:
+
+- `STRONG_UP`: return ≥ +strong_threshold
+- `WEAK_UP`: +weak_threshold ≤ return < +strong_threshold
+- `NEUTRAL`: |return| < weak_threshold
+- `WEAK_DOWN`: -strong_threshold < return ≤ -weak_threshold
+- `STRONG_DOWN`: return ≤ -strong_threshold
+
+Store predicted probabilities per class:
+
+```sql
+CREATE TABLE trend_class_predictions (
+    model_id INTEGER NOT NULL REFERENCES ml_models(id),
+    data_id INTEGER NOT NULL REFERENCES stocks(id),
+    prediction_date DATE NOT NULL,
+    horizon_days INTEGER NOT NULL,
+
+    weak_threshold NUMERIC(10,4) NOT NULL,
+    strong_threshold NUMERIC(10,4) NOT NULL,
+
+    p_strong_up DOUBLE PRECISION,
+    p_weak_up DOUBLE PRECISION,
+    p_neutral DOUBLE PRECISION,
+    p_weak_down DOUBLE PRECISION,
+    p_strong_down DOUBLE PRECISION,
+
+    predicted_class TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    run_id INTEGER REFERENCES ml_runs(id),
+
+    PRIMARY KEY (model_id, data_id, prediction_date, horizon_days)
+);
+
+SELECT create_hypertable('trend_class_predictions', 'prediction_date');
+```
+
+Derived “trend strength” signals can be computed from probabilities, e.g.:
+- `strength = p_strong_up + p_weak_up - (p_weak_down + p_strong_down)`
+- `confidence = 1 - p_neutral`
+
 ### 2. Prediction Outcomes Table
 
 Stores actual outcomes for validation.
@@ -134,6 +254,13 @@ CREATE TABLE prediction_outcomes (
 );
 
 SELECT create_hypertable('prediction_outcomes', 'prediction_date');
+```
+
+Recommendation (MVP): add a run reference for traceability.
+
+```sql
+ALTER TABLE prediction_outcomes
+ADD COLUMN run_id INTEGER REFERENCES ml_runs(id);
 ```
 
 ### 3. Model Performance Table
@@ -164,6 +291,13 @@ CREATE TABLE model_performance (
 
     updated_at TIMESTAMP DEFAULT NOW()
 );
+```
+
+Recommendation (MVP): store evaluation run linkage.
+
+```sql
+ALTER TABLE model_performance
+ADD COLUMN eval_run_id INTEGER REFERENCES ml_runs(id);
 ```
 
 ### 4. Trend Analysis Table (Future)
@@ -551,6 +685,15 @@ g2 model-validate --model-id 1 --start 2020-01-01 --end 2024-01-01
 - Shared representation improves sample efficiency and consistency across horizons
 - Still allows horizon-specific specialization via separate heads
 - Fallback is straightforward if validation loss is meaningfully worse than separate models
+
+### 2b. Configuration Storage (Dataset/Run Lineage)
+
+**Decision:** Store MVP configuration in dedicated tables (`ml_datasets`, `ml_runs`) rather than embedding it only in code or in `ml_models`.
+
+**Rationale:**
+- Keeps the `g2` CLI flexible while maintaining reproducibility (“what data and labels produced this?”)
+- Makes it easy to track and compare experiments, predictions, and evaluations over time
+- Provides a clean join path: dataset → train run → model → predict run → predictions → eval run → outcomes/metrics
 
 ### 3. LightGBM First, PyTorch Later
 

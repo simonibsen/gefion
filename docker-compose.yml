@@ -24,3 +24,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  ml:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ml
+    working_dir: /app
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://g2:g2pass@postgres:6432/g2}
+    depends_on:
+      postgres:
+        condition: service_healthy

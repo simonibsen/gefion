@@ -1,5 +1,55 @@
 # G2 User Guide
 
+## ML overview (conceptual)
+
+g2’s ML workflow (high level) is:
+1. Ingest daily price data (OHLCV) into TimescaleDB
+2. Compute technical indicators/derived features and store them in the feature store
+3. Build training datasets (rolling windows) and labels (forward returns for 7/30/90d, plus optional “big move” classification labels)
+4. Train a multi-horizon model that predicts return *distributions* (quantiles) rather than a single number
+5. Store predictions in dedicated prediction tables and validate with point-in-time backtests before turning them into tradeable signals
+
+For details, start at `docs/archive/ml/README.md` (index), then read `docs/archive/ml/HIGHLEVEL.md` (vision), `docs/archive/ml/ML_SYSTEM_DESIGN.md` (schemas/pipelines), and `docs/archive/ml/ML_ROADMAP.md` (phases/tasks).
+
+### ML via Docker (GPU if available, CPU otherwise)
+
+Use the `ml` image for training/inference. It includes a CUDA-enabled PyTorch build and will fall back to CPU automatically when no GPU is available *inside the container*.
+
+```bash
+# CPU (works everywhere)
+docker compose run --rm ml ml device
+
+# GPU (requires NVIDIA GPU + nvidia-container-toolkit on the host)
+docker compose run --rm --gpus all ml ml device
+```
+
+### Build an ML dataset manifest (and optional CSV exports)
+
+`dataset-build` registers a dataset configuration in `ml_datasets` and writes a manifest JSON file. With `--export`, it also exports CSVs (`prices.csv`, `features.csv`, `labels.csv`) into the same output directory.
+
+Example (symbols):
+```bash
+g2 ml dataset-build \
+  --name mvp --version v1 \
+  --symbols IBM,MSFT \
+  --horizons 7,30,90 \
+  --weak-thresholds 0.02,0.05,0.10 \
+  --strong-thresholds 0.05,0.10,0.20 \
+  --out-dir datasets/mvp \
+  --export
+```
+
+Example (exchange + optional limit; used for manifest/universe selection):
+```bash
+g2 ml dataset-build \
+  --name nasdaq_mvp --version v1 \
+  --exchange NASDAQ --limit 100 \
+  --horizons 7,30,90 \
+  --weak-thresholds 0.02,0.05,0.10 \
+  --strong-thresholds 0.05,0.10,0.20 \
+  --out-dir datasets/nasdaq_mvp
+```
+
 ## Setup
 1. Copy `.env.example` to `.env` and set:
    - `DATABASE_URL` (e.g., `postgresql://g2:g2pass@localhost:5432/g2`)

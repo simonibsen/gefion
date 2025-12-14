@@ -18,6 +18,12 @@ Notes:
 - The ingest command above stays offline by using the bundled fixture; swap in `--exchange NASDAQ --timeframe auto` when you want live API calls.
 - CLI commands load `.env` automatically for DB/API credentials.
 
+## ML (layman overview)
+
+The long-term goal is to learn “trend strength” from historical patterns instead of hand-written rules: ingest prices → compute indicators/features → build labeled training datasets → train a multi-horizon model that predicts return ranges/probabilities (quantiles) for 7/30/90 days → store predictions in dedicated tables → validate via point-in-time backtests → turn into screening/signals/strategies.
+
+Start here: `docs/archive/ml/README.md` (index), then `docs/archive/ml/HIGHLEVEL.md` (vision), `docs/archive/ml/ML_SYSTEM_DESIGN.md` (schemas/pipelines), `docs/archive/ml/ML_ROADMAP.md` (phases/tasks).
+
 ## Architecture
 
 ```mermaid
