@@ -604,6 +604,245 @@ def ml_dataset_build(
     )
 
 
+@ml_app.command("train")
+def ml_train(
+    dataset_name: str = typer.Option(..., help="Dataset name to train on"),
+    dataset_version: str = typer.Option(..., help="Dataset version"),
+    model_name: str = typer.Option(..., help="Model name (identifier)"),
+    model_version: str = typer.Option(..., help="Model version (e.g., date tag)"),
+    algorithm: str = typer.Option("quantile_regression", help="Algorithm: quantile_regression, xgboost, lightgbm"),
+    out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """Train a quantile regression model for multi-horizon return prediction (MVP)."""
+    from g2.ml.store import get_ml_dataset
+
+    with db_connection(db_url) as conn:
+        # Fetch dataset manifest
+        dataset = get_ml_dataset(conn, name=dataset_name, version=dataset_version)
+        if not dataset:
+            emit_error(f"Dataset not found: {dataset_name} {dataset_version}", json_output=json_output)
+            return
+
+        # TODO: Load features and labels from dataset
+        # TODO: Train model
+        # TODO: Save model artifact
+
+        # For MVP, create placeholder model artifact
+        out_dir.mkdir(parents=True, exist_ok=True)
+        model_path = out_dir / f"{model_name}_{model_version}.pkl"
+        model_path.write_text("# Placeholder model artifact (TODO: implement training)")
+
+        # Register model in ml_models
+        from psycopg.types.json import Json
+
+        with conn.cursor() as cur:
+            # Create run record
+            cur.execute(
+                """
+                INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
+                VALUES ('train', 'running', %s, %s, NOW())
+                RETURNING id;
+                """,
+                (dataset["id"], Json({"algorithm": algorithm, "model_name": model_name})),
+            )
+            run_id = int(cur.fetchone()[0])
+
+            # Register model
+            cur.execute(
+                """
+                INSERT INTO ml_models
+                  (name, version, train_run_id, dataset_id, algorithm, hyperparams, metrics, artifact_uri)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name, version) DO UPDATE SET
+                  train_run_id = EXCLUDED.train_run_id,
+                  dataset_id = EXCLUDED.dataset_id,
+                  algorithm = EXCLUDED.algorithm,
+                  hyperparams = EXCLUDED.hyperparams,
+                  metrics = EXCLUDED.metrics,
+                  artifact_uri = EXCLUDED.artifact_uri
+                RETURNING id;
+                """,
+                (
+                    model_name,
+                    model_version,
+                    run_id,
+                    dataset["id"],
+                    algorithm,
+                    Json({}),  # TODO: actual hyperparameters
+                    Json({"status": "placeholder"}),  # TODO: actual metrics
+                    str(model_path),
+                ),
+            )
+            model_id = int(cur.fetchone()[0])
+
+            # Mark run as complete
+            cur.execute(
+                """
+                UPDATE ml_runs SET status = 'completed', finished_at = NOW()
+                WHERE id = %s;
+                """,
+                (run_id,),
+            )
+
+        conn.commit()
+
+    emit(
+        f"Model trained: {model_name} {model_version}",
+        data={"model_id": model_id, "run_id": run_id, "artifact_uri": str(model_path)},
+        json_output=json_output,
+    )
+
+
+@ml_app.command("predict")
+def ml_predict(
+    model_name: str = typer.Option(..., help="Model name to use for predictions"),
+    model_version: str = typer.Option(..., help="Model version"),
+    prediction_date: str = typer.Option(..., help="Date to generate predictions for (YYYY-MM-DD)"),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
+    exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
+    limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """Generate predictions using a trained model (MVP placeholder)."""
+    sym_list = parse_comma_separated(symbols) or []
+    if not sym_list and not exchange:
+        emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
+        return
+
+    with db_connection(db_url) as conn:
+        # Fetch model
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, dataset_id, artifact_uri, algorithm
+                FROM ml_models
+                WHERE name = %s AND version = %s;
+                """,
+                (model_name, model_version),
+            )
+            row = cur.fetchone()
+            if not row:
+                emit_error(f"Model not found: {model_name} {model_version}", json_output=json_output)
+                return
+
+            model_id, dataset_id, artifact_uri, algorithm = row[0], row[1], row[2], row[3]
+
+        # TODO: Load model from artifact_uri
+        # TODO: Fetch features for symbols on prediction_date
+        # TODO: Generate predictions
+        # TODO: Store in quantile_predictions and/or trend_class_predictions
+
+        # Create run record
+        from psycopg.types.json import Json
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
+                VALUES ('predict', 'completed', %s, %s, NOW())
+                RETURNING id;
+                """,
+                (
+                    dataset_id,
+                    Json(
+                        {
+                            "model_name": model_name,
+                            "model_version": model_version,
+                            "prediction_date": prediction_date,
+                            "universe": {"symbols": sym_list} if sym_list else {"exchange": exchange},
+                        }
+                    ),
+                ),
+            )
+            run_id = int(cur.fetchone()[0])
+
+        conn.commit()
+
+    emit(
+        f"Predictions generated: {model_name} {model_version} for {prediction_date}",
+        data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date},
+        json_output=json_output,
+    )
+
+
+@ml_app.command("eval")
+def ml_eval(
+    model_name: str = typer.Option(..., help="Model name to evaluate"),
+    model_version: str = typer.Option(..., help="Model version"),
+    start_date: str = typer.Option(..., help="Evaluation start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(..., help="Evaluation end date (YYYY-MM-DD)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """Evaluate model performance on historical predictions (MVP placeholder)."""
+    with db_connection(db_url) as conn:
+        # Fetch model
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, dataset_id
+                FROM ml_models
+                WHERE name = %s AND version = %s;
+                """,
+                (model_name, model_version),
+            )
+            row = cur.fetchone()
+            if not row:
+                emit_error(f"Model not found: {model_name} {model_version}", json_output=json_output)
+                return
+
+            model_id, dataset_id = row[0], row[1]
+
+        # TODO: Fetch predictions from quantile_predictions
+        # TODO: Fetch actual returns from stock_ohlcv
+        # TODO: Calculate calibration metrics (q10/q50/q90 coverage)
+        # TODO: Calculate quantile loss (pinball loss)
+        # TODO: Store in model_performance
+
+        # Create run record and placeholder performance metrics
+        from psycopg.types.json import Json
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
+                VALUES ('eval', 'completed', %s, %s, NOW())
+                RETURNING id;
+                """,
+                (dataset_id, Json({"start_date": start_date, "end_date": end_date})),
+            )
+            run_id = int(cur.fetchone()[0])
+
+            # TODO: Replace with actual metrics
+            cur.execute(
+                """
+                INSERT INTO model_performance
+                  (model_id, model_name, horizon_days, q10_calibration, q50_calibration, q90_calibration,
+                   eval_start_date, eval_end_date, eval_run_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (model_id) DO UPDATE SET
+                  q10_calibration = EXCLUDED.q10_calibration,
+                  q50_calibration = EXCLUDED.q50_calibration,
+                  q90_calibration = EXCLUDED.q90_calibration,
+                  eval_start_date = EXCLUDED.eval_start_date,
+                  eval_end_date = EXCLUDED.eval_end_date,
+                  eval_run_id = EXCLUDED.eval_run_id;
+                """,
+                (model_id, model_name, 7, None, None, None, start_date, end_date, run_id),  # Placeholder
+            )
+
+        conn.commit()
+
+    emit(
+        f"Model evaluated: {model_name} {model_version}",
+        data={"model_id": model_id, "run_id": run_id, "eval_period": f"{start_date} to {end_date}"},
+        json_output=json_output,
+    )
+
+
 @app.command("prices-ingest")
 def ingest_prices(
     symbol: str = typer.Option(..., help="Ticker symbol to ingest"),
