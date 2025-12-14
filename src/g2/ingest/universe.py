@@ -252,7 +252,7 @@ def ingest_prices_for_symbols(
                         except errors.DeadlockDetected:
                             time.sleep(0.1 + random.random() * 0.2)
                             retries += 1
-                        except errors.OutOfSharedMemory:
+                        except errors.InsufficientResources:
                             time.sleep(backoff)
                             retries += 1
                             backoff = min(backoff * 2, 2.0)
