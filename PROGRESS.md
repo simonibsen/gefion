@@ -20,13 +20,27 @@ g2 is a production-ready database-first technical analysis platform with:
 
 ### CLI Tools
 
-- `g2 data-update` - Update prices and compute indicators
+**Data Pipeline:**
+
+- `g2 data-update` - Update prices and compute indicators (full pipeline)
+- `g2 prices-ingest` - Ingest specific symbols from AlphaVantage
+- `g2 feat-compute` - Compute features for specific symbols
+
+**Feature Management:**
+
 - `g2 feat-fx-export/import` - Version control for feature functions
 - `g2 feat-def-export/import` - Version control for feature definitions
 - `g2 feat-fx-list` - List registered functions
 - `g2 feat-def-list` - List feature definitions
-- `g2 prices-ingest` - Ingest specific symbols
-- `g2 feat-compute` - Compute features for symbols
+
+**ML Workflow (Phase 1 MVP):**
+
+- `g2 ml init` - Initialize ML schema tables
+- `g2 ml device` - Check GPU/CPU availability
+- `g2 ml dataset-build` - Create dataset manifests + export CSVs
+- `g2 ml train` - Train models (placeholder - DB integration only)
+- `g2 ml predict` - Generate predictions (placeholder - DB integration only)
+- `g2 ml eval` - Evaluate performance (placeholder - DB integration only)
 
 ### Performance
 
@@ -39,11 +53,21 @@ g2 is a production-ready database-first technical analysis platform with:
 
 ### December 13, 2025
 
+**Bug Fixes & Improvements:**
+
 - **Rate limiting fix**: Added minimum 1.0s spacing to prevent burst pattern errors
 - **Error detection**: AlphaVantage API errors now properly detected and reported (vs misleading "empty payload")
+- **Code quality**: Fixed missing returns after emit_error, improved NaN/inf handling in labels, optimized CSV writes
 - **Documentation consolidation**: Reorganized docs/ into focused architecture/performance guides + archive/
-- **ML foundations**: Added `g2 ml` CLI group and DB schema support for ML datasets/runs/models and prediction tables; added GPU-capable ML runner container that auto-falls back to CPU.
-- **ML dataset build**: Implemented `g2 ml dataset-build` to register dataset manifests in `ml_datasets` and (optionally) export `prices.csv`, `features.csv`, `labels.csv` with configurable horizons/thresholds/universe.
+
+**ML Infrastructure (Phase 1):**
+
+- **ML foundations**: Added `g2 ml` CLI group and DB schema (7 tables: ml_datasets, ml_runs, ml_models, quantile_predictions, trend_class_predictions, prediction_outcomes, model_performance)
+- **Dataset management**: Implemented `g2 ml dataset-build` with manifest registration and CSV export (prices, features, labels)
+- **TDD implementation**: Added `g2 ml train/predict/eval` commands with 21 passing tests
+  - Database integration complete (run tracking, model registry, lineage)
+  - ML operations (training, inference, evaluation) are placeholders pending actual implementation
+- **Infrastructure**: GPU-capable ML runner container, check constraints for data integrity
 
 ### December 12, 2025
 
@@ -90,7 +114,17 @@ See [docs/archive/ml/HIGHLEVEL.md](docs/archive/ml/HIGHLEVEL.md) for ML-driven a
 1. **Quantile Regression**: Predict return distributions (q10, q50, q90) for 7/30/90-day horizons
 2. **Trend Classification**: Identify stocks likely to make strong directional moves
 
-**Status**: Data pipeline complete, ML implementation not started
+**Status**: Data pipeline ✅ complete, ML infrastructure ✅ complete (Phase 1), ML implementation 🚧 in progress
+
+**Phase 1 Progress:**
+
+- ✅ Database schema (7 ML tables with proper constraints)
+- ✅ Dataset building and export
+- ✅ CLI commands structure (train/predict/eval)
+- ✅ Run tracking and model registry
+- 🚧 Model training (placeholder - needs scikit-learn implementation)
+- 🚧 Prediction generation (placeholder - needs inference implementation)
+- 🚧 Performance evaluation (placeholder - needs metrics calculation)
 
 ---
 
