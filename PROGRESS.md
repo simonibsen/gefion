@@ -42,6 +42,8 @@ g2 is a production-ready database-first technical analysis platform with:
 - **Rate limiting fix**: Added minimum 1.0s spacing to prevent burst pattern errors
 - **Error detection**: AlphaVantage API errors now properly detected and reported (vs misleading "empty payload")
 - **Documentation consolidation**: Reorganized docs/ into focused architecture/performance guides + archive/
+- **ML foundations**: Added `g2 ml` CLI group and DB schema support for ML datasets/runs/models and prediction tables; added GPU-capable ML runner container that auto-falls back to CPU.
+- **ML dataset build**: Implemented `g2 ml dataset-build` to register dataset manifests in `ml_datasets` and (optionally) export `prices.csv`, `features.csv`, `labels.csv` with configurable horizons/thresholds/universe.
 
 ### December 12, 2025
 

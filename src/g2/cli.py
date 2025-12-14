@@ -69,6 +69,9 @@ app = typer.Typer(
 )
 SETTINGS = load_settings()
 
+ml_app = typer.Typer(help="ML workflow commands (dataset/build/train/predict/eval)")
+app.add_typer(ml_app, name="ml", cls=SortedGroup)
+
 
 def emit(
     message: str,
@@ -451,6 +454,154 @@ def main(
 
 def _db_url(override: Optional[str]) -> str:
     return override or SETTINGS.database_url or os.getenv("DATABASE_URL") or schema.test_db_url()
+
+
+@ml_app.command("init")
+def ml_init(
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """Initialize ML tables (datasets/runs/models/predictions)."""
+    try:
+        with db_connection(db_url) as conn:
+            init_schema_tables(
+                conn,
+                [
+                    "stocks",
+                    "ml_datasets",
+                    "ml_runs",
+                    "ml_models",
+                    "quantile_predictions",
+                    "trend_class_predictions",
+                    "prediction_outcomes",
+                    "model_performance",
+                ],
+            )
+        emit("ML schema initialized", json_output=json_output)
+    except psycopg.OperationalError as exc:  # pragma: no cover - infra guard
+        emit_error(f"Database connection failed: {exc}", json_output=json_output)
+
+
+@ml_app.command("device")
+def ml_device(
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """Report the compute device selection (GPU if available, else CPU)."""
+    device = "cpu"
+    torch_version: Optional[str] = None
+    cuda_available = False
+    try:
+        import torch  # type: ignore
+
+        torch_version = getattr(torch, "__version__", None)
+        cuda_available = bool(torch.cuda.is_available())
+        device = "cuda" if cuda_available else "cpu"
+    except Exception:
+        # Torch not installed or CUDA probing failed; default to CPU.
+        pass
+
+    emit(
+        f"ML device: {device}",
+        data={"device": device, "cuda_available": cuda_available, "torch_version": torch_version},
+        json_output=json_output,
+    )
+
+
+@ml_app.command("dataset-build")
+def ml_dataset_build(
+    name: str = typer.Option(..., help="Dataset name (logical identifier)"),
+    version: str = typer.Option(..., help="Dataset version (e.g., date tag)"),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
+    exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
+    limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
+    lookback_days: int = typer.Option(200, help="Rolling window lookback days"),
+    horizons: str = typer.Option("7,30,90", help="Comma-separated horizons in days"),
+    weak_thresholds: str = typer.Option("0.02,0.05,0.10", help="Comma-separated weak thresholds (per horizon)"),
+    strong_thresholds: str = typer.Option("0.05,0.10,0.20", help="Comma-separated strong thresholds (per horizon)"),
+    out_dir: Path = typer.Option(Path("datasets"), help="Output directory for dataset manifest"),
+    export: bool = typer.Option(False, "--export/--no-export", help="Export dataset artifacts (requires DB data)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """Create a dataset manifest and register it in `ml_datasets` (MVP)."""
+    sym_list = parse_comma_separated(symbols) or []
+    if not sym_list and not exchange:
+        emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
+        return
+
+    try:
+        horizon_vals = [int(x) for x in (parse_comma_separated(horizons, required=True) or [])]
+    except ValueError:
+        raise typer.BadParameter("Invalid --horizons (expected comma-separated integers)")
+    if not horizon_vals or any(h <= 0 for h in horizon_vals):
+        raise typer.BadParameter("Invalid --horizons (all horizons must be positive integers)")
+
+    try:
+        weak_vals = [float(x) for x in (parse_comma_separated(weak_thresholds, required=True) or [])]
+        strong_vals = [float(x) for x in (parse_comma_separated(strong_thresholds, required=True) or [])]
+    except ValueError:
+        raise typer.BadParameter("Invalid thresholds (expected comma-separated numbers)")
+
+    if len(weak_vals) != len(horizon_vals) or len(strong_vals) != len(horizon_vals):
+        emit_error(
+            "Threshold list length mismatch: provide one weak+strong threshold per horizon",
+            json_output=json_output,
+        )
+        return
+
+    thresholds_by_horizon: dict[str, dict[str, float]] = {}
+    for h, weak, strong in zip(horizon_vals, weak_vals, strong_vals):
+        if weak <= 0:
+            raise typer.BadParameter("Invalid thresholds (weak threshold must be > 0)")
+        if strong < weak:
+            raise typer.BadParameter("Invalid thresholds (strong threshold must be >= weak threshold)")
+        thresholds_by_horizon[str(h)] = {"weak": float(weak), "strong": float(strong)}
+
+    universe: dict[str, object] = {}
+    if sym_list:
+        universe["symbols"] = sym_list
+    if exchange:
+        universe["exchange"] = exchange
+    if limit is not None:
+        universe["limit"] = int(limit)
+
+    label_spec = {"type": "forward_return_5class", "thresholds": thresholds_by_horizon}
+    split_spec = {"type": "walk_forward", "note": "TBD", "horizons_days": horizon_vals}
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = out_dir / f"{name}_{version}.json"
+    manifest = {
+        "name": name,
+        "version": version,
+        "universe": universe,
+        "feature_names": [],
+        "lookback_days": int(lookback_days),
+        "horizons_days": horizon_vals,
+        "label_spec": label_spec,
+        "split_spec": split_spec,
+        "artifact_uri": str(manifest_path),
+    }
+    manifest_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    manifest_path.write_text(manifest_text)
+
+    from g2.ml.store import sha256_text, upsert_ml_dataset
+
+    payload = dict(manifest)
+    payload["checksum"] = sha256_text(manifest_text)
+
+    with db_connection(db_url) as conn:
+        init_schema_tables(conn, ["ml_datasets"])
+        dataset_id = upsert_ml_dataset(conn, payload)
+        if export:
+            from g2.ml.dataset import export_dataset_artifacts
+
+            export_dataset_artifacts(conn, manifest=manifest, out_dir=out_dir)
+
+    emit(
+        f"Dataset registered: {name} {version}",
+        data={"dataset_id": dataset_id, "artifact_uri": str(manifest_path)},
+        json_output=json_output,
+    )
 
 
 @app.command("prices-ingest")

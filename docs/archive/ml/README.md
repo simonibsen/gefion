@@ -12,4 +12,4 @@ This folder contains g2's ML vision, system design, and execution roadmap. To av
 
 - Modeling: start with **one multi-output quantile model** (shared encoder + 7d/30d/90d heads); fall back to separate models only if validation materially underperforms.
 - Storage: store predictions in **dedicated prediction tables** (e.g., `quantile_predictions`, `prediction_outcomes`, `model_performance`) rather than encoding them as `computed_features`.
-
+- Config/lineage (MVP): store dataset manifests and run configs in **`ml_datasets`** and **`ml_runs`**, and register artifacts in **`ml_models`**.

@@ -224,6 +224,227 @@ def create_computed_features_table(conn: Connection) -> None:
     conn.commit()
 
 
+def create_ml_datasets_table(conn: Connection) -> None:
+    """Dataset manifests for ML training/inference runs."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ml_datasets (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                universe JSONB,
+                feature_names TEXT[] NOT NULL,
+                lookback_days INTEGER NOT NULL,
+                horizons_days INTEGER[] NOT NULL,
+                label_spec JSONB NOT NULL,
+                split_spec JSONB NOT NULL,
+                artifact_uri TEXT NOT NULL,
+                checksum TEXT,
+                UNIQUE (name, version)
+            );
+            """
+        )
+    conn.commit()
+
+
+def create_ml_runs_table(conn: Connection) -> None:
+    """Run tracking for ML train/predict/eval."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ml_runs (
+                id SERIAL PRIMARY KEY,
+                run_type TEXT NOT NULL, -- 'train' | 'predict' | 'eval'
+                status TEXT NOT NULL DEFAULT 'running',
+                created_at TIMESTAMP DEFAULT NOW(),
+                started_at TIMESTAMP,
+                finished_at TIMESTAMP,
+                dataset_id INTEGER REFERENCES ml_datasets(id),
+                run_config JSONB NOT NULL,
+                code_version TEXT,
+                notes TEXT
+            );
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS ml_runs_type_status_idx ON ml_runs(run_type, status);")
+    conn.commit()
+
+
+def create_ml_models_table(conn: Connection) -> None:
+    """Model registry: training artifact metadata and lineage."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ml_models (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                train_run_id INTEGER REFERENCES ml_runs(id),
+                dataset_id INTEGER REFERENCES ml_datasets(id),
+                algorithm TEXT,
+                hyperparams JSONB,
+                metrics JSONB,
+                artifact_uri TEXT NOT NULL,
+                active BOOLEAN DEFAULT TRUE,
+                UNIQUE (name, version)
+            );
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS ml_models_active_idx ON ml_models(active, name);")
+    conn.commit()
+
+
+def create_quantile_predictions_table(conn: Connection) -> None:
+    """Store predicted return quantiles for multiple horizons."""
+    _ensure_timescaledb(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS quantile_predictions (
+                model_id INTEGER NOT NULL REFERENCES ml_models(id),
+                data_id INTEGER NOT NULL REFERENCES stocks(id),
+                prediction_date DATE NOT NULL,
+                horizon_days INTEGER NOT NULL,
+                q10 NUMERIC(10,4),
+                q50 NUMERIC(10,4),
+                q90 NUMERIC(10,4),
+                model_version TEXT,
+                features_snapshot JSONB,
+                created_at TIMESTAMP DEFAULT NOW(),
+                run_id INTEGER REFERENCES ml_runs(id),
+                PRIMARY KEY (model_id, data_id, prediction_date, horizon_days),
+                CONSTRAINT check_quantile_order CHECK (q10 <= q50 AND q50 <= q90),
+                CONSTRAINT check_horizon_positive CHECK (horizon_days > 0)
+            );
+            """
+        )
+        cur.execute("SELECT create_hypertable('quantile_predictions', 'prediction_date', if_not_exists => TRUE);")
+        try:
+            cur.execute("SELECT set_chunk_time_interval('quantile_predictions', INTERVAL '30 days');")
+        except Exception:
+            pass
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS quantile_predictions_symbol_date_idx
+                ON quantile_predictions(data_id, prediction_date, horizon_days);
+            """
+        )
+    conn.commit()
+
+
+def create_prediction_outcomes_table(conn: Connection) -> None:
+    """Store realized outcomes for predictions (evaluation)."""
+    _ensure_timescaledb(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS prediction_outcomes (
+                data_id INTEGER NOT NULL REFERENCES stocks(id),
+                prediction_date DATE NOT NULL,
+                outcome_date DATE NOT NULL,
+                horizon_days INTEGER NOT NULL,
+                actual_return NUMERIC(10,4),
+                model_id INTEGER REFERENCES ml_models(id),
+                created_at TIMESTAMP DEFAULT NOW(),
+                run_id INTEGER REFERENCES ml_runs(id),
+                PRIMARY KEY (data_id, prediction_date, horizon_days)
+            );
+            """
+        )
+        cur.execute("SELECT create_hypertable('prediction_outcomes', 'prediction_date', if_not_exists => TRUE);")
+        try:
+            cur.execute("SELECT set_chunk_time_interval('prediction_outcomes', INTERVAL '30 days');")
+        except Exception:
+            pass
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS prediction_outcomes_symbol_date_idx
+                ON prediction_outcomes(data_id, prediction_date, horizon_days);
+            """
+        )
+    conn.commit()
+
+
+def create_model_performance_table(conn: Connection) -> None:
+    """Track model calibration and validation metrics."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS model_performance (
+                model_id INTEGER PRIMARY KEY REFERENCES ml_models(id),
+                model_name TEXT NOT NULL,
+                horizon_days INTEGER NOT NULL,
+                q10_calibration NUMERIC(5,2),
+                q50_calibration NUMERIC(5,2),
+                q90_calibration NUMERIC(5,2),
+                quantile_loss NUMERIC(10,6),
+                avg_iqr NUMERIC(10,4),
+                eval_start_date DATE,
+                eval_end_date DATE,
+                num_predictions INTEGER,
+                updated_at TIMESTAMP DEFAULT NOW(),
+                eval_run_id INTEGER REFERENCES ml_runs(id)
+            );
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS model_performance_name_horizon_idx ON model_performance(model_name, horizon_days);"
+        )
+    conn.commit()
+
+
+def create_trend_class_predictions_table(conn: Connection) -> None:
+    """Store 5-class trend classification probabilities per horizon."""
+    _ensure_timescaledb(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trend_class_predictions (
+                model_id INTEGER NOT NULL REFERENCES ml_models(id),
+                data_id INTEGER NOT NULL REFERENCES stocks(id),
+                prediction_date DATE NOT NULL,
+                horizon_days INTEGER NOT NULL,
+
+                weak_threshold NUMERIC(10,4) NOT NULL,
+                strong_threshold NUMERIC(10,4) NOT NULL,
+
+                p_strong_up DOUBLE PRECISION,
+                p_weak_up DOUBLE PRECISION,
+                p_neutral DOUBLE PRECISION,
+                p_weak_down DOUBLE PRECISION,
+                p_strong_down DOUBLE PRECISION,
+
+                predicted_class TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                run_id INTEGER REFERENCES ml_runs(id),
+
+                PRIMARY KEY (model_id, data_id, prediction_date, horizon_days),
+                CONSTRAINT check_threshold_order CHECK (weak_threshold > 0 AND strong_threshold >= weak_threshold),
+                CONSTRAINT check_horizon_positive CHECK (horizon_days > 0),
+                CONSTRAINT check_probabilities_valid CHECK (
+                    p_strong_up >= 0 AND p_weak_up >= 0 AND p_neutral >= 0 AND
+                    p_weak_down >= 0 AND p_strong_down >= 0
+                )
+            );
+            """
+        )
+        cur.execute("SELECT create_hypertable('trend_class_predictions', 'prediction_date', if_not_exists => TRUE);")
+        try:
+            cur.execute("SELECT set_chunk_time_interval('trend_class_predictions', INTERVAL '30 days');")
+        except Exception:
+            pass
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS trend_class_predictions_symbol_date_idx
+                ON trend_class_predictions(data_id, prediction_date, horizon_days);
+            """
+        )
+    conn.commit()
+
+
 def migrate_stock_tables_to_data_id(conn: Connection) -> None:
     """
     Rename legacy stock_id columns to data_id if they exist.

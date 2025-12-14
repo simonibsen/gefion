@@ -348,6 +348,13 @@ def init_schema_tables(conn: psycopg.Connection, tables: List[str]) -> None:
         "feature_functions": schema.create_feature_functions_table,
         "feature_definitions": schema.create_feature_definitions_table,
         "computed_features": schema.create_computed_features_table,
+        "ml_datasets": schema.create_ml_datasets_table,
+        "ml_runs": schema.create_ml_runs_table,
+        "ml_models": schema.create_ml_models_table,
+        "quantile_predictions": schema.create_quantile_predictions_table,
+        "prediction_outcomes": schema.create_prediction_outcomes_table,
+        "model_performance": schema.create_model_performance_table,
+        "trend_class_predictions": schema.create_trend_class_predictions_table,
     }
 
     for table in tables:

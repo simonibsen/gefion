@@ -417,3 +417,37 @@ class TestInitSchemaTables:
         with db_connection(url) as conn:
             with pytest.raises(ValueError, match="Unknown table"):
                 init_schema_tables(conn, ["nonexistent_table_xyz"])
+
+    def test_init_ml_tables_calls_creators(self, monkeypatch):
+        """Test that ML table names are supported by init_schema_tables()."""
+        from g2.db import schema as schema_mod
+
+        called: list[str] = []
+
+        monkeypatch.setattr(schema_mod, "create_ml_datasets_table", lambda conn: called.append("ml_datasets"))
+        monkeypatch.setattr(schema_mod, "create_ml_runs_table", lambda conn: called.append("ml_runs"))
+        monkeypatch.setattr(schema_mod, "create_ml_models_table", lambda conn: called.append("ml_models"))
+        monkeypatch.setattr(schema_mod, "create_quantile_predictions_table", lambda conn: called.append("quantile_predictions"))
+        monkeypatch.setattr(schema_mod, "create_prediction_outcomes_table", lambda conn: called.append("prediction_outcomes"))
+        monkeypatch.setattr(schema_mod, "create_model_performance_table", lambda conn: called.append("model_performance"))
+        monkeypatch.setattr(schema_mod, "create_trend_class_predictions_table", lambda conn: called.append("trend_class_predictions"))
+
+        init_schema_tables(object(), [
+            "ml_datasets",
+            "ml_runs",
+            "ml_models",
+            "quantile_predictions",
+            "prediction_outcomes",
+            "model_performance",
+            "trend_class_predictions",
+        ])
+
+        assert called == [
+            "ml_datasets",
+            "ml_runs",
+            "ml_models",
+            "quantile_predictions",
+            "prediction_outcomes",
+            "model_performance",
+            "trend_class_predictions",
+        ]
