@@ -373,7 +373,7 @@ def ingest_indicators_for_symbols(
                             except errors.DeadlockDetected:
                                 time.sleep(0.1 + (0.1 * retries))
                                 retries += 1
-                            except errors.OutOfSharedMemory:
+                            except errors.InsufficientResources:
                                 time.sleep(backoff)
                                 retries += 1
                                 backoff = min(backoff * 2, 2.0)

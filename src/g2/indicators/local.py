@@ -98,6 +98,12 @@ def compute_indicators(
     high = df.get("high")
     low = df.get("low")
 
+    # Ensure high/low are numeric dtype (not object) to avoid "No numeric types to aggregate"
+    if high is not None and not pd.api.types.is_numeric_dtype(high):
+        high = pd.to_numeric(high, errors="coerce")
+    if low is not None and not pd.api.types.is_numeric_dtype(low):
+        low = pd.to_numeric(low, errors="coerce")
+
     # Track which features failed during computation with error messages
     failed_features: List[tuple[str, str]] = []
 
