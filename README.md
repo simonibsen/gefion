@@ -1,68 +1,261 @@
 # g2 (working title)
 
-New Python/Postgres project inspired by `folly` (technical analysis + calc_store pattern) and `gefjon` (modern ingestion/ML pipeline). The goal is to grow this incrementally with strict TDD and a running dev journal so work can be paused/resumed easily.
+Database-first ML platform for quantitative stock analysis. Ingests price data, computes technical indicators, trains quantile regression models, and generates return predictions.
 
-## First run (10-minute quickstart)
+**Key Features:**
+
+- 📊 AlphaVantage integration with 5,600+ NASDAQ stocks
+- 🔧 17 technical indicators (RSI, MACD, Bollinger Bands, etc.) + extensible custom features
+- 🤖 ML pipeline: multi-horizon quantile regression (7/30/90-day forecasts)
+- 💬 Natural language interface via MCP server
+- 🗃️ TimescaleDB for efficient time-series storage
+- 🔌 DB-first architecture: features and functions stored in database, exported to git
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+- **Python 3.10+** - Check with `python --version`
+- **Docker & Docker Compose** - For TimescaleDB database
+- **PostgreSQL client (psql)** - For schema initialization
+- **AlphaVantage API key** - Get free at [alphavantage.co](https://www.alphavantage.co/support/#api-key)
+
+Optional:
+
+- **Make** - For convenient commands (`make venv`, `make test`)
+- **GPU + nvidia-container-toolkit** - For accelerated ML training (XGBoost/LightGBM)
+
+## Quick Start (10 minutes)
+
+### 1. Install and Configure
 
 ```bash
-make venv                               # create/upgrade venv + dev deps
-cp .env.example .env                    # set DATABASE_URL and ALPHAVANTAGE_API_KEY
-docker compose up -d postgres           # start TimescaleDB locally
-psql -d g2 -f sql/schema.sql            # idempotent schema init
-g2 seed-features                        # seed indicator feature definitions
-g2 prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_adjusted.json
-g2 run-features --features indicator_rsi_14 --exchange NASDAQ --local --refresh-existing
+# Create Python environment and install g2
+make venv                               # Creates .venv + installs g2 + dependencies
+source .venv/bin/activate               # Activate venv (Windows: .venv\Scripts\activate)
+
+# Configure environment variables
+cp .env.example .env
+# Edit .env and set:
+#   DATABASE_URL=postgresql://g2:g2pass@localhost:5432/g2
+#   ALPHAVANTAGE_API_KEY=your_key_here
 ```
 
-Notes:
-- The ingest command above stays offline by using the bundled fixture; swap in `--exchange NASDAQ --timeframe auto` when you want live API calls.
-- CLI commands load `.env` automatically for DB/API credentials.
-
-## ML (Production Ready)
-
-g2 now includes a complete ML pipeline for quantile regression-based return prediction:
-
-**What it does:** Predicts return distributions (q10, q50, q90 quantiles) for multi-horizon forecasts (7/30/90 days) using technical indicators as features.
-
-**Quick Start:**
+### 2. Start Database
 
 ```bash
+docker compose up -d postgres           # Start TimescaleDB
+docker compose ps postgres              # Verify it's healthy (wait ~10 seconds)
+```
+
+### 3. Initialize Schema and Seed Data
+
+```bash
+psql -d g2 -f sql/schema.sql            # Create tables, hypertables, indexes
+g2 seed-features                        # Seed 17 technical indicator definitions
+```
+
+### 4. Test with Sample Data (Offline)
+
+```bash
+# Ingest sample IBM data (offline, uses bundled fixture)
+g2 prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_adjusted.json
+
+# Compute RSI indicator
+g2 run-features --features indicator_rsi_14 --symbols IBM --local
+```
+
+✅ **Success!** You now have price data and computed features in the database.
+
+### Next Steps
+
+- **Live data ingestion:** See "Data Ingestion" section below
+- **ML workflow:** See "Machine Learning" section below
+- **Full CLI reference:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+
+## What Can You Do?
+
+### 📊 Data Ingestion & Features
+
+Ingest daily OHLCV data and compute technical indicators:
+
+```bash
+# Update prices for NASDAQ stocks (live API)
+g2 data-update --exchange NASDAQ --limit 50 --timeframe auto
+
+# Compute all 17 indicators for those stocks
+g2 feat-compute --exchange NASDAQ --limit 50 --local
+```
+
+**Learn more:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) - Full CLI reference
+
+### 🤖 Machine Learning Pipeline
+
+Train quantile regression models to predict return distributions:
+
+```bash
+# Prerequisites: Have price data + features in database (see above)
+
 # 1. Build dataset
 g2 ml dataset-build --name mvp --version v1 --symbols AAPL,MSFT --horizons 7,30 --export
 
-# 2. Train model
+# 2. Train model (predicts q10/q50/q90 quantiles)
 g2 ml train --dataset-name mvp --dataset-version v1 --model-name model --model-version $(date +%Y%m%d)
 
 # 3. Generate predictions
-g2 ml predict --model-name model --model-version $(date +%Y%m%d) --prediction-date $(date +%Y-%m-%d) --symbols AAPL,MSFT
+g2 ml predict --model-name model --model-version $(date +%Y-%m-%d) --prediction-date $(date +%Y-%m-%d) --symbols AAPL,MSFT
 
-# 4. Evaluate performance
+# 4. Evaluate performance (calibration metrics)
 g2 ml eval --model-name model --model-version $(date +%Y%m%d) --start-date 2024-01-01 --end-date 2024-11-30
 ```
 
-**Documentation:**
+**Learn more:** [docs/ML_QUICKSTART.md](docs/ML_QUICKSTART.md) - Complete ML workflow guide
 
-- **[ML Quickstart Guide](docs/ML_QUICKSTART.md)** - Complete walkthrough with examples
-- **[User Guide](docs/USER_GUIDE.md)** - Full CLI reference
-- **[ML System Design](docs/archive/ml/ML_SYSTEM_DESIGN.md)** - Architecture and database schema
+### 💬 Natural Language Interface (MCP Server)
 
-### MCP Server (Natural Language Interface)
+Interact with g2 using natural language via Model Context Protocol:
 
-Use g2 through Claude Desktop with natural language:
+```text
+You: "Update NASDAQ data for the top 100 stocks"
+Assistant: [Runs g2 data-update --exchange NASDAQ --limit 100]
 
-```bash
-# Setup (local development)
-cd mcp-server
-pip install -r requirements.txt
+You: "Build a dataset with AAPL, MSFT, GOOGL for 7 and 30 day horizons"
+Assistant: [Runs g2 ml dataset-build ...]
 
-# Configure Claude Desktop (see mcp-server/README.md)
-# Then chat with Claude:
-"Build a dataset with AAPL, MSFT, GOOGL for 7 and 30 day horizons"
-"Train a quantile regression model on that dataset"
-"Show me predictions for AAPL from the last week"
+You: "Show me predictions for AAPL from the last week"
+Assistant: [Queries database and displays results]
 ```
 
-**Documentation:** [mcp-server/README.md](mcp-server/README.md)
+**Learn more:** [mcp-server/README.md](mcp-server/README.md) - MCP server setup and usage
+
+## Creating Custom Features & Data Sources
+
+g2's DB-first architecture makes it easy to add custom indicators, alternative data, or new data sources without modifying code.
+
+### Custom Technical Indicators
+
+Create a JSON file in `feature-functions/`:
+
+```json
+{
+  "name": "price_change_pct",
+  "version": "1.0",
+  "language": "python",
+  "description": "Calculate percentage price change",
+  "status": "active",
+  "enabled": true,
+  "function_body": "import pandas as pd\n\ndef compute(rows, specs):\n    df = pd.DataFrame(rows)\n    df['price_change_pct'] = df['close'].pct_change() * 100\n    return df.to_dict('records')\n"
+}
+```
+
+Import and use:
+
+```bash
+# Import function to database
+g2 feat-fx-import --dir feature-functions
+
+# Register feature definition
+g2 feat-def-register --definition '{
+  "name": "daily_price_change_pct",
+  "function_name": "price_change_pct",
+  "params": {},
+  "source_table": "stock_ohlcv",
+  "source_column": "close",
+  "store_table": "computed_features",
+  "store_column": "value",
+  "active": true
+}'
+
+# Compute for stocks
+g2 feat-compute --features daily_price_change_pct --symbols AAPL,MSFT --local
+```
+
+### Ingesting New Data Sources
+
+Add sentiment, news, fundamental data, or any other alternative data:
+
+**Method 1: As Computed Features (Recommended)**
+
+Use when data is derived or fetched per-symbol:
+
+```json
+{
+  "name": "news_sentiment_fetcher",
+  "version": "1.0",
+  "language": "python",
+  "description": "Fetch news sentiment from API",
+  "function_body": "import requests\nimport pandas as pd\n\ndef compute(rows, specs):\n    # rows contains stock_ohlcv data\n    symbol = rows[0]['symbol']\n    # Fetch from external API\n    response = requests.get(f'https://api.example.com/sentiment/{symbol}')\n    sentiment = response.json()['score']\n    # Return time-series data\n    return [{'date': row['date'], 'sentiment': sentiment} for row in rows]\n"
+}
+```
+
+Register and run:
+
+```bash
+g2 feat-fx-import --dir feature-functions
+g2 feat-def-register --definition '{...}'  # Register sentiment feature
+g2 feat-compute --features news_sentiment --symbols AAPL,MSFT --local
+```
+
+**Method 2: Direct Database Ingestion**
+
+Use when you have bulk data files or need custom schema:
+
+```python
+# custom_ingest.py
+import psycopg
+import pandas as pd
+
+# Read your data source (CSV, API, etc.)
+df = pd.read_csv('earnings_data.csv')
+
+# Insert into database
+with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+    with conn.cursor() as cur:
+        # Option A: Use computed_features (generic)
+        for _, row in df.iterrows():
+            cur.execute("""
+                INSERT INTO computed_features (data_id, date, feature_id, value)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (data_id, date, feature_id) DO UPDATE
+                SET value = EXCLUDED.value
+            """, (stock_id, row['date'], feature_id, row['earnings_surprise']))
+
+        # Option B: Create custom table (for complex data)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS earnings_data (
+                data_id INT REFERENCES stocks(id),
+                date DATE,
+                eps_actual DECIMAL,
+                eps_estimate DECIMAL,
+                surprise_pct DECIMAL,
+                PRIMARY KEY (data_id, date)
+            )
+        """)
+
+# Then run via CLI
+python custom_ingest.py
+```
+
+**Example use cases:**
+
+- **News sentiment** - Fetch from news APIs, store sentiment scores
+- **Social media mentions** - Twitter/Reddit volume and sentiment
+- **Insider trading** - SEC Form 4 filings
+- **Analyst ratings** - Upgrades/downgrades from financial APIs
+- **Economic indicators** - FRED API (GDP, unemployment, CPI)
+- **Fundamental data** - Earnings, revenue, P/E ratios
+- **Options data** - Implied volatility, open interest
+
+**What's allowed in sandboxed functions:**
+
+- ✅ pandas, numpy, scipy, sklearn, talib
+- ✅ External APIs via requests
+- ✅ JSON/CSV parsing
+- ✅ Date/time operations
+- ❌ File I/O (use database)
+- ❌ eval(), exec(), arbitrary imports
+
+**See:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for DB-first architecture details
 
 ## Architecture
 
@@ -140,135 +333,90 @@ graph TB
 - **Generic Dispatcher**: Routes computation based on `function_name` in feature definitions
 - **Hypertables**: TimescaleDB optimizes time-series queries on `stock_ohlcv` and `computed_features`
 - **Pure Functions**: Compute functions are side-effect-free, dispatcher handles DB I/O
-- **DB-First Functions**: Custom feature functions stored in database with git backup for version control
+- **DB-First**: Custom feature functions stored in database with git backup for version control
 
-## Feature Functions (DB-First Architecture)
+## Documentation Index
 
-### Overview
+**Getting Started:**
 
-g2 supports **database-stored feature functions** that can be written in multiple languages (Python, SQL, etc.) and executed in a sandboxed environment. The database is the source of truth, with periodic exports to git for version control and code review.
+- This README - Installation and overview
+- [docs/USER_GUIDE.md](docs/USER_GUIDE.md) - Full CLI reference
+- [docs/ML_QUICKSTART.md](docs/ML_QUICKSTART.md) - End-to-end ML workflow
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
 
-### Architecture Layers
+**Advanced:**
 
-1. **Core Compute Engines** (in code): `indicator`, `derivative`
-   - Built-in functions that need full system access
-   - Registered at runtime via `register_compute_function()`
-   - Cannot be overridden by DB functions
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design and DB-first architecture
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) - Optimization techniques
+- [mcp-server/README.md](mcp-server/README.md) - Natural language interface setup
+- [docs/archive/ml/](docs/archive/ml/) - ML vision and future roadmap
+- [PROGRESS.md](PROGRESS.md) - Current status and recent changes
 
-2. **Custom Feature Functions** (in database): User-defined logic
-   - Stored in `feature_functions` table as code text
-   - Loaded and executed in sandboxed environment
-   - Can override code registry or add new functions
-   - Support multiple languages: `python`, `python_expr`, `sql` (extensible)
-
-### DB-First Workflow
+## Running Tests
 
 ```bash
-# 1. Create/modify feature functions in the database
-#    (via g2 CLI, web UI, or direct SQL)
+# Quick tests (no database required)
+make test                               # Uses fixture data
 
-# 2. Export to git for version control
-g2 feat-fx-export --dir feature-functions
+# Full test suite (requires PostgreSQL running)
+make test-db                            # Includes database integration tests
 
-# 3. Review and commit changes
-git add feature-functions/
-git commit -m "Update price_change_pct feature function"
-
-# 4. Deploy to other environments
-g2 feat-fx-import --dir feature-functions
+# Manual pytest commands
+pytest -q                               # All tests (skips DB if not available)
+pytest -q tests -k "not db"             # Explicitly skip DB tests
+ENABLE_DB_TESTS=1 pytest -q             # Force DB tests
 ```
 
-### Example: Creating a Custom Feature Function
+**Test Coverage:** 27 ML tests, full CLI integration tests
 
-Create a JSON file in `feature-functions/`:
-
-```json
-{
-  "name": "price_change_pct",
-  "version": "1.0",
-  "language": "python",
-  "description": "Calculate percentage price change",
-  "status": "active",
-  "enabled": true,
-  "function_body": "import pandas as pd\n\ndef compute(rows, specs):\n    df = pd.DataFrame(rows)\n    df['price_change_pct'] = df['close'].pct_change() * 100\n    return df.to_dict('records')\n"
-}
-```
-
-Import to database:
+## Useful Commands
 
 ```bash
-g2 feat-fx-import --dir feature-functions
+# Database
+make db-up                              # Start PostgreSQL
+make db-down                            # Stop PostgreSQL
+make db-health                          # Check database health
+
+# Development
+make venv                               # Create/upgrade virtualenv
+g2 --help                               # Show all CLI commands
+g2 ml --help                            # Show ML subcommands
+
+# Feature Management
+g2 feat-fx-export --dir feature-functions    # Export functions to git
+g2 feat-fx-import --dir feature-functions    # Import functions from git
+g2 feat-def-export --dir feature-definitions # Export definitions to git
+g2 feat-def-import --dir feature-definitions # Import definitions from git
 ```
 
-### Security & Sandboxing
+## Project Status
 
-DB-stored functions execute in a restricted environment:
+**Current State:**
 
-- **Allowed**: pandas, numpy, scipy, sklearn, talib, math, statistics, datetime
-- **Blocked**: file I/O, eval(), exec(), compile(), arbitrary imports
-- **Safe**: Each function runs in isolated namespace
+- ✅ Data pipeline complete (ingestion, features, storage)
+- ✅ ML Phase 1 complete (training, prediction, evaluation)
+- ✅ MCP server implemented (natural language interface)
+- ✅ Production-ready database schema
+- ✅ Comprehensive documentation
 
-### Priority Order
+**See:** [PROGRESS.md](PROGRESS.md) for detailed status and recent changes
 
-When loading functions, the dispatcher checks:
+## Contributing
 
-1. **Function cache** (performance optimization)
-2. **Database** (`feature_functions` table) — **highest priority**
-3. **Code registry** (hardcoded via `register_compute_function()`)
+This project follows strict TDD (test-driven development):
 
-DB functions override code registry functions with the same name.
+1. Write a failing test that describes the behavior
+2. Implement the smallest change to make it pass
+3. Refactor with tests green
+4. Update documentation
 
-### Best Practices
+**Key Practices:**
 
-- **Core engines stay in code**: Don't try to move `indicator` or `derivative` to DB
-- **Custom logic goes to DB**: User-defined features, experiments, prototypes
-- **Version control**: Export regularly, commit to git
-- **Idempotent imports**: Safe to re-import; uses `ON CONFLICT DO UPDATE`
-- **Clear descriptions**: Document what each function does
-- **Test before deploy**: Verify functions in dev before production import
+- Database is source of truth (DB-first architecture)
+- All feature functions stored in database, exported to git
+- Functions execute in sandboxed environment
+- Comprehensive test coverage required
 
-## Current focus
+## License
 
-- Capture initial domain notes (data model, sources/computed separation, calc_store-style descriptors)
-- Set up a minimal Python package + pytest harness
-- Keep AlphaVantage credentials in `.env` (reused from `../gefjon/.env`, never printed or committed)
-
-## Running tests
-```bash
-python -m pytest -q
-```
-- Quick no-DB smoke: `pytest -q tests -k "not db"` (uses bundled fixtures like `tests/fixtures/demo_time_series_daily_adjusted.json`)
-- DB-enabled: `ENABLE_DB_TESTS=1 pytest -q` with TimescaleDB running
-
-### Make targets
-- `make venv` — create/upgrade the venv and install dev deps
-- `make test` — run pytest in the venv (DB tests skipped)
-- `make test-db` — run pytest with `ENABLE_DB_TESTS=1` (requires running Postgres)
-- `make db-up` / `make db-down` — start/stop TimescaleDB via docker compose
-- `make db-health` — pg_isready check against the running container
-
-## CLI
-- Install (editable): `pip install -e .`
-- Run: `g2 ingest-prices --symbol IBM --input tests/fixtures/demo_time_series_daily_adjusted.json`
-  - Uses `DATABASE_URL` from env; creates tables if missing.
-- Universe ingest (AlphaVantage LISTING_STATUS + prices):
-  - `g2 ingest-universe --exchange NASDAQ --limit 5 --max-workers 4 --timeframe auto --update-existing`
-  - Respects `ALPHAVANTAGE_API_KEY` and `calls_per_minute` (default 75 for premium). `timeframe auto` chooses full if no data or newest point is older than ~100 days; otherwise compact. `--update-existing` upserts existing dates.
-  - CLI loads `.env` automatically for `ALPHAVANTAGE_API_KEY` and `DATABASE_URL`.
-- Indicators ingest:
-  - `g2 ingest-indicators --exchange NASDAQ --local --indicators rsi,macd,bbands,adx,stoch,psar --refresh`
-  - Local mode (default) computes indicators from existing `stock_ohlcv` and resumes from the last indicator date; use `--api` to fetch from AlphaVantage instead. Writer/fetch workers are auto-sized; progress shows mode and queue/fetch stats.
-
-## Local Postgres (TimescaleDB)
-- Copy `.env.example` to `.env` and adjust credentials as needed.
-- Start database: `docker compose up -d postgres`
-- A TimescaleDB extension is enabled via `docker/initdb.d/timescaledb.sql`.
-- **Initialize schema**: `psql -d g2 -f sql/schema.sql`
-  - Creates all tables, hypertables, and indexes
-  - Safe to run multiple times (idempotent)
-
-## Contributing workflow (TDD-first)
-- Write a failing test that describes the behavior
-- Implement the smallest change to make it pass
-- Refactor with tests green
-- Update docs/dev-journal.md with what changed and why
+See [LICENSE](LICENSE) file for details.
