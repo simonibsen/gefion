@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # MCP Server (includes g2 CLI)
+  mcp-server:
+    build:
+      context: ..
+      dockerfile: mcp-server/Dockerfile
+    container_name: g2-mcp-server
+    stdin_open: true  # Required for MCP stdio
+    tty: false
+    environment:
+      DATABASE_URL: postgresql://g2:g2pass@postgres:5432/g2
+      ALPHAVANTAGE_API_KEY: ${ALPHAVANTAGE_API_KEY:-}
+    volumes:
+      # Mount directories for persistent storage
+      - ../datasets:/app/datasets
+      - ../models:/app/models
+      - ../feature-functions:/app/feature-functions
+      - ../feature-definitions:/app/feature-definitions
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - g2-network
+
+  # PostgreSQL database (shared with main g2)
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    container_name: g2-postgres
+    environment:
+      POSTGRES_DB: g2
+      POSTGRES_USER: g2
+      POSTGRES_PASSWORD: g2pass
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U g2 -d g2"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - g2-network
+
+networks:
+  g2-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+
+# ============================================================================
+# Usage
+# ============================================================================
+
+# Start services:
+#   cd mcp-server && docker-compose up -d
+
+# View logs:
+#   docker-compose logs -f mcp-server
+
+# Run g2 command in container:
+#   docker-compose run --rm mcp-server g2 ml dataset-build --help
+
+# Stop services:
+#   docker-compose down
+
+# For Claude Desktop integration, configure claude_desktop_config.json
+# to use: docker-compose run --rm mcp-server
