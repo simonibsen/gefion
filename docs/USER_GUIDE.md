@@ -23,7 +23,9 @@ docker compose run --rm ml ml device
 docker compose run --rm --gpus all ml ml device
 ```
 
-### Build an ML dataset manifest (and optional CSV exports)
+### ML Workflow (End-to-End)
+
+#### 1. Build ML Dataset
 
 `dataset-build` registers a dataset configuration in `ml_datasets` and writes a manifest JSON file. With `--export`, it also exports CSVs (`prices.csv`, `features.csv`, `labels.csv`) into the same output directory.
 
@@ -39,7 +41,7 @@ g2 ml dataset-build \
   --export
 ```
 
-Example (exchange + optional limit; used for manifest/universe selection):
+Example (exchange + optional limit):
 ```bash
 g2 ml dataset-build \
   --name nasdaq_mvp --version v1 \
@@ -47,8 +49,68 @@ g2 ml dataset-build \
   --horizons 7,30,90 \
   --weak-thresholds 0.02,0.05,0.10 \
   --strong-thresholds 0.05,0.10,0.20 \
-  --out-dir datasets/nasdaq_mvp
+  --out-dir datasets/nasdaq_mvp \
+  --export
 ```
+
+#### 2. Train Models
+
+Train quantile regression models for each horizon:
+
+```bash
+g2 ml train \
+  --dataset-name mvp \
+  --dataset-version v1 \
+  --model-name mvp_model \
+  --model-version 20251214 \
+  --algorithm quantile_regression \
+  --out-dir models
+```
+
+**Supported Algorithms:**
+
+- `quantile_regression` - sklearn QuantileRegressor (default, fast, linear)
+- `xgboost` - XGBoost quantile regression (requires `pip install 'g2[ml_extended]'`)
+- `lightgbm` - LightGBM quantile regression (requires `pip install 'g2[ml_extended]'`)
+
+The command trains 3 quantile models (q10, q50, q90) per horizon and saves artifacts to `models/mvp_model_20251214_hN/`.
+
+#### 3. Generate Predictions
+
+Generate predictions for symbols on a specific date:
+
+```bash
+# Predict for specific symbols
+g2 ml predict \
+  --model-name mvp_model \
+  --model-version 20251214 \
+  --prediction-date 2024-12-14 \
+  --symbols IBM,MSFT,AAPL
+
+# Predict for exchange
+g2 ml predict \
+  --model-name mvp_model \
+  --model-version 20251214 \
+  --prediction-date 2024-12-14 \
+  --exchange NASDAQ \
+  --limit 500
+```
+
+Fetches features from `computed_features`, generates q10/q50/q90 predictions, stores in `quantile_predictions`.
+
+#### 4. Evaluate Performance
+
+Evaluate model calibration on historical predictions:
+
+```bash
+g2 ml eval \
+  --model-name mvp_model \
+  --model-version 20251214 \
+  --start-date 2024-01-01 \
+  --end-date 2024-12-01
+```
+
+Computes calibration metrics (q10/q50/q90 coverage, pinball loss, IQR), stores in `model_performance`, prints evaluation report.
 
 ## Setup
 1. Copy `.env.example` to `.env` and set:
