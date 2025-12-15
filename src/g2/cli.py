@@ -617,6 +617,7 @@ def ml_train(
 ) -> None:
     """Train a quantile regression model for multi-horizon return prediction (MVP)."""
     from g2.ml.store import get_ml_dataset
+    from g2.ml.models import load_dataset_from_csv, train_quantile_model, save_model_artifact
 
     with db_connection(db_url) as conn:
         # Fetch dataset manifest
@@ -625,17 +626,47 @@ def ml_train(
             emit_error(f"Dataset not found: {dataset_name} {dataset_version}", json_output=json_output)
             return
 
-        # TODO: Load features and labels from dataset
-        # TODO: Train model
-        # TODO: Save model artifact
+        # Train models for each horizon
+        artifact_uri = Path(dataset["artifact_uri"])
+        horizons = dataset["horizons_days"]
+        all_train_metrics = {}
 
-        # For MVP, create placeholder model artifact
-        out_dir.mkdir(parents=True, exist_ok=True)
-        model_path = out_dir / f"{model_name}_{model_version}.pkl"
-        model_path.write_text("# Placeholder model artifact (TODO: implement training)")
+        emit(f"Training {algorithm} models for horizons: {horizons}", json_output=json_output)
+
+        for horizon in horizons:
+            emit(f"Training model for {horizon}-day horizon...", json_output=json_output)
+
+            # Load features and labels for this horizon
+            X, y = load_dataset_from_csv(artifact_uri, horizon)
+            emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
+
+            # Train quantile models (q10, q50, q90)
+            model_data = train_quantile_model(X, y, algorithm=algorithm)
+            emit(f"  Trained {len(model_data['models'])} quantile models", json_output=json_output)
+
+            # Save model artifact
+            out_dir.mkdir(parents=True, exist_ok=True)
+            model_path = out_dir / f"{model_name}_{model_version}_h{horizon}"
+            save_model_artifact(
+                model_data,
+                model_path,
+                metadata={
+                    "model_name": model_name,
+                    "model_version": model_version,
+                    "horizon_days": horizon,
+                    "dataset_name": dataset_name,
+                    "dataset_version": dataset_version,
+                }
+            )
+            emit(f"  Saved artifacts to {model_path}", json_output=json_output)
+
+            all_train_metrics[f"h{horizon}"] = model_data["train_metrics"]
 
         # Register model in ml_models
         from psycopg.types.json import Json
+
+        # Use first horizon's path as base artifact URI (individual horizons have _hN suffix)
+        base_artifact_path = out_dir / f"{model_name}_{model_version}"
 
         with conn.cursor() as cur:
             # Create run record
@@ -670,9 +701,9 @@ def ml_train(
                     run_id,
                     dataset["id"],
                     algorithm,
-                    Json({}),  # TODO: actual hyperparameters
-                    Json({"status": "placeholder"}),  # TODO: actual metrics
-                    str(model_path),
+                    Json({"algorithm": algorithm}),
+                    Json(all_train_metrics),
+                    str(base_artifact_path),
                 ),
             )
             model_id = int(cur.fetchone()[0])
@@ -690,7 +721,7 @@ def ml_train(
 
     emit(
         f"Model trained: {model_name} {model_version}",
-        data={"model_id": model_id, "run_id": run_id, "artifact_uri": str(model_path)},
+        data={"model_id": model_id, "run_id": run_id, "artifact_uri": str(base_artifact_path), "horizons": horizons},
         json_output=json_output,
     )
 
@@ -707,13 +738,17 @@ def ml_predict(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
     """Generate predictions using a trained model (MVP placeholder)."""
+    import pandas as pd
+    from g2.ml.models import load_model_artifact, predict_quantiles
+    from g2.ml.store import get_ml_dataset
+
     sym_list = parse_comma_separated(symbols) or []
     if not sym_list and not exchange:
         emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
         return
 
     with db_connection(db_url) as conn:
-        # Fetch model
+        # Fetch model metadata
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -730,19 +765,94 @@ def ml_predict(
 
             model_id, dataset_id, artifact_uri, algorithm = row[0], row[1], row[2], row[3]
 
-        # TODO: Load model from artifact_uri
-        # TODO: Fetch features for symbols on prediction_date
-        # TODO: Generate predictions
-        # TODO: Store in quantile_predictions and/or trend_class_predictions
+        # Get dataset to know which features and horizons to use
+        dataset = get_ml_dataset(conn, name="", version="")  # Need to query by dataset_id
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT name, version, feature_names, horizons_days
+                FROM ml_datasets
+                WHERE id = %s;
+                """,
+                (dataset_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                emit_error(f"Dataset not found for model (id={dataset_id})", json_output=json_output)
+                return
+            dataset_name, dataset_version, feature_names, horizons = row[0], row[1], row[2], row[3]
+
+        # Build universe of symbols
+        if exchange:
+            with conn.cursor() as cur:
+                limit_clause = f"LIMIT {limit}" if limit else ""
+                cur.execute(
+                    f"""
+                    SELECT DISTINCT s.id, s.symbol
+                    FROM stocks s
+                    WHERE s.exchange = %s
+                    {limit_clause};
+                    """,
+                    (exchange,),
+                )
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
+        else:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, symbol FROM stocks WHERE symbol = ANY(%s);
+                    """,
+                    (sym_list,),
+                )
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
+
+        if not universe:
+            emit_error("No symbols found in universe", json_output=json_output)
+            return
+
+        emit(f"Generating predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
+
+        # Fetch features for all symbols on prediction_date
+        data_ids = [u[0] for u in universe]
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT cf.data_id, fd.name, cf.value
+                FROM computed_features cf
+                JOIN feature_definitions fd ON cf.feature_id = fd.id
+                WHERE cf.data_id = ANY(%s)
+                  AND cf.date = %s
+                  AND fd.name = ANY(%s);
+                """,
+                (data_ids, prediction_date, feature_names),
+            )
+            features_data = cur.fetchall()
+
+        if not features_data:
+            emit_error(f"No features found for {prediction_date}", json_output=json_output)
+            return
+
+        # Convert to DataFrame and pivot to wide format
+        features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
+        features_wide = features_df.pivot_table(
+            index="data_id",
+            columns="feature_name",
+            values="value",
+            aggfunc="first"
+        )
+
+        emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
+
+        # Generate predictions for each horizon
+        from psycopg.types.json import Json
+        from decimal import Decimal
 
         # Create run record
-        from psycopg.types.json import Json
-
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
-                VALUES ('predict', 'completed', %s, %s, NOW())
+                VALUES ('predict', 'running', %s, %s, NOW())
                 RETURNING id;
                 """,
                 (
@@ -759,11 +869,60 @@ def ml_predict(
             )
             run_id = int(cur.fetchone()[0])
 
+        total_predictions = 0
+        for horizon in horizons:
+            emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
+
+            # Load model for this horizon
+            horizon_model_path = Path(artifact_uri) / f"_h{horizon}"
+            model_data = load_model_artifact(horizon_model_path)
+
+            # Generate predictions
+            predictions = predict_quantiles(model_data, features_wide)
+
+            # Insert predictions into database
+            with conn.cursor() as cur:
+                for data_id in predictions.index:
+                    q10 = Decimal(str(predictions.loc[data_id, "q10"]))
+                    q50 = Decimal(str(predictions.loc[data_id, "q50"]))
+                    q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+
+                    cur.execute(
+                        """
+                        INSERT INTO quantile_predictions
+                          (model_id, data_id, prediction_date, horizon_days, q10, q50, q90,
+                           model_version, run_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
+                        DO UPDATE SET
+                          q10 = EXCLUDED.q10,
+                          q50 = EXCLUDED.q50,
+                          q90 = EXCLUDED.q90,
+                          model_version = EXCLUDED.model_version,
+                          run_id = EXCLUDED.run_id,
+                          created_at = NOW();
+                        """,
+                        (model_id, int(data_id), prediction_date, horizon, q10, q50, q90, model_version, run_id),
+                    )
+                    total_predictions += 1
+
+            emit(f"  Stored {len(predictions)} predictions for {horizon}-day horizon", json_output=json_output)
+
+        # Mark run as complete
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE ml_runs SET status = 'completed', finished_at = NOW()
+                WHERE id = %s;
+                """,
+                (run_id,),
+            )
+
         conn.commit()
 
     emit(
         f"Predictions generated: {model_name} {model_version} for {prediction_date}",
-        data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date},
+        data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizons": horizons},
         json_output=json_output,
     )
 
@@ -778,6 +937,11 @@ def ml_eval(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
     """Evaluate model performance on historical predictions (MVP placeholder)."""
+    import pandas as pd
+    from datetime import datetime, timedelta
+    from decimal import Decimal
+    from g2.ml.evaluation import calculate_calibration_metrics, generate_evaluation_report
+
     with db_connection(db_url) as conn:
         # Fetch model
         with conn.cursor() as cur:
@@ -796,49 +960,176 @@ def ml_eval(
 
             model_id, dataset_id = row[0], row[1]
 
-        # TODO: Fetch predictions from quantile_predictions
-        # TODO: Fetch actual returns from stock_ohlcv
-        # TODO: Calculate calibration metrics (q10/q50/q90 coverage)
-        # TODO: Calculate quantile loss (pinball loss)
-        # TODO: Store in model_performance
+        emit(f"Evaluating {model_name} {model_version} from {start_date} to {end_date}...", json_output=json_output)
 
-        # Create run record and placeholder performance metrics
+        # Fetch predictions from quantile_predictions
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT qp.data_id, qp.prediction_date, qp.horizon_days, qp.q10, qp.q50, qp.q90,
+                       s.symbol
+                FROM quantile_predictions qp
+                JOIN stocks s ON qp.data_id = s.id
+                WHERE qp.model_id = %s
+                  AND qp.prediction_date >= %s
+                  AND qp.prediction_date <= %s
+                ORDER BY qp.prediction_date, qp.data_id, qp.horizon_days;
+                """,
+                (model_id, start_date, end_date),
+            )
+            predictions_data = cur.fetchall()
+
+        if not predictions_data:
+            emit_error(f"No predictions found for evaluation period", json_output=json_output)
+            return
+
+        emit(f"Found {len(predictions_data)} predictions to evaluate", json_output=json_output)
+
+        # Convert to DataFrame
+        predictions_df = pd.DataFrame(
+            predictions_data,
+            columns=["data_id", "prediction_date", "horizon_days", "q10", "q50", "q90", "symbol"]
+        )
+
+        # Calculate actual returns for each prediction
+        emit("Calculating actual returns...", json_output=json_output)
+
+        actual_returns = []
+        for _, row in predictions_df.iterrows():
+            data_id = row["data_id"]
+            pred_date = row["prediction_date"]
+            horizon = row["horizon_days"]
+
+            # Calculate outcome date (prediction_date + horizon_days)
+            outcome_date = pred_date + timedelta(days=horizon)
+
+            # Fetch close prices for prediction_date and outcome_date
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT date, close
+                    FROM stock_ohlcv
+                    WHERE data_id = %s
+                      AND date IN (%s, %s)
+                    ORDER BY date;
+                    """,
+                    (int(data_id), pred_date, outcome_date),
+                )
+                prices = cur.fetchall()
+
+            if len(prices) == 2:
+                start_price = float(prices[0][1])
+                end_price = float(prices[1][1])
+                actual_return = (end_price - start_price) / start_price
+                actual_returns.append(actual_return)
+            else:
+                # Missing price data - skip this prediction
+                actual_returns.append(None)
+
+        predictions_df["actual_return"] = actual_returns
+
+        # Filter out predictions with missing actual returns
+        valid_predictions = predictions_df[predictions_df["actual_return"].notna()].copy()
+        emit(f"Valid predictions with actual returns: {len(valid_predictions)}", json_output=json_output)
+
+        if len(valid_predictions) == 0:
+            emit_error("No valid predictions with actual returns found", json_output=json_output)
+            return
+
+        # Calculate metrics by horizon
         from psycopg.types.json import Json
 
+        horizons = valid_predictions["horizon_days"].unique()
+        all_metrics = {}
+
+        for horizon in sorted(horizons):
+            horizon_data = valid_predictions[valid_predictions["horizon_days"] == horizon]
+
+            # Prepare predictions and actuals for metrics calculation
+            preds = horizon_data[["q10", "q50", "q90"]].astype(float)
+            actuals = horizon_data["actual_return"].astype(float)
+
+            # Calculate calibration metrics
+            metrics = calculate_calibration_metrics(preds, actuals)
+            all_metrics[int(horizon)] = metrics
+
+            emit(f"Horizon {horizon} days: {metrics['num_samples']} samples, "
+                 f"q50_calibration={metrics.get('q50_calibration', 0):.1f}%", json_output=json_output)
+
+        # Generate evaluation report
+        report = generate_evaluation_report(model_name, all_metrics)
+        emit(report, json_output=json_output)
+
+        # Create run record
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
-                VALUES ('eval', 'completed', %s, %s, NOW())
+                VALUES ('eval', 'running', %s, %s, NOW())
                 RETURNING id;
                 """,
                 (dataset_id, Json({"start_date": start_date, "end_date": end_date})),
             )
             run_id = int(cur.fetchone()[0])
 
-            # TODO: Replace with actual metrics
+        # Store metrics in model_performance (one row per horizon)
+        # Note: model_performance has model_id as PRIMARY KEY, so we can only store one horizon
+        # For now, store the first horizon's metrics
+        if all_metrics:
+            first_horizon = sorted(all_metrics.keys())[0]
+            first_metrics = all_metrics[first_horizon]
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO model_performance
+                      (model_id, model_name, horizon_days, q10_calibration, q50_calibration, q90_calibration,
+                       quantile_loss, avg_iqr, eval_start_date, eval_end_date, num_predictions, eval_run_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (model_id) DO UPDATE SET
+                      horizon_days = EXCLUDED.horizon_days,
+                      q10_calibration = EXCLUDED.q10_calibration,
+                      q50_calibration = EXCLUDED.q50_calibration,
+                      q90_calibration = EXCLUDED.q90_calibration,
+                      quantile_loss = EXCLUDED.quantile_loss,
+                      avg_iqr = EXCLUDED.avg_iqr,
+                      eval_start_date = EXCLUDED.eval_start_date,
+                      eval_end_date = EXCLUDED.eval_end_date,
+                      num_predictions = EXCLUDED.num_predictions,
+                      eval_run_id = EXCLUDED.eval_run_id,
+                      updated_at = NOW();
+                    """,
+                    (
+                        model_id,
+                        model_name,
+                        first_horizon,
+                        Decimal(str(first_metrics.get("q10_calibration", 0))),
+                        Decimal(str(first_metrics.get("q50_calibration", 0))),
+                        Decimal(str(first_metrics.get("q90_calibration", 0))),
+                        Decimal(str(first_metrics.get("quantile_loss", 0))) if "quantile_loss" in first_metrics else None,
+                        Decimal(str(first_metrics.get("avg_iqr", 0))) if "avg_iqr" in first_metrics else None,
+                        start_date,
+                        end_date,
+                        first_metrics.get("num_samples", 0),
+                        run_id,
+                    ),
+                )
+
+        # Mark run as complete
+        with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO model_performance
-                  (model_id, model_name, horizon_days, q10_calibration, q50_calibration, q90_calibration,
-                   eval_start_date, eval_end_date, eval_run_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (model_id) DO UPDATE SET
-                  q10_calibration = EXCLUDED.q10_calibration,
-                  q50_calibration = EXCLUDED.q50_calibration,
-                  q90_calibration = EXCLUDED.q90_calibration,
-                  eval_start_date = EXCLUDED.eval_start_date,
-                  eval_end_date = EXCLUDED.eval_end_date,
-                  eval_run_id = EXCLUDED.eval_run_id;
+                UPDATE ml_runs SET status = 'completed', finished_at = NOW()
+                WHERE id = %s;
                 """,
-                (model_id, model_name, 7, None, None, None, start_date, end_date, run_id),  # Placeholder
+                (run_id,),
             )
 
         conn.commit()
 
     emit(
         f"Model evaluated: {model_name} {model_version}",
-        data={"model_id": model_id, "run_id": run_id, "eval_period": f"{start_date} to {end_date}"},
+        data={"model_id": model_id, "run_id": run_id, "eval_period": f"{start_date} to {end_date}", "horizons": list(all_metrics.keys())},
         json_output=json_output,
     )
 
