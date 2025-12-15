@@ -1,0 +1,5 @@
+# MCP SDK
+mcp>=0.9.0
+
+# g2 is installed via parent directory (pip install -e ..)
+# Dependencies are managed by g2's pyproject.toml
