@@ -18,11 +18,51 @@ Notes:
 - The ingest command above stays offline by using the bundled fixture; swap in `--exchange NASDAQ --timeframe auto` when you want live API calls.
 - CLI commands load `.env` automatically for DB/API credentials.
 
-## ML (layman overview)
+## ML (Production Ready)
 
-The long-term goal is to learn “trend strength” from historical patterns instead of hand-written rules: ingest prices → compute indicators/features → build labeled training datasets → train a multi-horizon model that predicts return ranges/probabilities (quantiles) for 7/30/90 days → store predictions in dedicated tables → validate via point-in-time backtests → turn into screening/signals/strategies.
+g2 now includes a complete ML pipeline for quantile regression-based return prediction:
 
-Start here: `docs/archive/ml/README.md` (index), then `docs/archive/ml/HIGHLEVEL.md` (vision), `docs/archive/ml/ML_SYSTEM_DESIGN.md` (schemas/pipelines), `docs/archive/ml/ML_ROADMAP.md` (phases/tasks).
+**What it does:** Predicts return distributions (q10, q50, q90 quantiles) for multi-horizon forecasts (7/30/90 days) using technical indicators as features.
+
+**Quick Start:**
+
+```bash
+# 1. Build dataset
+g2 ml dataset-build --name mvp --version v1 --symbols AAPL,MSFT --horizons 7,30 --export
+
+# 2. Train model
+g2 ml train --dataset-name mvp --dataset-version v1 --model-name model --model-version $(date +%Y%m%d)
+
+# 3. Generate predictions
+g2 ml predict --model-name model --model-version $(date +%Y%m%d) --prediction-date $(date +%Y-%m-%d) --symbols AAPL,MSFT
+
+# 4. Evaluate performance
+g2 ml eval --model-name model --model-version $(date +%Y%m%d) --start-date 2024-01-01 --end-date 2024-11-30
+```
+
+**Documentation:**
+
+- **[ML Quickstart Guide](docs/ML_QUICKSTART.md)** - Complete walkthrough with examples
+- **[User Guide](docs/USER_GUIDE.md)** - Full CLI reference
+- **[ML System Design](docs/archive/ml/ML_SYSTEM_DESIGN.md)** - Architecture and database schema
+
+### MCP Server (Natural Language Interface)
+
+Use g2 through Claude Desktop with natural language:
+
+```bash
+# Setup (local development)
+cd mcp-server
+pip install -r requirements.txt
+
+# Configure Claude Desktop (see mcp-server/README.md)
+# Then chat with Claude:
+"Build a dataset with AAPL, MSFT, GOOGL for 7 and 30 day horizons"
+"Train a quantile regression model on that dataset"
+"Show me predictions for AAPL from the last week"
+```
+
+**Documentation:** [mcp-server/README.md](mcp-server/README.md)
 
 ## Architecture
 
