@@ -172,33 +172,76 @@ g2 feat-compute --features daily_price_change_pct --symbols AAPL,MSFT --local
 
 ### Ingesting New Data Sources
 
-Add sentiment, news, fundamental data, or any other alternative data:
+Add data from new API endpoints (sentiment, fundamentals, news, etc.):
 
-**Method 1: As Computed Features (Recommended)**
+**Example: AlphaVantage News Sentiment API**
 
-Use when data is derived or fetched per-symbol:
+The AlphaVantage [News Sentiment API](https://www.alphavantage.co/documentation/#news-sentiment) provides sentiment scores for news articles. Here's how to integrate it:
+
+**Step 1: Create API Fetcher Function**
+
+Store in `feature-functions/news_sentiment_fetcher.json`:
 
 ```json
 {
   "name": "news_sentiment_fetcher",
   "version": "1.0",
   "language": "python",
-  "description": "Fetch news sentiment from API",
-  "function_body": "import requests\nimport pandas as pd\n\ndef compute(rows, specs):\n    # rows contains stock_ohlcv data\n    symbol = rows[0]['symbol']\n    # Fetch from external API\n    response = requests.get(f'https://api.example.com/sentiment/{symbol}')\n    sentiment = response.json()['score']\n    # Return time-series data\n    return [{'date': row['date'], 'sentiment': sentiment} for row in rows]\n"
+  "description": "Fetch news sentiment from AlphaVantage API",
+  "status": "active",
+  "enabled": true,
+  "function_body": "import requests\nimport os\nfrom datetime import datetime\n\ndef compute(rows, specs):\n    \"\"\"Fetch sentiment data from AlphaVantage News Sentiment API.\"\"\"\n    api_key = os.environ.get('ALPHAVANTAGE_API_KEY')\n    symbol = rows[0]['symbol']  # Get symbol from price data\n    \n    # Call AlphaVantage News Sentiment API\n    url = f'https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={symbol}&apikey={api_key}'\n    response = requests.get(url)\n    data = response.json()\n    \n    # Parse sentiment data and return time-series rows\n    results = []\n    for article in data.get('feed', []):\n        for ticker_sentiment in article.get('ticker_sentiment', []):\n            if ticker_sentiment['ticker'] == symbol:\n                results.append({\n                    'date': article['time_published'][:10],  # Extract date\n                    'sentiment_score': float(ticker_sentiment['ticker_sentiment_score']),\n                    'relevance_score': float(ticker_sentiment['relevance_score'])\n                })\n    \n    return results\n"
 }
 ```
 
-Register and run:
+**Step 2: Import Function to Database**
 
 ```bash
 g2 feat-fx-import --dir feature-functions
-g2 feat-def-register --definition '{...}'  # Register sentiment feature
-g2 feat-compute --features news_sentiment --symbols AAPL,MSFT --local
 ```
 
-**Method 2: Direct Database Ingestion**
+This stores the function in the `feature_functions` table, making it available to the dispatcher.
 
-Use when you have bulk data files or need custom schema:
+**Step 3: Register Feature Definition**
+
+Register it so g2 knows how to run it:
+
+```bash
+g2 feat-def-register --definition '{
+  "name": "news_sentiment_score",
+  "function_name": "news_sentiment_fetcher",
+  "params": {},
+  "source_table": "stock_ohlcv",
+  "source_column": "symbol",
+  "store_table": "computed_features",
+  "store_column": "value",
+  "active": true
+}'
+```
+
+**Step 4: Compute for Symbols**
+
+```bash
+# Fetch and store sentiment data
+g2 feat-compute --features news_sentiment_score --symbols AAPL,MSFT,GOOGL --local
+```
+
+The dispatcher will:
+1. Load the `news_sentiment_fetcher` function from database
+2. Call it for each symbol
+3. Store results in `computed_features` table
+4. Available for ML training as a feature
+
+**Where Code Lives:**
+
+- **API fetcher functions**: `feature-functions/` directory → imported to `feature_functions` table
+- **Feature definitions**: Registered in `feature_definitions` table
+- **Dispatcher**: `src/g2/ingest/dispatcher.py` - loads and executes functions
+- **Data storage**: `computed_features` table (or custom table if needed)
+
+**Alternative: Custom Table for Complex Data**
+
+Use when data doesn't fit the `computed_features` schema (e.g., multiple columns per row):
 
 ```python
 # custom_ingest.py
@@ -236,15 +279,22 @@ with psycopg.connect(os.environ['DATABASE_URL']) as conn:
 python custom_ingest.py
 ```
 
-**Example use cases:**
+**Other API Data Sources You Can Add:**
 
-- **News sentiment** - Fetch from news APIs, store sentiment scores
-- **Social media mentions** - Twitter/Reddit volume and sentiment
-- **Insider trading** - SEC Form 4 filings
-- **Analyst ratings** - Upgrades/downgrades from financial APIs
-- **Economic indicators** - FRED API (GDP, unemployment, CPI)
-- **Fundamental data** - Earnings, revenue, P/E ratios
-- **Options data** - Implied volatility, open interest
+- **AlphaVantage News Sentiment** - Article sentiment scores (example above)
+- **AlphaVantage Fundamentals** - `OVERVIEW`, `INCOME_STATEMENT`, `BALANCE_SHEET`, `EARNINGS`
+- **FRED Economic Data** - GDP, unemployment, interest rates
+- **Twitter/Reddit Sentiment** - Social media APIs
+- **SEC EDGAR** - Insider trading (Form 4), earnings filings
+- **Options Data** - `HISTORICAL_OPTIONS` endpoint
+- **Analyst Ratings** - From financial data providers
+- **Weather Data** - For retail/energy stocks
+
+**Pattern is always the same:**
+1. Create fetcher function in `feature-functions/`
+2. Import to database: `g2 feat-fx-import`
+3. Register definition: `g2 feat-def-register`
+4. Compute: `g2 feat-compute`
 
 **What's allowed in sandboxed functions:**
 
