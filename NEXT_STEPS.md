@@ -10,29 +10,29 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 
 ### 1. Fix Trim Command Behavior ⚠️ BREAKING CHANGE
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17)
 **Priority**: High (documented but not implemented)
 **Effort**: 2-3 days
 
 **Context**: We documented inverted trim behavior in USER_GUIDE.md, but the CLI code still has the old behavior.
 
 **Action Items**:
-- [ ] Update `src/g2/cli.py` trim-features command:
+- [x] Update `src/g2/cli.py` trim-features command:
   - Remove default `--trim-prices` behavior
   - Add `--trim-prices` flag (default False)
   - Update help text
-- [ ] Update `src/g2/cli.py` trim-prices command:
+- [x] Update `src/g2/cli.py` trim-prices command:
   - Add default trim features behavior
   - Add `--no-trim-features` flag
   - Update help text
-- [ ] Update `src/g2/db/ingest.py` trim functions to match new behavior
-- [ ] Add/update tests in `tests/` to verify:
+- [x] Update `src/g2/db/ingest.py` trim functions to match new behavior
+- [x] Add/update tests in `tests/` to verify:
   - `trim-features` doesn't touch prices by default
   - `trim-features --trim-prices` does trim prices
   - `trim-prices` trims features by default
   - `trim-prices --no-trim-features` keeps features
-- [ ] Add migration note to CHANGELOG.md
-- [ ] Test manually with real data to verify no regressions
+- [x] Add migration note to CHANGELOG.md
+- [x] Test manually with real data to verify no regressions
 
 **Files to modify**:
 - `src/g2/cli.py` (trim-features, trim-prices commands)
