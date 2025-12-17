@@ -13,15 +13,33 @@ For details, start at `docs/archive/ml/README.md` (index), then read `docs/archi
 
 ### ML via Docker (GPU if available, CPU otherwise)
 
-Use the `ml` image for training/inference. It includes a CUDA-enabled PyTorch build and will fall back to CPU automatically when no GPU is available *inside the container*.
+Use the `ml` Docker image for training/inference with optional GPU acceleration. The image includes a CUDA-enabled PyTorch build and automatically falls back to CPU when no GPU is available.
+
+**How it works:**
+- `docker compose run --rm ml` runs the g2 CLI inside a container
+- Same commands as local g2, just prefixed with `docker compose run --rm ml`
+- Container has ML dependencies pre-installed (XGBoost, LightGBM, PyTorch)
+- `--gpus all` exposes host NVIDIA GPUs to the container (requires nvidia-container-toolkit)
+
+**Examples:**
 
 ```bash
-# CPU (works everywhere)
-docker compose run --rm ml ml device
+# Check device (CPU or GPU)
+docker compose run --rm ml g2 ml device
 
-# GPU (requires NVIDIA GPU + nvidia-container-toolkit on the host)
-docker compose run --rm --gpus all ml ml device
+# Train model (CPU)
+docker compose run --rm ml g2 ml train --dataset-name mvp --dataset-version v1 --model-name test --model-version 20251217
+
+# Train model (GPU accelerated)
+docker compose run --rm --gpus all ml g2 ml train --dataset-name mvp --dataset-version v1 --model-name test --model-version 20251217
+
+# Generate predictions
+docker compose run --rm ml g2 ml predict --model-name test --model-version 20251217 --prediction-date 2024-12-14 --symbols AAPL,MSFT
 ```
+
+**When to use Docker vs local:**
+- **Docker**: Clean environment, GPU support without local CUDA install, reproducible builds
+- **Local**: Faster iteration, easier debugging, direct file access
 
 ### ML Workflow (End-to-End)
 
@@ -136,8 +154,12 @@ g2 prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_adju
 ```
 
 ### Indicators / features (tall store)
-Run indicator features (local compute by default, resumes from last date):
+Run indicator features (local compute by default):
 ```bash
+# Resume from last date (only compute new dates)
+g2 run-features --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local
+
+# Recompute all dates (useful after fixing a feature function bug)
 g2 run-features --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing
 ```
 - Writes tall rows into `computed_features` (no wide table). Add `--api` to fetch from Alpha Vantage instead of local compute.
@@ -145,7 +167,36 @@ g2 run-features --features indicator_rsi_14,indicator_macd --exchange NASDAQ --l
 - Progress shows mode, queue depth, fetched count.
 
 ### Listings / Offline
-- Use `--listings-file <csv|json>` to bypass network for universe selection.
+
+Use `--listings-file <csv|json>` to bypass the API for universe selection and work with a pre-defined list of stocks.
+
+**When and why to use offline listings:**
+
+1. **Testing**: Work with a small subset of symbols without hitting the API
+   ```bash
+   echo "AAPL,MSFT,GOOGL" > test_symbols.csv
+   g2 data-update --listings-file test_symbols.csv --timeframe auto
+   ```
+
+2. **Reproducibility**: Lock to a specific universe for consistent backtesting
+   ```bash
+   # Save current NASDAQ 100 to file
+   g2 universe-list --exchange NASDAQ --limit 100 > nasdaq100_2024.csv
+   # Use same universe months later
+   g2 data-update --listings-file nasdaq100_2024.csv
+   ```
+
+3. **Custom watchlist/portfolio**: Work with your own curated list of stocks
+   ```bash
+   # personal_portfolio.csv: AAPL,TSLA,NVDA,AMD...
+   g2 run-features --listings-file personal_portfolio.csv --local
+   ```
+
+4. **Offline development**: Develop and test without internet or API access
+   ```bash
+   # Use saved listings file when API unavailable
+   g2 data-update --listings-file cached_listings.json --timeframe compact
+   ```
 
 ### Feature definitions
 - Seed indicator feature metadata: `g2 seed-features` (creates `stocks`, `feature_definitions`, `computed_features`, and seeds indicator definitions).
@@ -165,19 +216,31 @@ g2 register-feature --definition '{
 ```
 Required keys: `name`, `function_name`, `store_table`, `store_column`. Optional: `params`, `source_table`, `source_column`, `store_type`, `active`.
 - Ingestion commands look up `feature_definitions` to map columns -> feature IDs before writing to `computed_features`.
-- Registering a feature also ensures the target store table/column exists. Non-`computed_features` targets are created with columns `(data_id, date, <store_column>, source)`.
+- **Registering a feature automatically creates the target table/column if it doesn't exist:**
+  - For `computed_features` table: Ensures the hypertable exists (standard schema)
+  - For custom tables: Creates table with columns `(data_id, date, <store_column>, source)` and indexes
+  - This means you can register features without manually creating database schema first
 - Trim feature data (left/right):
 ```bash
+# Trim features only (doesn't touch prices by default)
 g2 trim-features --feature indicator_rsi_14,indicator_macd --before 2024-01-01
-g2 trim-features --feature indicator_rsi_14 --after 2024-12-31 --no-trim-prices
-```
-Deletes rows in `computed_features` for the named features before/after the given dates. By default also trims `stock_ohlcv` in the same window; use `--no-trim-prices` to skip price trimming.
 
-Trim prices only:
-```bash
-g2 trim-prices --before 2023-01-01 --symbols IBM,MSFT
+# Trim features AND underlying prices
+g2 trim-features --feature indicator_rsi_14 --before 2024-01-01 --trim-prices
 ```
-Removes price rows before/after the given dates, optionally limited to symbols.
+Deletes rows in `computed_features` for the named features before/after the given dates. Use `--trim-prices` to also trim `stock_ohlcv` in the same window.
+
+**Note:** Default behavior inverted from older versions - now features are trimmed independently unless you explicitly use `--trim-prices`.
+
+Trim prices (also trims features by default):
+```bash
+# Trim prices AND all derived features
+g2 trim-prices --before 2023-01-01 --symbols IBM,MSFT
+
+# Trim prices only (keep computed features)
+g2 trim-prices --before 2023-01-01 --symbols IBM,MSFT --no-trim-features
+```
+Removes price rows before/after the given dates. By default also trims all `computed_features` derived from those prices; use `--no-trim-features` to keep features.
 
 Drop features and data (destructive):
 ```bash
@@ -189,7 +252,7 @@ Data-only delete (keep definitions/schema):
 g2 features-drop --feature indicator_rsi_14 --data-only
 ```
 
-### Update everything (prices + indicators)
+### Update everything (prices + computed_features)
 ```bash
 g2 data-update --exchange NASDAQ --timeframe auto --refresh-existing --local
 ```

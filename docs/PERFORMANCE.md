@@ -130,7 +130,7 @@ SET value = EXCLUDED.value
 
 ### Parallel Feature Processing
 
-**Problem**: Computing 17 indicators sequentially is slow.
+**Problem**: Computing multiple indicators sequentially is slow.
 
 **Solution**: Process features in parallel per symbol.
 
@@ -242,7 +242,7 @@ with Live(progress_table, refresh_per_second=4):
 
 **Speedup**: 24x
 
-### Feature Computation (20 stocks, 17 indicators)
+### Feature Computation (20 stocks, multiple indicators)
 
 **Before optimizations**:
 - Sequential feature processing

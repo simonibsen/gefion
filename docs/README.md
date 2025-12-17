@@ -10,6 +10,7 @@
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and DB-first architecture
 - **[PERFORMANCE.md](PERFORMANCE.md)** - Optimization techniques and benchmarks
+- **[ML_ROADMAP.md](ML_ROADMAP.md)** - Future ML features and enhancements
 
 ## Archive
 

@@ -2,6 +2,37 @@
 
 Complete walkthrough for training and deploying quantile regression models in g2.
 
+## What is g2's ML Pipeline?
+
+g2 predicts **return distributions** instead of single-value forecasts. This approach provides:
+
+**Key Concepts:**
+
+- **Features**: Input data used to make predictions (technical indicators like RSI, MACD, price changes, volume, sentiment scores, etc.)
+- **Labels**: What we're predicting - future returns at different time horizons (7, 30, 90 days by default, fully configurable)
+- **Quantile Regression**: Instead of predicting "stock will return 5%", predict "10% chance of worse than -2%, 50% chance of worse than +0.8%, 90% chance of worse than +3.5%"
+- **Horizons**: Time periods for predictions (e.g., 7-day, 30-day, 90-day returns) - **fully configurable via `--horizons`**
+- **Multi-Horizon**: Train separate models for each time period to capture different market dynamics
+
+**Why Quantiles vs Point Estimates?**
+
+Traditional models predict: "AAPL will return +3.2% in 7 days"
+
+g2 predicts: "AAPL 7-day distribution: q10=-1.5%, q50=+2.1%, q90=+5.8%"
+
+This enables:
+- **Risk assessment**: Know downside risk (q10) and upside potential (q90)
+- **Position sizing**: Size positions based on uncertainty (q90-q10 spread)
+- **Portfolio construction**: Combine stocks with different risk/return profiles
+- **Screening**: Filter by risk-adjusted metrics, not just expected return
+
+**Current Implementation:**
+
+- ✅ Quantile regression (q10, q50, q90 predictions)
+- ✅ Multi-horizon forecasts (configurable horizons)
+- ✅ Trend strength labels computed (weak/strong up/down movements)
+- ⏳ Trend classification model (future enhancement - see ML Roadmap)
+
 ## Prerequisites
 
 1. **Database running** with prices and features:
@@ -20,6 +51,11 @@ Complete walkthrough for training and deploying quantile regression models in g2
    pip install 'g2[ml_extended]'
    ```
 
+   **When to use extended algorithms:**
+   - **Start with `quantile_regression`**: Fast, simple, good for prototyping and linear relationships
+   - **Upgrade to `xgboost`**: Better accuracy for non-linear patterns, worth the extra training time for production
+   - **Use `lightgbm`**: When you have very large datasets (>100K samples) or training time is critical
+
 ## Quick Start (5 Minutes)
 
 ### 1. Build Training Dataset
@@ -37,6 +73,11 @@ g2 ml dataset-build \
   --out-dir datasets/quickstart \
   --export
 ```
+
+**Note:** Horizons are fully configurable! Use any comma-separated list of days:
+- Short-term: `--horizons 3,7,14`
+- Long-term: `--horizons 30,60,90,180`
+- Mixed: `--horizons 7,21,60` (weekly, monthly, quarterly)
 
 **Output:**
 - `datasets/quickstart/manifest.json` - Dataset metadata
@@ -311,9 +352,29 @@ ls -la models/your_model_version_h30/
 4. **Automated retraining** - Set up cron jobs to retrain weekly/monthly
 5. **Signal generation** - Convert predictions into trading signals (e.g., buy when q50 > 2% and q10 > 0%)
 
+## Trend Strength Classification (Future)
+
+Currently, the pipeline computes trend labels (weak/strong up/down) based on forward returns and thresholds, but only trains quantile regression models. A future enhancement will add:
+
+- **Trend Classification Model**: Predict categorical trend strength (strong_up, weak_up, neutral, weak_down, strong_down)
+- **Dual System**: Use quantile predictions for risk assessment + trend classification for screening
+- **Combined Strategy**: "Buy stocks with strong_up trend AND q10 > 0% (downside protected)"
+
+This is documented in the [ML Roadmap](ML_ROADMAP.md).
+
+## Parquet Export (Future)
+
+Dataset exports currently use CSV format. Future versions will support Parquet for:
+- Better compression (smaller files)
+- Type preservation (no string conversion)
+- Faster I/O (columnar format)
+- Industry standard for ML pipelines
+
+Usage: `g2 ml dataset-build ... --export --format parquet`
+
 ## Reference
 
+- [ML Roadmap](ML_ROADMAP.md) - Future enhancements (trend classification, parquet, feature selection)
 - [ML System Design](archive/ml/ML_SYSTEM_DESIGN.md) - Database schema and architecture
-- [ML Roadmap](archive/ml/ML_ROADMAP.md) - Future enhancements and phases
 - [User Guide](USER_GUIDE.md) - Full CLI reference
 - [Architecture](ARCHITECTURE.md) - Overall system design
