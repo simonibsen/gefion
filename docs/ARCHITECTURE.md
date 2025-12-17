@@ -2,7 +2,9 @@
 
 ## Overview
 
-g2 is a database-first technical analysis platform with versioned feature engineering capabilities. All feature definitions and implementations are stored in the database and exported to git for version control.
+g2 is a database-first technical analysis platform with versioned feature engineering capabilities. Feature definitions and custom feature implementations are stored in the database and exported to git for version control.
+
+**Note:** Built-in technical indicators are currently implemented in Python code for performance, but will be migrated to the database-first pattern for consistency (see ML Roadmap). This migration will enable users to modify indicator parameters without code changes.
 
 ## Core Design Principles
 
@@ -314,8 +316,34 @@ Price and feature data are chunked by month:
 - Transactions rolled back after test
 - Mocked AlphaVantage API for unit tests
 
+## Future Enhancements
+
+### Cross-Sectional Features
+
+For sector-relative and market-relative features (e.g., stock return vs sector average), a dedicated table structure is planned:
+
+```sql
+CREATE TABLE cross_sectional_features (
+    data_id INTEGER REFERENCES stocks(id),
+    date DATE,
+    sector VARCHAR(50),
+    feature_name VARCHAR(255),
+    value DOUBLE PRECISION,
+    rank INTEGER,  -- Rank within sector/market
+    percentile DOUBLE PRECISION,  -- Percentile within sector/market
+    PRIMARY KEY (data_id, date, feature_name)
+);
+```
+
+This enables:
+- Sector-relative metrics (stock performance vs sector benchmark)
+- Market-relative metrics (stock performance vs market index)
+- Cross-sectional ranking and screening
+- Sector rotation strategies
+
 ## Related Documentation
 
+- **ML Roadmap**: [ML_ROADMAP.md](ML_ROADMAP.md) - Future features and enhancements
 - **ML Vision**: [archive/ml/HIGHLEVEL.md](archive/ml/HIGHLEVEL.md) - Long-term ML goals
 - **Security Deep Dive**: [archive/ml/SECURITY_SANDBOXING.md](archive/ml/SECURITY_SANDBOXING.md) - Threat model and mitigation
 - **Performance**: [PERFORMANCE.md](PERFORMANCE.md) - Optimization techniques
