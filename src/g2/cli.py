@@ -37,6 +37,7 @@ from g2.db.ingest import (
     delete_feature_data_only,
     trim_feature_data,
     trim_stock_ohlcv,
+    trim_all_computed_features,
     ensure_store_targets,
     drop_features,
     feature_ids_for_names,
@@ -1856,13 +1857,14 @@ def trim_features(
     feature: str = typer.Option(..., "--feature", help="Comma-separated feature names to trim"),
     before: Optional[str] = typer.Option(None, help="Drop rows before this date (YYYY-MM-DD)"),
     after: Optional[str] = typer.Option(None, help="Drop rows after this date (YYYY-MM-DD)"),
-    trim_prices: bool = typer.Option(True, "--trim-prices/--no-trim-prices", help="Also trim stock_ohlcv for date window"),
+    trim_prices: bool = typer.Option(False, "--trim-prices/--no-trim-prices", help="Also trim stock_ohlcv for date window (default: False)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
     Trim computed_features for given feature names.
     Use --before for left-trim, --after for right-trim.
+    By default, only features are trimmed. Use --trim-prices to also trim underlying price data.
     """
     if not before and not after:
         if json_output:
@@ -1905,10 +1907,14 @@ def trim_prices(
     before: Optional[str] = typer.Option(None, help="Drop price rows before this date (YYYY-MM-DD)"),
     after: Optional[str] = typer.Option(None, help="Drop price rows after this date (YYYY-MM-DD)"),
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols to trim (optional)"),
+    trim_features: bool = typer.Option(True, "--trim-features/--no-trim-features", help="Also trim computed_features for date window (default: True)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
-    """Trim stock_ohlcv by date (optionally limited to symbols)."""
+    """
+    Trim stock_ohlcv by date (optionally limited to symbols).
+    By default, also trims all derived features. Use --no-trim-features to keep features.
+    """
     if not before and not after:
         if json_output:
             emit_error("Specify --before and/or --after", json_output=True)
@@ -1925,10 +1931,15 @@ def trim_prices(
         with db_connection(db_url) as conn:
             init_schema_tables(conn, ["stocks", "stock_ohlcv"])
             deleted = trim_stock_ohlcv(conn, before=before_dt, after=after_dt, symbols=sym_list)
+            features_deleted = 0
+            if trim_features:
+                init_schema_tables(conn, ["computed_features"])
+                features_deleted = trim_all_computed_features(conn, before=before_dt, after=after_dt, symbols=sym_list)
         emit(
-            "Trimmed stock_ohlcv",
+            "Trimmed stock_ohlcv" + (" and computed_features" if trim_features else ""),
             data={
                 "deleted_prices": deleted,
+                "deleted_features": features_deleted,
                 "before": before,
                 "after": after,
                 "symbols": sym_list if sym_list else "All",

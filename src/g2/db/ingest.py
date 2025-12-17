@@ -274,6 +274,59 @@ def trim_stock_ohlcv(
     return total_deleted
 
 
+def trim_all_computed_features(
+    conn: psycopg.Connection,
+    before: Optional[date] = None,
+    after: Optional[date] = None,
+    symbols: Optional[Sequence[str]] = None,
+) -> int:
+    """
+    Trim ALL computed_features rows by date (optionally limited to symbols).
+    - before: drop rows strictly before this date
+    - after: drop rows strictly after this date
+    - symbols: optional list of symbols to restrict trimming to specific stocks
+    Returns count of rows deleted.
+    """
+    if not before and not after:
+        return 0
+
+    data_ids: Optional[List[int]] = None
+    if symbols:
+        placeholders = ",".join(["%s"] * len(symbols))
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT id FROM stocks WHERE symbol IN ({placeholders});",
+                list(symbols),
+            )
+            rows = cur.fetchall()
+        data_ids = [r[0] for r in rows]
+        if not data_ids:
+            return 0
+
+    total_deleted = 0
+    with conn.cursor() as cur:
+        where_ids = ""
+        params: List[object] = []
+        if data_ids is not None:
+            where_ids = f" AND data_id IN ({','.join(['%s'] * len(data_ids))})"
+            params.extend(data_ids)
+
+        if before:
+            cur.execute(
+                f"DELETE FROM computed_features WHERE date < %s{where_ids};",
+                [before, *params] if params else (before,),
+            )
+            total_deleted += cur.rowcount
+        if after:
+            cur.execute(
+                f"DELETE FROM computed_features WHERE date > %s{where_ids};",
+                [after, *params] if params else (after,),
+            )
+            total_deleted += cur.rowcount
+    conn.commit()
+    return total_deleted
+
+
 def drop_features(
     conn: psycopg.Connection,
     feature_names: Sequence[str],
