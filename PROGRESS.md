@@ -125,6 +125,30 @@ g2 is a production-ready database-first technical analysis platform with:
     * Production Deployment Patterns (cron jobs, automation, alerts)
     * Best Practices & Troubleshooting
 
+**Backtest CLI Implementation (Path A: Trading-First):**
+
+- **CLI Command Added**: Implemented `g2 backtest run` for real-world strategy validation (NEXT_STEPS.md Item #11)
+  - Usage: `g2 backtest run --symbols AAPL,MSFT --start-date 2024-01-01 --end-date 2024-12-01`
+  - Supports filtering by symbols or exchange with optional limit
+  - Configurable strategy parameters (lookback, top_n, rebalance_days)
+  - Rich formatted output with performance metrics (total return, Sharpe ratio, max drawdown)
+  - JSON output mode for programmatic access
+- **Data Loader Module**: Created backtest/data_loader.py for efficient price data loading from database
+  - Loads historical OHLCV data with symbol and date filtering
+  - Point-in-time correct data loading for backtesting
+  - Helper function for getting available symbols
+  - Optimized queries with proper indexing
+- **Comprehensive TDD Tests**: Added 6 test functions (358 lines) for backtest functionality
+  - Tests for data loading with various filters
+  - End-to-end backtest workflow validation
+  - Empty data handling and edge cases
+  - Follows existing test patterns (DB connection fixtures)
+
+**Files Created:**
+
+- src/g2/backtest/data_loader.py (150 lines)
+- tests/test_backtest_cli.py (358 lines, 6 tests)
+
 **Files Modified:**
 
 - src/g2/ingest/universe.py - Thread deadlock fix (try/finally for sentinels), database deadlock fix (retry upsert_stock), target_date filtering

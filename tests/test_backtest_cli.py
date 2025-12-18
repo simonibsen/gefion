@@ -7,13 +7,17 @@ import psycopg
 from datetime import date, timedelta
 
 from g2.db import schema
+from g2.config import load_settings
 
 
 def create_connection():
     if os.getenv("ENABLE_DB_TESTS", "0") != "1":
         pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
     try:
-        return psycopg.connect(schema.test_db_url())
+        # Load settings to get DATABASE_URL from .env
+        settings = load_settings()
+        db_url = os.environ.get("DATABASE_URL", settings.database_url)
+        return psycopg.connect(db_url)
     except psycopg.OperationalError as exc:
         pytest.skip(f"DB not available: {exc}")
 
@@ -22,6 +26,9 @@ def create_connection():
 def conn():
     connection = create_connection()
     connection.autocommit = True
+    # Store the db_url for tests to use
+    settings = load_settings()
+    connection.test_db_url = os.environ.get("DATABASE_URL", settings.database_url)
     yield connection
     connection.close()
 
@@ -81,26 +88,30 @@ def test_backtest_data_loader_with_symbols(conn):
         insert_stock_ohlcv(
             conn,
             aapl_id,
-            test_date,
-            open_price=100.0 + i,
-            high=102.0 + i,
-            low=99.0 + i,
-            close=101.0 + i,
-            volume=1000000,
+            [{
+                "date": test_date,
+                "open": 100.0 + i,
+                "high": 102.0 + i,
+                "low": 99.0 + i,
+                "close": 101.0 + i,
+                "volume": 1000000,
+            }]
         )
         insert_stock_ohlcv(
             conn,
             msft_id,
-            test_date,
-            open_price=200.0 + i,
-            high=202.0 + i,
-            low=199.0 + i,
-            close=201.0 + i,
-            volume=2000000,
+            [{
+                "date": test_date,
+                "open": 200.0 + i,
+                "high": 202.0 + i,
+                "low": 199.0 + i,
+                "close": 201.0 + i,
+                "volume": 2000000,
+            }]
         )
 
     # Load price data
-    db_url = conn.info.dsn
+    db_url = conn.test_db_url
     price_data = load_price_data_for_backtest(
         db_url=db_url,
         symbols=["AAPL", "MSFT"],
@@ -137,19 +148,21 @@ def test_backtest_data_loader_with_date_range(conn):
         insert_stock_ohlcv(
             conn,
             aapl_id,
-            test_date,
-            open_price=100.0,
-            high=102.0,
-            low=99.0,
-            close=101.0,
-            volume=1000000,
+            [{
+                "date": test_date,
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "volume": 1000000,
+            }]
         )
 
     # Load only last 10 days
     start_date = today - timedelta(days=9)
     end_date = today
 
-    db_url = conn.info.dsn
+    db_url = conn.test_db_url
     price_data = load_price_data_for_backtest(
         db_url=db_url,
         symbols=["AAPL"],
@@ -194,18 +207,20 @@ def test_backtest_run_end_to_end(conn):
                 close = 150.0 - i * 0.3  # -0.3% per day
 
             insert_stock_ohlcv(
-                conn,
-                stock_id,
-                test_date,
-                open_price=close,
-                high=close * 1.01,
-                low=close * 0.99,
-                close=close,
-                volume=1000000,
-            )
+            conn,
+            stock_id,
+            [{
+                "date": test_date,
+                "open": close,
+                "high": close * 1.01,
+                "low": close * 0.99,
+                "close": close,
+                "volume": 1000000,
+            }]
+        )
 
     # Load price data
-    db_url = conn.info.dsn
+    db_url = conn.test_db_url
     start = today - timedelta(days=50)
     end = today - timedelta(days=1)
 
@@ -276,7 +291,7 @@ def test_backtest_empty_data(conn):
     """Test backtest with no price data."""
     from g2.backtest.data_loader import load_price_data_for_backtest
 
-    db_url = conn.info.dsn
+    db_url = conn.test_db_url
     price_data = load_price_data_for_backtest(
         db_url=db_url,
         symbols=["NONEXISTENT"],
@@ -302,18 +317,20 @@ def test_get_available_symbols(conn):
         for i in range(100):
             test_date = today - timedelta(days=i)
             insert_stock_ohlcv(
-                conn,
-                stock_id,
-                test_date,
-                open_price=100.0,
-                high=102.0,
-                low=99.0,
-                close=101.0,
-                volume=1000000,
-            )
+            conn,
+            stock_id,
+            [{
+                "date": test_date,
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "volume": 1000000,
+            }]
+        )
 
     # Get available symbols
-    db_url = conn.info.dsn
+    db_url = conn.test_db_url
     available = get_available_symbols(db_url=db_url)
 
     # Should return all 4 symbols (all have > 50 records)
@@ -330,23 +347,28 @@ def test_backtest_with_limit(conn):
     today = date.today()
 
     for symbol in symbols:
-        stock_id = upsert_stock(conn, symbol, exchange="NASDAQ", status="Active")
+        stock_id = upsert_stock(conn, symbol, status="Active")
+        # Set exchange manually
+        with conn.cursor() as cur:
+            cur.execute("UPDATE stocks SET exchange = %s WHERE id = %s", ("NASDAQ", stock_id))
 
         for i in range(10):
             test_date = today - timedelta(days=i)
             insert_stock_ohlcv(
-                conn,
-                stock_id,
-                test_date,
-                open_price=100.0,
-                high=102.0,
-                low=99.0,
-                close=101.0,
-                volume=1000000,
-            )
+            conn,
+            stock_id,
+            [{
+                "date": test_date,
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "volume": 1000000,
+            }]
+        )
 
     # Load with limit
-    db_url = conn.info.dsn
+    db_url = conn.test_db_url
     price_data = load_price_data_for_backtest(
         db_url=db_url,
         exchange="NASDAQ",
