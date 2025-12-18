@@ -1412,6 +1412,11 @@ def ingest_prices(
             raise typer.Exit(code=2)
         reporter = ProgressReporter(total=1, json_output=json_output, enabled=not json_output)
         reporter.mode = "api"
+
+        # Calculate target date to prevent inserting partial/future data
+        from g2.ingest.universe import _expected_market_date
+        target_date = _expected_market_date()
+
         live: Optional[Live] = None
         if not json_output:
             live = reporter.start_live()
@@ -1427,6 +1432,7 @@ def ingest_prices(
                 timeframe=timeframe,
                 update_existing=refresh_existing,
                 progress=reporter,
+                target_date=target_date,
             )
             if live:
                 live.update(reporter._build_table())
@@ -1522,15 +1528,17 @@ def ingest_universe(
         default_writer=writer_workers or 1,
     )
 
+    # Calculate target date to prevent inserting partial/future data
+    from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
+    target_date = _expected_market_date()
+
     # Do bulk filtering ONCE for all symbols before chunking
     # This is much faster than filtering each chunk separately
     symbols_before = len(symbols)
     skipped = 0
     if not update_existing:
-        from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
         with db_connection(db_url) as conn:
             init_schema_tables(conn, ["stocks", "stock_ohlcv"])
-            target_date = _expected_market_date()
             symbols = filter_symbols_needing_update(conn, symbols, target_date)
             skipped = symbols_before - len(symbols)
             if skipped > 0 and not json_output:
@@ -1564,6 +1572,7 @@ def ingest_universe(
                 timeframe=timeframe,
                 update_existing=update_existing,
                 progress=reporter,
+                target_date=target_date,
             )
         if live:
             live.update(reporter._build_table())
@@ -2935,14 +2944,16 @@ def update_all(
     # Save original symbols list for indicator filtering
     all_symbols = symbols.copy()
 
+    # Calculate target date to prevent inserting partial/future data
+    from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
+    target_date = _expected_market_date()
+
     # Bulk filter symbols that don't need price updates (skip API calls for up-to-date symbols)
     price_symbols = symbols
     price_skipped = 0
     if not refresh_existing:
-        from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
         with db_connection(db_url) as conn:
             init_schema_tables(conn, ["stocks", "stock_ohlcv"])
-            target_date = _expected_market_date()
             price_symbols = filter_symbols_needing_update(conn, symbols, target_date)
             price_skipped = len(symbols) - len(price_symbols)
             if price_skipped > 0 and not json_output:
@@ -2972,6 +2983,7 @@ def update_all(
                 timeframe=timeframe,
                 update_existing=refresh_existing,
                 progress=price_reporter,
+                target_date=target_date,
             )
         if price_live:
             price_live.update(price_reporter._build_table())

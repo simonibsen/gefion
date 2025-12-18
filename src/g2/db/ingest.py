@@ -119,21 +119,25 @@ def filter_symbols_needing_update(
 def filter_new_rows(
     conn: psycopg.Connection,
     data_id: int,
-    rows: Iterable[Mapping[str, object]]
+    rows: Iterable[Mapping[str, object]],
+    target_date: Optional[date] = None
 ) -> List[Mapping[str, object]]:
     """
     Filter API response rows to only include rows newer than existing data.
 
     This avoids inserting duplicate rows that would be skipped by ON CONFLICT,
-    reducing database overhead.
+    reducing database overhead. Also prevents inserting future dates beyond
+    the expected target date (e.g., partial intraday data).
 
     Args:
         conn: Database connection
         data_id: Stock ID
         rows: Rows from API response
+        target_date: Maximum date to allow (inclusive). Rows with dates after
+                    this will be filtered out. Defaults to None (no limit).
 
     Returns:
-        List of rows that are newer than existing data
+        List of rows that are newer than existing data and not beyond target_date
     """
     if not rows:
         return []
@@ -141,11 +145,14 @@ def filter_new_rows(
     # Get the latest date we have for this symbol
     latest = latest_price_date(conn, data_id)
 
-    # If no existing data, all rows are new
+    # If no existing data, all rows are new (but still respect target_date)
     if latest is None:
-        return list(rows)
+        if target_date is None:
+            return list(rows)
+        # Filter to only rows up to target_date
+        latest = date.min  # Use minimum date so all rows pass the > latest check
 
-    # Filter to only rows after the latest date
+    # Filter to only rows after the latest date AND not beyond target_date
     new_rows = []
     for row in rows:
         row_date = row.get("date")
@@ -168,7 +175,9 @@ def filter_new_rows(
 
         # Only include rows newer than latest existing date
         if parsed_date > latest:
-            new_rows.append(row)
+            # Also check target_date limit (prevent future/partial data)
+            if target_date is None or parsed_date <= target_date:
+                new_rows.append(row)
 
     return new_rows
 
