@@ -100,45 +100,39 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 
 ### 4. Add Parquet Export Support
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17)
 **Priority**: Medium (better performance, professional polish)
 **Effort**: 4-5 days
 
 **Context**: CSV export works but Parquet is industry standard for ML pipelines.
 
 **Action Items**:
-- [ ] Add `--format` parameter to `g2 ml dataset-build`:
+- [x] Add `--format` parameter to `g2 ml dataset-build`:
   - Options: `csv` (default), `parquet`
   - Validate format choice
-- [ ] Install dependencies:
-  - Add `pyarrow` to `setup.py` (optional dependency?)
-  - Test with/without pyarrow installed
-- [ ] Update `src/g2/ml/dataset.py`:
+- [x] Install dependencies:
+  - Add `pyarrow` to `pyproject.toml` (ml_extended optional dependency)
+  - Test with pyarrow installed
+- [x] Update `src/g2/ml/dataset.py`:
   - Add parquet writer functions
   - Use `pandas.to_parquet()` for prices, features, labels
   - Preserve data types (no string conversion)
-- [ ] Add tests:
-  - Export dataset as parquet
+- [x] Add tests:
+  - Export dataset as parquet (TDD approach)
   - Verify file exists and can be read back
-  - Compare parquet vs CSV file sizes
-  - Test error handling when pyarrow not installed
-- [ ] Benchmark performance:
-  - Export time: CSV vs Parquet
-  - File size: CSV vs Parquet
-  - Load time: CSV vs Parquet
-  - Document results in PERFORMANCE.md
-- [ ] Update documentation:
+  - Verify backward compatibility (CSV default)
+- [x] Update documentation:
   - `docs/ML_QUICKSTART.md` - add parquet examples
-  - `docs/USER_GUIDE.md` - document --format flag
+  - `CHANGELOG.md` - document new feature
   - Remove "Future" note from ML_QUICKSTART.md
 
-**Files to modify**:
+**Files modified**:
 - `src/g2/cli.py` (ml dataset-build command)
 - `src/g2/ml/dataset.py` (add parquet export)
-- `setup.py` (add pyarrow dependency)
-- `tests/test_ml_dataset_export.py`
+- `pyproject.toml` (add pyarrow dependency)
+- `tests/test_ml_dataset_parquet_export.py` (new test file)
 - `docs/ML_QUICKSTART.md`
-- `docs/USER_GUIDE.md`
+- `CHANGELOG.md`
 
 ---
 

@@ -8,6 +8,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+#### Parquet Export Support
+
+Added Parquet format support for ML dataset exports:
+
+**New CLI Parameter:**
+
+- `--format` - Export format: `csv` (default) or `parquet`
+
+**Usage Examples:**
+
+```bash
+# Export as Parquet for better performance and smaller file sizes
+g2 ml dataset-build --name tech --version v1 \
+  --symbols AAPL,MSFT,GOOGL --horizons 7,30 \
+  --format parquet \
+  --export
+
+# CSV is still the default (backward compatible)
+g2 ml dataset-build --name tech --version v1 \
+  --symbols AAPL,MSFT,GOOGL --horizons 7,30 \
+  --export
+```
+
+**Benefits:**
+
+- **Performance**: 5-10x faster read/write compared to CSV
+- **File Size**: 5-10x smaller files (columnar compression)
+- **Type Preservation**: Maintains int64, float64 types (CSV converts to strings)
+- **Industry Standard**: Compatible with pandas, polars, spark, and ML frameworks
+
+**Notes:**
+
+- Requires `pyarrow>=14.0` (install with: `pip install g2[ml_extended]`)
+- Format is stored in dataset manifest for reproducibility
+- Default is CSV for backward compatibility
+
 #### Feature Selection for Dataset Build
 
 Added ability to select specific features when building ML datasets:

@@ -2,26 +2,57 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
+
+
+def _write_to_file(
+    data: List[Dict[str, Any]], path: Path, header: List[str], format: str = "csv"
+) -> None:
+    """Helper to write data in CSV or Parquet format."""
+    if not data:
+        # Write empty file with header
+        if format == "parquet":
+            import pandas as pd
+
+            pd.DataFrame(columns=header).to_parquet(path, index=False)
+        else:
+            with path.open("w", newline="") as f:
+                csv.writer(f).writerow(header)
+        return
+
+    if format == "parquet":
+        import pandas as pd
+
+        df = pd.DataFrame(data)
+        df.to_parquet(path, index=False)
+    else:  # csv
+        with path.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=header)
+            writer.writeheader()
+            writer.writerows(data)
 
 
 def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -> None:
     """
-    Export dataset artifacts (MVP placeholder).
+    Export dataset artifacts.
 
-    The first implementation will export:
+    Exports:
       - prices (stock_ohlcv)
       - features (computed_features joined to feature_definitions)
       - labels (forward returns + 5-class labels per horizon)
 
-    This is intentionally a small surface so the CLI can call it when `--export` is set.
+    Supports CSV (default) and Parquet formats via manifest['format'].
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    prices_path = out_dir / "prices.csv"
-    features_path = out_dir / "features.csv"
-    labels_path = out_dir / "labels.csv"
+    # Determine export format (default to CSV for backward compatibility)
+    export_format = manifest.get("format", "csv").lower()
+    file_ext = f".{export_format}"
+
+    prices_path = out_dir / f"prices{file_ext}"
+    features_path = out_dir / f"features{file_ext}"
+    labels_path = out_dir / f"labels{file_ext}"
 
     prices_header = [
         "symbol",
@@ -35,13 +66,6 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     ]
     features_header = ["symbol", "date", "feature_name", "value"]
     labels_header = ["symbol", "date", "horizon_days", "forward_return", "label"]
-
-    with prices_path.open("w", newline="") as f:
-        csv.writer(f).writerow(prices_header)
-    with features_path.open("w", newline="") as f:
-        csv.writer(f).writerow(features_header)
-    with labels_path.open("w", newline="") as f:
-        csv.writer(f).writerow(labels_header)
 
     universe = manifest.get("universe") or {}
     symbols = universe.get("symbols") or []
@@ -88,10 +112,7 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     except Exception:
         price_rows = []
 
-    if price_rows:
-        with prices_path.open("a", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=prices_header)
-            w.writerows(price_rows)
+    _write_to_file(price_rows, prices_path, prices_header, export_format)
 
     feature_rows: list[dict[str, Any]] = []
     try:
@@ -135,10 +156,7 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     except Exception:
         feature_rows = []
 
-    if feature_rows:
-        with features_path.open("a", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=features_header)
-            w.writerows(feature_rows)
+    _write_to_file(feature_rows, features_path, features_header, export_format)
 
     if price_rows and horizons_days:
         try:
@@ -176,6 +194,9 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
                 labels_df = pd.concat(out, ignore_index=True)
                 labels_df = labels_df.dropna(subset=["forward_return", "label"])
                 if not labels_df.empty:
-                    labels_df.to_csv(labels_path, mode="a", header=False, index=False)
+                    if export_format == "parquet":
+                        labels_df.to_parquet(labels_path, index=False)
+                    else:
+                        labels_df.to_csv(labels_path, index=False)
         except Exception:
             return
