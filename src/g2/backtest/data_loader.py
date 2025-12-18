@@ -36,39 +36,46 @@ def load_price_data_for_backtest(
     """
     with psycopg.connect(db_url) as conn:
         # Build query
-        where_clauses = []
+        symbol_where_clauses = []  # For filtering stocks
+        ohlcv_where_clauses = []   # For filtering price data
         params = []
 
         # Filter by symbols or exchange
         if symbols:
-            where_clauses.append("s.symbol = ANY(%s)")
+            symbol_where_clauses.append("s.symbol = ANY(%s)")
             params.append(symbols)
         elif exchange:
-            where_clauses.append("LOWER(s.exchange) = LOWER(%s)")
+            symbol_where_clauses.append("LOWER(s.exchange) = LOWER(%s)")
             params.append(exchange)
 
-        # Filter by date range
+        # Apply symbol limit if specified
+        if limit and not symbols:
+            # Create subquery to get limited set of stock IDs
+            subquery_where = " AND ".join(symbol_where_clauses) if symbol_where_clauses else "1=1"
+            symbol_id_subquery = f"""
+                (SELECT id FROM stocks s
+                 WHERE {subquery_where} AND s.status = 'Active'
+                 LIMIT {limit})
+            """
+            # Replace symbol filters with IN clause
+            symbol_where_clauses = [f"s.id IN {symbol_id_subquery}"]
+            # params already has the exchange parameter if needed
+
+        # Add active status filter if not using limit subquery
+        elif not limit:
+            symbol_where_clauses.append("s.status = 'Active'")
+
+        # Filter by date range (applies to OHLCV data)
         if start_date:
-            where_clauses.append("o.date >= %s")
+            ohlcv_where_clauses.append("o.date >= %s")
             params.append(start_date)
         if end_date:
-            where_clauses.append("o.date <= %s")
+            ohlcv_where_clauses.append("o.date <= %s")
             params.append(end_date)
 
-        # Build WHERE clause
-        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
-
-        # Build limit clause for symbols (not rows)
-        limit_sql = ""
-        if limit and not symbols:  # Only apply limit if not filtering by specific symbols
-            # Subquery to limit symbols
-            symbol_limit_subquery = f"""
-                SELECT id FROM stocks s
-                WHERE {where_sql if not exchange else "LOWER(s.exchange) = LOWER(%s)"}
-                AND s.status = 'Active'
-                LIMIT {limit}
-            """
-            where_sql = f"s.id IN ({symbol_limit_subquery})"
+        # Combine all WHERE clauses
+        all_where_clauses = symbol_where_clauses + ohlcv_where_clauses
+        where_sql = " AND ".join(all_where_clauses) if all_where_clauses else "1=1"
 
         query = f"""
             SELECT
