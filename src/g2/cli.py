@@ -2482,6 +2482,23 @@ def features_compute(
                     )
                     feature_name_list = [r[0] for r in cur.fetchall()]
 
+            # Validate that we have features to compute
+            if not feature_name_list and not function_name_list:
+                emit_error(
+                    "No features specified.\n"
+                    "\n"
+                    "To fix this:\n"
+                    "  → Specify features: --features indicator_rsi_14,indicator_macd\n"
+                    "  → Or use function names: --function-names indicator\n"
+                    "  → Or compute all features: --all-features\n"
+                    "\n"
+                    "First, ensure features are defined:\n"
+                    "  → Run: g2 feat-def-list\n"
+                    "  → Or seed defaults: g2 feat-seed",
+                    json_output=json_output
+                )
+                return
+
             # If no symbols specified, get all stocks
             if not symbol_list:
                 with conn.cursor() as cur:
@@ -2489,7 +2506,15 @@ def features_compute(
                     symbol_list = [r[0] for r in cur.fetchall()]
 
             if not symbol_list:
-                emit_error("No stocks found in database", json_output=json_output)
+                emit_error(
+                    "No stocks found in database.\n"
+                    "\n"
+                    "To fix this:\n"
+                    "  → Ingest a single stock: g2 prices-ingest --symbol AAPL\n"
+                    "  → Or ingest a universe: g2 universe-ingest --exchange NASDAQ --limit 10\n"
+                    "  → Or run full workflow: g2 data-update --exchange NASDAQ --limit 10",
+                    json_output=json_output
+                )
                 return
 
             # Calculate worker budget based on available connections
