@@ -308,16 +308,18 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
   - All 8 tests passing ✓
 - [x] Update documentation:
   - CHANGELOG.md with usage examples ✓
-- [ ] Add CLI command (deferred):
-  - `g2 backtest run` - execute backtest
-  - Can be used programmatically for now
+- [x] Add CLI command:
+  - `g2 backtest run` - execute backtest ✓
+  - Symbol/exchange filtering with limit ✓
+  - Configurable strategy parameters ✓
+  - Rich formatted output + JSON mode ✓
 - [ ] Advanced features (deferred):
   - Transaction cost modeling
   - Slippage simulation
   - Trade log export (CSV)
   - Equity curve visualization
   - Additional metrics (Calmar, win rate, turnover)
-  - Output formats (CSV, JSON)
+  - CSV output format (JSON already supported)
 
 **Files created**:
 
@@ -325,14 +327,17 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 - `src/g2/backtest/engine.py`
 - `src/g2/backtest/portfolio.py`
 - `src/g2/backtest/metrics.py`
+- `src/g2/backtest/data_loader.py` (CLI data loading)
 - `tests/test_backtest_engine.py`
+- `tests/test_backtest_cli.py` (CLI integration tests)
 
 **Files modified**:
 
 - `CHANGELOG.md` (added detailed documentation)
+- `src/g2/cli.py` (added backtest command group)
 - `NEXT_STEPS.md` (this file)
 
-**Core Implementation Complete**: Engine can run strategies, track portfolios, and calculate performance metrics. CLI and advanced features are natural extensions for future work.
+**Core Implementation Complete**: Engine can run strategies, track portfolios, and calculate performance metrics. CLI interface with real-world data integration complete. Advanced features (transaction costs, slippage, CSV export) are natural extensions for future work.
 
 ---
 
@@ -478,7 +483,7 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ### 11. Real-World Validation & Integration Testing
 
-**Status**: Planned
+**Status**: In Progress (CLI Complete, Real-World Testing Pending)
 **Priority**: High (validates foundation)
 **Effort**: 1-2 weeks
 
@@ -498,20 +503,27 @@ With the foundation in place, choose your strategic direction based on goals:
   - Sharpe ratio, max drawdown, win rate
   - Transaction costs impact
   - Create reference example in docs/BACKTESTING.md
-- [ ] Add CLI command for backtesting:
-  ```bash
-  g2 backtest run --strategy momentum \
-    --symbols AAPL,MSFT,GOOGL \
-    --start-date 2024-01-01 \
-    --end-date 2024-12-31 \
-    --initial-cash 100000
-  ```
+- [x] Add CLI command for backtesting:
+  - Implemented `g2 backtest run` with full parameter support ✓
+  - Symbol/exchange filtering with optional limit ✓
+  - Configurable strategy parameters (lookback, top_n, rebalance_days) ✓
+  - Rich formatted output + JSON mode ✓
+  - Data loader module for efficient price data loading ✓
+  - 6 TDD tests (all passing) ✓
 
-**Files to create/modify**:
-- `src/g2/cli.py` (add backtest command)
+**Files created**:
+
+- `src/g2/backtest/data_loader.py` (150 lines)
+- `tests/test_backtest_cli.py` (381 lines, 6 tests)
+
+**Files to create**:
+
 - `docs/BACKTESTING.md` (new file)
 - `examples/momentum_backtest.py`
-- Tests for backtest CLI command
+
+**Files modified**:
+
+- `src/g2/cli.py` (added backtest command group and run command)
 
 ---
 
