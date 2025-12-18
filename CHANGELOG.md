@@ -8,6 +8,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+#### Backtesting Engine (MVP)
+
+Implemented simple, point-in-time correct backtesting engine for strategy validation.
+
+**Core Components:**
+
+- `Portfolio` class - Position and cash tracking
+- `BacktestEngine` class - Main backtesting loop with point-in-time correctness
+- `calculate_metrics()` - Performance metrics (returns, Sharpe, drawdown)
+
+**Features:**
+
+- Point-in-time correctness (no look-ahead bias)
+- Portfolio state tracking (positions, cash, equity)
+- Transaction logging
+- Performance metrics (total return, Sharpe ratio, max drawdown)
+- Simple strategy interface: `strategy(date, portfolio, prices) -> signals`
+- 8 comprehensive tests (all passing)
+
+**Usage:**
+
+```python
+from datetime import date
+from g2.backtest.engine import BacktestEngine
+
+# Define price data
+price_data = [
+    {"symbol": "AAPL", "date": date(2024, 1, 1), "close": 150.0},
+    {"symbol": "AAPL", "date": date(2024, 1, 2), "close": 155.0},
+    # ... more data
+]
+
+# Define strategy
+def buy_and_hold_strategy(current_date, portfolio, prices):
+    """Buy on first day, hold."""
+    if current_date == date(2024, 1, 1):
+        return [{"action": "buy", "symbol": "AAPL", "shares": 100}]
+    return []
+
+# Run backtest
+engine = BacktestEngine(
+    price_data=price_data,
+    strategy=buy_and_hold_strategy,
+    initial_cash=100000.0,
+    start_date=date(2024, 1, 1),
+    end_date=date(2024, 12, 31),
+)
+
+results = engine.run()
+print(f"Total return: {results['metrics']['total_return']:.2%}")
+print(f"Sharpe ratio: {results['metrics']['sharpe_ratio']:.2f}")
+print(f"Max drawdown: {results['metrics']['max_drawdown']:.2%}")
+```
+
+**Files:**
+
+- `src/g2/backtest/__init__.py` - Module initialization
+- `src/g2/backtest/portfolio.py` - Portfolio management
+- `src/g2/backtest/engine.py` - Backtesting engine
+- `src/g2/backtest/metrics.py` - Performance metrics
+- `tests/test_backtest_engine.py` - Comprehensive tests
+
+**Future Extensions:**
+
+- CLI command (`g2 backtest run`)
+- Transaction cost modeling
+- Slippage simulation
+- Trade log export (CSV)
+- Equity curve visualization
+- Strategy library (momentum, mean reversion, etc.)
+
 #### Cross-Sectional Features (Market-Relative)
 
 Implemented cross-sectional feature computation that compares stocks to their peers at the same point in time (vs time-series features which compare to own history).
