@@ -23,7 +23,9 @@ Claude: [Queries database and shows predictions]
 ### ML Workflow Tools
 - `ml_dataset_build` - Create training datasets with features and labels
 - `ml_train` - Train quantile regression models (sklearn/XGBoost/LightGBM)
+- `ml_train_classifier` - Train 5-class trend classifiers (strong_down to strong_up)
 - `ml_predict` - Generate multi-horizon predictions (7/30/90 days)
+- `ml_predict_classifier` - Generate trend class predictions with probabilities
 - `ml_eval` - Evaluate model calibration and performance
 
 ### Database Query Tools
@@ -32,8 +34,8 @@ Claude: [Queries database and shows predictions]
 - `query_database` - Execute read-only SQL for data exploration and analysis
 
 ### Data Management Tools
-- `data_update` - Update prices and compute features
-- `features_list` - List all registered technical indicators
+- `data_update` - Update prices and compute features (time-aware: before 4pm ET = yesterday's data, after 4pm ET = today's data)
+- `features_list` - List all registered technical indicators + cross-sectional features (percentile ranks, z-scores)
 
 ## Installation
 
@@ -294,6 +296,36 @@ Evaluate model performance on historical predictions.
 
 **Example prompt:**
 > "Evaluate prod_model version 20251214 from 2024-01-01 to 2024-12-01"
+
+### ml_train_classifier
+
+Train multi-class trend classifier (5-class: strong_down, weak_down, flat, weak_up, strong_up).
+
+**Parameters:**
+- `dataset_name` (required): Dataset name
+- `dataset_version` (required): Dataset version
+- `model_name` (required): Model name
+- `model_version` (required): Model version (e.g., "20251214")
+- `algorithm`: "xgboost" (default) or "lightgbm"
+- `out_dir`: Output directory (default: "models")
+
+**Example prompt:**
+> "Train a trend classifier named 'trend_model' version '20251218' on dataset 'nasdaq_100' v1 using XGBoost"
+
+### ml_predict_classifier
+
+Generate trend class predictions for symbols on a specific date.
+
+**Parameters:**
+- `model_name` (required): Model name
+- `model_version` (required): Model version
+- `prediction_date` (required): Date in YYYY-MM-DD format
+- `symbols`: Comma-separated symbols
+- `exchange`: Exchange name (alternative to symbols)
+- `limit`: Limit symbols from exchange
+
+**Example prompt:**
+> "Generate trend predictions for AAPL, MSFT using trend_model version 20251218 for today"
 
 ### query_predictions
 
