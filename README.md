@@ -546,6 +546,7 @@ graph TB
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design and DB-first architecture
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) - Optimization techniques
+- [docs/WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md](docs/WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md) - White paper on technical analysis and ML
 - [mcp-server/README.md](mcp-server/README.md) - Natural language interface setup
 - [docs/archive/ml/](docs/archive/ml/) - ML vision and future roadmap
 - [PROGRESS.md](PROGRESS.md) - Current status and recent changes

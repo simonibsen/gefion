@@ -81,13 +81,13 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 
 ### 3. Add White Paper to Documentation Index
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17)
 **Priority**: Low (already written, just needs linking)
 **Effort**: 30 minutes
 
 **Action Items**:
-- [ ] Add white paper link to `docs/README.md`
-- [ ] Add white paper link to main `README.md` (optional)
+- [x] Add white paper link to `docs/README.md`
+- [x] Add white paper link to main `README.md` (optional)
 - [ ] Consider adding to project website or blog (future)
 
 **Files to modify**:
