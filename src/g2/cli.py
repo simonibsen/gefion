@@ -1159,6 +1159,163 @@ def ml_eval(
     )
 
 
+@ml_app.command("train-classifier")
+def ml_train_classifier(
+    dataset_name: str = typer.Option(..., help="Dataset name to train on"),
+    dataset_version: str = typer.Option(..., help="Dataset version"),
+    model_name: str = typer.Option(..., help="Model name (identifier)"),
+    model_version: str = typer.Option(..., help="Model version (e.g., date tag)"),
+    algorithm: str = typer.Option("sklearn", help="Algorithm: sklearn, xgboost, lightgbm"),
+    horizon: int = typer.Option(..., help="Horizon in days for classification"),
+    out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """Train a multi-class classifier for trend prediction (5-class labels)."""
+    import joblib
+    from g2.ml.store import get_ml_dataset
+    from g2.ml.classifier import load_dataset_for_classifier, train_classifier, evaluate_classifier
+
+    with db_connection(db_url) as conn:
+        # Fetch dataset manifest
+        dataset = get_ml_dataset(conn, name=dataset_name, version=dataset_version)
+        if not dataset:
+            emit_error(f"Dataset not found: {dataset_name} {dataset_version}", json_output=json_output)
+            return
+
+        emit(f"Training {algorithm} classifier for {horizon}-day horizon...", json_output=json_output)
+
+        # Load features and labels for this horizon
+        artifact_uri = Path(dataset["artifact_uri"])
+        X, y = load_dataset_for_classifier(artifact_uri, horizon)
+        emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
+        emit(f"  Label distribution: {y.value_counts().to_dict()}", json_output=json_output)
+
+        # Train classifier
+        model_artifacts = train_classifier(X, y, algorithm=algorithm)
+        emit(f"  Training accuracy: {model_artifacts['train_metrics']['train_accuracy']:.4f}", json_output=json_output)
+
+        # Evaluate
+        eval_metrics = evaluate_classifier(model_artifacts, X, y)
+        emit(f"  Accuracy: {eval_metrics['accuracy']:.4f}", json_output=json_output)
+
+        # Save model artifact
+        out_dir.mkdir(parents=True, exist_ok=True)
+        model_path = out_dir / f"{model_name}_{model_version}_h{horizon}_classifier"
+        joblib.dump(model_artifacts, model_path / "classifier.pkl")
+        (model_path / "metadata.json").write_text(
+            json.dumps({
+                "model_name": model_name,
+                "model_version": model_version,
+                "horizon_days": horizon,
+                "dataset_name": dataset_name,
+                "dataset_version": dataset_version,
+                "algorithm": algorithm,
+                "train_metrics": model_artifacts["train_metrics"],
+                "eval_metrics": eval_metrics,
+            }, indent=2)
+        )
+        emit(f"  Saved artifacts to {model_path}", json_output=json_output)
+
+        # Register model in ml_models
+        from psycopg.types.json import Json
+
+        with conn.cursor() as cur:
+            # Create run record
+            cur.execute(
+                """
+                INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
+                VALUES ('train_classifier', 'running', %s, %s, NOW())
+                RETURNING id;
+                """,
+                (dataset["id"], Json({"algorithm": algorithm, "model_name": model_name, "horizon": horizon})),
+            )
+            run_id = int(cur.fetchone()[0])
+
+            # Register model
+            cur.execute(
+                """
+                INSERT INTO ml_models
+                  (name, version, train_run_id, dataset_id, algorithm, hyperparams, metrics, artifact_uri)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name, version) DO UPDATE SET
+                  train_run_id = EXCLUDED.train_run_id,
+                  dataset_id = EXCLUDED.dataset_id,
+                  algorithm = EXCLUDED.algorithm,
+                  hyperparams = EXCLUDED.hyperparams,
+                  metrics = EXCLUDED.metrics,
+                  artifact_uri = EXCLUDED.artifact_uri
+                RETURNING id;
+                """,
+                (
+                    model_name,
+                    model_version,
+                    run_id,
+                    dataset["id"],
+                    f"classifier_{algorithm}",
+                    Json({"algorithm": algorithm, "horizon": horizon}),
+                    Json({"train": model_artifacts["train_metrics"], "eval": eval_metrics}),
+                    str(model_path),
+                ),
+            )
+            model_id = int(cur.fetchone()[0])
+
+            # Mark run as complete
+            cur.execute(
+                """
+                UPDATE ml_runs SET status = 'completed', finished_at = NOW()
+                WHERE id = %s;
+                """,
+                (run_id,),
+            )
+
+        conn.commit()
+
+    emit(
+        f"Classifier trained: {model_name} {model_version}",
+        data={"model_id": model_id, "run_id": run_id, "artifact_uri": str(model_path), "horizon": horizon},
+        json_output=json_output,
+    )
+
+
+@ml_app.command("predict-classifier")
+def ml_predict_classifier(
+    model_path: Path = typer.Option(..., help="Path to classifier model directory"),
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(..., help="End date (YYYY-MM-DD)"),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols (optional, predicts all if not specified)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """Generate trend class predictions using a trained classifier."""
+    import joblib
+    from g2.ml.classifier import predict_classifier
+
+    # Load model
+    model_artifacts = joblib.load(model_path / "classifier.pkl")
+    metadata_path = model_path / "metadata.json"
+    if metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text())
+        emit(f"Loaded classifier: {metadata['model_name']} {metadata['model_version']}", json_output=json_output)
+        emit(f"  Horizon: {metadata['horizon_days']} days", json_output=json_output)
+        emit(f"  Algorithm: {metadata['algorithm']}", json_output=json_output)
+
+    with db_connection(db_url) as conn:
+        init_schema_tables(conn, ["trend_class_predictions"])
+
+        # Parse symbols
+        symbol_list = parse_comma_separated(symbols) if symbols else None
+
+        # TODO: Load features for the specified date range and symbols
+        # For now, emit a message that this needs feature loading implementation
+        emit(
+            "Prediction implementation: Load features from database for date range and symbols, "
+            "then call predict_classifier() and store results in trend_class_predictions table",
+            json_output=json_output
+        )
+        emit("Note: Full prediction workflow requires feature loading - to be implemented", json_output=json_output)
+
+
 @app.command("prices-ingest")
 def ingest_prices(
     symbol: str = typer.Option(..., help="Ticker symbol to ingest"),
