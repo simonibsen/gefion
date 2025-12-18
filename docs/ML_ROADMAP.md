@@ -34,7 +34,7 @@ g2 aims to provide a comprehensive ML-driven quantitative analysis platform with
 
 ### 1.2 Feature Selection During Dataset Build
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17)
 
 **Goal**: Allow users to select specific features for training instead of including all computed features.
 
@@ -85,11 +85,11 @@ g2 ml dataset-build --name mvp --version v1 \
 
 ### 2.1 Trend Classification Model
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17)
 
 **Goal**: Add categorical trend prediction alongside quantile regression.
 
-**Current State**: Trend labels (weak_up, strong_up, neutral, weak_down, strong_down) are computed and stored but not used for predictions.
+**Current State**: Trend labels and predictions are computed and stored. Full 5-class classifier implemented with training, prediction, and evaluation workflows.
 
 **Benefits**:
 - Screen stocks by predicted trend strength
@@ -150,11 +150,13 @@ LIMIT 20;
 
 ## Phase 3: Cross-Sectional Features
 
-### 3.1 Sector-Relative Features
+### 3.1 Cross-Sectional Features
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17)
 
 **Goal**: Enable sector and market-relative analysis.
+
+**Note**: Implemented as market-relative features (MVP). Sector-specific analysis can be added in future iterations.
 
 **New Table**:
 ```sql
@@ -242,7 +244,11 @@ Implement production-ready strategies with full backtesting:
 
 ### 4.2 Backtesting Engine
 
+**Status**: ✅ MVP Complete (2025-12-17)
+
 **Goal**: Simulate full portfolio performance with realistic constraints.
+
+**Current State**: Core backtesting engine with point-in-time correctness, portfolio tracking, and performance metrics. Transaction costs and advanced features planned for Phase 2.
 
 **Features**:
 - Point-in-time data (no look-ahead bias)
