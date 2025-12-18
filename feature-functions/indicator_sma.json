@@ -1,0 +1,10 @@
+{
+  "name": "indicator_sma",
+  "version": "1.0",
+  "language": "python",
+  "description": "Simple Moving Average (SMA) - arithmetic mean of prices over a specified number of periods. Smooths price data to identify trends and support/resistance levels.",
+  "status": "active",
+  "enabled": true,
+  "created_by": "g2-migration",
+  "function_body": "import pandas as pd\n\ndef compute(rows, specs):\n    \"\"\"\n    Compute Simple Moving Average (SMA).\n    \n    Args:\n        rows: Price data rows with 'date', 'close', 'adjusted_close'\n        specs: Feature specs with optional 'window' (default: 20)\n    \n    Returns:\n        List of rows with date and sma_XX values\n    \"\"\"\n    if not rows:\n        return []\n    \n    df = pd.DataFrame(rows)\n    if df.empty:\n        return []\n    \n    df = df.sort_values('date')\n    \n    # Use adjusted_close if available, otherwise close\n    close_col = 'adjusted_close' if 'adjusted_close' in df.columns else 'close'\n    if close_col not in df.columns:\n        return []\n    \n    close = pd.to_numeric(df[close_col], errors='coerce')\n    if close.isna().all():\n        return []\n    \n    # Get window from specs (default: 20)\n    window = specs.get('window', 20)\n    \n    # Calculate SMA\n    sma = close.rolling(window=window, min_periods=window).mean()\n    \n    col_name = f'sma_{window}'\n    df[col_name] = sma\n    \n    # Convert to results format\n    results = []\n    for _, row in df.iterrows():\n        if pd.notna(row[col_name]):\n            results.append({\n                'date': row['date'],\n                col_name: float(row[col_name])\n            })\n    \n    return results\n"
+}
