@@ -244,12 +244,14 @@ def ingest_prices_for_symbols(
                 if item is writer_done:
                     break
                 sym, rows, outputsize = item
-                data_id = upsert_stock(conn, sym, status=status)
                 try:
                     retries = 0
                     backoff = 0.1
                     while True:
                         try:
+                            # upsert_stock can also encounter deadlocks with parallel writers,
+                            # so include it in the retry loop
+                            data_id = upsert_stock(conn, sym, status=status)
                             inserted = _batch_insert_prices(conn, data_id, rows, update_existing)
                             break
                         except errors.DeadlockDetected:
