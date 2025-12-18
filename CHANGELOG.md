@@ -8,6 +8,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+#### Momentum Trading Strategy (MVP)
+
+Implemented simple price-based momentum strategy for demonstration and testing.
+
+**Strategy Logic:**
+
+- Calculate momentum (percent return) over lookback period
+- Select top N stocks with highest positive momentum
+- Allocate capital equally across selected stocks
+- Rebalance periodically (every N days)
+
+**Features:**
+
+- Flexible lookback period (default: 20 days)
+- Configurable portfolio size (top N stocks)
+- Periodic rebalancing (default: every 5 days)
+- Equal-weight position sizing
+- Uses available data when less than full lookback period
+
+**Usage:**
+
+```python
+from datetime import date
+from g2.strategies.momentum import MomentumStrategy
+from g2.backtest.engine import BacktestEngine
+
+# Create momentum strategy
+strategy_func = MomentumStrategy(
+    lookback_days=20,
+    top_n=5,
+    rebalance_days=5,
+).generate_signals
+
+# Run backtest
+engine = BacktestEngine(
+    price_data=price_data,
+    strategy=strategy_func,
+    initial_cash=100000.0,
+    start_date=date(2024, 1, 1),
+    end_date=date(2024, 12, 31),
+)
+
+results = engine.run()
+```
+
+**Files:**
+
+- `src/g2/strategies/__init__.py` - Module initialization
+- `src/g2/strategies/momentum.py` - Momentum strategy implementation
+- `tests/test_strategy_momentum.py` - 7 comprehensive tests
+
+**Future Extensions:**
+
+- ML-based momentum (using trend predictions)
+- Risk-adjusted position sizing (inverse IQR)
+- Sector-neutral portfolios
+- Stop-loss and take-profit rules
+- Transaction cost modeling
+
 #### Backtesting Engine (MVP)
 
 Implemented simple, point-in-time correct backtesting engine for strategy validation.
