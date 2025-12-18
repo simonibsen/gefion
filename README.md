@@ -1,12 +1,13 @@
 # g2 (working title)
 
-Database-first ML platform for quantitative stock analysis. Ingests price data, computes technical indicators, trains quantile regression models, and generates return predictions.
+Database-first ML platform for quantitative stock analysis. Ingests price data, computes technical indicators, trains ML models, and backtests trading strategies.
 
 **Key Features:**
 
 - 📊 AlphaVantage integration with 5,600+ NASDAQ stocks
-- 🔧 Technical indicators (RSI, MACD, Bollinger Bands, etc.) + extensible custom features
-- 🤖 ML pipeline: multi-horizon quantile regression (7/30/90-day forecasts)
+- 🔧 Technical indicators (RSI, MACD, Bollinger Bands, etc.) + cross-sectional features (market-relative)
+- 🤖 ML pipeline: multi-horizon quantile regression + trend classification (5-class)
+- 📈 Backtesting engine with point-in-time correctness + momentum strategy MVP
 - 💬 Natural language interface via MCP server
 - 🗃️ TimescaleDB for efficient time-series storage
 - 🔌 DB-first architecture: features and functions stored in database, exported to git

@@ -51,6 +51,40 @@ g2 is a production-ready database-first technical analysis platform with:
 
 ## Recent Changes
 
+### December 17, 2025
+
+**Phase 1 Completion - All Tactical Items (#1-10) Complete:**
+
+- **Cross-Sectional Features (Item #7)**: Implemented market-relative features (return_vs_market, volume_vs_market, rank_by_return) with database storage in cross_sectional_features hypertable
+- **Backtesting Engine (Item #8)**: Complete point-in-time backtesting with Portfolio tracking, equity curves, and performance metrics (Sharpe, max drawdown)
+- **Momentum Strategy (Item #9)**: Implemented price-based momentum strategy with rebalancing, position sizing, and comprehensive tests
+- **Error Messages & CLI Help (Item #10)**: Enhanced UX with helpful validation messages and practical examples in --help text for 7 key commands
+- **Testing**: 20 new tests passing (5 cross-sectional + 8 backtest + 7 momentum)
+- **Documentation Standardization**: Clarified 'python' as preferred language type for feature functions (backward compatible with 'python_expr')
+
+**New Modules Created:**
+
+- `src/g2/compute/cross_sectional.py` - Market-relative computations
+- `src/g2/db/cross_sectional.py` - Database persistence
+- `src/g2/backtest/portfolio.py` - Portfolio tracking (173 lines)
+- `src/g2/backtest/engine.py` - Backtesting engine (168 lines)
+- `src/g2/backtest/metrics.py` - Performance metrics (122 lines)
+- `src/g2/strategies/momentum.py` - Momentum strategy (195 lines)
+
+**User Experience Improvements:**
+
+- Database connection errors now provide actionable guidance (suggest docker compose up, check DATABASE_URL)
+- API key validation links to AlphaVantage and shows .env setup instructions
+- Feature/stock validation suggests specific commands to run
+- CLI help text includes practical examples for common workflows
+
+**Strategic Direction:**
+
+- Defined three strategic paths for Phase 2 (Trading-First, ML-First, Scale-First)
+- Path A focuses on additional strategies and real-world validation
+- Path B focuses on advanced ML infrastructure (Parquet, ensembles, API)
+- Path C focuses on production infrastructure (monitoring, optimization, CI/CD)
+
 ### December 14, 2025
 
 **ML Implementation Complete (Phase 1):**
