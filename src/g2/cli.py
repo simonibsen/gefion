@@ -73,6 +73,9 @@ SETTINGS = load_settings()
 ml_app = typer.Typer(help="ML workflow commands (dataset/build/train/predict/eval)")
 app.add_typer(ml_app, name="ml", cls=SortedGroup)
 
+backtest_app = typer.Typer(help="Backtesting commands (run/compare/analyze)")
+app.add_typer(backtest_app, name="backtest", cls=SortedGroup)
+
 
 def emit(
     message: str,
@@ -3061,6 +3064,245 @@ def update_all(
         },
         json_output=json_output,
     )
+
+
+@backtest_app.command("run")
+def backtest_run(
+    symbols: Optional[str] = typer.Option(
+        None,
+        "--symbols",
+        help="Comma-separated symbols to backtest (e.g., AAPL,MSFT,GOOGL)"
+    ),
+    exchange: Optional[str] = typer.Option(
+        None,
+        "--exchange",
+        help="Exchange name (alternative to --symbols, e.g., NASDAQ)"
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        help="Limit number of symbols from exchange (for testing)"
+    ),
+    strategy: str = typer.Option(
+        "momentum",
+        "--strategy",
+        help="Strategy name (currently only 'momentum' supported)"
+    ),
+    start_date: str = typer.Option(
+        ...,
+        "--start-date",
+        help="Backtest start date (YYYY-MM-DD)"
+    ),
+    end_date: str = typer.Option(
+        ...,
+        "--end-date",
+        help="Backtest end date (YYYY-MM-DD)"
+    ),
+    initial_cash: float = typer.Option(
+        100000.0,
+        "--initial-cash",
+        help="Initial portfolio cash amount"
+    ),
+    lookback_days: int = typer.Option(
+        20,
+        "--lookback-days",
+        help="Momentum lookback period in days"
+    ),
+    top_n: int = typer.Option(
+        10,
+        "--top-n",
+        help="Number of top momentum stocks to hold"
+    ),
+    rebalance_days: int = typer.Option(
+        5,
+        "--rebalance-days",
+        help="Days between rebalancing"
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output results as JSON"
+    ),
+) -> None:
+    """
+    Run backtest for a trading strategy.
+
+    Example:
+        # Backtest momentum strategy on tech stocks
+        g2 backtest run --symbols AAPL,MSFT,GOOGL,NVDA,TSLA \\
+          --start-date 2024-01-01 --end-date 2024-12-01 \\
+          --initial-cash 100000 --top-n 3 --rebalance-days 5
+
+        # Backtest on 50 NASDAQ stocks
+        g2 backtest run --exchange NASDAQ --limit 50 \\
+          --start-date 2024-01-01 --end-date 2024-12-01
+    """
+    from datetime import datetime
+    from g2.backtest.data_loader import load_price_data_for_backtest
+    from g2.backtest.engine import BacktestEngine
+    from g2.strategies.momentum import MomentumStrategy
+
+    url = os.getenv("DATABASE_URL", SETTINGS.database_url)
+
+    # Validate inputs
+    if not symbols and not exchange:
+        emit_error(
+            "Must specify either --symbols or --exchange",
+            json_output=json_output
+        )
+        raise typer.Exit(1)
+
+    # Parse dates
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except ValueError as e:
+        emit_error(
+            f"Invalid date format: {e}. Use YYYY-MM-DD format.",
+            json_output=json_output
+        )
+        raise typer.Exit(1)
+
+    if start >= end:
+        emit_error(
+            "Start date must be before end date",
+            json_output=json_output
+        )
+        raise typer.Exit(1)
+
+    # Parse symbols
+    symbol_list = None
+    if symbols:
+        symbol_list = [s.strip().upper() for s in symbols.split(",")]
+
+    # Load price data
+    emit("Loading price data from database...", json_output=json_output)
+
+    try:
+        price_data = load_price_data_for_backtest(
+            db_url=url,
+            symbols=symbol_list,
+            exchange=exchange,
+            start_date=start,
+            end_date=end,
+            limit=limit,
+        )
+
+        if not price_data:
+            emit_error(
+                "No price data found for specified parameters.\n"
+                "Try: g2 data-update --exchange NASDAQ --limit 50",
+                json_output=json_output
+            )
+            raise typer.Exit(1)
+
+        # Count symbols
+        symbols_found = set(row["symbol"] for row in price_data)
+        emit(
+            f"Loaded {len(price_data)} price records for {len(symbols_found)} symbols",
+            json_output=json_output
+        )
+
+    except Exception as e:
+        emit_error(
+            f"Failed to load price data: {e}",
+            json_output=json_output
+        )
+        raise typer.Exit(1)
+
+    # Initialize strategy
+    if strategy == "momentum":
+        strat = MomentumStrategy(
+            lookback_days=lookback_days,
+            top_n=top_n,
+            rebalance_days=rebalance_days,
+        )
+    else:
+        emit_error(
+            f"Unknown strategy: {strategy}. Currently only 'momentum' is supported.",
+            json_output=json_output
+        )
+        raise typer.Exit(1)
+
+    # Run backtest
+    emit(f"Running {strategy} strategy backtest...", json_output=json_output)
+
+    try:
+        # Create wrapper function for strategy that matches BacktestEngine interface
+        def strategy_fn(current_date, portfolio, prices):
+            return strat.generate_signals(
+                current_date=current_date,
+                portfolio=portfolio,
+                price_data=prices,
+                initial_cash=initial_cash,
+            )
+
+        engine = BacktestEngine(
+            price_data=price_data,
+            strategy=strategy_fn,
+            initial_cash=initial_cash,
+            start_date=start,
+            end_date=end,
+        )
+
+        results = engine.run()
+
+        # Extract metrics (already calculated by engine)
+        metrics = results["metrics"]
+        final_equity = results["equity_curve"][-1]["equity"] if results["equity_curve"] else initial_cash
+        trade_count = len(results["trades"])
+
+        # Format and output results
+        emit(
+            "Backtest complete",
+            data={
+                "strategy": strategy,
+                "parameters": {
+                    "initial_cash": initial_cash,
+                    "lookback_days": lookback_days,
+                    "top_n": top_n,
+                    "rebalance_days": rebalance_days,
+                },
+                "date_range": {
+                    "start": start_date,
+                    "end": end_date,
+                },
+                "symbols_tested": len(symbols_found),
+                "performance": {
+                    "final_value": final_equity,
+                    "total_return": metrics["total_return"],
+                    "sharpe_ratio": metrics["sharpe_ratio"],
+                    "max_drawdown": metrics["max_drawdown"],
+                },
+                "trades": trade_count,
+            },
+            json_output=json_output,
+        )
+
+        # Print formatted summary if not JSON
+        if not json_output:
+            console = Console()
+            console.print("\n[bold green]Backtest Results[/bold green]")
+            console.print(f"Strategy: {strategy}")
+            console.print(f"Period: {start_date} to {end_date}")
+            console.print(f"Symbols: {len(symbols_found)}")
+            console.print(f"\n[bold]Performance:[/bold]")
+            console.print(f"  Initial Value: ${initial_cash:,.2f}")
+            console.print(f"  Final Value:   ${final_equity:,.2f}")
+            console.print(f"  Total Return:  {metrics['total_return']:.2%}")
+            console.print(f"  Sharpe Ratio:  {metrics['sharpe_ratio']:.3f}")
+            console.print(f"  Max Drawdown:  {metrics['max_drawdown']:.2%}")
+            console.print(f"\n[bold]Activity:[/bold]")
+            console.print(f"  Total Trades:  {trade_count}")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        emit_error(
+            f"Backtest failed: {e}",
+            json_output=json_output
+        )
+        raise typer.Exit(1)
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
