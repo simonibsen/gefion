@@ -3086,7 +3086,7 @@ def backtest_run(
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
-        help="Strategy name (currently only 'momentum' supported)"
+        help="Strategy name: 'momentum' or 'mean_reversion'"
     ),
     start_date: str = typer.Option(
         ...,
@@ -3116,7 +3116,32 @@ def backtest_run(
     rebalance_days: int = typer.Option(
         5,
         "--rebalance-days",
-        help="Days between rebalancing"
+        help="Days between rebalancing (momentum strategy)"
+    ),
+    rsi_oversold: float = typer.Option(
+        30.0,
+        "--rsi-oversold",
+        help="RSI oversold threshold for buy signals (mean_reversion strategy)"
+    ),
+    rsi_overbought: float = typer.Option(
+        70.0,
+        "--rsi-overbought",
+        help="RSI overbought threshold for sell signals (mean_reversion strategy)"
+    ),
+    rsi_period: int = typer.Option(
+        14,
+        "--rsi-period",
+        help="RSI calculation period in days (mean_reversion strategy)"
+    ),
+    position_size: float = typer.Option(
+        0.2,
+        "--position-size",
+        help="Fraction of portfolio per position (mean_reversion strategy)"
+    ),
+    max_positions: int = typer.Option(
+        5,
+        "--max-positions",
+        help="Maximum concurrent positions (mean_reversion strategy)"
     ),
     json_output: bool = typer.Option(
         False,
@@ -3127,20 +3152,22 @@ def backtest_run(
     """
     Run backtest for a trading strategy.
 
-    Example:
+    Examples:
         # Backtest momentum strategy on tech stocks
         g2 backtest run --symbols AAPL,MSFT,GOOGL,NVDA,TSLA \\
           --start-date 2024-01-01 --end-date 2024-12-01 \\
-          --initial-cash 100000 --top-n 3 --rebalance-days 5
+          --initial-cash 100000 --strategy momentum --top-n 3
 
-        # Backtest on 50 NASDAQ stocks
+        # Backtest mean reversion strategy on NASDAQ
         g2 backtest run --exchange NASDAQ --limit 50 \\
-          --start-date 2024-01-01 --end-date 2024-12-01
+          --start-date 2024-01-01 --end-date 2024-12-01 \\
+          --strategy mean_reversion --rsi-oversold 25 --rsi-overbought 75
     """
     from datetime import datetime
     from g2.backtest.data_loader import load_price_data_for_backtest
     from g2.backtest.engine import BacktestEngine
     from g2.strategies.momentum import MomentumStrategy
+    from g2.strategies.mean_reversion import MeanReversionStrategy
 
     url = os.getenv("DATABASE_URL", SETTINGS.database_url)
 
@@ -3217,9 +3244,17 @@ def backtest_run(
             top_n=top_n,
             rebalance_days=rebalance_days,
         )
+    elif strategy == "mean_reversion":
+        strat = MeanReversionStrategy(
+            rsi_oversold=rsi_oversold,
+            rsi_overbought=rsi_overbought,
+            rsi_period=rsi_period,
+            position_size=position_size,
+            max_positions=max_positions,
+        )
     else:
         emit_error(
-            f"Unknown strategy: {strategy}. Currently only 'momentum' is supported.",
+            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion'",
             json_output=json_output
         )
         raise typer.Exit(1)
