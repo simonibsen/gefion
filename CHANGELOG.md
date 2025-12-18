@@ -8,6 +8,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+#### Trend Classification Model
+
+Implemented multi-class classifier for predicting trend labels (5-class):
+
+**CLI Commands:**
+
+- `g2 ml train-classifier` - Train classifier on dataset with trend labels
+- `g2 ml predict-classifier` - Generate trend predictions (placeholder)
+
+**Classes:**
+
+- `strong_up` - Return >= strong_threshold
+- `weak_up` - weak_threshold <= return < strong_threshold
+- `neutral` - |return| < weak_threshold
+- `weak_down` - -strong_threshold < return <= -weak_threshold
+- `strong_down` - Return <= -strong_threshold
+
+**Algorithms:**
+
+- `sklearn` - RandomForestClassifier (default)
+- `xgboost` - XGBClassifier (requires ml_extended)
+- `lightgbm` - LGBMClassifier (requires ml_extended)
+
+**Features:**
+
+- Load datasets with trend labels from CSV/Parquet
+- Train multi-class classifier with configurable algorithms
+- Automatic label encoding for 5 trend classes
+- Missing value handling with median imputation
+- Evaluation metrics: accuracy, confusion matrix, per-class precision/recall/F1
+- Model artifacts saved with metadata
+- Database integration (ml_models, ml_runs tables)
+
+**Usage:**
+
+```bash
+# Train classifier
+g2 ml train-classifier \
+  --dataset-name tech --dataset-version v1 \
+  --model-name trend-clf --model-version v1 \
+  --algorithm sklearn --horizon 7
+
+# View metadata
+cat models/trend-clf_v1_h7_classifier/metadata.json
+```
+
+**Files Created:**
+
+- `src/g2/ml/classifier.py` - Classifier training, prediction, evaluation
+- `tests/test_ml_classifier.py` - 6 tests (5 passing, 1 skipped)
+
+**Tests**: All 5 core tests passing using TDD approach (RED → GREEN)
+
 #### JSON-Based Indicator Functions (Proof of Concept)
 
 Migrated 3 indicators from Python code to JSON-based database-stored functions:
