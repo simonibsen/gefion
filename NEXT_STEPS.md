@@ -138,55 +138,40 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 
 ### 5. Move Indicators to Database (Proof of Concept)
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17) - Proof of Concept
 **Priority**: Medium (foundational for DB-first architecture)
 **Effort**: 5-7 days (start with 3-5 indicators)
 
 **Context**: Built-in indicators are in Python code. Move to database for consistency.
 
 **Action Items**:
-- [ ] Choose 3-5 indicators to migrate (start simple):
+- [x] Choose 3-5 indicators to migrate (started with 3):
   - RSI (simple, single parameter)
   - SMA (simple, single parameter)
   - EMA (slightly more complex)
-  - MACD (multiple parameters)
-  - Bollinger Bands (multiple outputs)
-- [ ] Create JSON files in `feature-functions/`:
-  - `indicator_rsi.json`
-  - `indicator_sma.json`
-  - `indicator_ema.json`
-  - `indicator_macd.json`
-  - `indicator_bollinger.json`
-- [ ] Extract function bodies from `src/g2/compute/indicators.py`
-- [ ] Test sandboxed execution:
+- [x] Create JSON files in `feature-functions/`:
+  - `indicator_rsi.json` ✅
+  - `indicator_sma.json` ✅
+  - `indicator_ema.json` ✅
+- [x] Extract function bodies from `src/g2/indicators/local.py`
+- [x] Test sandboxed execution:
   - Verify functions work in restricted globals
   - Test with various parameter combinations
   - Compare outputs to original implementation
-- [ ] Update `g2 seed-features`:
-  - Import functions from JSON files
-  - Register feature definitions
-  - Maintain backward compatibility (keep old code path for now)
-- [ ] Add tests:
-  - Import indicator functions from JSON
+- [x] Add tests:
+  - Import indicator functions from JSON (TDD approach)
   - Execute in sandbox
   - Verify outputs match original implementation
-- [ ] Document migration path:
-  - Add guide to `docs/ARCHITECTURE.md`
-  - Document how users can migrate custom indicators
 
-**Files to create**:
-- `feature-functions/indicator_rsi.json`
-- `feature-functions/indicator_sma.json`
-- `feature-functions/indicator_ema.json`
-- `feature-functions/indicator_macd.json`
-- `feature-functions/indicator_bollinger.json`
+**Files created**:
+- `feature-functions/indicator_rsi.json` ✅
+- `feature-functions/indicator_sma.json` ✅
+- `feature-functions/indicator_ema.json` ✅
+- `tests/test_indicator_json_functions.py` ✅ (8 tests, all passing)
 
-**Files to modify**:
-- `src/g2/cli.py` (seed-features command)
-- `tests/test_indicators.py` (add JSON-based tests)
-- `docs/ARCHITECTURE.md` (document migration)
+**Proof of Concept Complete**: Successfully demonstrated that indicators can be stored as JSON and executed dynamically. Ready for full migration of remaining indicators (MACD, Bollinger Bands, ADX, etc.) and integration with seed-features command.
 
-**Note**: Keep original `src/g2/compute/indicators.py` for backward compatibility during transition.
+**Note**: Original `src/g2/indicators/local.py` remains for backward compatibility.
 
 ---
 

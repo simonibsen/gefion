@@ -1,0 +1,10 @@
+{
+  "name": "indicator_ema",
+  "version": "1.0",
+  "language": "python",
+  "description": "Exponential Moving Average (EMA) - weighted moving average that gives more weight to recent prices. More responsive to recent price changes than SMA, useful for trend following and crossover strategies.",
+  "status": "active",
+  "enabled": true,
+  "created_by": "g2-migration",
+  "function_body": "import pandas as pd\n\ndef compute(rows, specs):\n    \"\"\"\n    Compute Exponential Moving Average (EMA).\n    \n    Args:\n        rows: Price data rows with 'date', 'close', 'adjusted_close'\n        specs: Feature specs with optional 'span' (default: 12)\n    \n    Returns:\n        List of rows with date and ema_XX values\n    \"\"\"\n    if not rows:\n        return []\n    \n    df = pd.DataFrame(rows)\n    if df.empty:\n        return []\n    \n    df = df.sort_values('date')\n    \n    # Use adjusted_close if available, otherwise close\n    close_col = 'adjusted_close' if 'adjusted_close' in df.columns else 'close'\n    if close_col not in df.columns:\n        return []\n    \n    close = pd.to_numeric(df[close_col], errors='coerce')\n    if close.isna().all():\n        return []\n    \n    # Get span from specs (default: 12)\n    span = specs.get('span', 12)\n    \n    # Calculate EMA\n    ema = close.ewm(span=span, adjust=False).mean()\n    \n    col_name = f'ema_{span}'\n    df[col_name] = ema\n    \n    # Convert to results format\n    results = []\n    for _, row in df.iterrows():\n        if pd.notna(row[col_name]):\n            results.append({\n                'date': row['date'],\n                col_name: float(row[col_name])\n            })\n    \n    return results\n"
+}

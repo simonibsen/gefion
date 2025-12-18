@@ -8,6 +8,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+#### JSON-Based Indicator Functions (Proof of Concept)
+
+Migrated 3 indicators from Python code to JSON-based database-stored functions:
+
+**Indicators Migrated:**
+
+- RSI (Relative Strength Index)
+- SMA (Simple Moving Average)
+- EMA (Exponential Moving Average)
+
+**Benefits:**
+
+- **Database-First Architecture**: Indicators stored as data, not code
+- **Dynamic Execution**: Load and execute functions from JSON files
+- **Extensibility**: Users can add custom indicators without modifying source code
+- **Version Control**: Indicator definitions tracked in git alongside code
+- **Sandboxed Execution**: Functions run in controlled environment
+
+**Files Created:**
+
+```
+feature-functions/indicator_rsi.json
+feature-functions/indicator_sma.json
+feature-functions/indicator_ema.json
+tests/test_indicator_json_functions.py (8 tests, all passing)
+```
+
+**Proof of Concept**: Demonstrates feasibility of migrating all indicators to JSON format. Existing implementation in `src/g2/indicators/local.py` remains for backward compatibility.
+
+**Next Steps**: Migrate remaining indicators (MACD, Bollinger Bands, ADX, Stochastic, PSAR) and integrate with `g2 seed-features` command.
+
 #### Parquet Export Support
 
 Added Parquet format support for ML dataset exports:
