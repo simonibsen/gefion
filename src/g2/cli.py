@@ -2470,6 +2470,7 @@ def features_compute(
     # Parse symbols
     symbol_list = parse_comma_separated(symbols)
 
+    pool_needed = False  # Initialize early to avoid UnboundLocalError in finally block
     try:
         with db_connection(db_url) as conn:
             init_schema_tables(conn, ["feature_definitions", "computed_features"])
