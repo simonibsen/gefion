@@ -44,31 +44,31 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 
 ### 2. Add Feature Selection to Dataset Build
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17)
 **Priority**: High (most requested feature)
 **Effort**: 3-4 days
 
 **Context**: Currently all features in `computed_features` are included in datasets. Users want to select specific features.
 
 **Action Items**:
-- [ ] Add `--features` parameter to `g2 ml dataset-build`:
+- [x] Add `--features` parameter to `g2 ml dataset-build`:
   - Parse comma-separated feature names
   - Filter features before pivot in dataset builder
   - Validate feature names exist in database
-- [ ] Add `--exclude-features` parameter (blacklist mode):
+- [x] Add `--exclude-features` parameter (blacklist mode):
   - Parse comma-separated feature names
   - Exclude from feature set before pivot
-- [ ] Update `src/g2/ml/dataset.py`:
+- [x] Update `src/g2/ml/dataset.py`:
   - Modify `export_dataset_artifacts()` to accept feature filter
   - Update SQL query to filter features by name
-- [ ] Add tests:
+- [x] Add tests:
   - Build dataset with specific features only
   - Build dataset excluding certain features
   - Error handling for non-existent feature names
-- [ ] Update documentation:
+- [x] Update documentation:
   - `docs/ML_QUICKSTART.md` - add feature selection examples
   - `docs/USER_GUIDE.md` - document new flags
-- [ ] Update help text in CLI
+- [x] Update help text in CLI
 
 **Files to modify**:
 - `src/g2/cli.py` (ml dataset-build command)
