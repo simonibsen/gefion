@@ -89,10 +89,14 @@ g2 is a production-ready database-first technical analysis platform with:
 
 **Critical Bug Fixes & Infrastructure Improvements:**
 
-- **Deadlock Fix**: Resolved writer thread deadlock during data-update shutdown (universe.py:240)
+- **Thread Deadlock Fix**: Resolved writer thread deadlock during data-update shutdown (universe.py:240)
   - Root cause: Sentinel objects not sent when fetch phase interrupted, blocking queue.get() forever
   - Solution: Added try/finally block ensuring writers always receive shutdown signal
   - Impact: Clean Ctrl+C handling, no more hanging processes
+- **Database Deadlock Fix**: Resolved PostgreSQL deadlocks with parallel writer workers (universe.py:254)
+  - Root cause: Multiple writers calling upsert_stock() outside retry loop, creating circular lock dependencies on stocks table (relation 75061)
+  - Solution: Moved upsert_stock() inside existing retry loop to handle database-level deadlocks (up to 5 retries with backoff)
+  - Impact: Eliminates database deadlocks during parallel ingestion with multiple writer workers
 - **Partial Data Protection**: Fixed mid-day ingestion inserting incomplete intraday data
   - Root cause: filter_new_rows() accepted any date newer than existing, including today's partial data
   - Solution: Added target_date parameter (calculated via _expected_market_date()) to filter future dates
@@ -123,7 +127,7 @@ g2 is a production-ready database-first technical analysis platform with:
 
 **Files Modified:**
 
-- src/g2/ingest/universe.py - Added target_date filtering, deadlock fix
+- src/g2/ingest/universe.py - Thread deadlock fix (try/finally for sentinels), database deadlock fix (retry upsert_stock), target_date filtering
 - src/g2/db/ingest.py - Enhanced filter_new_rows() with date limits
 - src/g2/cli.py - Updated all ingest call sites to pass target_date
 - src/g2/alphavantage/client.py - Optimized rate limiter buffer
@@ -134,7 +138,7 @@ g2 is a production-ready database-first technical analysis platform with:
 **Impact:**
 
 - **Data Quality**: Time-aware filtering ensures clean historical data, no partial intraday contamination
-- **Reliability**: Deadlock fix prevents process hangs during updates
+- **Reliability**: Dual deadlock fixes (thread-level + database-level) prevent process hangs and database lock conflicts
 - **Performance**: 13% faster ingestion via optimized rate limiting
 - **User Experience**: MCP server now exposes full Phase 1 capabilities with detailed workflows
 
