@@ -87,6 +87,39 @@ g2 is a production-ready database-first technical analysis platform with:
 
 ### December 18, 2025
 
+**Mean Reversion Trading Strategy (Path A: Item #12):**
+
+- **Strategy Implementation**: Created RSI-based mean reversion strategy
+  - Buys oversold stocks (RSI < 30) and sells overbought stocks (RSI > 70)
+  - Configurable parameters: RSI thresholds, period, position size, max positions
+  - Equal-weight position sizing with portfolio constraints
+  - Follows same interface as momentum strategy
+- **TDD Development**: Comprehensive test coverage (369 lines, 9 tests)
+  - Tests for initialization, empty data, insufficient data
+  - Buy/sell signal generation in various RSI conditions
+  - Position sizing, max positions limit, multi-symbol scenarios
+  - All tests passing
+- **CLI Integration**: Updated backtest command to support mean_reversion
+  - Added --rsi-oversold, --rsi-overbought, --rsi-period parameters
+  - Added --position-size, --max-positions parameters
+  - Updated help text and usage examples
+  - Both momentum and mean_reversion strategies now available via CLI
+
+**Files Created:**
+
+- src/g2/strategies/mean_reversion.py (195 lines)
+- tests/test_strategy_mean_reversion.py (369 lines, 9 tests)
+
+**Files Modified:**
+
+- src/g2/cli.py (added mean_reversion support to backtest run command)
+
+**Impact:**
+
+- **Strategy Diversity**: Users can now compare momentum vs mean reversion approaches
+- **Market Coverage**: Mean reversion complements momentum for different market conditions
+- **Extensibility**: Pattern established for adding more strategies (Item #12 progress: 1/6 complete)
+
 **Critical Bug Fixes & Infrastructure Improvements:**
 
 - **Thread Deadlock Fix**: Resolved writer thread deadlock during data-update shutdown (universe.py:240)
