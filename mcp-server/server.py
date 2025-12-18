@@ -4,9 +4,11 @@ G2 MCP Server - Natural language interface to g2 ML platform.
 
 Provides MCP tools for:
 - ML workflow (dataset build, train, predict, evaluate)
+  * Quantile regression models for multi-horizon return prediction
+  * Trend classifiers for 5-class trend prediction (strong_down to strong_up)
 - Database queries (predictions, model performance)
-- Feature management
-- Data ingestion
+- Feature management (technical indicators + cross-sectional market-relative features)
+- Data ingestion (time-aware to prevent partial intraday data)
 """
 
 import asyncio
@@ -180,6 +182,54 @@ async def list_tools() -> List[Tool]:
             },
         ),
 
+        Tool(
+            name="ml_train_classifier",
+            description=(
+                "Train multi-class trend classifier (5-class: strong_down, weak_down, flat, weak_up, strong_up). "
+                "Uses gradient boosting (XGBoost/LightGBM) for trend prediction. "
+                "Saves model artifacts to out_dir/{model_name}_{model_version}_hN/"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset_name": {"type": "string", "description": "Dataset name to train on"},
+                    "dataset_version": {"type": "string", "description": "Dataset version to train on"},
+                    "model_name": {"type": "string", "description": "Model name for registry"},
+                    "model_version": {"type": "string", "description": "Model version (e.g., YYYYMMDD)"},
+                    "algorithm": {
+                        "type": "string",
+                        "description": "Algorithm: xgboost or lightgbm",
+                        "default": "xgboost",
+                        "enum": ["xgboost", "lightgbm"]
+                    },
+                    "out_dir": {"type": "string", "description": "Output directory for model artifacts", "default": "models"},
+                },
+                "required": ["dataset_name", "dataset_version", "model_name", "model_version"],
+            },
+        ),
+
+        Tool(
+            name="ml_predict_classifier",
+            description=(
+                "Generate trend class predictions for symbols on a specific date. "
+                "Fetches features from database, loads classifier model, predicts trend classes. "
+                "Returns probabilities for each class (strong_down, weak_down, flat, weak_up, strong_up). "
+                "Stores results in trend_predictions table."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Model name to use"},
+                    "model_version": {"type": "string", "description": "Model version to use"},
+                    "prediction_date": {"type": "string", "description": "Date for predictions (YYYY-MM-DD)"},
+                    "symbols": {"type": "string", "description": "Comma-separated symbols (e.g., AAPL,MSFT)"},
+                    "exchange": {"type": "string", "description": "Exchange name (alternative to symbols)"},
+                    "limit": {"type": "integer", "description": "Limit symbols from exchange"},
+                },
+                "required": ["model_name", "model_version", "prediction_date"],
+            },
+        ),
+
         # Database Query Tools
         Tool(
             name="query_predictions",
@@ -220,7 +270,11 @@ async def list_tools() -> List[Tool]:
             name="data_update",
             description=(
                 "Update prices and features for an exchange. "
-                "Fetches latest OHLCV data and computes technical indicators. "
+                "Fetches latest OHLCV data from AlphaVantage and computes technical indicators. "
+                "Includes time-aware filtering to prevent inserting partial intraday data. "
+                "Before 4pm ET: fetches yesterday's data only. After 4pm ET: includes today's data. "
+                "Features include technical indicators (RSI, MACD, Bollinger Bands) and cross-sectional "
+                "market-relative features (percentile ranks, z-scores). "
                 "Use --local for local computation (faster, no API limits)."
             ),
             inputSchema={
@@ -236,7 +290,11 @@ async def list_tools() -> List[Tool]:
 
         Tool(
             name="features_list",
-            description="List all registered feature definitions with metadata.",
+            description=(
+                "List all registered feature definitions with metadata. "
+                "Includes technical indicators (RSI, MACD, Bollinger Bands, etc.) and "
+                "cross-sectional features (market-relative percentile ranks, z-scores)."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -276,6 +334,10 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _ml_predict(arguments)
         elif name == "ml_eval":
             result = await _ml_eval(arguments)
+        elif name == "ml_train_classifier":
+            result = await _ml_train_classifier(arguments)
+        elif name == "ml_predict_classifier":
+            result = await _ml_predict_classifier(arguments)
         elif name == "query_predictions":
             result = await _query_predictions(arguments)
         elif name == "query_model_performance":
@@ -380,6 +442,43 @@ async def _ml_eval(args: Dict[str, Any]) -> Dict[str, Any]:
         '--start-date', args['start_date'],
         '--end-date', args['end_date'],
     ]
+
+    return await executor.run(*cmd)
+
+
+async def _ml_train_classifier(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Train trend classifier model."""
+    cmd = [
+        'ml', 'train-classifier',
+        '--dataset-name', args['dataset_name'],
+        '--dataset-version', args['dataset_version'],
+        '--model-name', args['model_name'],
+        '--model-version', args['model_version'],
+    ]
+
+    if args.get('algorithm'):
+        cmd.extend(['--algorithm', args['algorithm']])
+    if args.get('out_dir'):
+        cmd.extend(['--out-dir', args['out_dir']])
+
+    return await executor.run(*cmd)
+
+
+async def _ml_predict_classifier(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate trend classifier predictions."""
+    cmd = [
+        'ml', 'predict-classifier',
+        '--model-name', args['model_name'],
+        '--model-version', args['model_version'],
+        '--prediction-date', args['prediction_date'],
+    ]
+
+    if args.get('symbols'):
+        cmd.extend(['--symbols', args['symbols']])
+    elif args.get('exchange'):
+        cmd.extend(['--exchange', args['exchange']])
+        if args.get('limit'):
+            cmd.extend(['--limit', str(args['limit'])])
 
     return await executor.run(*cmd)
 
