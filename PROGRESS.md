@@ -85,6 +85,59 @@ g2 is a production-ready database-first technical analysis platform with:
 - Path B focuses on advanced ML infrastructure (Parquet, ensembles, API)
 - Path C focuses on production infrastructure (monitoring, optimization, CI/CD)
 
+### December 18, 2025
+
+**Critical Bug Fixes & Infrastructure Improvements:**
+
+- **Deadlock Fix**: Resolved writer thread deadlock during data-update shutdown (universe.py:240)
+  - Root cause: Sentinel objects not sent when fetch phase interrupted, blocking queue.get() forever
+  - Solution: Added try/finally block ensuring writers always receive shutdown signal
+  - Impact: Clean Ctrl+C handling, no more hanging processes
+- **Partial Data Protection**: Fixed mid-day ingestion inserting incomplete intraday data
+  - Root cause: filter_new_rows() accepted any date newer than existing, including today's partial data
+  - Solution: Added target_date parameter (calculated via _expected_market_date()) to filter future dates
+  - Time-aware logic: Before 4pm ET = yesterday's data, After 4pm ET = today's data
+  - Impact: Clean historical data, no contamination from partial trading day snapshots
+- **Rate Limiter Optimization**: Reduced safety buffer from 25% to 10%
+  - Before: ~60 calls/min (80% capacity utilization)
+  - After: ~68 calls/min (90% capacity utilization)
+  - Impact: 13% faster data ingestion
+
+**MCP Server Enhancements:**
+
+- **New Tools**: Added ml_train_classifier and ml_predict_classifier for Phase 1 trend classification
+- **Updated Descriptions**: Enhanced data_update and features_list tool descriptions
+  - Now mentions time-aware filtering (4pm ET cutoff)
+  - Cross-sectional features (percentile ranks, z-scores)
+  - Market-relative computations
+- **Comprehensive Documentation**:
+  - Updated mcp-server/README.md with new classifier tools and detailed parameters
+  - Created docs/MCP_WORKFLOWS.md (600 lines) with end-to-end workflows:
+    * Complete ML Pipeline (quantile regression)
+    * Trend Classification System (5-class predictions)
+    * Combined Signal System (multi-signal screening with SQL)
+    * Model Performance Monitoring (degradation detection, A/B testing)
+    * Data Quality & Exploration (coverage audits, sanity checks)
+    * Production Deployment Patterns (cron jobs, automation, alerts)
+    * Best Practices & Troubleshooting
+
+**Files Modified:**
+
+- src/g2/ingest/universe.py - Added target_date filtering, deadlock fix
+- src/g2/db/ingest.py - Enhanced filter_new_rows() with date limits
+- src/g2/cli.py - Updated all ingest call sites to pass target_date
+- src/g2/alphavantage/client.py - Optimized rate limiter buffer
+- mcp-server/server.py - Added classifier tools, updated capability descriptions
+- mcp-server/README.md - Added tool documentation
+- docs/MCP_WORKFLOWS.md - Created comprehensive workflow guide
+
+**Impact:**
+
+- **Data Quality**: Time-aware filtering ensures clean historical data, no partial intraday contamination
+- **Reliability**: Deadlock fix prevents process hangs during updates
+- **Performance**: 13% faster ingestion via optimized rate limiting
+- **User Experience**: MCP server now exposes full Phase 1 capabilities with detailed workflows
+
 ### December 14, 2025
 
 **ML Implementation Complete (Phase 1):**
