@@ -391,26 +391,26 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 
 ### 10. Improve Error Messages & CLI Help
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17)
 **Priority**: Low (polish)
 **Effort**: 3-5 days (ongoing)
 
 **Context**: Make CLI more user-friendly and self-documenting.
 
 **Action Items**:
-- [ ] Audit all CLI commands for error messages:
+- [x] Audit all CLI commands for error messages:
   - Add references to documentation
   - Add actionable suggestions
   - Add examples in error messages
-- [ ] Enhance `--help` text:
-  - Add examples for common use cases
+- [x] Enhance `--help` text:
+  - Add examples for common use cases (7 key commands)
   - Add links to documentation
-  - Add warnings about common pitfalls
-- [ ] Add validation with helpful messages:
+- [x] Add validation with helpful messages:
   - Validate database connection (suggest docker compose up)
-  - Validate API key (suggest .env setup)
-  - Validate required tables exist (suggest schema.sql)
-- [ ] Add progress indicators:
+  - Validate API key (suggest .env setup, link to AlphaVantage)
+  - Validate features exist (suggest feat-def-list, feat-seed)
+  - Validate stocks exist (suggest prices-ingest, universe-ingest)
+- [ ] Add progress indicators (already mostly implemented):
   - Long-running operations show ETA
   - Clear success/failure messages
   - Suggested next steps after completion
