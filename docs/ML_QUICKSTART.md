@@ -397,19 +397,43 @@ Currently, the pipeline computes trend labels (weak/strong up/down) based on for
 
 This is documented in the [ML Roadmap](ML_ROADMAP.md).
 
-## Parquet Export (Future)
+## Parquet Export
 
-Dataset exports currently use CSV format. Future versions will support Parquet for:
-- Better compression (smaller files)
-- Type preservation (no string conversion)
-- Faster I/O (columnar format)
-- Industry standard for ML pipelines
+Dataset exports support both CSV (default) and Parquet formats. Use Parquet for:
+- **Better compression**: 5-10x smaller files
+- **Type preservation**: Maintains int64, float64 types (CSV converts to strings)
+- **Faster I/O**: 5-10x faster read/write with columnar format
+- **Industry standard**: Compatible with pandas, polars, spark, and ML frameworks
 
-Usage: `g2 ml dataset-build ... --export --format parquet`
+**Usage:**
+
+```bash
+# Export as Parquet (recommended for large datasets)
+g2 ml dataset-build \
+  --name tech --version v1 \
+  --symbols AAPL,MSFT,GOOGL \
+  --horizons 7,30 \
+  --format parquet \
+  --export
+
+# CSV is still the default (backward compatible)
+g2 ml dataset-build \
+  --name tech --version v1 \
+  --symbols AAPL,MSFT,GOOGL \
+  --horizons 7,30 \
+  --export
+```
+
+**Requirements:**
+- Install with: `pip install g2[ml_extended]` (includes `pyarrow>=14.0`)
+
+**Output:**
+- Parquet: `prices.parquet`, `features.parquet`, `labels.parquet`
+- CSV: `prices.csv`, `features.csv`, `labels.csv`
 
 ## Reference
 
-- [ML Roadmap](ML_ROADMAP.md) - Future enhancements (trend classification, parquet, feature selection)
+- [ML Roadmap](ML_ROADMAP.md) - Future enhancements (trend classification, cross-sectional features, backtesting)
 - [ML System Design](archive/ml/ML_SYSTEM_DESIGN.md) - Database schema and architecture
 - [User Guide](USER_GUIDE.md) - Full CLI reference
 - [Architecture](ARCHITECTURE.md) - Overall system design

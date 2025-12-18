@@ -521,6 +521,7 @@ def ml_dataset_build(
     strong_thresholds: str = typer.Option("0.05,0.10,0.20", help="Comma-separated strong thresholds (per horizon)"),
     features: Optional[str] = typer.Option(None, help="Comma-separated feature names to include (whitelist mode)"),
     exclude_features: Optional[str] = typer.Option(None, help="Comma-separated feature names to exclude (blacklist mode)"),
+    format: str = typer.Option("csv", help="Export format: csv (default) or parquet"),
     out_dir: Path = typer.Option(Path("datasets"), help="Output directory for dataset manifest"),
     export: bool = typer.Option(False, "--export/--no-export", help="Export dataset artifacts (requires DB data)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
@@ -538,6 +539,15 @@ def ml_dataset_build(
     if feature_list and exclude_list:
         emit_error(
             "Cannot specify both --features and --exclude-features. Use one or the other.",
+            json_output=json_output,
+        )
+        return
+
+    # Format validation
+    format_lower = format.lower()
+    if format_lower not in ("csv", "parquet"):
+        emit_error(
+            f"Invalid --format '{format}'. Must be 'csv' or 'parquet'.",
             json_output=json_output,
         )
         return
@@ -589,6 +599,7 @@ def ml_dataset_build(
         "universe": universe,
         "feature_names": feature_list,
         "exclude_features": exclude_list,
+        "format": format_lower,
         "lookback_days": int(lookback_days),
         "horizons_days": horizon_vals,
         "label_spec": label_spec,
