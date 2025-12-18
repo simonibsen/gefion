@@ -351,17 +351,21 @@ def ingest_prices_for_symbols(
     with ThreadPoolExecutor(max_workers=writer_threads) as writer_pool:
         writer_futures = [writer_pool.submit(writer_worker) for _ in range(writer_threads)]
 
-        # Fetch in parallel
-        fetch_workers = max_workers
-        with ThreadPoolExecutor(max_workers=fetch_workers) as fetch_pool:
-            futures = {fetch_pool.submit(fetch_worker, sym): sym for sym in symbols}
-            for fut in as_completed(futures):
-                # Drain exceptions
-                fut.result()
+        try:
+            # Fetch in parallel
+            fetch_workers = max_workers
+            with ThreadPoolExecutor(max_workers=fetch_workers) as fetch_pool:
+                futures = {fetch_pool.submit(fetch_worker, sym): sym for sym in symbols}
+                for fut in as_completed(futures):
+                    # Drain exceptions
+                    fut.result()
+        finally:
+            # CRITICAL: Signal writers to finish even if fetch phase fails
+            # Without this, writer threads block forever on queue.get() during shutdown
+            for _ in range(writer_threads):
+                work_queue.put(writer_done)
 
-        # Signal writers to finish
-        for _ in range(writer_threads):
-            work_queue.put(writer_done)
+        # Wait for writers to complete
         for fut in writer_futures:
             fut.result()
 
