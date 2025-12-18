@@ -279,57 +279,60 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 
 ### 8. Implement Backtesting Engine
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-17) - Core Engine MVP
 **Priority**: High (validates entire pipeline, demo-able)
-**Effort**: 3-4 weeks
+**Effort**: 3-4 weeks (MVP completed in 1 session)
 
-**Context**: Need to validate predictions and demonstrate end-to-end value.
+**Context**: Need to validate predictions and demonstrate end-to-end value. Implemented core engine with point-in-time correctness.
 
 **Action Items**:
-- [ ] Design backtesting architecture:
-  - Point-in-time data (no look-ahead bias)
-  - Portfolio state tracking
-  - Transaction cost modeling
-  - Rebalancing logic
-- [ ] Implement core engine:
-  - New directory: `src/g2/backtest/`
-  - `engine.py` - main backtesting loop
-  - `portfolio.py` - position tracking
-  - `metrics.py` - performance calculations
-- [ ] Add CLI command:
-  - `g2 backtest run` - execute backtest
-  - Parameters: strategy, start/end dates, capital, constraints
-- [ ] Implement metrics:
-  - Total return
-  - Sharpe ratio
-  - Max drawdown
-  - Calmar ratio
-  - Win rate
-  - Average gain/loss
-  - Turnover
-- [ ] Add tests:
-  - Simple buy-and-hold strategy
-  - Verify point-in-time correctness
-  - Verify transaction costs
-- [ ] Output formats:
-  - Trade log CSV
-  - Equity curve CSV
-  - Summary statistics JSON
-  - Performance report (text)
-- [ ] Documentation:
-  - Add to USER_GUIDE.md
-  - Add examples to ML_QUICKSTART.md
 
-**Files to create**:
+- [x] Design backtesting architecture:
+  - Point-in-time data (no look-ahead bias) ✓
+  - Portfolio state tracking ✓
+  - Simple strategy interface ✓
+- [x] Implement core engine:
+  - New directory: `src/g2/backtest/` ✓
+  - `engine.py` - main backtesting loop ✓
+  - `portfolio.py` - position tracking ✓
+  - `metrics.py` - performance calculations ✓
+- [x] Implement metrics:
+  - Total return ✓
+  - Sharpe ratio ✓
+  - Max drawdown ✓
+- [x] Add tests:
+  - Simple buy-and-hold strategy ✓
+  - Verify point-in-time correctness ✓
+  - Portfolio tracking ✓
+  - Metrics calculation ✓
+  - All 8 tests passing ✓
+- [x] Update documentation:
+  - CHANGELOG.md with usage examples ✓
+- [ ] Add CLI command (deferred):
+  - `g2 backtest run` - execute backtest
+  - Can be used programmatically for now
+- [ ] Advanced features (deferred):
+  - Transaction cost modeling
+  - Slippage simulation
+  - Trade log export (CSV)
+  - Equity curve visualization
+  - Additional metrics (Calmar, win rate, turnover)
+  - Output formats (CSV, JSON)
+
+**Files created**:
+
+- `src/g2/backtest/__init__.py`
 - `src/g2/backtest/engine.py`
 - `src/g2/backtest/portfolio.py`
 - `src/g2/backtest/metrics.py`
 - `tests/test_backtest_engine.py`
 
-**Files to modify**:
-- `src/g2/cli.py` (add backtest run)
-- `docs/USER_GUIDE.md`
-- `docs/ML_QUICKSTART.md`
+**Files modified**:
+
+- `CHANGELOG.md` (added detailed documentation)
+- `NEXT_STEPS.md` (this file)
+
+**Core Implementation Complete**: Engine can run strategies, track portfolios, and calculate performance metrics. CLI and advanced features are natural extensions for future work.
 
 ---
 
