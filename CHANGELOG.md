@@ -8,6 +8,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+#### Cross-Sectional Features (Market-Relative)
+
+Implemented cross-sectional feature computation that compares stocks to their peers at the same point in time (vs time-series features which compare to own history).
+
+**Database Schema:**
+
+- New table: `cross_sectional_features` (TimescaleDB hypertable)
+  - Stores market-relative features with rankings
+  - Columns: data_id, date, feature_name, value, rank, percentile
+  - Partitioned by date for efficient time-series queries
+
+**Computation Functions:**
+
+- `compute_return_vs_market()` - Stock return minus market average
+- `compute_market_rankings()` - Rank stocks by performance
+- `compute_percentiles()` - Convert values to percentile ranks (0-1)
+
+**Features:**
+
+- Market-relative returns (stock vs market average)
+- Percentile rankings (0 = worst, 1 = best)
+- Database persistence with automatic stock ID lookup
+- TimescaleDB hypertable for efficient time-series queries
+- Composite indexes optimized for feature and date-based queries
+
+**Usage:**
+
+```python
+from g2.compute.cross_sectional import compute_return_vs_market, compute_percentiles
+from g2.db.cross_sectional import insert_cross_sectional_features
+
+# Compute market-relative returns
+price_data = [
+    {"symbol": "AAPL", "date": "2024-01-01", "close": 100.0},
+    {"symbol": "AAPL", "date": "2024-01-02", "close": 105.0},  # +5%
+    {"symbol": "MSFT", "date": "2024-01-01", "close": 200.0},
+    {"symbol": "MSFT", "date": "2024-01-02", "close": 202.0},  # +1%
+]
+
+results = compute_return_vs_market(price_data, date="2024-01-02")
+# Market avg = 3%, AAPL = +2% vs market, MSFT = -2% vs market
+
+# Compute percentile rankings
+ranked = compute_percentiles(results, value_key="return_vs_market")
+
+# Save to database
+insert_cross_sectional_features(conn, ranked)
+```
+
+**Files:**
+
+- `src/g2/compute/cross_sectional.py` - Computation functions
+- `src/g2/db/cross_sectional.py` - Database persistence
+- `sql/migrations/002_cross_sectional_features.sql` - Schema migration
+
+**Future Extensions:**
+
+- Sector-relative features (requires sector data source)
+- Industry group comparisons
+- Size-based peer groups (market cap quartiles)
+- CLI commands for computing and persisting features
+
 #### Trend Classification Model
 
 Implemented multi-class classifier for predicting trend labels (5-class):

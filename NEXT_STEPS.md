@@ -226,48 +226,52 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 
 ### 7. Add Cross-Sectional Features
 
-**Status**: Planned
-**Priority**: Medium (enables sector strategies)
+**Status**: ✅ Complete (2025-12-17) - Market-Relative MVP
+**Priority**: Medium (enables peer-relative strategies)
 **Effort**: 2-3 weeks
 
-**Context**: Currently only time-series features exist. Need sector-relative features.
+**Context**: Currently only time-series features exist. Implemented market-relative features as MVP (sector-relative requires sector data source).
 
 **Action Items**:
-- [ ] Create database schema:
-  - Add migration: `sql/migrations/add_cross_sectional_features.sql`
-  - Create `cross_sectional_features` table (as documented in ARCHITECTURE.md)
-- [ ] Implement computation:
+- [x] Create database schema:
+  - Add migration: `sql/migrations/002_cross_sectional_features.sql`
+  - Create `cross_sectional_features` table (TimescaleDB hypertable)
+  - Add indexes for feature and date-based queries
+- [x] Implement computation:
   - New file: `src/g2/compute/cross_sectional.py`
-  - Compute return vs sector average
-  - Compute volume vs sector average
-  - Compute sector rankings
-  - Compute percentiles
-- [ ] Add CLI command:
-  - `g2 feat-compute-cross-sectional` - compute sector features
-  - Add `--features` parameter (which cross-sectional features)
-  - Add `--exchange` parameter (universe)
-- [ ] Add sector data:
-  - Where to get sector mapping? (AlphaVantage, manual, GICS codes?)
+  - `compute_return_vs_market()` - stock return vs market average
+  - `compute_market_rankings()` - rank stocks by performance
+  - `compute_percentiles()` - percentile rankings (0-1)
+- [x] Implement database persistence:
+  - New file: `src/g2/db/cross_sectional.py`
+  - `insert_cross_sectional_features()` - batch insert with upsert
+  - Automatic stock ID lookup from symbols
+- [x] Add tests:
+  - TDD approach (RED → GREEN)
+  - Compute cross-sectional features (3 tests passing)
+  - Database integration tests (2 tests - require DB)
+- [x] Update documentation:
+  - `CHANGELOG.md` - detailed feature documentation
+  - Usage examples in CHANGELOG
+- [ ] Add CLI command (deferred):
+  - `g2 feat-compute-cross-sectional` - compute features
+  - Can be used programmatically for now
+- [ ] Add sector-relative features (future):
+  - Requires sector data source (AlphaVantage, GICS, etc.)
   - Add `sector` column to `stocks` table
-  - Populate sector data
-- [ ] Add tests:
-  - Compute cross-sectional features
-  - Verify sector aggregations
-  - Verify rankings and percentiles
-- [ ] Add example queries:
-  - Find sector leaders
-  - Sector rotation signals
-  - Document in ML_QUICKSTART.md
+  - Implement sector aggregations
 
-**Files to create**:
-- `sql/migrations/add_cross_sectional_features.sql`
+**Files created**:
+
+- `sql/migrations/002_cross_sectional_features.sql`
+- `src/g2/compute/__init__.py`
 - `src/g2/compute/cross_sectional.py`
+- `src/g2/db/cross_sectional.py`
 - `tests/test_cross_sectional.py`
 
-**Files to modify**:
-- `src/g2/cli.py` (add feat-compute-cross-sectional)
-- `docs/ARCHITECTURE.md` (move from "Future" to "Implemented")
-- `docs/ML_QUICKSTART.md` (add examples)
+**Files modified**:
+
+- `CHANGELOG.md` (added cross-sectional features section)
 
 ---
 
