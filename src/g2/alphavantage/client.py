@@ -79,7 +79,16 @@ class AlphaVantageClient:
     def __init__(self, api_key: Optional[str] = None, calls_per_minute: int = 75, session: Optional[requests.Session] = None):
         self.api_key = api_key or os.getenv("ALPHAVANTAGE_API_KEY")
         if not self.api_key:
-            raise ValueError("ALPHAVANTAGE_API_KEY is required")
+            raise ValueError(
+                "ALPHAVANTAGE_API_KEY is required.\n"
+                "\n"
+                "To fix this:\n"
+                "  1. Get a free API key from: https://www.alphavantage.co/support/#api-key\n"
+                "  2. Add to your .env file: ALPHAVANTAGE_API_KEY=your_key_here\n"
+                "  3. Or set environment variable: export ALPHAVANTAGE_API_KEY=your_key_here\n"
+                "\n"
+                "See: docs/USER_GUIDE.md#api-keys"
+            )
         self.session = session or requests.Session()
         self.rate = RateLimiter(calls_per_minute)
 
