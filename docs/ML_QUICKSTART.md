@@ -208,6 +208,41 @@ g2 ml eval \
   --end-date $(date +%Y-%m-%d)
 ```
 
+### Feature Selection
+
+By default, all computed features are included in the dataset. You can customize feature selection:
+
+**Whitelist Mode** (include only specific features):
+
+```bash
+g2 ml dataset-build \
+  --name selective \
+  --version v1 \
+  --symbols AAPL,MSFT,GOOGL \
+  --horizons 7,30 \
+  --features indicator_rsi_14,indicator_macd,indicator_bollinger_bands \
+  --export
+```
+
+**Blacklist Mode** (exclude specific features):
+
+```bash
+g2 ml dataset-build \
+  --name filtered \
+  --version v1 \
+  --symbols AAPL,MSFT,GOOGL \
+  --horizons 7,30 \
+  --exclude-features indicator_obv,indicator_adx \
+  --export
+```
+
+**Notes:**
+
+- Cannot use both `--features` and `--exclude-features` together
+- Feature names must match those in `feature_definitions` table
+- Non-existent feature names are silently ignored
+- Use `SELECT DISTINCT name FROM feature_definitions;` to list available features
+
 ## Understanding the Output
 
 ### Quantile Predictions

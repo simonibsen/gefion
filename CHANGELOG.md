@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+#### Feature Selection for Dataset Build
+
+Added ability to select specific features when building ML datasets:
+
+**New CLI Parameters:**
+
+- `--features` - Whitelist mode: include only specified features
+- `--exclude-features` - Blacklist mode: exclude specified features
+
+**Usage Examples:**
+
+```bash
+# Include only specific features
+g2 ml dataset-build --name selective --version v1 \
+  --symbols AAPL,MSFT --horizons 7,30 \
+  --features indicator_rsi_14,indicator_macd,indicator_bollinger_bands \
+  --export
+
+# Exclude specific features
+g2 ml dataset-build --name filtered --version v1 \
+  --symbols AAPL,MSFT --horizons 7,30 \
+  --exclude-features indicator_obv,indicator_adx \
+  --export
+```
+
+**Notes:**
+
+- Cannot use both `--features` and `--exclude-features` together
+- Feature names must match those in `feature_definitions` table
+- Non-existent feature names are silently ignored
+- Default behavior unchanged: all features included when neither flag is specified
+
 ### Changed
 
 #### ⚠️ BREAKING CHANGE: Inverted Trim Command Defaults

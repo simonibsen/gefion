@@ -519,6 +519,8 @@ def ml_dataset_build(
     horizons: str = typer.Option("7,30,90", help="Comma-separated horizons in days"),
     weak_thresholds: str = typer.Option("0.02,0.05,0.10", help="Comma-separated weak thresholds (per horizon)"),
     strong_thresholds: str = typer.Option("0.05,0.10,0.20", help="Comma-separated strong thresholds (per horizon)"),
+    features: Optional[str] = typer.Option(None, help="Comma-separated feature names to include (whitelist mode)"),
+    exclude_features: Optional[str] = typer.Option(None, help="Comma-separated feature names to exclude (blacklist mode)"),
     out_dir: Path = typer.Option(Path("datasets"), help="Output directory for dataset manifest"),
     export: bool = typer.Option(False, "--export/--no-export", help="Export dataset artifacts (requires DB data)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
@@ -528,6 +530,16 @@ def ml_dataset_build(
     sym_list = parse_comma_separated(symbols) or []
     if not sym_list and not exchange:
         emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
+        return
+
+    # Feature selection validation
+    feature_list = parse_comma_separated(features) or []
+    exclude_list = parse_comma_separated(exclude_features) or []
+    if feature_list and exclude_list:
+        emit_error(
+            "Cannot specify both --features and --exclude-features. Use one or the other.",
+            json_output=json_output,
+        )
         return
 
     try:
@@ -575,7 +587,8 @@ def ml_dataset_build(
         "name": name,
         "version": version,
         "universe": universe,
-        "feature_names": [],
+        "feature_names": feature_list,
+        "exclude_features": exclude_list,
         "lookback_days": int(lookback_days),
         "horizons_days": horizon_vals,
         "label_spec": label_spec,
