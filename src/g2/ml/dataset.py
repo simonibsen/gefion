@@ -46,6 +46,8 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     universe = manifest.get("universe") or {}
     symbols = universe.get("symbols") or []
     horizons_days = manifest.get("horizons_days") or []
+    feature_names = manifest.get("feature_names") or []
+    exclude_features = manifest.get("exclude_features") or []
 
     price_rows: list[dict[str, Any]] = []
     try:
@@ -94,28 +96,40 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     feature_rows: list[dict[str, Any]] = []
     try:
         with conn.cursor() as cur:
+            # Build WHERE clause based on feature selection
+            where_clauses = []
+            params: list[Any] = []
+
+            # Symbol filtering
             if symbols:
-                cur.execute(
-                    """
-                    SELECT s.symbol, cf.date, fd.name, cf.value
-                    FROM computed_features cf
-                    JOIN feature_definitions fd ON fd.id = cf.feature_id
-                    JOIN stocks s ON s.id = cf.data_id
-                    WHERE s.symbol = ANY(%s)
-                    ORDER BY s.symbol, cf.date, fd.name;
-                    """,
-                    (list(symbols),),
-                )
+                where_clauses.append("s.symbol = ANY(%s)")
+                params.append(list(symbols))
+
+            # Feature filtering (whitelist mode: include only specified features)
+            if feature_names:
+                where_clauses.append("fd.name = ANY(%s)")
+                params.append(list(feature_names))
+            # Feature filtering (blacklist mode: exclude specified features)
+            elif exclude_features:
+                where_clauses.append("fd.name != ALL(%s)")
+                params.append(list(exclude_features))
+
+            where_clause = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+            sql = f"""
+                SELECT s.symbol, cf.date, fd.name, cf.value
+                FROM computed_features cf
+                JOIN feature_definitions fd ON fd.id = cf.feature_id
+                JOIN stocks s ON s.id = cf.data_id
+                WHERE {where_clause}
+                ORDER BY s.symbol, cf.date, fd.name;
+            """
+
+            if params:
+                cur.execute(sql, tuple(params))
             else:
-                cur.execute(
-                    """
-                    SELECT s.symbol, cf.date, fd.name, cf.value
-                    FROM computed_features cf
-                    JOIN feature_definitions fd ON fd.id = cf.feature_id
-                    JOIN stocks s ON s.id = cf.data_id
-                    ORDER BY s.symbol, cf.date, fd.name;
-                    """
-                )
+                cur.execute(sql)
+
             for row in cur.fetchall():
                 feature_rows.append({"symbol": row[0], "date": row[1], "feature_name": row[2], "value": row[3]})
     except Exception:
