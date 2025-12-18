@@ -527,7 +527,20 @@ def ml_dataset_build(
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
-    """Create a dataset manifest and register it in `ml_datasets` (MVP)."""
+    """
+    Create a dataset manifest and register it in ml_datasets.
+
+    Examples:
+        # Build dataset for specific symbols
+        g2 ml dataset-build --name tech_stocks --version v1 --symbols AAPL,MSFT,GOOGL
+
+        # Build dataset for NASDAQ exchange (limited to 50 stocks)
+        g2 ml dataset-build --name nasdaq_50 --version 2025-01 --exchange NASDAQ --limit 50
+
+        # Build with custom horizons and thresholds
+        g2 ml dataset-build --name custom --version v1 --symbols AAPL,MSFT \\
+            --horizons 7,14,30 --weak-thresholds 0.02,0.03,0.05 --strong-thresholds 0.05,0.08,0.12
+    """
     sym_list = parse_comma_separated(symbols) or []
     if not sym_list and not exchange:
         emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
@@ -640,7 +653,22 @@ def ml_train(
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
-    """Train a quantile regression model for multi-horizon return prediction (MVP)."""
+    """
+    Train a quantile regression model for multi-horizon return prediction.
+
+    Examples:
+        # Train a quantile regression model on a dataset
+        g2 ml train --dataset-name tech_stocks --dataset-version v1 \\
+            --model-name tech_qr --model-version v1
+
+        # Train using XGBoost algorithm
+        g2 ml train --dataset-name nasdaq_50 --dataset-version 2025-01 \\
+            --model-name nasdaq_xgb --model-version v1 --algorithm xgboost
+
+        # Train with custom output directory
+        g2 ml train --dataset-name custom --dataset-version v1 \\
+            --model-name custom_model --model-version v1 --out-dir ./my_models
+    """
     from g2.ml.store import get_ml_dataset
     from g2.ml.models import load_dataset_from_csv, train_quantile_model, save_model_artifact
 
@@ -762,7 +790,18 @@ def ml_predict(
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
-    """Generate predictions using a trained model (MVP placeholder)."""
+    """
+    Generate predictions using a trained model.
+
+    Examples:
+        # Generate predictions for specific symbols
+        g2 ml predict --model-name tech_qr --model-version v1 \\
+            --prediction-date 2025-01-15 --symbols AAPL,MSFT,GOOGL
+
+        # Generate predictions for NASDAQ universe
+        g2 ml predict --model-name nasdaq_xgb --model-version v1 \\
+            --prediction-date 2025-01-15 --exchange NASDAQ --limit 50
+    """
     import pandas as pd
     from g2.ml.models import load_model_artifact, predict_quantiles
     from g2.ml.store import get_ml_dataset
@@ -1330,7 +1369,21 @@ def ingest_prices(
     db_url: Optional[str] = typer.Option(None, help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
-    """Ingest daily adjusted prices from AlphaVantage. If --input is provided, load from file; otherwise fetch via API."""
+    """
+    Ingest daily adjusted prices from AlphaVantage.
+
+    If --input is provided, load from file; otherwise fetch via API.
+
+    Examples:
+        # Fetch latest prices for AAPL from API
+        g2 prices-ingest --symbol AAPL
+
+        # Ingest from a local JSON file
+        g2 prices-ingest --symbol AAPL --input prices.json
+
+        # Fetch full history and refresh existing data
+        g2 prices-ingest --symbol MSFT --timeframe full --refresh-existing
+    """
     if input:
         payload = json.loads(input.read_text())
         rows = parse_daily_adjusted(symbol=symbol, payload=payload)
@@ -1419,7 +1472,19 @@ def ingest_universe(
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress updates"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
-    """Fetch listing status and ingest prices for the filtered universe."""
+    """
+    Fetch listing status and ingest prices for the filtered universe.
+
+    Examples:
+        # Ingest all active NASDAQ stocks (limited to first 10 for testing)
+        g2 universe-ingest --exchange NASDAQ --limit 10
+
+        # Full refresh of NYSE universe with custom rate limit
+        g2 universe-ingest --exchange NYSE --refresh --calls-per-minute 75
+
+        # Ingest from a saved listings file
+        g2 universe-ingest --exchange NASDAQ --listings-file listings.csv
+    """
     if refresh:
         timeframe = "full"
         update_existing = True
@@ -1591,7 +1656,18 @@ def db_init(
 ) -> None:
     """
     Initialize database schema from sql/schema.sql.
+
     Creates all tables, hypertables, and indexes. Safe to run multiple times (idempotent).
+
+    Examples:
+        # Initialize database with default connection
+        g2 db-init
+
+        # Initialize with custom database URL
+        g2 db-init --db-url postgresql://user:pass@localhost:5432/mydb
+
+        # Check results in JSON format
+        g2 db-init --json
     """
     import subprocess
     import sys
@@ -2747,6 +2823,22 @@ def update_all(
 ) -> None:
     """
     Update all data: prices first, then indicators for the selected universe.
+
+    This is the main workflow command that ingests price data and computes
+    technical indicators in one step.
+
+    Examples:
+        # Update data for existing stocks in database (inferred from stocks table)
+        g2 data-update
+
+        # Update NASDAQ stocks (limited to 20 for testing)
+        g2 data-update --exchange NASDAQ --limit 20
+
+        # Full refresh with custom indicators
+        g2 data-update --exchange NYSE --refresh --indicators rsi,macd,sma20,sma50
+
+        # Use local computation for faster processing
+        g2 data-update --exchange NASDAQ --limit 50 --local
     """
     url = _db_url(db_url)
     if refresh:
