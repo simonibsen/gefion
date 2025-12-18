@@ -457,3 +457,609 @@ Tactical, prioritized list of implementation tasks for g2. For long-term vision,
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md) - How to use g2
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Development guidelines (if exists)
+
+---
+
+## Strategic Direction: Three Paths Forward
+
+**Status**: All tactical items (#1-10) complete as of 2025-12-17
+
+With the foundation in place, choose your strategic direction based on goals:
+
+---
+
+## Path A: Trading-First (Production Trading Platform)
+
+**Goal**: Ship a complete, production-ready trading platform with multiple strategies and real-world validation.
+
+**Timeline**: 6-8 weeks
+
+**Best For**: Users who want to make real trading decisions, deploy strategies, analyze performance.
+
+### 11. Real-World Validation & Integration Testing
+
+**Status**: Planned
+**Priority**: High (validates foundation)
+**Effort**: 1-2 weeks
+
+**Context**: Test the backtesting engine and momentum strategy with real historical data to validate correctness and identify edge cases.
+
+**Action Items**:
+- [ ] Run momentum backtest on 50+ NASDAQ stocks (6+ months history)
+  - Test with real market gaps (weekends, holidays)
+  - Test with stock halts and circuit breakers
+  - Validate point-in-time correctness (no look-ahead bias)
+- [ ] Create end-to-end integration test:
+  - `g2 db-init` → `g2 data-update` → backtest
+  - Document any rough edges or failure modes
+  - Measure performance (time, memory) with real data volumes
+- [ ] Document real performance metrics:
+  - Total return vs. buy-and-hold benchmark
+  - Sharpe ratio, max drawdown, win rate
+  - Transaction costs impact
+  - Create reference example in docs/BACKTESTING.md
+- [ ] Add CLI command for backtesting:
+  ```bash
+  g2 backtest run --strategy momentum \
+    --symbols AAPL,MSFT,GOOGL \
+    --start-date 2024-01-01 \
+    --end-date 2024-12-31 \
+    --initial-cash 100000
+  ```
+
+**Files to create/modify**:
+- `src/g2/cli.py` (add backtest command)
+- `docs/BACKTESTING.md` (new file)
+- `examples/momentum_backtest.py`
+- Tests for backtest CLI command
+
+---
+
+### 12. Core Trading Strategies Suite
+
+**Status**: Planned
+**Priority**: High (expand capabilities)
+**Effort**: 3-4 weeks
+
+**Context**: Implement 4-6 additional trading strategies to provide variety and enable strategy comparison.
+
+**Action Items**:
+- [ ] **Mean Reversion Strategy**:
+  - Buy oversold (RSI < 30), sell overbought (RSI > 70)
+  - Bollinger Band reversions
+  - Tests in `tests/test_strategy_mean_reversion.py`
+- [ ] **Pairs Trading Strategy**:
+  - Cointegration-based pairs selection
+  - Z-score entry/exit signals
+  - Tests for spread calculation and signal generation
+- [ ] **Breakout Strategy**:
+  - Volatility expansion detection
+  - Volume confirmation
+  - Trailing stop loss implementation
+- [ ] **Moving Average Crossover**:
+  - Golden cross (50/200 day) signals
+  - EMA-based faster signals
+  - Trend confirmation with volume
+- [ ] **RSI Divergence Strategy**:
+  - Price/RSI divergence detection
+  - Combined with support/resistance levels
+- [ ] **Volatility Contraction Strategy**:
+  - Bollinger Band squeeze
+  - Low ATR periods → expansion trades
+
+**Implementation Pattern** (TDD for each):
+1. Write failing tests for strategy logic
+2. Implement strategy class with `generate_signals()` method
+3. Test with synthetic data (predictable outcomes)
+4. Test with real historical data
+5. Document parameters and expected behavior
+
+**Files to create**:
+- `src/g2/strategies/mean_reversion.py`
+- `src/g2/strategies/pairs_trading.py`
+- `src/g2/strategies/breakout.py`
+- `src/g2/strategies/ma_crossover.py`
+- `src/g2/strategies/rsi_divergence.py`
+- `src/g2/strategies/volatility_contraction.py`
+- Corresponding test files in `tests/`
+
+---
+
+### 13. Strategy Comparison Framework
+
+**Status**: Planned
+**Priority**: Medium (enables evaluation)
+**Effort**: 1-2 weeks
+
+**Context**: Enable side-by-side comparison of strategy performance to identify best performers for given conditions.
+
+**Action Items**:
+- [ ] Implement comparison metrics:
+  - Risk-adjusted returns (Sharpe, Sortino, Calmar ratios)
+  - Drawdown analysis (max, average, recovery time)
+  - Trade statistics (win rate, profit factor, avg win/loss)
+  - Consistency metrics (monthly returns, rolling Sharpe)
+- [ ] Create comparison CLI command:
+  ```bash
+  g2 backtest compare \
+    --strategies momentum,mean_reversion,breakout \
+    --symbols AAPL,MSFT,GOOGL,NVDA,TSLA \
+    --start-date 2024-01-01 \
+    --end-date 2024-12-31
+  ```
+- [ ] Generate comparison report:
+  - Table of key metrics by strategy
+  - Equity curve plots (matplotlib/plotly)
+  - Monthly return heatmaps
+  - Export to JSON/CSV for further analysis
+- [ ] Add statistical significance testing:
+  - Bootstrap confidence intervals
+  - Paired t-tests for return differences
+- [ ] Document best practices for strategy selection:
+  - Market regime considerations
+  - Portfolio allocation across strategies
+  - Parameter sensitivity analysis
+
+**Files to create/modify**:
+- `src/g2/backtest/comparison.py`
+- `src/g2/backtest/metrics.py` (expand existing)
+- `src/g2/backtest/reporting.py`
+- `src/g2/cli.py` (add compare command)
+- `tests/test_comparison.py`
+- `docs/STRATEGY_COMPARISON.md`
+
+---
+
+### 14. Advanced Backtesting Features
+
+**Status**: Planned
+**Priority**: Medium (realism)
+**Effort**: 2-3 weeks
+
+**Context**: Add features for more realistic backtesting (costs, slippage, position sizing).
+
+**Action Items**:
+- [ ] Transaction cost modeling:
+  - Configurable commission per trade
+  - Bid-ask spread simulation
+  - Market impact for larger orders
+- [ ] Slippage modeling:
+  - Slippage as function of volume
+  - Limit vs. market order simulation
+- [ ] Position sizing strategies:
+  - Fixed dollar amount
+  - Kelly criterion
+  - Risk parity
+  - Volatility-based sizing
+- [ ] Risk management:
+  - Stop loss orders
+  - Take profit targets
+  - Maximum position size limits
+  - Portfolio-level risk constraints
+- [ ] Walk-forward optimization:
+  - Rolling train/test windows
+  - Parameter stability analysis
+  - Out-of-sample performance validation
+
+**Files to create/modify**:
+- `src/g2/backtest/costs.py`
+- `src/g2/backtest/position_sizing.py`
+- `src/g2/backtest/risk_management.py`
+- `src/g2/backtest/optimization.py`
+- Update `BacktestEngine` to use these components
+
+---
+
+## Path B: ML-First (Advanced ML Infrastructure)
+
+**Goal**: Build state-of-the-art ML infrastructure for research and production model development.
+
+**Timeline**: 6-8 weeks
+
+**Best For**: Researchers, data scientists, users focused on model quality and experimentation.
+
+### 15. Parquet Dataset Format
+
+**Status**: Planned
+**Priority**: High (performance)
+**Effort**: 1 week
+
+**Context**: Parquet provides 5-10x faster I/O and smaller files compared to CSV.
+
+**Action Items**:
+- [ ] Add Parquet export to dataset builder:
+  ```bash
+  g2 ml dataset-build --name tech --version v1 \
+    --symbols AAPL,MSFT --export --format parquet
+  ```
+- [ ] Update model training to read Parquet:
+  - Replace `pd.read_csv()` with `pd.read_parquet()`
+  - Handle Parquet metadata for type preservation
+- [ ] Benchmark performance improvements:
+  - File size comparison (CSV vs. Parquet)
+  - Load time comparison
+  - Memory usage comparison
+- [ ] Add PyArrow as dependency:
+  - Update `pyproject.toml`
+  - Document installation requirements
+
+**Files to modify**:
+- `src/g2/ml/dataset.py`
+- `src/g2/ml/models.py`
+- `src/g2/cli.py`
+- `pyproject.toml`
+- `tests/test_ml_dataset_export.py`
+
+---
+
+### 16. Combined Trend + Quantile Screening
+
+**Status**: Planned
+**Priority**: High (ML integration)
+**Effort**: 2-3 weeks
+
+**Context**: Combine trend classification and quantile predictions for intelligent stock screening.
+
+**Action Items**:
+- [ ] Implement screening logic:
+  - Filter by predicted trend (e.g., only "strong_up" or "weak_up")
+  - Within trend filter, rank by quantile predictions (q90 - q10 spread)
+  - Select top N stocks for portfolio
+- [ ] Create screening CLI:
+  ```bash
+  g2 ml screen \
+    --trend-model trend_v1 \
+    --quantile-model qr_v1 \
+    --date 2024-12-17 \
+    --trend-filter strong_up,weak_up \
+    --top-n 20
+  ```
+- [ ] Add confidence filtering:
+  - Require minimum trend probability (e.g., > 0.7)
+  - Require minimum quantile spread (q90 - q50 > threshold)
+- [ ] Backtest screening strategy:
+  - Compare vs. momentum strategy
+  - Analyze turnover and transaction costs
+- [ ] Document screening approach in ML_QUICKSTART.md
+
+**Files to create/modify**:
+- `src/g2/ml/screening.py`
+- `src/g2/cli.py` (add screen command)
+- `tests/test_ml_screening.py`
+- `docs/ML_QUICKSTART.md`
+
+---
+
+### 17. Feature Engineering Pipeline
+
+**Status**: Planned
+**Priority**: Medium (data quality)
+**Effort**: 2-3 weeks
+
+**Context**: Structured feature engineering with transformations, selections, and validation.
+
+**Action Items**:
+- [ ] Feature transformations:
+  - Log transforms for skewed features
+  - Winsorization for outliers
+  - Standardization (z-score) and normalization
+  - Interaction features (products, ratios)
+- [ ] Feature selection:
+  - Correlation-based filtering
+  - Variance threshold
+  - Recursive feature elimination (RFE)
+  - SHAP-based importance
+- [ ] Feature validation:
+  - Missing value checks
+  - Distribution drift detection
+  - Multicollinearity detection (VIF)
+  - Target leakage detection
+- [ ] Pipeline configuration:
+  - YAML/JSON config for feature pipeline
+  - Reproducible transformations
+  - Version tracking
+
+**Files to create**:
+- `src/g2/ml/feature_engineering.py`
+- `src/g2/ml/feature_selection.py`
+- `src/g2/ml/feature_validation.py`
+- `config/feature_pipeline_example.yaml`
+
+---
+
+### 18. Production ML Features
+
+**Status**: Planned
+**Priority**: Medium (production readiness)
+**Effort**: 3-4 weeks
+
+**Context**: Features needed for production ML deployment.
+
+**Action Items**:
+- [ ] **Warm-Start Retraining**:
+  - Incremental model updates with new data
+  - Transfer learning from previous model
+  - A/B testing framework for model comparison
+- [ ] **Model Ensembles**:
+  - Combine multiple models (voting, stacking)
+  - Diversity-based ensemble selection
+  - Ensemble weight optimization
+- [ ] **Feature Importance Analysis**:
+  - SHAP values for global/local explanations
+  - Permutation importance
+  - Partial dependence plots
+- [ ] **Hyperparameter Tuning**:
+  - Optuna integration for Bayesian optimization
+  - Cross-validation strategies
+  - Early stopping and pruning
+- [ ] **Online Prediction API**:
+  - FastAPI endpoint for predictions
+  - Model serving with caching
+  - Batch prediction support
+  - Monitoring and logging
+
+**Files to create**:
+- `src/g2/ml/retraining.py`
+- `src/g2/ml/ensemble.py`
+- `src/g2/ml/explainability.py`
+- `src/g2/ml/tuning.py`
+- `src/g2/api/` (new module for API)
+- `src/g2/api/server.py`
+- `src/g2/api/models.py`
+
+---
+
+## Path C: Scale-First (Production Infrastructure)
+
+**Goal**: Build bulletproof, scalable infrastructure for growing user base and production deployment.
+
+**Timeline**: 6-8 weeks
+
+**Best For**: Teams deploying to production, handling large data volumes, supporting multiple users.
+
+### 19. Observability & Monitoring
+
+**Status**: Planned
+**Priority**: High (production requirement)
+**Effort**: 2-3 weeks
+
+**Context**: Production systems need comprehensive monitoring, logging, and alerting.
+
+**Action Items**:
+- [ ] **Structured Logging**:
+  - Migrate from print/echo to structured logging (JSON)
+  - Use Python `logging` module with formatters
+  - Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  - Contextual logging (operation ID, user, timestamp)
+- [ ] **Metrics Collection**:
+  - Track operation duration (data ingestion, feature computation, training)
+  - Track success/failure rates
+  - Track resource usage (memory, CPU, DB connections)
+  - Export to Prometheus/StatsD
+- [ ] **Error Tracking**:
+  - Integrate Sentry or similar for error aggregation
+  - Capture stack traces and context
+  - Alert on error spikes
+- [ ] **Performance Profiling**:
+  - Add profiling decorators for slow operations
+  - Identify bottlenecks in data pipeline
+  - Memory profiling for large datasets
+- [ ] **Health Checks**:
+  - Database connectivity check
+  - API availability check
+  - Data freshness check (last update time)
+
+**Files to create/modify**:
+- `src/g2/utils/logging.py`
+- `src/g2/utils/metrics.py`
+- `src/g2/utils/profiling.py`
+- `config/logging.yaml`
+- Update all CLI commands to use structured logging
+
+---
+
+### 20. Performance Optimization
+
+**Status**: Planned
+**Priority**: High (scalability)
+**Effort**: 2-3 weeks
+
+**Context**: Optimize for larger datasets and faster execution.
+
+**Action Items**:
+- [ ] **Database Query Optimization**:
+  - Analyze slow queries with EXPLAIN ANALYZE
+  - Add missing indexes (date, symbol combinations)
+  - Optimize JOIN operations
+  - Use window functions for time-series operations
+- [ ] **Parallel Execution**:
+  - Increase parallelism in feature computation
+  - Use connection pooling more effectively
+  - Optimize batch sizes for throughput
+- [ ] **Caching Layer**:
+  - Cache frequently accessed data (stock metadata)
+  - Cache computed features (Redis/Memcached)
+  - Invalidation strategy for stale data
+- [ ] **Data Pipeline Optimization**:
+  - Use Pandas/Polars optimizations
+  - Vectorize operations instead of loops
+  - Chunked processing for large datasets
+- [ ] **Benchmark Suite**:
+  - Create reproducible benchmarks
+  - Track performance over time
+  - Regression detection
+
+**Files to create/modify**:
+- `src/g2/utils/caching.py`
+- `benchmarks/` (new directory)
+- `benchmarks/bench_feature_computation.py`
+- `benchmarks/bench_data_ingestion.py`
+- SQL migration for additional indexes
+
+---
+
+### 21. CI/CD & Deployment
+
+**Status**: Planned
+**Priority**: Medium (automation)
+**Effort**: 1-2 weeks
+
+**Context**: Automate testing, building, and deployment.
+
+**Action Items**:
+- [ ] **GitHub Actions Workflows**:
+  - Run tests on every PR (pytest, linting)
+  - Run tests with multiple Python versions (3.9, 3.10, 3.11)
+  - Database integration tests with Docker
+- [ ] **Docker Deployment**:
+  - Dockerfile for g2 application
+  - Docker Compose for full stack (app + DB)
+  - Multi-stage builds for smaller images
+- [ ] **Release Automation**:
+  - Semantic versioning (SemVer)
+  - Automated changelog generation
+  - PyPI package publishing
+  - Docker image publishing to registry
+- [ ] **Documentation Site**:
+  - MkDocs or Sphinx for documentation
+  - Auto-deploy docs on push to main
+  - API reference generation from docstrings
+
+**Files to create**:
+- `.github/workflows/test.yml`
+- `.github/workflows/release.yml`
+- `Dockerfile`
+- `docker-compose.yml` (production version)
+- `mkdocs.yml` or `docs/conf.py`
+
+---
+
+### 22. Documentation & Tutorials
+
+**Status**: Planned
+**Priority**: Medium (user experience)
+**Effort**: 2-3 weeks
+
+**Context**: Comprehensive documentation and tutorials for new users.
+
+**Action Items**:
+- [ ] **Getting Started Guide**:
+  - 15-minute quickstart from zero to first backtest
+  - Step-by-step with screenshots
+  - Common pitfalls and troubleshooting
+- [ ] **Video Tutorials**:
+  - YouTube series covering main workflows
+  - Screen recordings with narration
+  - Jupyter notebook walkthroughs
+- [ ] **API Documentation**:
+  - Full docstring coverage (Google/NumPy style)
+  - Auto-generated API reference
+  - Type hints for all public APIs
+- [ ] **Example Gallery**:
+  - 10+ complete examples covering use cases
+  - Jupyter notebooks with explanations
+  - Runnable in Binder/Colab
+- [ ] **FAQ & Cookbook**:
+  - Common questions and answers
+  - Recipe-style solutions for specific tasks
+  - Performance tips and best practices
+
+**Files to create/modify**:
+- `docs/QUICKSTART.md` (expand existing)
+- `docs/TUTORIALS.md`
+- `docs/API_REFERENCE.md`
+- `docs/FAQ.md`
+- `docs/COOKBOOK.md`
+- `examples/notebooks/` (Jupyter notebooks)
+
+---
+
+### 23. Testing & Quality Assurance
+
+**Status**: Planned
+**Priority**: High (code quality)
+**Effort**: 2-3 weeks
+
+**Context**: Increase test coverage and add quality gates.
+
+**Action Items**:
+- [ ] **Increase Test Coverage**:
+  - Target 80%+ coverage for core modules
+  - Add integration tests for full workflows
+  - Add property-based tests (Hypothesis)
+  - Performance regression tests
+- [ ] **Linting & Formatting**:
+  - Enforce Black formatting
+  - Enable Ruff for fast linting
+  - Type checking with mypy
+  - Pre-commit hooks for consistency
+- [ ] **Database Test Fixtures**:
+  - Reusable fixtures for common scenarios
+  - Fast in-memory test database option
+  - Data generators for realistic test data
+- [ ] **Load Testing**:
+  - Simulate high query loads
+  - Test with 1000+ stocks, 5+ years data
+  - Identify scalability limits
+- [ ] **Security Audit**:
+  - SQL injection prevention review
+  - Dependency vulnerability scanning
+  - Secrets management review
+
+**Files to create/modify**:
+- `.pre-commit-config.yaml`
+- `pyproject.toml` (add linting config)
+- `tests/fixtures/` (shared fixtures)
+- `tests/performance/` (performance tests)
+- Update CI to enforce quality gates
+
+---
+
+## Implementation Recommendations
+
+### For Path A (Trading-First):
+1. Start with Item #11 (validation) - 1 week
+2. Implement 2-3 strategies from #12 - 2 weeks
+3. Add strategy comparison #13 - 1 week
+4. **Milestone**: Working multi-strategy platform
+
+### For Path B (ML-First):
+1. Add Parquet support #15 - 1 week
+2. Build screening system #16 - 2 weeks
+3. Add feature engineering #17 - 2 weeks
+4. Add 2-3 production features from #18 - 2 weeks
+5. **Milestone**: Production-grade ML pipeline
+
+### For Path C (Scale-First):
+1. Add observability #19 - 2 weeks
+2. Optimize performance #20 - 2 weeks
+3. Set up CI/CD #21 - 1 week
+4. Write documentation #22 - 2 weeks
+5. **Milestone**: Production-ready infrastructure
+
+### Recommended Sequence:
+If uncertain, follow this order:
+1. **Path A** (validate foundation, add value fast)
+2. **Path C** (make it robust before scaling)
+3. **Path B** (add advanced ML features)
+
+This ensures you have a working, validated, stable platform before adding complexity.
+
+---
+
+## Progress Tracking
+
+Update this section as items are completed:
+
+**Completed** (2025-12-17):
+- ✅ Items #1-10 (all tactical improvements)
+- ✅ Cross-sectional features
+- ✅ Backtesting engine MVP
+- ✅ Momentum strategy MVP
+- ✅ Trend classification model
+- ✅ Error messages & CLI help
+
+**In Progress**: None
+
+**Next Up**: Choose strategic path (A, B, or C)
+
