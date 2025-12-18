@@ -31,8 +31,9 @@ class RateLimiter:
         self.tokens = calls_per_minute
         self.updated = time.monotonic()
         # Enforce minimum spacing: for 75/min, that's 0.8 sec/call
-        # Add 25% buffer for safety: 0.8 * 1.25 = 1.0 second minimum spacing
-        self.min_spacing = (60.0 / calls_per_minute) * 1.25
+        # Add 10% buffer for safety: 0.8 * 1.10 = 0.88 seconds minimum spacing
+        # This gives ~68 calls/min (90% capacity utilization) vs 60/min with 25% buffer
+        self.min_spacing = (60.0 / calls_per_minute) * 1.10
         self.last_request = 0.0  # Track last request time
         self.lock = threading.Lock()
 
