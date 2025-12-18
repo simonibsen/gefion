@@ -527,17 +527,18 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ### 12. Core Trading Strategies Suite
 
-**Status**: Planned
+**Status**: In Progress (1/6 complete)
 **Priority**: High (expand capabilities)
 **Effort**: 3-4 weeks
 
 **Context**: Implement 4-6 additional trading strategies to provide variety and enable strategy comparison.
 
 **Action Items**:
-- [ ] **Mean Reversion Strategy**:
-  - Buy oversold (RSI < 30), sell overbought (RSI > 70)
-  - Bollinger Band reversions
-  - Tests in `tests/test_strategy_mean_reversion.py`
+- [x] **Mean Reversion Strategy**:
+  - Buy oversold (RSI < 30), sell overbought (RSI > 70) ✓
+  - RSI-based signal generation ✓
+  - Tests in `tests/test_strategy_mean_reversion.py` (9 tests passing) ✓
+  - CLI integration via `g2 backtest run --strategy mean_reversion` ✓
 - [ ] **Pairs Trading Strategy**:
   - Cointegration-based pairs selection
   - Z-score entry/exit signals
@@ -564,8 +565,13 @@ With the foundation in place, choose your strategic direction based on goals:
 4. Test with real historical data
 5. Document parameters and expected behavior
 
+**Files created**:
+
+- `src/g2/strategies/mean_reversion.py` (195 lines) ✓
+- `tests/test_strategy_mean_reversion.py` (369 lines, 9 tests) ✓
+
 **Files to create**:
-- `src/g2/strategies/mean_reversion.py`
+
 - `src/g2/strategies/pairs_trading.py`
 - `src/g2/strategies/breakout.py`
 - `src/g2/strategies/ma_crossover.py`
