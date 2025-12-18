@@ -13,7 +13,7 @@ from g2.db import schema
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         yield conn
