@@ -656,6 +656,7 @@ def _load_db_function(conn: psycopg.Connection, function_name: str) -> Optional[
     if not row:
         return None
     language, body, version = row
+    # Accept both "python" (preferred) and "python_expr" (legacy) for backward compatibility
     if language not in ("python_expr", "python"):
         warnings.warn(f"Ignoring feature_function '{function_name}' with unsupported language '{language}'")
         return None

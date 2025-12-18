@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS feature_functions (
     version TEXT NOT NULL,
     status TEXT DEFAULT 'active',
     description TEXT,
-    language TEXT NOT NULL,        -- e.g., python_expr, sql_expr, udf
+    language TEXT NOT NULL,        -- e.g., python, sql (python_expr also supported for legacy)
     function_body TEXT NOT NULL,   -- code or template
     inputs JSONB,                  -- expected inputs schema
     output_name TEXT DEFAULT 'value',
