@@ -3086,7 +3086,7 @@ def backtest_run(
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
-        help="Strategy name: 'momentum' or 'mean_reversion'"
+        help="Strategy name: 'momentum', 'mean_reversion', or 'ma_crossover'"
     ),
     start_date: str = typer.Option(
         ...,
@@ -3141,7 +3141,17 @@ def backtest_run(
     max_positions: int = typer.Option(
         5,
         "--max-positions",
-        help="Maximum concurrent positions (mean_reversion strategy)"
+        help="Maximum concurrent positions (mean_reversion, ma_crossover strategies)"
+    ),
+    fast_period: int = typer.Option(
+        50,
+        "--fast-period",
+        help="Fast moving average period in days (ma_crossover strategy)"
+    ),
+    slow_period: int = typer.Option(
+        200,
+        "--slow-period",
+        help="Slow moving average period in days (ma_crossover strategy)"
     ),
     json_output: bool = typer.Option(
         False,
@@ -3162,12 +3172,18 @@ def backtest_run(
         g2 backtest run --exchange NASDAQ --limit 50 \\
           --start-date 2024-01-01 --end-date 2024-12-01 \\
           --strategy mean_reversion --rsi-oversold 25 --rsi-overbought 75
+
+        # Backtest moving average crossover strategy
+        g2 backtest run --symbols AAPL,MSFT,GOOGL \\
+          --start-date 2024-01-01 --end-date 2024-12-01 \\
+          --strategy ma_crossover --fast-period 50 --slow-period 200
     """
     from datetime import datetime
     from g2.backtest.data_loader import load_price_data_for_backtest
     from g2.backtest.engine import BacktestEngine
     from g2.strategies.momentum import MomentumStrategy
     from g2.strategies.mean_reversion import MeanReversionStrategy
+    from g2.strategies.ma_crossover import MovingAverageCrossoverStrategy
 
     url = os.getenv("DATABASE_URL", SETTINGS.database_url)
 
@@ -3252,9 +3268,16 @@ def backtest_run(
             position_size=position_size,
             max_positions=max_positions,
         )
+    elif strategy == "ma_crossover":
+        strat = MovingAverageCrossoverStrategy(
+            fast_period=fast_period,
+            slow_period=slow_period,
+            position_size=position_size,
+            max_positions=max_positions,
+        )
     else:
         emit_error(
-            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion'",
+            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover'",
             json_output=json_output
         )
         raise typer.Exit(1)

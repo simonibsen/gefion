@@ -527,7 +527,7 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ### 12. Core Trading Strategies Suite
 
-**Status**: In Progress (1/6 complete)
+**Status**: In Progress (2/6 complete)
 **Priority**: High (expand capabilities)
 **Effort**: 3-4 weeks
 
@@ -539,6 +539,11 @@ With the foundation in place, choose your strategic direction based on goals:
   - RSI-based signal generation ✓
   - Tests in `tests/test_strategy_mean_reversion.py` (9 tests passing) ✓
   - CLI integration via `g2 backtest run --strategy mean_reversion` ✓
+- [x] **Moving Average Crossover**:
+  - Golden cross / death cross signal detection ✓
+  - Detects exact crossover points (fast MA > slow MA) ✓
+  - Tests in `tests/test_strategy_ma_crossover.py` (9 tests passing) ✓
+  - CLI integration via `g2 backtest run --strategy ma_crossover` ✓
 - [ ] **Pairs Trading Strategy**:
   - Cointegration-based pairs selection
   - Z-score entry/exit signals
@@ -547,10 +552,6 @@ With the foundation in place, choose your strategic direction based on goals:
   - Volatility expansion detection
   - Volume confirmation
   - Trailing stop loss implementation
-- [ ] **Moving Average Crossover**:
-  - Golden cross (50/200 day) signals
-  - EMA-based faster signals
-  - Trend confirmation with volume
 - [ ] **RSI Divergence Strategy**:
   - Price/RSI divergence detection
   - Combined with support/resistance levels
@@ -567,14 +568,15 @@ With the foundation in place, choose your strategic direction based on goals:
 
 **Files created**:
 
-- `src/g2/strategies/mean_reversion.py` (195 lines) ✓
-- `tests/test_strategy_mean_reversion.py` (369 lines, 9 tests) ✓
+- `src/g2/strategies/mean_reversion.py` (202 lines) ✓
+- `tests/test_strategy_mean_reversion.py` (370 lines, 9 tests) ✓
+- `src/g2/strategies/ma_crossover.py` (165 lines) ✓
+- `tests/test_strategy_ma_crossover.py` (425 lines, 9 tests) ✓
 
 **Files to create**:
 
 - `src/g2/strategies/pairs_trading.py`
 - `src/g2/strategies/breakout.py`
-- `src/g2/strategies/ma_crossover.py`
 - `src/g2/strategies/rsi_divergence.py`
 - `src/g2/strategies/volatility_contraction.py`
 - Corresponding test files in `tests/`
