@@ -3086,7 +3086,7 @@ def backtest_run(
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
-        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', or 'rsi_divergence'"
+        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', or 'volatility_contraction'"
     ),
     start_date: str = typer.Option(
         ...,
@@ -3173,6 +3173,26 @@ def backtest_run(
         "--divergence-lookback",
         help="Days to look back for divergence detection (rsi_divergence strategy)"
     ),
+    bb_period: int = typer.Option(
+        20,
+        "--bb-period",
+        help="Bollinger Band moving average period (volatility_contraction strategy)"
+    ),
+    bb_std_dev: float = typer.Option(
+        2.0,
+        "--bb-std-dev",
+        help="Bollinger Band standard deviation multiplier (volatility_contraction strategy)"
+    ),
+    squeeze_threshold: float = typer.Option(
+        0.05,
+        "--squeeze-threshold",
+        help="Band width threshold for squeeze detection (volatility_contraction strategy)"
+    ),
+    expansion_threshold: float = typer.Option(
+        0.10,
+        "--expansion-threshold",
+        help="Band width threshold for expansion detection (volatility_contraction strategy)"
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -3207,6 +3227,7 @@ def backtest_run(
     from g2.strategies.breakout import BreakoutStrategy
     from g2.strategies.pairs_trading import PairsTradingStrategy
     from g2.strategies.rsi_divergence import RSIDivergenceStrategy
+    from g2.strategies.volatility_contraction import VolatilityContractionStrategy
 
     url = os.getenv("DATABASE_URL", SETTINGS.database_url)
 
@@ -3322,9 +3343,18 @@ def backtest_run(
             position_size=position_size,
             max_positions=max_positions,
         )
+    elif strategy == "volatility_contraction":
+        strat = VolatilityContractionStrategy(
+            bb_period=bb_period,
+            bb_std_dev=bb_std_dev,
+            squeeze_threshold=squeeze_threshold,
+            expansion_threshold=expansion_threshold,
+            position_size=position_size,
+            max_positions=max_positions,
+        )
     else:
         emit_error(
-            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence'",
+            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', 'volatility_contraction'",
             json_output=json_output
         )
         raise typer.Exit(1)
