@@ -427,32 +427,68 @@ def delete_feature_data_only(
     return deleted_counts
 
 
-def latest_indicator_date(conn: psycopg.Connection, data_id: int) -> Optional[date]:
+def latest_feature_date(
+    conn: psycopg.Connection,
+    data_id: int,
+    function_name: Optional[str] = None
+) -> Optional[date]:
+    """
+    Get the latest date for computed features for a given data_id.
+
+    Args:
+        conn: Database connection
+        data_id: Stock data_id
+        function_name: Optional function_name to filter by (e.g., 'indicator', 'derivative')
+                      If None, returns latest date across all active features
+
+    Returns:
+        Latest date or None if no data exists
+    """
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT MAX(date) FROM computed_features
-            WHERE data_id = %s
-            AND feature_id IN (
-                SELECT id FROM feature_definitions WHERE function_name = 'indicator' AND active = TRUE
-            );
-            """,
-            (data_id,),
-        )
+        if function_name:
+            cur.execute(
+                """
+                SELECT MAX(date) FROM computed_features
+                WHERE data_id = %s
+                AND feature_id IN (
+                    SELECT id FROM feature_definitions WHERE function_name = %s AND active = TRUE
+                );
+                """,
+                (data_id, function_name),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT MAX(date) FROM computed_features
+                WHERE data_id = %s
+                AND feature_id IN (
+                    SELECT id FROM feature_definitions WHERE active = TRUE
+                );
+                """,
+                (data_id,),
+            )
         row = cur.fetchone()
     return row[0]
 
 
-def filter_symbols_needing_indicators(
+def filter_symbols_needing_features(
     conn: psycopg.Connection,
     symbols: Sequence[str],
-    target_date: Optional[date] = None
+    target_date: Optional[date] = None,
+    function_name: Optional[str] = None
 ) -> List[str]:
     """
-    Filter out symbols that already have up-to-date indicator data.
+    Filter out symbols that already have up-to-date feature data.
 
-    Returns a list of symbols that need indicator computation (either missing data or stale data).
-    This is more efficient than checking each symbol individually in parallel workers.
+    Args:
+        conn: Database connection
+        symbols: List of stock symbols to check
+        target_date: Target date for up-to-date check (defaults to today)
+        function_name: Optional function_name to filter by (e.g., 'indicator', 'derivative')
+                      If None, checks all active features
+
+    Returns:
+        List of symbols that need feature computation (either missing data or stale data)
     """
     from datetime import date as date_type
     if target_date is None:
@@ -462,39 +498,83 @@ def filter_symbols_needing_indicators(
         return []
 
     with conn.cursor() as cur:
-        # Query to find symbols with stale or missing indicator data
-        # Exclude symbols with status='Inactive' (delisted/dead tickers)
-        cur.execute(
-            """
-            WITH symbol_ids AS (
-                SELECT s.id, s.symbol
-                FROM stocks s
-                WHERE s.symbol = ANY(%s)
-                  AND s.status IS DISTINCT FROM 'Inactive'
-            ),
-            latest_indicators AS (
-                SELECT
-                    cf.data_id,
-                    MAX(cf.date) as latest_date
-                FROM computed_features cf
-                WHERE cf.data_id IN (SELECT id FROM symbol_ids)
-                  AND cf.feature_id IN (
-                      SELECT id FROM feature_definitions
-                      WHERE function_name = 'indicator' AND active = TRUE
-                  )
-                GROUP BY cf.data_id
+        if function_name:
+            # Query to find symbols with stale or missing feature data for specific function
+            cur.execute(
+                """
+                WITH symbol_ids AS (
+                    SELECT s.id, s.symbol
+                    FROM stocks s
+                    WHERE s.symbol = ANY(%s)
+                      AND s.status IS DISTINCT FROM 'Inactive'
+                ),
+                latest_features AS (
+                    SELECT
+                        cf.data_id,
+                        MAX(cf.date) as latest_date
+                    FROM computed_features cf
+                    WHERE cf.data_id IN (SELECT id FROM symbol_ids)
+                      AND cf.feature_id IN (
+                          SELECT id FROM feature_definitions
+                          WHERE function_name = %s AND active = TRUE
+                      )
+                    GROUP BY cf.data_id
+                )
+                SELECT s.symbol
+                FROM symbol_ids s
+                LEFT JOIN latest_features lf ON s.id = lf.data_id
+                WHERE lf.latest_date IS NULL
+                   OR lf.latest_date < %s;
+                """,
+                (symbols, function_name, target_date)
             )
-            SELECT s.symbol
-            FROM symbol_ids s
-            LEFT JOIN latest_indicators li ON s.id = li.data_id
-            WHERE li.latest_date IS NULL
-               OR li.latest_date < %s;
-            """,
-            (symbols, target_date)
-        )
+        else:
+            # Query to find symbols with stale or missing feature data for any active features
+            cur.execute(
+                """
+                WITH symbol_ids AS (
+                    SELECT s.id, s.symbol
+                    FROM stocks s
+                    WHERE s.symbol = ANY(%s)
+                      AND s.status IS DISTINCT FROM 'Inactive'
+                ),
+                latest_features AS (
+                    SELECT
+                        cf.data_id,
+                        MAX(cf.date) as latest_date
+                    FROM computed_features cf
+                    WHERE cf.data_id IN (SELECT id FROM symbol_ids)
+                      AND cf.feature_id IN (
+                          SELECT id FROM feature_definitions WHERE active = TRUE
+                      )
+                    GROUP BY cf.data_id
+                )
+                SELECT s.symbol
+                FROM symbol_ids s
+                LEFT JOIN latest_features lf ON s.id = lf.data_id
+                WHERE lf.latest_date IS NULL
+                   OR lf.latest_date < %s;
+                """,
+                (symbols, target_date)
+            )
         needs_update = [row[0] for row in cur.fetchall()]
 
     return needs_update
+
+
+def latest_indicator_date(conn: psycopg.Connection, data_id: int) -> Optional[date]:
+    """DEPRECATED: Use latest_feature_date(conn, data_id, function_name='indicator') instead."""
+    return latest_feature_date(conn, data_id, function_name='indicator')
+
+
+def filter_symbols_needing_indicators(
+    conn: psycopg.Connection,
+    symbols: Sequence[str],
+    target_date: Optional[date] = None
+) -> List[str]:
+    """DEPRECATED: Use filter_symbols_needing_features(conn, symbols, target_date, function_name='indicator') instead."""
+    return filter_symbols_needing_features(conn, symbols, target_date, function_name='indicator')
+
 
 
 def decide_outputsize(conn: psycopg.Connection, data_id: int, timeframe: str = "auto") -> str:
