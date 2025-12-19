@@ -58,6 +58,7 @@ def test_optimistic_insert_slow_path_creates_chunks_on_error():
     # Mock connection
     conn = MagicMock()
     conn.autocommit = False
+    conn.info.dsn = "postgresql://test:test@localhost/testdb"
 
     # Mock cursor that fails first time, succeeds second time
     cursor_mock = MagicMock()
@@ -85,14 +86,20 @@ def test_optimistic_insert_slow_path_creates_chunks_on_error():
     with patch("g2.db.pool.should_prepare_statements", return_value=False):
         with patch("g2.utils.timescale.ensure_chunks_for_date_range") as mock_ensure:
             with patch("warnings.warn") as mock_warn:
-                # Call insert
-                result = insert_computed_features(
-                    conn=conn,
-                    data_id=10,
-                    rows=rows,
-                    feature_map=feature_map,
-                    batch_size=200,
-                )
+                # Mock psycopg.connect to return a mock connection for chunk creation
+                with patch("psycopg.connect") as mock_connect:
+                    chunk_conn = MagicMock()
+                    chunk_conn.autocommit = False
+                    mock_connect.return_value.__enter__.return_value = chunk_conn
+
+                    # Call insert
+                    result = insert_computed_features(
+                        conn=conn,
+                        data_id=10,
+                        rows=rows,
+                        feature_map=feature_map,
+                        batch_size=200,
+                    )
 
     # Verify insert succeeded after retry
     assert result == 1  # 1 row * 1 feature
