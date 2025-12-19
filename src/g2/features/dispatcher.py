@@ -1060,8 +1060,8 @@ def _fetch_from_stock_ohlcv(
     start_date: Optional[date],
 ) -> List[Dict[str, Any]]:
     """Fetch from stock_ohlcv table."""
-    # For indicators, we need OHLC data
-    # Column might be 'close', but we fetch all price columns
+    # For OHLC-based features, we fetch all price columns
+    # Column parameter specifies which column is primary, but we fetch all for flexibility
     query = """
     SELECT date, open, high, low, close, adjusted_close, volume
     FROM stock_ohlcv

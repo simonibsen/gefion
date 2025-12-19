@@ -371,7 +371,7 @@ def _parse_date_or_error(val: Optional[str], json_output: Optional[bool]):
             raise typer.BadParameter("Invalid date format; use YYYY-MM-DD", param_hint="'--before' / '--after'")
 
 
-def _auto_indicator_workers(compute_locally: bool, calls_per_minute: int) -> int:
+def _auto_workers(compute_locally: bool, calls_per_minute: int) -> int:
     """
     Calculate optimal worker count based on computation mode and rate limits.
 
@@ -379,7 +379,7 @@ def _auto_indicator_workers(compute_locally: bool, calls_per_minute: int) -> int
     For API mode: respects rate limits to avoid throttling
 
     Args:
-        compute_locally: True if computing indicators locally, False if using API
+        compute_locally: True if computing features locally, False if using API
         calls_per_minute: API rate limit in calls per minute
 
     Returns:
@@ -427,7 +427,7 @@ def _plan_workers_for_stage(
     default_writer: int = 1,
     reserve: int = 2,
 ) -> tuple[int, int]:
-    auto_fetch = _auto_indicator_workers(compute_locally, calls_per_minute)
+    auto_fetch = _auto_workers(compute_locally, calls_per_minute)
     return plan_workers(
         available,
         requested_fetch,

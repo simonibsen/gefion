@@ -1,9 +1,9 @@
 """
-Tests for filtering out Inactive symbols from data updates and indicator computation.
+Tests for filtering out Inactive symbols from data updates and feature computation.
 
 Requirements:
 1. filter_symbols_needing_update() should exclude Inactive symbols
-2. filter_symbols_needing_indicators() should exclude Inactive symbols
+2. filter_symbols_needing_features() should exclude Inactive symbols
 3. Universe ingest should not register symbols with Inactive status
 """
 import os
@@ -11,7 +11,7 @@ import pytest
 import psycopg
 from datetime import date, timedelta
 from g2.db import schema
-from g2.db.ingest import filter_symbols_needing_update, filter_symbols_needing_indicators
+from g2.db.ingest import filter_symbols_needing_update, filter_symbols_needing_features
 
 
 @pytest.fixture
@@ -124,18 +124,27 @@ def test_filter_symbols_needing_update_excludes_inactive(db_conn, setup_test_sto
     assert "INACTIVE_TEST_DELISTED" not in result  # ⭐ Inactive excluded
 
 
-def test_filter_symbols_needing_indicators_excludes_inactive(db_conn, setup_test_stocks):
-    """Test that filter_symbols_needing_indicators() excludes Inactive symbols."""
+def test_filter_symbols_needing_features_excludes_inactive(db_conn, setup_test_stocks):
+    """Test that filter_symbols_needing_features() excludes Inactive symbols."""
     target_date = date.today()
 
     symbols = ["INACTIVE_TEST_ACTIVE", "INACTIVE_TEST_DELISTED", "INACTIVE_TEST_NULL"]
 
-    result = filter_symbols_needing_indicators(db_conn, symbols, target_date)
+    # Test with function_name parameter (indicator features)
+    result = filter_symbols_needing_features(db_conn, symbols, target_date, function_name='indicator')
 
     # Should include Active and NULL status symbols, but NOT Inactive
     assert "INACTIVE_TEST_ACTIVE" in result
     assert "INACTIVE_TEST_NULL" in result
     assert "INACTIVE_TEST_DELISTED" not in result  # ⭐ Inactive excluded
+
+    # Test without function_name parameter (all features)
+    result_all = filter_symbols_needing_features(db_conn, symbols, target_date, function_name=None)
+
+    # Should also exclude Inactive symbols when checking all features
+    assert "INACTIVE_TEST_ACTIVE" in result_all
+    assert "INACTIVE_TEST_NULL" in result_all
+    assert "INACTIVE_TEST_DELISTED" not in result_all  # ⭐ Inactive excluded
 
 
 def test_filter_excludes_inactive_with_no_data(db_conn):
