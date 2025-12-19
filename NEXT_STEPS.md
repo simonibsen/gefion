@@ -527,7 +527,7 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ### 12. Core Trading Strategies Suite
 
-**Status**: In Progress (4/6 complete)
+**Status**: In Progress (5/6 complete)
 **Priority**: High (expand capabilities)
 **Effort**: 3-4 weeks
 
@@ -554,9 +554,11 @@ With the foundation in place, choose your strategic direction based on goals:
   - Z-score entry/exit signals ✓
   - Tests in `tests/test_strategy_pairs_trading.py` (9 tests passing) ✓
   - CLI integration via `g2 backtest run --strategy pairs_trading` ✓
-- [ ] **RSI Divergence Strategy**:
-  - Price/RSI divergence detection
-  - Combined with support/resistance levels
+- [x] **RSI Divergence Strategy**:
+  - Price/RSI divergence detection (bullish/bearish) ✓
+  - Peak/trough detection in price and RSI ✓
+  - Tests in `tests/test_strategy_rsi_divergence.py` (10 tests passing) ✓
+  - CLI integration via `g2 backtest run --strategy rsi_divergence` ✓
 - [ ] **Volatility Contraction Strategy**:
   - Bollinger Band squeeze
   - Low ATR periods → expansion trades

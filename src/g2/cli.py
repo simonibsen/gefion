@@ -3086,7 +3086,7 @@ def backtest_run(
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
-        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', or 'pairs_trading'"
+        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', or 'rsi_divergence'"
     ),
     start_date: str = typer.Option(
         ...,
@@ -3168,6 +3168,11 @@ def backtest_run(
         "--exit-zscore",
         help="Z-score threshold for exiting pairs trade (pairs_trading strategy)"
     ),
+    divergence_lookback: int = typer.Option(
+        10,
+        "--divergence-lookback",
+        help="Days to look back for divergence detection (rsi_divergence strategy)"
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -3201,6 +3206,7 @@ def backtest_run(
     from g2.strategies.ma_crossover import MovingAverageCrossoverStrategy
     from g2.strategies.breakout import BreakoutStrategy
     from g2.strategies.pairs_trading import PairsTradingStrategy
+    from g2.strategies.rsi_divergence import RSIDivergenceStrategy
 
     url = os.getenv("DATABASE_URL", SETTINGS.database_url)
 
@@ -3307,9 +3313,18 @@ def backtest_run(
             position_size=position_size,
             max_pairs=max_positions,  # Reuse max_positions as max_pairs
         )
+    elif strategy == "rsi_divergence":
+        strat = RSIDivergenceStrategy(
+            rsi_period=rsi_period,
+            divergence_lookback=divergence_lookback,
+            rsi_oversold=rsi_oversold,
+            rsi_overbought=rsi_overbought,
+            position_size=position_size,
+            max_positions=max_positions,
+        )
     else:
         emit_error(
-            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading'",
+            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence'",
             json_output=json_output
         )
         raise typer.Exit(1)
