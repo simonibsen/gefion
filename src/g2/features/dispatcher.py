@@ -13,7 +13,7 @@ import threading
 import time
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, timedelta
 import warnings
 import inspect
 import psycopg
@@ -327,6 +327,77 @@ def compute_features(
                 }
                 results[func_name] = {'inserted': 0, 'errors': [error]}
                 total_errors.append(error)
+
+    # === CHUNK PRE-CREATION (Prevents deadlocks and optimizes performance) ===
+    # After all computes complete, pre-create chunks for the entire date range
+    # This ensures writers hit the optimistic insert fast path (no chunk creation)
+    # and eliminates the deadlock condition from concurrent chunk creation
+    if write_queue is not None and not write_queue.empty():
+        def precreate_chunks_for_queued_data():
+            """Scan write queue and pre-create all needed chunks before writers drain it."""
+            if write_queue.empty():
+                return
+
+            # Scan queue to find min/max dates (non-destructive peek)
+            items = []
+            try:
+                while True:
+                    item = write_queue.get_nowait()
+                    if item is stop_token:
+                        write_queue.put(item)
+                        break
+                    items.append(item)
+            except queue.Empty:
+                pass
+
+            # Put items back in queue
+            for item in items:
+                write_queue.put(item)
+
+            if not items:
+                return
+
+            # Calculate date range across ALL queued work
+            min_date = None
+            max_date = None
+            for item in items:
+                rows = item.get("rows", [])
+                for row in rows:
+                    dt = row.get("date")
+                    if dt:
+                        if min_date is None or dt < min_date:
+                            min_date = dt
+                        if max_date is None or dt > max_date:
+                            max_date = dt
+
+            if min_date and max_date:
+                from g2.utils.timescale import ensure_chunks_for_date_range
+
+                buffer = timedelta(days=1)
+
+                # Use SEPARATE connection (not autocommit) to avoid lock contention
+                # Note: data_id is from parent scope (compute_features function)
+                try:
+                    with psycopg.connect(conn.info.dsn) as chunk_conn:
+                        chunk_conn.autocommit = False
+                        try:
+                            ensure_chunks_for_date_range(
+                                chunk_conn,
+                                "computed_features",
+                                min_date - buffer,
+                                max_date + buffer,
+                                chunk_interval_days=30
+                            )
+                        except Exception:
+                            # Log but don't fail - optimistic fallback will handle it
+                            pass
+                except Exception:
+                    # If we can't create separate connection, just skip pre-creation
+                    # Optimistic fallback will handle chunk creation on-demand
+                    pass
+
+        # Pre-create chunks after compute completes, before draining queue
+        precreate_chunks_for_queued_data()
 
     # Drain writer queue
     if write_queue is not None:

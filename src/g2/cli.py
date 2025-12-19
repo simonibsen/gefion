@@ -24,7 +24,8 @@ from g2.cli_helpers import (
     db_connection,
     init_schema_tables,
 )
-from g2.ingest.indicators import ingest_indicators_for_symbols, INDICATOR_FUNCTIONS
+from g2.ingest.indicators import INDICATOR_FUNCTIONS  # For validation only
+from g2.features.dispatcher import compute_features
 from g2.config import load_settings
 from g2.db import schema
 from psycopg.types.json import Json
@@ -3013,11 +3014,17 @@ def update_all(
             if indicator_skipped > 0 and not json_output:
                 emit(f"Skipped {indicator_skipped} up-to-date symbols, processing {len(indicator_symbols)} symbols for indicators", json_output=False)
 
-    # Indicators
+    # Indicators - use generic features dispatcher
+    # Ensure indicator feature definitions exist first
+    with db_connection(url) as conn:
+        from g2.db.ingest import ensure_indicator_feature_definitions
+        ensure_indicator_feature_definitions(conn, indicator_list)
+
+    # Compute indicators using generic features dispatcher (function_name='indicator')
     indicator_reporter = ProgressReporter(total=len(indicator_symbols), json_output=json_output, enabled=progress)
     indicator_reporter.skipped = indicator_skipped
     indicator_reporter.workers = feature_fetch
-    indicator_reporter.mode = "local" if compute_locally else "api"
+    indicator_reporter.mode = "local"  # Always local computation
     ind_live: Optional[Live] = None
     if progress and not json_output:
         ind_live = indicator_reporter.start_live()
@@ -3025,28 +3032,45 @@ def update_all(
             ind_live.__enter__()
     try:
         indicator_inserted = 0
-        for sym_chunk in chunked(indicator_symbols, 50):
-            indicator_inserted += ingest_indicators_for_symbols(
-                db_url=url,
-                client=client,
-                symbols=sym_chunk,
-                indicators=indicator_list,
-                timeframe=timeframe,
-                update_existing=refresh_existing,
-                compute_locally=compute_locally,
-                refresh=refresh,
-                batch_size=feature_batch_size,
-                progress=indicator_reporter,
-                fetch_workers=feature_fetch,
-                writer_workers=feature_writer,
-            )
+        for symbol in indicator_symbols:
+            try:
+                with db_connection(url) as conn:
+                    from g2.db.ingest import upsert_stock
+                    data_id = upsert_stock(conn, symbol)
+
+                    result = compute_features(
+                        conn,
+                        data_id=data_id,
+                        function_names=['indicator'],
+                        incremental=not refresh,
+                        update_existing=refresh_existing,
+                        feature_batch_size=feature_batch_size,
+                    )
+
+                    inserted = result.get('summary', {}).get('total_inserted', 0)
+                    indicator_inserted += inserted
+
+                    if indicator_reporter:
+                        indicator_reporter.step_done(
+                            symbol,
+                            error=False,
+                            meta={"inserted": inserted}
+                        )
+            except Exception as exc:
+                if indicator_reporter:
+                    indicator_reporter.step_done(
+                        symbol,
+                        error=True,
+                        meta={"inserted": 0, "reason": str(exc)}
+                    )
+
         if ind_live:
             ind_live.update(indicator_reporter._build_table())
         indicator_reporter.complete(live=ind_live)
     except Exception as exc:
         if ind_live:
             ind_live.__exit__(type(exc), exc, exc.__traceback__)
-        emit_error(f"Indicator ingest failed: {exc}", json_output=json_output)
+        emit_error(f"Indicator computation failed: {exc}", json_output=json_output)
     finally:
         if ind_live:
             ind_live.__exit__(None, None, None)
