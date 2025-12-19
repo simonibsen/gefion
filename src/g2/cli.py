@@ -2861,10 +2861,13 @@ def update_all(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
     """
-    Update all data: prices first, then indicators for the selected universe.
+    Update all data: prices first, then ALL active features.
 
     This is the main workflow command that ingests price data and computes
-    technical indicators in one step.
+    all active features (indicators, derivatives, etc.) in one step.
+
+    The --indicators parameter ensures those feature definitions exist,
+    but ALL active features from feature_definitions will be computed.
 
     Examples:
         # Update data for existing stocks in database (inferred from stocks table)
@@ -2873,10 +2876,10 @@ def update_all(
         # Update NASDAQ stocks (limited to 20 for testing)
         g2 data-update --exchange NASDAQ --limit 20
 
-        # Full refresh with custom indicators
+        # Full refresh with custom indicators (creates feature definitions if needed)
         g2 data-update --exchange NYSE --refresh --indicators rsi,macd,sma20,sma50
 
-        # Use local computation for faster processing
+        # Compute all features for all stocks
         g2 data-update --exchange NASDAQ --limit 50 --local
     """
     url = _db_url(db_url)
@@ -3000,87 +3003,74 @@ def update_all(
         if price_live:
             price_live.__exit__(None, None, None)
 
-    # Bulk filter symbols that don't need indicator updates
-    indicator_symbols = all_symbols
-    indicator_skipped = 0
-    if not refresh_existing and not refresh:
-        from g2.db.ingest import filter_symbols_needing_indicators
-        from datetime import date
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["stocks", "feature_definitions", "computed_features"])
-            target_date = date.today()
-            indicator_symbols = filter_symbols_needing_indicators(conn, all_symbols, target_date)
-            indicator_skipped = len(all_symbols) - len(indicator_symbols)
-            if indicator_skipped > 0 and not json_output:
-                emit(f"Skipped {indicator_skipped} up-to-date symbols, processing {len(indicator_symbols)} symbols for indicators", json_output=False)
-
-    # Indicators - use generic features dispatcher
-    # Ensure indicator feature definitions exist first
+    # Features - compute ALL active features (not just indicators)
+    # First ensure requested indicator feature definitions exist (for backward compatibility)
     with db_connection(url) as conn:
         from g2.db.ingest import ensure_indicator_feature_definitions
         ensure_indicator_feature_definitions(conn, indicator_list)
 
-    # Compute indicators using generic features dispatcher (function_name='indicator')
-    indicator_reporter = ProgressReporter(total=len(indicator_symbols), json_output=json_output, enabled=progress)
-    indicator_reporter.skipped = indicator_skipped
-    indicator_reporter.workers = feature_fetch
-    indicator_reporter.mode = "local"  # Always local computation
-    ind_live: Optional[Live] = None
+    # Compute all active features using generic dispatcher
+    feature_reporter = ProgressReporter(total=len(all_symbols), json_output=json_output, enabled=progress)
+    feature_reporter.workers = feature_fetch
+    feature_reporter.mode = "local"
+    feat_live: Optional[Live] = None
     if progress and not json_output:
-        ind_live = indicator_reporter.start_live()
-        if ind_live:
-            ind_live.__enter__()
+        feat_live = feature_reporter.start_live()
+        if feat_live:
+            feat_live.__enter__()
     try:
-        indicator_inserted = 0
-        for symbol in indicator_symbols:
+        features_inserted = 0
+        for symbol in all_symbols:
             try:
                 with db_connection(url) as conn:
                     from g2.db.ingest import upsert_stock
                     data_id = upsert_stock(conn, symbol)
 
+                    # Compute ALL active features (indicators, derivatives, etc.)
+                    # TODO: Add dependency ordering via feature_definitions.depends_on field
                     result = compute_features(
                         conn,
                         data_id=data_id,
-                        function_names=['indicator'],
+                        function_names=None,  # None = compute all active features
                         incremental=not refresh,
                         update_existing=refresh_existing,
                         feature_batch_size=feature_batch_size,
                     )
 
                     inserted = result.get('summary', {}).get('total_inserted', 0)
-                    indicator_inserted += inserted
+                    features_inserted += inserted
 
-                    if indicator_reporter:
-                        indicator_reporter.step_done(
+                    if feature_reporter:
+                        feature_reporter.step_done(
                             symbol,
                             error=False,
                             meta={"inserted": inserted}
                         )
             except Exception as exc:
-                if indicator_reporter:
-                    indicator_reporter.step_done(
+                if feature_reporter:
+                    feature_reporter.step_done(
                         symbol,
                         error=True,
                         meta={"inserted": 0, "reason": str(exc)}
                     )
 
-        if ind_live:
-            ind_live.update(indicator_reporter._build_table())
-        indicator_reporter.complete(live=ind_live)
+        if feat_live:
+            feat_live.update(feature_reporter._build_table())
+        feature_reporter.complete(live=feat_live)
     except Exception as exc:
-        if ind_live:
-            ind_live.__exit__(type(exc), exc, exc.__traceback__)
-        emit_error(f"Indicator computation failed: {exc}", json_output=json_output)
+        if feat_live:
+            feat_live.__exit__(type(exc), exc, exc.__traceback__)
+        emit_error(f"Feature computation failed: {exc}", json_output=json_output)
     finally:
-        if ind_live:
-            ind_live.__exit__(None, None, None)
+        if feat_live:
+            feat_live.__exit__(None, None, None)
 
     emit(
         "Update complete",
         data={
             "symbols": symbols,
             "price_inserted": price_inserted,
-            "indicator_inserted": indicator_inserted,
+            "features_inserted": features_inserted,
             "price_fetch_workers": price_fetch,
             "price_writer_workers": price_writer,
             "feature_fetch_workers": feature_fetch,
