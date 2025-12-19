@@ -926,13 +926,18 @@ def insert_computed_features(
             )
 
             try:
-                ensure_chunks_for_date_range(
-                    conn,
-                    "computed_features",
-                    min_date - buffer,
-                    max_date + buffer,
-                    chunk_interval_days=30
-                )
+                # Use separate connection to avoid deadlock with autocommit writers
+                # Autocommit mode can cause circular lock dependencies when multiple
+                # workers try to create chunks simultaneously
+                with psycopg.connect(conn.info.dsn) as chunk_conn:
+                    chunk_conn.autocommit = False  # Transaction mode prevents lock conflicts
+                    ensure_chunks_for_date_range(
+                        chunk_conn,
+                        "computed_features",
+                        min_date - buffer,
+                        max_date + buffer,
+                        chunk_interval_days=30
+                    )
             except Exception as chunk_err:
                 raise Exception(
                     f"Failed to create chunks for {min_date} to {max_date}: {chunk_err}"
