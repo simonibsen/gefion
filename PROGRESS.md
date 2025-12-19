@@ -98,21 +98,38 @@ g2 is a production-ready database-first technical analysis platform with:
   - Tests for initialization, empty data, insufficient data
   - Buy/sell signal generation in various RSI conditions
   - Position sizing, max positions limit, multi-symbol scenarios
-  - All tests passing
-- **CLI Integration**: Updated backtest command to support mean_reversion
-  - Added --rsi-oversold, --rsi-overbought, --rsi-period parameters
-  - Added --position-size, --max-positions parameters
-  - Updated help text and usage examples
-  - Both momentum and mean_reversion strategies now available via CLI
+- **CLI Integration**: Added mean reversion support to backtest command
+  - New parameters: --rsi-oversold, --rsi-overbought, --rsi-period, --position-size, --max-positions
+  - Example usage in --help text
+- **Impact**: Strategy diversity for backtesting, pattern for adding more strategies (1/6 complete)
+
+**Moving Average Crossover Strategy (Path A: Item #12):**
+
+- **Strategy Implementation**: Created MA-based crossover strategy
+  - Buys on golden cross (fast MA > slow MA) and sells on death cross (fast MA < slow MA)
+  - Configurable parameters: fast period (default 50), slow period (default 200), position size, max positions
+  - Detects exact crossover points (not just alignment)
+  - Follows same interface as other strategies
+- **TDD Development**: Comprehensive test coverage (425 lines, 9 tests)
+  - Tests for golden cross buy signals, death cross sell signals
+  - Crossover detection accuracy, max positions limit
+  - Multi-symbol mixed signals, position sizing
+- **CLI Integration**: Added ma_crossover support to backtest command
+  - New parameters: --fast-period, --slow-period
+  - Example usage: `g2 backtest run --strategy ma_crossover --fast-period 50 --slow-period 200`
+- **Impact**: Classic technical analysis strategy, further strategy diversity (2/6 complete)
 
 **Files Created:**
 
-- src/g2/strategies/mean_reversion.py (195 lines)
-- tests/test_strategy_mean_reversion.py (369 lines, 9 tests)
+- src/g2/strategies/mean_reversion.py (202 lines)
+- tests/test_strategy_mean_reversion.py (370 lines, 9 tests)
+- src/g2/strategies/ma_crossover.py (165 lines)
+- tests/test_strategy_ma_crossover.py (425 lines, 9 tests)
 
 **Files Modified:**
 
-- src/g2/cli.py (added mean_reversion support to backtest run command)
+- src/g2/cli.py (added mean_reversion and ma_crossover support to backtest run command)
+- NEXT_STEPS.md (updated Item #12 progress: 2/6 strategies complete)
 
 **Impact:**
 
