@@ -756,6 +756,63 @@ def ensure_feature_definitions(
     return ids
 
 
+def load_feature_definitions_from_json(path: str) -> List[Dict[str, object]]:
+    """
+    Load feature definitions from JSON file(s).
+
+    Args:
+        path: Path to a JSON file or directory containing JSON files
+
+    Returns:
+        List of feature definition dicts
+
+    Raises:
+        ValueError: If required fields are missing
+        json.JSONDecodeError: If JSON is malformed
+    """
+    import json
+    from pathlib import Path as PathlibPath
+
+    path_obj = PathlibPath(path)
+    definitions: List[Dict[str, object]] = []
+
+    if path_obj.is_file():
+        # Load single file
+        with open(path_obj) as f:
+            data = json.load(f)
+            _validate_feature_definition(data)
+            definitions.append(data)
+    elif path_obj.is_dir():
+        # Load all JSON files in directory
+        for json_file in sorted(path_obj.glob("*.json")):
+            with open(json_file) as f:
+                data = json.load(f)
+                _validate_feature_definition(data)
+                definitions.append(data)
+    else:
+        raise ValueError(f"Path does not exist: {path}")
+
+    return definitions
+
+
+def _validate_feature_definition(definition: Dict[str, object]) -> None:
+    """Validate that a feature definition has all required fields."""
+    required_fields = [
+        "name",
+        "function_name",
+        "source_table",
+        "source_column",
+        "store_table",
+        "store_column",
+        "store_type",
+        "active"
+    ]
+
+    for field in required_fields:
+        if field not in definition:
+            raise ValueError(f"Missing required field '{field}' in feature definition: {definition.get('name', 'unknown')}")
+
+
 def ensure_indicator_feature_definitions(conn: psycopg.Connection, indicators: Sequence[str]) -> Dict[str, int]:
     """
     Create/ensure feature_definitions entries for requested indicator columns.
