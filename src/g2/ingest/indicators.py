@@ -6,7 +6,7 @@ This module only contains metadata (INDICATOR_FUNCTIONS dict) for validation
 and legacy AlphaVantage API fetching support.
 
 For indicator computation, see:
-- g2.indicators.local.compute_indicators() - Local computation from OHLCV data
+- g2.features.indicators.compute_indicators() - Local computation from OHLCV data
 - g2.features.dispatcher - Generic feature computation dispatcher
 - g2 features-compute --function-names indicator - CLI command
 """
