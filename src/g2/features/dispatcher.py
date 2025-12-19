@@ -1132,7 +1132,7 @@ def _fetch_from_generic_table(
 def _register_default_functions():
     """Register default compute functions."""
     try:
-        from g2.indicators.local import compute_indicators
+        from g2.features.indicators import compute_indicators
         register_compute_function('indicator', compute_indicators)
     except ImportError:
         pass
