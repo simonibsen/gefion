@@ -3086,7 +3086,7 @@ def backtest_run(
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
-        help="Strategy name: 'momentum', 'mean_reversion', or 'ma_crossover'"
+        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', or 'breakout'"
     ),
     start_date: str = typer.Option(
         ...,
@@ -3153,6 +3153,11 @@ def backtest_run(
         "--slow-period",
         help="Slow moving average period in days (ma_crossover strategy)"
     ),
+    volume_threshold: float = typer.Option(
+        1.5,
+        "--volume-threshold",
+        help="Volume multiplier for breakout confirmation (breakout strategy)"
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -3184,6 +3189,7 @@ def backtest_run(
     from g2.strategies.momentum import MomentumStrategy
     from g2.strategies.mean_reversion import MeanReversionStrategy
     from g2.strategies.ma_crossover import MovingAverageCrossoverStrategy
+    from g2.strategies.breakout import BreakoutStrategy
 
     url = os.getenv("DATABASE_URL", SETTINGS.database_url)
 
@@ -3275,9 +3281,16 @@ def backtest_run(
             position_size=position_size,
             max_positions=max_positions,
         )
+    elif strategy == "breakout":
+        strat = BreakoutStrategy(
+            lookback_days=lookback_days,
+            volume_threshold=volume_threshold,
+            position_size=position_size,
+            max_positions=max_positions,
+        )
     else:
         emit_error(
-            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover'",
+            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout'",
             json_output=json_output
         )
         raise typer.Exit(1)
