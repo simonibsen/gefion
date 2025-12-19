@@ -527,7 +527,7 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ### 12. Core Trading Strategies Suite
 
-**Status**: In Progress (5/6 complete)
+**Status**: Complete (6/6 complete)
 **Priority**: High (expand capabilities)
 **Effort**: 3-4 weeks
 
@@ -559,9 +559,11 @@ With the foundation in place, choose your strategic direction based on goals:
   - Peak/trough detection in price and RSI ✓
   - Tests in `tests/test_strategy_rsi_divergence.py` (10 tests passing) ✓
   - CLI integration via `g2 backtest run --strategy rsi_divergence` ✓
-- [ ] **Volatility Contraction Strategy**:
-  - Bollinger Band squeeze
-  - Low ATR periods → expansion trades
+- [x] **Volatility Contraction Strategy**:
+  - Bollinger Band squeeze detection ✓
+  - Volatility expansion from squeeze → buy signals ✓
+  - Tests in `tests/test_strategy_volatility_contraction.py` (10 tests passing) ✓
+  - CLI integration via `g2 backtest run --strategy volatility_contraction` ✓
 
 **Implementation Pattern** (TDD for each):
 1. Write failing tests for strategy logic
@@ -576,14 +578,14 @@ With the foundation in place, choose your strategic direction based on goals:
 - `tests/test_strategy_mean_reversion.py` (370 lines, 9 tests) ✓
 - `src/g2/strategies/ma_crossover.py` (165 lines) ✓
 - `tests/test_strategy_ma_crossover.py` (425 lines, 9 tests) ✓
-
-**Files to create**:
-
-- `src/g2/strategies/pairs_trading.py`
-- `src/g2/strategies/breakout.py`
-- `src/g2/strategies/rsi_divergence.py`
-- `src/g2/strategies/volatility_contraction.py`
-- Corresponding test files in `tests/`
+- `src/g2/strategies/breakout.py` (168 lines) ✓
+- `tests/test_strategy_breakout.py` (475 lines, 10 tests) ✓
+- `src/g2/strategies/pairs_trading.py` (388 lines) ✓
+- `tests/test_strategy_pairs_trading.py` (523 lines, 9 tests) ✓
+- `src/g2/strategies/rsi_divergence.py` (372 lines) ✓
+- `tests/test_strategy_rsi_divergence.py` (506 lines, 10 tests) ✓
+- `src/g2/strategies/volatility_contraction.py` (258 lines) ✓
+- `tests/test_strategy_volatility_contraction.py` (457 lines, 10 tests) ✓
 
 ---
 

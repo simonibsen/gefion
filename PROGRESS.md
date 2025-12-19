@@ -175,6 +175,27 @@ g2 is a production-ready database-first technical analysis platform with:
   - Example usage: `g2 backtest run --strategy rsi_divergence --divergence-lookback 10 --rsi-oversold 30`
 - **Impact**: Reversal detection using technical divergence, complements trend-following strategies (5/6 complete)
 
+**Volatility Contraction Strategy (Path A: Item #12):**
+
+- **Strategy Implementation**: Created Bollinger Band squeeze detection strategy
+  - Detects low volatility periods (squeeze): band_width < squeeze_threshold (5%)
+  - Detects expansion from squeeze: band_width > expansion_threshold (10%)
+  - Buy signals on volatility expansion from squeeze (breakout starting)
+  - Sell signals on volatility contraction (breakout ending)
+  - Bollinger Bands: SMA ± (std_dev × multiplier)
+  - Band width normalized by SMA for cross-symbol comparison
+  - Configurable parameters: bb_period (20), bb_std_dev (2.0), squeeze_threshold (0.05), expansion_threshold (0.10)
+- **TDD Development**: Comprehensive test coverage (457 lines, 10 tests)
+  - Tests for squeeze detection, expansion signals, contraction signals
+  - No signal during ongoing squeeze, max positions, position sizing
+  - Bollinger Band calculation verification
+  - Multiple symbols with mixed volatility patterns
+- **CLI Integration**: Added volatility_contraction support to backtest command
+  - New parameters: --bb-period, --bb-std-dev, --squeeze-threshold, --expansion-threshold
+  - Reuses --position-size, --max-positions
+  - Example usage: `g2 backtest run --strategy volatility_contraction --bb-period 20 --squeeze-threshold 0.05`
+- **Impact**: Volatility-based breakout detection, captures range expansion moves (6/6 complete)
+
 **Files Created:**
 
 - src/g2/strategies/mean_reversion.py (202 lines)
@@ -187,11 +208,13 @@ g2 is a production-ready database-first technical analysis platform with:
 - tests/test_strategy_pairs_trading.py (523 lines, 9 tests)
 - src/g2/strategies/rsi_divergence.py (372 lines)
 - tests/test_strategy_rsi_divergence.py (506 lines, 10 tests)
+- src/g2/strategies/volatility_contraction.py (258 lines)
+- tests/test_strategy_volatility_contraction.py (457 lines, 10 tests)
 
 **Files Modified:**
 
-- src/g2/cli.py (added mean_reversion, ma_crossover, breakout, pairs_trading, and rsi_divergence support to backtest run command)
-- NEXT_STEPS.md (updated Item #12 progress: 5/6 strategies complete)
+- src/g2/cli.py (added mean_reversion, ma_crossover, breakout, pairs_trading, rsi_divergence, and volatility_contraction support to backtest run command)
+- NEXT_STEPS.md (updated Item #12 progress: 6/6 strategies complete)
 
 **Impact:**
 
