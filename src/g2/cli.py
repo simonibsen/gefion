@@ -32,7 +32,6 @@ from g2.db import migrate
 from g2.db.ingest import (
     insert_stock_ohlcv,
     upsert_stock,
-    ensure_all_indicator_feature_definitions,
     ensure_feature_definitions,
     delete_feature_data_only,
     trim_feature_data,
@@ -1862,27 +1861,6 @@ def db_tune(
     )
 
 
-@app.command("feat-seed")
-def seed_features(
-    db_url: Optional[str] = typer.Option(None, help="Database URL"),
-    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
-) -> None:
-    """
-    Create metadata tables and seed feature_definitions for all known indicators.
-    """
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["stocks", "feature_definitions", "computed_features"])
-            feature_map = ensure_all_indicator_feature_definitions(conn)
-        emit(
-            "Seeded indicator feature definitions",
-            data={"features": feature_map},
-            json_output=json_output,
-        )
-    except Exception as exc:
-        emit_error(f"Seeding failed: {exc}", json_output=json_output)
-
-
 def _normalize_feature_definition(payload: dict) -> dict:
     """
     Ensure feature definition has defaults and rejects legacy source table.
@@ -2507,7 +2485,7 @@ def features_compute(
                     "\n"
                     "First, ensure features are defined:\n"
                     "  → Run: g2 feat-def-list\n"
-                    "  → Or seed defaults: g2 feat-seed",
+                    "  → Or import definitions: g2 feat-def-import --dir feature-definitions",
                     json_output=json_output
                 )
                 return
@@ -2864,11 +2842,11 @@ def update_all(
     all active features (indicators, derivatives, etc.) in one step.
 
     Feature definitions must exist in the database before running this command.
-    Use 'g2 feat-seed' to create standard feature definitions.
+    Use 'g2 feat-def-import' to import feature definitions from JSON files.
 
     Examples:
-        # First time setup: seed feature definitions
-        g2 feat-seed
+        # First time setup: import feature definitions
+        g2 feat-def-import --dir feature-definitions
 
         # Update data for existing stocks in database (inferred from stocks table)
         g2 data-update
@@ -2998,7 +2976,7 @@ def update_all(
             price_live.__exit__(None, None, None)
 
     # Features - compute ALL active features
-    # Feature definitions must already exist (created via g2 feat-seed)
+    # Feature definitions must already exist (imported via g2 feat-def-import)
     # Compute all active features using generic dispatcher
     feature_reporter = ProgressReporter(total=len(all_symbols), json_output=json_output, enabled=progress)
     feature_reporter.workers = feature_fetch
