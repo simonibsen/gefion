@@ -829,64 +829,35 @@ def insert_computed_features(
     if not prepared:
         return 0
 
-    # Ensure chunks exist for the date range we're about to insert
-    # This prevents "chunk not found" errors by creating missing chunks automatically
-    from g2.utils.timescale import ensure_chunks_for_date_range
-    try:
-        # Find the date range of data we're inserting
-        dates = [dt for _, _, dt, _, _ in prepared]
-        if dates:
-            min_date = min(dates)
-            max_date = max(dates)
-
-            # Add a small buffer to ensure we cover the full range
-            from datetime import timedelta
-            buffer = timedelta(days=1)
-
-            # Ensure chunks exist for this date range
-            # This will create chunks if they don't exist, preventing insert errors
-            ensure_chunks_for_date_range(
-                conn,
-                "computed_features",
-                min_date - buffer,
-                max_date + buffer,
-                chunk_interval_days=30
-            )
-    except Exception as e:
-        # If chunk creation fails, log but continue with insert
-        # The insert might still succeed if chunks already exist
-        import warnings
-        warnings.warn(f"Failed to ensure chunks before insert: {e}")
-
     chunk_size = max(1, batch_size)
-    total = 0
 
     # Check if prepared statements are enabled via the pool
     from g2.db import pool as db_pool
     prepare_enabled = db_pool.should_prepare_statements()
 
-    # Disable synchronous_commit for the entire operation if requested
-    # Must use SET (session-level) not SET LOCAL when in autocommit mode
-    # because SET LOCAL only works inside a transaction block
-    sync_commit_changed = False
-    try:
-        if not sync_commit:
-            with conn.cursor() as cur:
-                cur.execute("SET synchronous_commit TO OFF;")
-            sync_commit_changed = True
+    # Helper function to perform the actual insert
+    def do_insert() -> int:
+        """Perform the batch insert operation."""
+        total = 0
+        sync_commit_changed = False
+        try:
+            # Disable synchronous_commit for the entire operation if requested
+            if not sync_commit:
+                with conn.cursor() as cur:
+                    cur.execute("SET synchronous_commit TO OFF;")
+                sync_commit_changed = True
 
-        for i in range(0, len(prepared), chunk_size):
-            batch = prepared[i : i + chunk_size]
-            batch_size_actual = len(batch)
+            for i in range(0, len(prepared), chunk_size):
+                batch = prepared[i : i + chunk_size]
+                batch_size_actual = len(batch)
 
-            # Use prepared statements whenever enabled
-            use_prepared = prepare_enabled
+                # Use prepared statements whenever enabled
+                use_prepared = prepare_enabled
 
-            params: List[object] = []
-            for fid, did, dt, val, source in batch:
-                params.extend([fid, did, dt, val, source])
+                params: List[object] = []
+                for fid, did, dt, val, source in batch:
+                    params.extend([fid, did, dt, val, source])
 
-            try:
                 # Build the SQL statement
                 conflict = (
                     "ON CONFLICT (feature_id, data_id, date) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source"
@@ -908,28 +879,85 @@ def insert_computed_features(
                         cur.execute(stmt, params, prepare=True)
                     else:
                         cur.execute(stmt, params)
-            except Exception as exc:
-                sample = batch[:3]
-                sample_types = [
-                    {
-                        "feature_id": type(x[0]).__name__,
-                        "data_id": type(x[1]).__name__,
-                        "date": type(x[2]).__name__,
-                        "value": type(x[3]).__name__,
-                        "source": type(x[4]).__name__,
-                    }
-                    for x in sample
-                ]
-                raise Exception(f"insert_computed_features failed: {exc}; sample_types={sample_types}; sample={sample}") from exc
-            total += len(batch)
-        conn.commit()
-        return total
-    finally:
-        # Reset synchronous_commit back to default if we changed it
-        if sync_commit_changed:
+
+                total += len(batch)
+            conn.commit()
+            return total
+        finally:
+            # Reset synchronous_commit back to default if we changed it
+            if sync_commit_changed:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("RESET synchronous_commit;")
+                except Exception:
+                    # Ignore errors during reset (connection might be closed)
+                    pass
+
+    # OPTIMISTIC INSERT: Try insert first, create chunks only if needed
+    try:
+        # Fast path: try insert without chunk creation (works 99.9% of the time)
+        return do_insert()
+
+    except Exception as exc:
+        # Check if this is a chunk-not-found error
+        error_msg = str(exc).lower()
+        is_chunk_error = (
+            "no chunks found" in error_msg or
+            "could not find chunk" in error_msg or
+            "chunk not found" in error_msg or
+            "insert or update on table" in error_msg and "violates" not in error_msg
+        )
+
+        if is_chunk_error:
+            # Slow path (rare): create missing chunks and retry
+            import warnings
+            from g2.utils.timescale import ensure_chunks_for_date_range
+            from datetime import timedelta
+
+            # Find date range
+            dates = [dt for _, _, dt, _, _ in prepared]
+            min_date = min(dates)
+            max_date = max(dates)
+            buffer = timedelta(days=1)
+
+            warnings.warn(
+                f"Chunk not found for date range {min_date} to {max_date}. "
+                f"Auto-creating chunks (this is a one-time operation)."
+            )
+
             try:
-                with conn.cursor() as cur:
-                    cur.execute("RESET synchronous_commit;")
-            except Exception:
-                # Ignore errors during reset (connection might be closed)
-                pass
+                ensure_chunks_for_date_range(
+                    conn,
+                    "computed_features",
+                    min_date - buffer,
+                    max_date + buffer,
+                    chunk_interval_days=30
+                )
+            except Exception as chunk_err:
+                raise Exception(
+                    f"Failed to create chunks for {min_date} to {max_date}: {chunk_err}"
+                ) from exc
+
+            # Retry insert after creating chunks
+            try:
+                return do_insert()
+            except Exception as retry_exc:
+                raise Exception(
+                    f"Insert failed even after creating chunks: {retry_exc}"
+                ) from exc
+        else:
+            # Different error - format with debug info and re-raise
+            sample = prepared[:3]
+            sample_types = [
+                {
+                    "feature_id": type(x[0]).__name__,
+                    "data_id": type(x[1]).__name__,
+                    "date": type(x[2]).__name__,
+                    "value": type(x[3]).__name__,
+                    "source": type(x[4]).__name__,
+                }
+                for x in sample
+            ]
+            raise Exception(
+                f"insert_computed_features failed: {exc}; sample_types={sample_types}; sample={sample}"
+            ) from exc
