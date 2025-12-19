@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from g2 import cli
 from g2.db import schema
-from g2.db.ingest import ensure_indicator_feature_definitions
+from g2.db.ingest import load_feature_definitions_from_json, ensure_feature_definitions
 
 runner = CliRunner()
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
@@ -43,7 +43,9 @@ def test_features_run_local_with_last_ind_none(monkeypatch):
     schema.create_stock_ohlcv_table(conn)
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
-    ensure_indicator_feature_definitions(conn, indicators=["adx"])
+    # Load ADX feature definition from JSON
+    feature_defs = load_feature_definitions_from_json("feature-definitions/indicator_adx_14.json")
+    ensure_feature_definitions(conn, feature_defs)
     with conn.cursor() as cur:
         cur.execute("INSERT INTO stocks (symbol) VALUES ('AAA') RETURNING id;")
         stock_id = cur.fetchone()[0]

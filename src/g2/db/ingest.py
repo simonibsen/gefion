@@ -701,21 +701,6 @@ def insert_stock_ohlcv(
 
 # --- Feature store helpers (computed_features / feature_definitions) ---
 
-_INDICATOR_COLUMNS: Dict[str, List[str]] = {
-    "rsi": ["rsi_14"],
-    "adx": ["adx_14"],
-    "sma20": ["sma_20"],
-    "sma50": ["sma_50"],
-    "sma200": ["sma_200"],
-    "ema12": ["ema_12"],
-    "ema26": ["ema_26"],
-    "macd": ["macd", "macd_signal", "macd_hist"],
-    "bbands": ["bb_upper", "bb_middle", "bb_lower"],
-    "stoch": ["stoch_k", "stoch_d"],
-    "psar": ["psar"],
-}
-
-
 def ensure_feature_definitions(
     conn: psycopg.Connection, defs: Sequence[Mapping[str, object]]
 ) -> Dict[str, int]:
@@ -811,55 +796,6 @@ def _validate_feature_definition(definition: Dict[str, object]) -> None:
     for field in required_fields:
         if field not in definition:
             raise ValueError(f"Missing required field '{field}' in feature definition: {definition.get('name', 'unknown')}")
-
-
-def ensure_indicator_feature_definitions(conn: psycopg.Connection, indicators: Sequence[str]) -> Dict[str, int]:
-    """
-    Create/ensure feature_definitions entries for requested indicator columns.
-    Returns mapping column_name -> feature_id (e.g., "rsi_14" -> 5).
-    """
-    seen_cols: Dict[str, str] = {}
-    for ind in indicators:
-        cols = _INDICATOR_COLUMNS.get(ind)
-        if not cols:
-            continue
-        for col in cols:
-            seen_cols[col] = ind
-    if not seen_cols:
-        return {}
-
-    defs = []
-    for col, ind in seen_cols.items():
-        defs.append(
-            {
-                "name": f"indicator_{col}",
-                "function_name": "indicator",
-                "params": {"indicator": ind},
-                "source_table": "stock_ohlcv",
-                "source_column": "close",
-                "store_table": "computed_features",
-                "store_column": "value",
-                "store_type": "double precision",
-                "active": True,
-            }
-        )
-    name_to_id = ensure_feature_definitions(conn, defs)
-    ensure_store_targets(conn, defs)
-    # Build column -> id map
-    col_to_id: Dict[str, int] = {}
-    for col in seen_cols:
-        fid = name_to_id.get(f"indicator_{col}")
-        if fid is not None:
-            col_to_id[col] = fid
-    return col_to_id
-
-
-def ensure_all_indicator_feature_definitions(conn: psycopg.Connection) -> Dict[str, int]:
-    """
-    Convenience to seed definitions for all known indicators in _INDICATOR_COLUMNS.
-    Returns column -> feature_id map.
-    """
-    return ensure_indicator_feature_definitions(conn, list(_INDICATOR_COLUMNS.keys()))
 
 
 def ensure_store_targets(conn: psycopg.Connection, defs: Sequence[Mapping[str, object]]) -> None:
