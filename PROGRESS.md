@@ -119,17 +119,37 @@ g2 is a production-ready database-first technical analysis platform with:
   - Example usage: `g2 backtest run --strategy ma_crossover --fast-period 50 --slow-period 200`
 - **Impact**: Classic technical analysis strategy, further strategy diversity (2/6 complete)
 
+**Breakout Trading Strategy (Path A: Item #12):**
+
+- **Strategy Implementation**: Created volume-confirmed breakout strategy
+  - Buys on upside breakouts (price breaks above recent high) with volume confirmation
+  - Sells on downside breakouts (price breaks below recent low) with volume confirmation
+  - Configurable parameters: lookback_days (default 20), volume_threshold (default 1.5x)
+  - Requires volume > average × threshold to confirm breakout validity
+  - Follows same interface as other strategies
+- **TDD Development**: Comprehensive test coverage (475 lines, 10 tests)
+  - Tests for upside/downside breakouts with/without volume confirmation
+  - No signal in range, max positions limit, position sizing
+  - Mixed signals across multiple symbols
+- **CLI Integration**: Added breakout support to backtest command
+  - New parameter: --volume-threshold
+  - Reuses --lookback-days parameter
+  - Example usage: `g2 backtest run --strategy breakout --lookback-days 20 --volume-threshold 1.5`
+- **Impact**: Volume-based breakout detection, momentum validation (3/6 complete)
+
 **Files Created:**
 
 - src/g2/strategies/mean_reversion.py (202 lines)
 - tests/test_strategy_mean_reversion.py (370 lines, 9 tests)
 - src/g2/strategies/ma_crossover.py (165 lines)
 - tests/test_strategy_ma_crossover.py (425 lines, 9 tests)
+- src/g2/strategies/breakout.py (168 lines)
+- tests/test_strategy_breakout.py (475 lines, 10 tests)
 
 **Files Modified:**
 
-- src/g2/cli.py (added mean_reversion and ma_crossover support to backtest run command)
-- NEXT_STEPS.md (updated Item #12 progress: 2/6 strategies complete)
+- src/g2/cli.py (added mean_reversion, ma_crossover, and breakout support to backtest run command)
+- NEXT_STEPS.md (updated Item #12 progress: 3/6 strategies complete)
 
 **Impact:**
 

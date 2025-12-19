@@ -527,7 +527,7 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ### 12. Core Trading Strategies Suite
 
-**Status**: In Progress (2/6 complete)
+**Status**: In Progress (3/6 complete)
 **Priority**: High (expand capabilities)
 **Effort**: 3-4 weeks
 
@@ -544,14 +544,15 @@ With the foundation in place, choose your strategic direction based on goals:
   - Detects exact crossover points (fast MA > slow MA) ✓
   - Tests in `tests/test_strategy_ma_crossover.py` (9 tests passing) ✓
   - CLI integration via `g2 backtest run --strategy ma_crossover` ✓
+- [x] **Breakout Strategy**:
+  - Volume-confirmed breakouts (upside/downside) ✓
+  - Configurable lookback period and volume threshold ✓
+  - Tests in `tests/test_strategy_breakout.py` (10 tests passing) ✓
+  - CLI integration via `g2 backtest run --strategy breakout` ✓
 - [ ] **Pairs Trading Strategy**:
   - Cointegration-based pairs selection
   - Z-score entry/exit signals
   - Tests for spread calculation and signal generation
-- [ ] **Breakout Strategy**:
-  - Volatility expansion detection
-  - Volume confirmation
-  - Trailing stop loss implementation
 - [ ] **RSI Divergence Strategy**:
   - Price/RSI divergence detection
   - Combined with support/resistance levels
