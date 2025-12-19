@@ -157,6 +157,24 @@ g2 is a production-ready database-first technical analysis platform with:
   - Example usage: `g2 backtest run --strategy pairs_trading --lookback-days 60 --entry-zscore 2.0 --exit-zscore 0.5`
 - **Impact**: Advanced statistical arbitrage, mean-reversion pairs trading (4/6 complete)
 
+**RSI Divergence Strategy (Path A: Item #12):**
+
+- **Strategy Implementation**: Created divergence-based reversal detection strategy
+  - Detects bullish divergence (price lower low, RSI higher low) → buy signal
+  - Detects bearish divergence (price higher high, RSI lower high) → sell signal
+  - Peak/trough detection in both price and RSI series
+  - Signals only in extreme RSI zones (oversold < 30 for bullish, overbought > 70 for bearish)
+  - Configurable parameters: rsi_period (14), divergence_lookback (10), thresholds
+- **TDD Development**: Comprehensive test coverage (506 lines, 10 tests)
+  - Tests for bullish/bearish divergence detection
+  - No divergence scenarios, max positions, position sizing
+  - Multiple symbols with mixed patterns
+- **CLI Integration**: Added rsi_divergence support to backtest command
+  - New parameter: --divergence-lookback
+  - Reuses --rsi-period, --rsi-oversold, --rsi-overbought, --position-size, --max-positions
+  - Example usage: `g2 backtest run --strategy rsi_divergence --divergence-lookback 10 --rsi-oversold 30`
+- **Impact**: Reversal detection using technical divergence, complements trend-following strategies (5/6 complete)
+
 **Files Created:**
 
 - src/g2/strategies/mean_reversion.py (202 lines)
@@ -167,11 +185,13 @@ g2 is a production-ready database-first technical analysis platform with:
 - tests/test_strategy_breakout.py (475 lines, 10 tests)
 - src/g2/strategies/pairs_trading.py (388 lines)
 - tests/test_strategy_pairs_trading.py (523 lines, 9 tests)
+- src/g2/strategies/rsi_divergence.py (372 lines)
+- tests/test_strategy_rsi_divergence.py (506 lines, 10 tests)
 
 **Files Modified:**
 
-- src/g2/cli.py (added mean_reversion, ma_crossover, breakout, and pairs_trading support to backtest run command)
-- NEXT_STEPS.md (updated Item #12 progress: 4/6 strategies complete)
+- src/g2/cli.py (added mean_reversion, ma_crossover, breakout, pairs_trading, and rsi_divergence support to backtest run command)
+- NEXT_STEPS.md (updated Item #12 progress: 5/6 strategies complete)
 
 **Impact:**
 
