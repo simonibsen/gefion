@@ -24,7 +24,6 @@ from g2.cli_helpers import (
     db_connection,
     init_schema_tables,
 )
-from g2.ingest.indicators import INDICATOR_FUNCTIONS  # For validation only
 from g2.features.dispatcher import compute_features
 from g2.config import load_settings
 from g2.db import schema
@@ -2840,7 +2839,6 @@ def features_compute(
 def update_all(
     exchange: Optional[str] = typer.Option(None, help="Exchange filter (e.g., NASDAQ, NYSE). If omitted, infer from stocks table."),
     status: str = typer.Option("Active", help="Listing status filter"),
-    indicators: str = typer.Option("rsi,macd,bbands,adx,stoch,sma20,sma50,sma200,ema12,ema26,psar", help="Comma list of indicators"),
     timeframe: str = typer.Option("auto", help="compact, full, or auto"),
     feature_batch_size: int = typer.Option(200, help="DB insert batch size for computed_features"),
     refresh_existing: bool = typer.Option(
@@ -2850,7 +2848,6 @@ def update_all(
         help="Refresh existing rows on conflict (upsert)",
     ),
     refresh: bool = typer.Option(False, help="Shortcut for full timeframe + refresh existing rows"),
-    compute_locally: bool = typer.Option(True, "--local/--api", help="Compute indicators locally from prices"),
     limit: Optional[int] = typer.Option(None, help="Optional limit for symbols to ingest"),
     max_workers: Optional[int] = typer.Option(None, help="Parallel workers for fetch (auto if not set)"),
     writer_workers: Optional[int] = typer.Option(None, help="Parallel writers to DB"),
@@ -2866,32 +2863,29 @@ def update_all(
     This is the main workflow command that ingests price data and computes
     all active features (indicators, derivatives, etc.) in one step.
 
-    The --indicators parameter ensures those feature definitions exist,
-    but ALL active features from feature_definitions will be computed.
+    Feature definitions must exist in the database before running this command.
+    Use 'g2 feat-seed' to create standard feature definitions.
 
     Examples:
+        # First time setup: seed feature definitions
+        g2 feat-seed
+
         # Update data for existing stocks in database (inferred from stocks table)
         g2 data-update
 
         # Update NASDAQ stocks (limited to 20 for testing)
         g2 data-update --exchange NASDAQ --limit 20
 
-        # Full refresh with custom indicators (creates feature definitions if needed)
-        g2 data-update --exchange NYSE --refresh --indicators rsi,macd,sma20,sma50
+        # Full refresh of all features
+        g2 data-update --exchange NYSE --refresh
 
-        # Compute all features for all stocks
-        g2 data-update --exchange NASDAQ --limit 50 --local
+        # Incremental update for all stocks
+        g2 data-update
     """
     url = _db_url(db_url)
     if refresh:
         timeframe = "full"
         refresh_existing = True
-
-    indicator_list = parse_comma_separated(indicators, lowercase=True, required=True)
-    unknown = [s for s in indicator_list if s not in INDICATOR_FUNCTIONS]
-    if unknown:
-        emit(f"Unknown indicators: {', '.join(unknown)}", json_output=json_output, error=True)
-        raise typer.Exit(code=1)
 
     # Resolve universe
     symbols: List[str] = []
@@ -2941,7 +2935,7 @@ def update_all(
     )
     feature_fetch, feature_writer = _plan_workers_for_stage(
         available,
-        compute_locally=compute_locally,
+        compute_locally=True,  # Always compute locally (not from API)
         calls_per_minute=calls_per_minute,
         requested_fetch=max_workers,
         requested_writer=writer_workers,
@@ -3003,12 +2997,8 @@ def update_all(
         if price_live:
             price_live.__exit__(None, None, None)
 
-    # Features - compute ALL active features (not just indicators)
-    # First ensure requested indicator feature definitions exist (for backward compatibility)
-    with db_connection(url) as conn:
-        from g2.db.ingest import ensure_indicator_feature_definitions
-        ensure_indicator_feature_definitions(conn, indicator_list)
-
+    # Features - compute ALL active features
+    # Feature definitions must already exist (created via g2 feat-seed)
     # Compute all active features using generic dispatcher
     feature_reporter = ProgressReporter(total=len(all_symbols), json_output=json_output, enabled=progress)
     feature_reporter.workers = feature_fetch
