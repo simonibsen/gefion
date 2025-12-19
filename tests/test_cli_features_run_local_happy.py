@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from g2 import cli
 from g2.db import schema
-from g2.db.ingest import ensure_all_indicator_feature_definitions
+from g2.db.ingest import ensure_indicator_feature_definitions
 
 runner = CliRunner()
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
@@ -44,7 +44,7 @@ def test_features_run_local_succeeds(monkeypatch, tmp_path):
     schema.create_stock_ohlcv_table(conn)
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
-    ensure_all_indicator_feature_definitions(conn, indicators=["adx"])
+    ensure_indicator_feature_definitions(conn, indicators=["adx"])
     with conn.cursor() as cur:
         cur.execute("INSERT INTO stocks (symbol) VALUES ('AAA') RETURNING id;")
         stock_id = cur.fetchone()[0]
