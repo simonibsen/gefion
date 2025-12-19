@@ -406,6 +406,74 @@ def ingest_indicators_for_symbols(
             for fut in as_completed(futures):
                 fut.result()
 
+            # === CHUNK PRE-CREATION (Prevents deadlocks and optimizes performance) ===
+            # After all fetches complete, pre-create chunks for the entire date range
+            # This ensures writers hit the optimistic insert fast path (no chunk creation)
+            # and eliminates the deadlock condition from concurrent chunk creation
+            def precreate_chunks_for_queued_data():
+                """Scan work queue and pre-create all needed chunks before writers process."""
+                if work_q.empty():
+                    return
+
+                # Scan queue to find min/max dates (non-destructive peek)
+                items = []
+                try:
+                    while True:
+                        item = work_q.get_nowait()
+                        if item is writer_done:
+                            work_q.put(item)
+                            break
+                        items.append(item)
+                except queue.Empty:
+                    pass
+
+                # Put items back in queue
+                for item in items:
+                    work_q.put(item)
+
+                if not items:
+                    return
+
+                # Calculate date range across ALL queued work
+                min_date = None
+                max_date = None
+                for item in items:
+                    rows = item.get("rows", [])
+                    for row in rows:
+                        dt = row.get("date")
+                        if dt:
+                            if min_date is None or dt < min_date:
+                                min_date = dt
+                            if max_date is None or dt > max_date:
+                                max_date = dt
+
+                if min_date and max_date:
+                    from g2.utils.timescale import ensure_chunks_for_date_range
+                    from datetime import timedelta
+
+                    buffer = timedelta(days=1)
+
+                    # Use SEPARATE connection (not autocommit) to avoid lock contention
+                    with psycopg.connect(db_url) as chunk_conn:
+                        chunk_conn.autocommit = False
+                        try:
+                            ensure_chunks_for_date_range(
+                                chunk_conn,
+                                "computed_features",
+                                min_date - buffer,
+                                max_date + buffer,
+                                chunk_interval_days=30
+                            )
+                            if progress:
+                                progress.log(f"Pre-created chunks for date range {min_date} to {max_date}")
+                        except Exception as e:
+                            # Log but don't fail - optimistic fallback will handle it
+                            if progress:
+                                progress.log(f"Warning: chunk pre-creation failed: {e}")
+
+            # Pre-create chunks after fetch completes, before writers drain queue
+            precreate_chunks_for_queued_data()
+
             work_q.put(writer_done)
             for _ in writers:
                 work_q.put(writer_done)
