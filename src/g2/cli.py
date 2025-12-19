@@ -3086,7 +3086,7 @@ def backtest_run(
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
-        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', or 'breakout'"
+        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', or 'pairs_trading'"
     ),
     start_date: str = typer.Option(
         ...,
@@ -3158,6 +3158,16 @@ def backtest_run(
         "--volume-threshold",
         help="Volume multiplier for breakout confirmation (breakout strategy)"
     ),
+    entry_zscore: float = typer.Option(
+        2.0,
+        "--entry-zscore",
+        help="Z-score threshold for entering pairs trade (pairs_trading strategy)"
+    ),
+    exit_zscore: float = typer.Option(
+        0.5,
+        "--exit-zscore",
+        help="Z-score threshold for exiting pairs trade (pairs_trading strategy)"
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -3190,6 +3200,7 @@ def backtest_run(
     from g2.strategies.mean_reversion import MeanReversionStrategy
     from g2.strategies.ma_crossover import MovingAverageCrossoverStrategy
     from g2.strategies.breakout import BreakoutStrategy
+    from g2.strategies.pairs_trading import PairsTradingStrategy
 
     url = os.getenv("DATABASE_URL", SETTINGS.database_url)
 
@@ -3288,9 +3299,17 @@ def backtest_run(
             position_size=position_size,
             max_positions=max_positions,
         )
+    elif strategy == "pairs_trading":
+        strat = PairsTradingStrategy(
+            lookback_days=lookback_days,
+            entry_zscore=entry_zscore,
+            exit_zscore=exit_zscore,
+            position_size=position_size,
+            max_pairs=max_positions,  # Reuse max_positions as max_pairs
+        )
     else:
         emit_error(
-            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout'",
+            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading'",
             json_output=json_output
         )
         raise typer.Exit(1)

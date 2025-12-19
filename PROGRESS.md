@@ -137,6 +137,26 @@ g2 is a production-ready database-first technical analysis platform with:
   - Example usage: `g2 backtest run --strategy breakout --lookback-days 20 --volume-threshold 1.5`
 - **Impact**: Volume-based breakout detection, momentum validation (3/6 complete)
 
+**Pairs Trading Strategy (Path A: Item #12):**
+
+- **Strategy Implementation**: Created statistical arbitrage strategy using cointegration
+  - Identifies cointegrated pairs (stocks that move together long-term)
+  - Calculates spread (difference between normalized prices) and z-score
+  - Enters long-short positions when |z-score| > entry threshold (default 2.0)
+  - Exits positions when |z-score| < exit threshold (default 0.5)
+  - Configurable parameters: lookback_days (60), entry_zscore (2.0), exit_zscore (0.5)
+  - Manages both legs of pair trade (long one stock, short the other)
+- **TDD Development**: Comprehensive test coverage (523 lines, 9 tests)
+  - Tests for cointegrated pair detection and entry signals
+  - Exit signals when spread normalizes
+  - Max pairs limit, position sizing for both legs
+  - Non-cointegrated stocks (no signals), single symbol handling
+- **CLI Integration**: Added pairs_trading support to backtest command
+  - New parameters: --entry-zscore, --exit-zscore
+  - Reuses --lookback-days, --position-size, --max-positions
+  - Example usage: `g2 backtest run --strategy pairs_trading --lookback-days 60 --entry-zscore 2.0 --exit-zscore 0.5`
+- **Impact**: Advanced statistical arbitrage, mean-reversion pairs trading (4/6 complete)
+
 **Files Created:**
 
 - src/g2/strategies/mean_reversion.py (202 lines)
@@ -145,11 +165,13 @@ g2 is a production-ready database-first technical analysis platform with:
 - tests/test_strategy_ma_crossover.py (425 lines, 9 tests)
 - src/g2/strategies/breakout.py (168 lines)
 - tests/test_strategy_breakout.py (475 lines, 10 tests)
+- src/g2/strategies/pairs_trading.py (388 lines)
+- tests/test_strategy_pairs_trading.py (523 lines, 9 tests)
 
 **Files Modified:**
 
-- src/g2/cli.py (added mean_reversion, ma_crossover, and breakout support to backtest run command)
-- NEXT_STEPS.md (updated Item #12 progress: 3/6 strategies complete)
+- src/g2/cli.py (added mean_reversion, ma_crossover, breakout, and pairs_trading support to backtest run command)
+- NEXT_STEPS.md (updated Item #12 progress: 4/6 strategies complete)
 
 **Impact:**
 
