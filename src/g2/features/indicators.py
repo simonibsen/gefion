@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Iterable, List, Mapping, Optional
+from typing import Dict, Iterable, List, Mapping, Optional, TYPE_CHECKING
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    import psycopg
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +69,133 @@ def _psar(high: pd.Series, low: pd.Series, step: float = 0.02, max_step: float =
     return pd.Series(psar, index=high.index, dtype=float)
 
 
+def _compute_indicators_with_plugins(
+    price_rows: Iterable[Mapping[str, object]],
+    indicators: Iterable[str | Mapping[str, object]],
+    return_failures: bool,
+    db_conn: 'psycopg.Connection',
+) -> List[Dict[str, object]] | tuple[List[Dict[str, object]], List[tuple[str, str]]]:
+    """
+    Compute indicators using database-driven plugin architecture.
+
+    Args:
+        price_rows: Price data rows (OHLCV)
+        indicators: List of indicator specs
+        return_failures: Whether to return failures
+        db_conn: Database connection
+
+    Returns:
+        List of computed indicator rows, or (rows, failures) if return_failures=True
+    """
+    from g2.features.dispatcher import PluginOrchestrator
+
+    # Prepare DataFrame from price rows
+    df = pd.DataFrame(price_rows)
+    if df.empty:
+        return ([], []) if return_failures else []
+
+    df = df.sort_values("date").copy()
+
+    # Ensure numeric types for OHLCV columns
+    for col in ["open", "high", "low", "close", "adjusted_close", "volume"]:
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Drop rows with no price data
+    df = df.dropna(subset=["close", "adjusted_close"], how="all")
+    if df.empty:
+        return ([], []) if return_failures else []
+
+    # Discover and load plugins
+    orchestrator = PluginOrchestrator(db_conn, 'compute_indicators')
+
+    # Convert indicator specs to format expected by orchestrator
+    specs = []
+    for indicator_spec in indicators:
+        if isinstance(indicator_spec, str):
+            # String format: "rsi" or "sma20" -> dict format
+            # Extract base indicator and period if present
+            import re
+            match = re.match(r'([a-z]+)(\d+)?', indicator_spec)
+            if match:
+                base_indicator = match.group(1)
+                period_str = match.group(2)
+                period = int(period_str) if period_str else None
+
+                params = {'indicator': indicator_spec}
+                if period is not None:
+                    params['period'] = period
+
+                specs.append({
+                    'type': indicator_spec,
+                    'name': f'indicator_{indicator_spec}',
+                    'params': params
+                })
+            else:
+                # Fallback
+                specs.append({
+                    'type': indicator_spec,
+                    'name': f'indicator_{indicator_spec}',
+                    'params': {'indicator': indicator_spec}
+                })
+        else:
+            # Already dict format
+            specs.append(indicator_spec)
+
+    # Execute plugins and get results
+    cache = {}  # Shared cache for plugins
+    failed_features: List[tuple[str, str]] = []
+
+    try:
+        result_df = orchestrator.execute_plugins(df, specs, cache)
+    except Exception as e:
+        logger.warning(f"Plugin execution failed: {e}")
+        return ([], []) if return_failures else []
+
+    # Add source column
+    result_df["source"] = "local"
+
+    # Convert DataFrame to list of dicts (same format as original)
+    records = result_df.to_dict("records")
+
+    # Filter out NaN values and format results
+    indicator_cols = [
+        "rsi_14", "adx_14", "sma_20", "sma_50", "sma_200",
+        "ema_12", "ema_26", "macd", "macd_signal", "macd_hist",
+        "bb_upper", "bb_middle", "bb_lower", "stoch_k", "stoch_d", "psar"
+    ]
+
+    results: List[Dict[str, object]] = []
+    for record in records:
+        out: Dict[str, object] = {"date": record["date"], "source": "local"}
+        has_indicators = False
+
+        for col in indicator_cols:
+            if col in record:
+                val = record[col]
+                if pd.notna(val):
+                    out[col] = float(val)
+                    has_indicators = True
+
+        if has_indicators:
+            results.append(out)
+
+    if return_failures:
+        return results, failed_features
+    return results
+
+
 def compute_indicators(
     price_rows: Iterable[Mapping[str, object]],
     indicators: Iterable[str | Mapping[str, object]],
     return_failures: bool = False,
+    db_conn: Optional['psycopg.Connection'] = None,
 ) -> List[Dict[str, object]] | tuple[List[Dict[str, object]], List[tuple[str, str]]]:
     """
     Compute technical indicators from price data.
+
+    Meta-function that orchestrates indicator plugins from the database when
+    db_conn is provided, or falls back to built-in implementations.
 
     Args:
         price_rows: Price data rows (OHLCV)
@@ -80,10 +203,16 @@ def compute_indicators(
                    or a list of compute spec dicts from feature_definitions
                    (e.g., [{"type": "rsi", "name": "indicator_rsi_14", ...}])
         return_failures: If True, return (results, failures) tuple
+        db_conn: Optional database connection for plugin discovery
 
     Returns:
         List of computed indicator rows, or (rows, failures) if return_failures=True
     """
+    # If db_conn provided, use plugin architecture
+    if db_conn is not None:
+        return _compute_indicators_with_plugins(price_rows, indicators, return_failures, db_conn)
+
+    # Otherwise, use built-in implementations (backward compatibility)
     df = pd.DataFrame(price_rows)
     if df.empty:
         return ([], []) if return_failures else []
