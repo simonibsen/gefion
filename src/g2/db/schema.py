@@ -168,6 +168,7 @@ def create_feature_functions_table(conn: Connection) -> None:
                 tags TEXT[],
                 min_app_version TEXT,
                 enabled BOOLEAN DEFAULT TRUE,
+                called_by TEXT,
                 created_by TEXT,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW(),
@@ -182,6 +183,15 @@ def create_feature_functions_table(conn: Connection) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_feature_functions_enabled_status_name
             ON feature_functions (enabled, status, name);
+            """
+        )
+        # Create index for plugin discovery - find all plugins for a meta-function
+        # Optimizes: WHERE called_by = 'meta_function' AND enabled = TRUE AND status = 'active'
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_feature_functions_called_by_enabled_status
+            ON feature_functions (called_by, enabled, status)
+            WHERE called_by IS NOT NULL;
             """
         )
     conn.commit()
