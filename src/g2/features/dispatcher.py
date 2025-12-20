@@ -45,6 +45,199 @@ def register_compute_function(function_name: str, compute_func: Callable) -> Non
     COMPUTE_FUNCTIONS[function_name] = compute_func
 
 
+class PluginOrchestrator:
+    """
+    Helper for meta-functions to discover and execute plugins from database.
+
+    Provides reusable plugin discovery, loading, caching, and execution
+    that meta-functions can use to orchestrate their plugins.
+
+    Example:
+        orchestrator = PluginOrchestrator(conn, 'compute_indicators')
+        result_df = orchestrator.execute_plugins(df, specs, cache)
+    """
+
+    # Class-level cache shared across instances
+    _PLUGIN_CACHE: Dict[str, Dict[str, Callable]] = {}
+
+    def __init__(self, conn: psycopg.Connection, meta_function_name: str):
+        """
+        Initialize orchestrator and discover plugins for meta-function.
+
+        Args:
+            conn: Database connection
+            meta_function_name: Name of meta-function to find plugins for
+        """
+        self.conn = conn
+        self.meta_function_name = meta_function_name
+        self.plugins = self._discover_plugins()
+
+    def _discover_plugins(self) -> Dict[str, Callable]:
+        """
+        Discover all enabled plugins for this meta-function.
+
+        Returns:
+            Dict mapping plugin name -> plugin function
+        """
+        # Check cache first
+        if self.meta_function_name in self._PLUGIN_CACHE:
+            return self._PLUGIN_CACHE[self.meta_function_name]
+
+        plugins: Dict[str, Callable] = {}
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT name, language, function_body, version
+                FROM feature_functions
+                WHERE called_by = %s
+                AND enabled = TRUE
+                AND status = 'active'
+                ORDER BY name
+                """,
+                (self.meta_function_name,),
+            )
+            rows = cur.fetchall()
+
+        for name, language, body, version in rows:
+            if language == 'python':
+                try:
+                    plugin_func = self._load_python_function(body, name)
+                    plugins[name] = plugin_func
+                except Exception as e:
+                    warnings.warn(f"Failed to load plugin '{name}': {e}")
+
+        # Cache the discovered plugins
+        self._PLUGIN_CACHE[self.meta_function_name] = plugins
+        return plugins
+
+    def _load_python_function(self, function_body: str, function_name: str) -> Callable:
+        """
+        Load a Python function from string code.
+
+        Args:
+            function_body: Python code containing the function
+            function_name: Name of function for error messages
+
+        Returns:
+            Callable function
+
+        Raises:
+            ValueError: If function cannot be loaded
+        """
+        import pandas as pd
+        import numpy as np
+
+        namespace = {
+            'pd': pd,
+            'np': np,
+            'pandas': pd,
+            'numpy': np,
+        }
+
+        try:
+            exec(function_body, namespace)
+        except Exception as e:
+            raise ValueError(f"Failed to exec function '{function_name}': {e}")
+
+        if 'compute' not in namespace:
+            raise ValueError(f"Function '{function_name}' must define a 'compute' function")
+
+        return namespace['compute']
+
+    def execute_plugins(
+        self,
+        df: 'pd.DataFrame',
+        specs: List[Dict[str, Any]],
+        cache: Optional[Dict[str, Any]] = None
+    ) -> 'pd.DataFrame':
+        """
+        Execute all plugins and merge results into a single DataFrame.
+
+        Args:
+            df: Input DataFrame with source data
+            specs: List of feature specs to compute
+            cache: Optional cache dict for sharing data between plugins
+
+        Returns:
+            DataFrame with date column and all computed feature columns
+        """
+        import pandas as pd
+
+        if cache is None:
+            cache = {}
+
+        # Start with date column
+        result_df = df[['date']].copy()
+
+        for spec in specs:
+            feature_name = spec.get('name', '')
+
+            # Find matching plugin based on spec name or params
+            plugin_name = self._find_plugin_for_spec(spec)
+
+            if plugin_name and plugin_name in self.plugins:
+                try:
+                    # Execute plugin
+                    plugin_result = self.plugins[plugin_name](df, spec, cache)
+
+                    # Merge result into output DataFrame
+                    if isinstance(plugin_result, pd.DataFrame):
+                        # Merge on date
+                        result_df = result_df.merge(
+                            plugin_result,
+                            on='date',
+                            how='left'
+                        )
+                    elif isinstance(plugin_result, dict):
+                        # Add scalar result to all rows
+                        for key, value in plugin_result.items():
+                            result_df[key] = value
+
+                except Exception as e:
+                    warnings.warn(f"Plugin '{plugin_name}' failed for spec '{feature_name}': {e}")
+
+        return result_df
+
+    def _find_plugin_for_spec(self, spec: Dict[str, Any]) -> Optional[str]:
+        """
+        Find the plugin name that should handle this spec.
+
+        Currently uses simple naming convention: indicator_rsi_14 -> indicator_rsi
+
+        Args:
+            spec: Feature specification
+
+        Returns:
+            Plugin name or None
+        """
+        feature_name = spec.get('name', '')
+        params = spec.get('params', {})
+
+        # Try exact match first
+        if feature_name in self.plugins:
+            return feature_name
+
+        # Try extracting base indicator name from feature name
+        # e.g., indicator_rsi_14 -> indicator_rsi
+        if '_' in feature_name:
+            parts = feature_name.split('_')
+            # Try progressively shorter prefixes
+            for i in range(len(parts), 0, -1):
+                candidate = '_'.join(parts[:i])
+                if candidate in self.plugins:
+                    return candidate
+
+        # Try using indicator type from params
+        indicator_type = params.get('indicator')
+        if indicator_type:
+            candidate = f"indicator_{indicator_type}"
+            if candidate in self.plugins:
+                return candidate
+
+        return None
+
+
 def compute_features(
     conn: psycopg.Connection,
     data_id: int,
