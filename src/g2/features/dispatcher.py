@@ -211,6 +211,8 @@ class PluginOrchestrator:
         Returns:
             Plugin name or None
         """
+        import re
+
         feature_name = spec.get('name', '')
         params = spec.get('params', {})
 
@@ -219,21 +221,36 @@ class PluginOrchestrator:
             return feature_name
 
         # Try extracting base indicator name from feature name
-        # e.g., indicator_rsi_14 -> indicator_rsi
+        # Handle both: indicator_rsi_14 -> indicator_rsi AND indicator_sma20 -> indicator_sma
         if '_' in feature_name:
             parts = feature_name.split('_')
             # Try progressively shorter prefixes
             for i in range(len(parts), 0, -1):
                 candidate = '_'.join(parts[:i])
+
+                # If last part has embedded number (e.g., 'sma20'), try stripping it
+                if i == len(parts):
+                    last_part = parts[-1]
+                    match = re.match(r'([a-z]+)\d+', last_part)
+                    if match:
+                        base = match.group(1)
+                        candidate_stripped = '_'.join(parts[:-1] + [base])
+                        if candidate_stripped in self.plugins:
+                            return candidate_stripped
+
                 if candidate in self.plugins:
                     return candidate
 
         # Try using indicator type from params
         indicator_type = params.get('indicator')
         if indicator_type:
-            candidate = f"indicator_{indicator_type}"
-            if candidate in self.plugins:
-                return candidate
+            # Strip numbers from indicator type (e.g., 'sma20' -> 'sma')
+            match = re.match(r'([a-z]+)\d*', indicator_type)
+            if match:
+                base_type = match.group(1)
+                candidate = f"indicator_{base_type}"
+                if candidate in self.plugins:
+                    return candidate
 
         return None
 
