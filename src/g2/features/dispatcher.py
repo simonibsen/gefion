@@ -824,11 +824,27 @@ def _process_function_group(
             # Call compute function
             try:
                 compute_start = time.monotonic()
-                # Pass cache and cache_lock if available to allow features to share intermediate calculations
-                if cache is not None:
-                    computed_rows = compute_func(source_rows, compute_specs, cache=cache, cache_lock=cache_lock)
-                else:
-                    computed_rows = compute_func(source_rows, compute_specs)
+
+                # Inspect function signature to determine what parameters to pass
+                sig = inspect.signature(compute_func)
+                params_to_pass = {}
+
+                # Always pass source_rows and compute_specs
+                # (passed as positional args, not in params_to_pass)
+
+                # Optional: cache and cache_lock
+                if 'cache' in sig.parameters and cache is not None:
+                    params_to_pass['cache'] = cache
+                if 'cache_lock' in sig.parameters and cache_lock is not None:
+                    params_to_pass['cache_lock'] = cache_lock
+
+                # Optional: db_conn (for meta-functions using plugins)
+                if 'db_conn' in sig.parameters:
+                    params_to_pass['db_conn'] = conn
+
+                # Call function with appropriate parameters
+                computed_rows = compute_func(source_rows, compute_specs, **params_to_pass)
+
                 if timings is not None and timings_lock is not None:
                     elapsed = time.monotonic() - compute_start
                     with timings_lock:
