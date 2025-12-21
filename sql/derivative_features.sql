@@ -103,7 +103,7 @@ ON CONFLICT (name) DO NOTHING;
 -- NOTE: These require 'indicator_close' to exist as a passthrough feature.
 -- If not already defined, create it first:
 --   INSERT INTO feature_definitions (name, function_name, params, source_table, source_column, store_table, store_column, store_type, active)
---   VALUES ('indicator_close', 'passthrough', '{}'::jsonb, 'stock_prices', 'close', 'computed_features', 'value', 'double precision', true);
+--   VALUES ('indicator_close', 'passthrough', '{}'::jsonb, 'stock_ohlcv', 'close', 'computed_features', 'value', 'double precision', true);
 INSERT INTO feature_definitions (
     name, function_name, params,
     source_table, source_column,

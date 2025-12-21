@@ -10,27 +10,176 @@ from psycopg import errors
 from psycopg.types.json import Json
 
 
-def upsert_stock(conn: psycopg.Connection, symbol: str) -> int:
-    """Insert symbol into stocks if missing; return id."""
+def upsert_stock(conn: psycopg.Connection, symbol: str, status: Optional[str] = None) -> int:
+    """
+    Insert or update symbol in stocks table; return id.
+
+    Args:
+        conn: Database connection
+        symbol: Stock symbol
+        status: Optional status (e.g., 'Active', 'Inactive'). If None, status is not updated.
+
+    Returns:
+        Stock ID
+    """
     with conn.cursor() as cur:
-        # Try insert first - returns ID if successful
-        cur.execute(
-            "INSERT INTO stocks (symbol) VALUES (%s) ON CONFLICT (symbol) DO NOTHING RETURNING id",
-            (symbol,),
-        )
-        row = cur.fetchone()
-        if row:
-            return row[0]
-        # If insert was skipped (conflict), fetch existing ID
-        cur.execute("SELECT id FROM stocks WHERE symbol = %s", (symbol,))
-        return cur.fetchone()[0]
+        if status is not None:
+            # Insert with status, or update status on conflict
+            cur.execute(
+                """
+                INSERT INTO stocks (symbol, status)
+                VALUES (%s, %s)
+                ON CONFLICT (symbol) DO UPDATE SET status = EXCLUDED.status
+                RETURNING id
+                """,
+                (symbol, status),
+            )
+            return cur.fetchone()[0]
+        else:
+            # Insert without status (leaves it NULL), or do nothing on conflict
+            cur.execute(
+                "INSERT INTO stocks (symbol) VALUES (%s) ON CONFLICT (symbol) DO NOTHING RETURNING id",
+                (symbol,),
+            )
+            row = cur.fetchone()
+            if row:
+                return row[0]
+            # If insert was skipped (conflict), fetch existing ID
+            cur.execute("SELECT id FROM stocks WHERE symbol = %s", (symbol,))
+            return cur.fetchone()[0]
 
 
 def latest_price_date(conn: psycopg.Connection, data_id: int) -> Optional[date]:
     with conn.cursor() as cur:
-        cur.execute("SELECT MAX(date) FROM stock_prices WHERE data_id = %s;", (data_id,))
+        cur.execute("SELECT MAX(date) FROM stock_ohlcv WHERE data_id = %s;", (data_id,))
         row = cur.fetchone()
     return row[0]
+
+
+def filter_symbols_needing_update(
+    conn: psycopg.Connection,
+    symbols: Sequence[str],
+    target_date: Optional[date] = None
+) -> List[str]:
+    """
+    Filter out symbols that already have data up to the target date.
+
+    Returns a list of symbols that need updates (either missing data or stale data).
+    This is more efficient than checking each symbol individually in parallel workers.
+
+    Args:
+        conn: Database connection
+        symbols: List of symbols to check
+        target_date: Date to check against (defaults to today)
+
+    Returns:
+        List of symbols that need updates
+    """
+    if not symbols:
+        return []
+
+    if target_date is None:
+        target_date = date.today()
+
+    # Build query to get latest price date for each symbol
+    # Use LEFT JOIN to include symbols that don't exist or have no prices
+    # Exclude symbols with status='Inactive' (delisted/dead tickers)
+    with conn.cursor() as cur:
+        # Create a temporary table with the input symbols for efficient joining
+        placeholders = ",".join(["%s"] * len(symbols))
+        cur.execute(
+            f"""
+            WITH input_symbols AS (
+                SELECT unnest(ARRAY[{placeholders}]) AS symbol
+            )
+            SELECT
+                input_symbols.symbol,
+                MAX(sp.date) AS latest_date
+            FROM input_symbols
+            LEFT JOIN stocks s ON s.symbol = input_symbols.symbol
+            LEFT JOIN stock_ohlcv sp ON sp.data_id = s.id
+            WHERE s.id IS NULL OR s.status IS DISTINCT FROM 'Inactive'
+            GROUP BY input_symbols.symbol
+            ORDER BY input_symbols.symbol
+            """,
+            list(symbols)
+        )
+        results = cur.fetchall()
+
+    # Filter to only symbols that need updates
+    symbols_needing_update = []
+    for symbol, latest_date in results:
+        # Need update if: no data exists OR data is stale
+        if latest_date is None or latest_date < target_date:
+            symbols_needing_update.append(symbol)
+
+    return symbols_needing_update
+
+
+def filter_new_rows(
+    conn: psycopg.Connection,
+    data_id: int,
+    rows: Iterable[Mapping[str, object]],
+    target_date: Optional[date] = None
+) -> List[Mapping[str, object]]:
+    """
+    Filter API response rows to only include rows newer than existing data.
+
+    This avoids inserting duplicate rows that would be skipped by ON CONFLICT,
+    reducing database overhead. Also prevents inserting future dates beyond
+    the expected target date (e.g., partial intraday data).
+
+    Args:
+        conn: Database connection
+        data_id: Stock ID
+        rows: Rows from API response
+        target_date: Maximum date to allow (inclusive). Rows with dates after
+                    this will be filtered out. Defaults to None (no limit).
+
+    Returns:
+        List of rows that are newer than existing data and not beyond target_date
+    """
+    if not rows:
+        return []
+
+    # Get the latest date we have for this symbol
+    latest = latest_price_date(conn, data_id)
+
+    # If no existing data, all rows are new (but still respect target_date)
+    if latest is None:
+        if target_date is None:
+            return list(rows)
+        # Filter to only rows up to target_date
+        latest = date.min  # Use minimum date so all rows pass the > latest check
+
+    # Filter to only rows after the latest date AND not beyond target_date
+    new_rows = []
+    for row in rows:
+        row_date = row.get("date")
+
+        # Handle different date formats
+        if isinstance(row_date, date):
+            parsed_date = row_date
+        elif isinstance(row_date, str):
+            try:
+                from datetime import datetime
+                parsed_date = datetime.fromisoformat(row_date).date()
+            except Exception:
+                # If we can't parse the date, include the row (let insert handle it)
+                new_rows.append(row)
+                continue
+        else:
+            # Unknown date format, include the row
+            new_rows.append(row)
+            continue
+
+        # Only include rows newer than latest existing date
+        if parsed_date > latest:
+            # Also check target_date limit (prevent future/partial data)
+            if target_date is None or parsed_date <= target_date:
+                new_rows.append(row)
+
+    return new_rows
 
 
 def feature_ids_for_names(conn: psycopg.Connection, names: Sequence[str]) -> Dict[str, int]:
@@ -82,14 +231,14 @@ def trim_feature_data(
     return total_deleted
 
 
-def trim_stock_prices(
+def trim_stock_ohlcv(
     conn: psycopg.Connection,
     before: Optional[date] = None,
     after: Optional[date] = None,
     symbols: Optional[Sequence[str]] = None,
 ) -> int:
     """
-    Trim stock_prices rows by date.
+    Trim stock_ohlcv rows by date.
     - before: drop rows strictly before this date
     - after: drop rows strictly after this date
     - symbols: optional list of symbols to restrict trimming
@@ -120,13 +269,66 @@ def trim_stock_prices(
 
         if before:
             cur.execute(
-                f"DELETE FROM stock_prices WHERE date < %s{where_ids};",
+                f"DELETE FROM stock_ohlcv WHERE date < %s{where_ids};",
                 [before, *params] if params else (before,),
             )
             total_deleted += cur.rowcount
         if after:
             cur.execute(
-                f"DELETE FROM stock_prices WHERE date > %s{where_ids};",
+                f"DELETE FROM stock_ohlcv WHERE date > %s{where_ids};",
+                [after, *params] if params else (after,),
+            )
+            total_deleted += cur.rowcount
+    conn.commit()
+    return total_deleted
+
+
+def trim_all_computed_features(
+    conn: psycopg.Connection,
+    before: Optional[date] = None,
+    after: Optional[date] = None,
+    symbols: Optional[Sequence[str]] = None,
+) -> int:
+    """
+    Trim ALL computed_features rows by date (optionally limited to symbols).
+    - before: drop rows strictly before this date
+    - after: drop rows strictly after this date
+    - symbols: optional list of symbols to restrict trimming to specific stocks
+    Returns count of rows deleted.
+    """
+    if not before and not after:
+        return 0
+
+    data_ids: Optional[List[int]] = None
+    if symbols:
+        placeholders = ",".join(["%s"] * len(symbols))
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT id FROM stocks WHERE symbol IN ({placeholders});",
+                list(symbols),
+            )
+            rows = cur.fetchall()
+        data_ids = [r[0] for r in rows]
+        if not data_ids:
+            return 0
+
+    total_deleted = 0
+    with conn.cursor() as cur:
+        where_ids = ""
+        params: List[object] = []
+        if data_ids is not None:
+            where_ids = f" AND data_id IN ({','.join(['%s'] * len(data_ids))})"
+            params.extend(data_ids)
+
+        if before:
+            cur.execute(
+                f"DELETE FROM computed_features WHERE date < %s{where_ids};",
+                [before, *params] if params else (before,),
+            )
+            total_deleted += cur.rowcount
+        if after:
+            cur.execute(
+                f"DELETE FROM computed_features WHERE date > %s{where_ids};",
                 [after, *params] if params else (after,),
             )
             total_deleted += cur.rowcount
@@ -225,20 +427,154 @@ def delete_feature_data_only(
     return deleted_counts
 
 
-def latest_indicator_date(conn: psycopg.Connection, data_id: int) -> Optional[date]:
+def latest_feature_date(
+    conn: psycopg.Connection,
+    data_id: int,
+    function_name: Optional[str] = None
+) -> Optional[date]:
+    """
+    Get the latest date for computed features for a given data_id.
+
+    Args:
+        conn: Database connection
+        data_id: Stock data_id
+        function_name: Optional function_name to filter by (e.g., 'indicator', 'derivative')
+                      If None, returns latest date across all active features
+
+    Returns:
+        Latest date or None if no data exists
+    """
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT MAX(date) FROM computed_features
-            WHERE data_id = %s
-            AND feature_id IN (
-                SELECT id FROM feature_definitions WHERE function_name = 'indicator' AND active = TRUE
-            );
-            """,
-            (data_id,),
-        )
+        if function_name:
+            cur.execute(
+                """
+                SELECT MAX(date) FROM computed_features
+                WHERE data_id = %s
+                AND feature_id IN (
+                    SELECT id FROM feature_definitions WHERE function_name = %s AND active = TRUE
+                );
+                """,
+                (data_id, function_name),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT MAX(date) FROM computed_features
+                WHERE data_id = %s
+                AND feature_id IN (
+                    SELECT id FROM feature_definitions WHERE active = TRUE
+                );
+                """,
+                (data_id,),
+            )
         row = cur.fetchone()
     return row[0]
+
+
+def filter_symbols_needing_features(
+    conn: psycopg.Connection,
+    symbols: Sequence[str],
+    target_date: Optional[date] = None,
+    function_name: Optional[str] = None
+) -> List[str]:
+    """
+    Filter out symbols that already have up-to-date feature data.
+
+    Args:
+        conn: Database connection
+        symbols: List of stock symbols to check
+        target_date: Target date for up-to-date check (defaults to today)
+        function_name: Optional function_name to filter by (e.g., 'indicator', 'derivative')
+                      If None, checks all active features
+
+    Returns:
+        List of symbols that need feature computation (either missing data or stale data)
+    """
+    from datetime import date as date_type
+    if target_date is None:
+        target_date = date_type.today()
+
+    if not symbols:
+        return []
+
+    with conn.cursor() as cur:
+        if function_name:
+            # Query to find symbols with stale or missing feature data for specific function
+            cur.execute(
+                """
+                WITH symbol_ids AS (
+                    SELECT s.id, s.symbol
+                    FROM stocks s
+                    WHERE s.symbol = ANY(%s)
+                      AND s.status IS DISTINCT FROM 'Inactive'
+                ),
+                latest_features AS (
+                    SELECT
+                        cf.data_id,
+                        MAX(cf.date) as latest_date
+                    FROM computed_features cf
+                    WHERE cf.data_id IN (SELECT id FROM symbol_ids)
+                      AND cf.feature_id IN (
+                          SELECT id FROM feature_definitions
+                          WHERE function_name = %s AND active = TRUE
+                      )
+                    GROUP BY cf.data_id
+                )
+                SELECT s.symbol
+                FROM symbol_ids s
+                LEFT JOIN latest_features lf ON s.id = lf.data_id
+                WHERE lf.latest_date IS NULL
+                   OR lf.latest_date < %s;
+                """,
+                (symbols, function_name, target_date)
+            )
+        else:
+            # Query to find symbols with stale or missing feature data for any active features
+            cur.execute(
+                """
+                WITH symbol_ids AS (
+                    SELECT s.id, s.symbol
+                    FROM stocks s
+                    WHERE s.symbol = ANY(%s)
+                      AND s.status IS DISTINCT FROM 'Inactive'
+                ),
+                latest_features AS (
+                    SELECT
+                        cf.data_id,
+                        MAX(cf.date) as latest_date
+                    FROM computed_features cf
+                    WHERE cf.data_id IN (SELECT id FROM symbol_ids)
+                      AND cf.feature_id IN (
+                          SELECT id FROM feature_definitions WHERE active = TRUE
+                      )
+                    GROUP BY cf.data_id
+                )
+                SELECT s.symbol
+                FROM symbol_ids s
+                LEFT JOIN latest_features lf ON s.id = lf.data_id
+                WHERE lf.latest_date IS NULL
+                   OR lf.latest_date < %s;
+                """,
+                (symbols, target_date)
+            )
+        needs_update = [row[0] for row in cur.fetchall()]
+
+    return needs_update
+
+
+def latest_indicator_date(conn: psycopg.Connection, data_id: int) -> Optional[date]:
+    """DEPRECATED: Use latest_feature_date(conn, data_id, function_name='indicator') instead."""
+    return latest_feature_date(conn, data_id, function_name='indicator')
+
+
+def filter_symbols_needing_indicators(
+    conn: psycopg.Connection,
+    symbols: Sequence[str],
+    target_date: Optional[date] = None
+) -> List[str]:
+    """DEPRECATED: Use filter_symbols_needing_features(conn, symbols, target_date, function_name='indicator') instead."""
+    return filter_symbols_needing_features(conn, symbols, target_date, function_name='indicator')
+
 
 
 def decide_outputsize(conn: psycopg.Connection, data_id: int, timeframe: str = "auto") -> str:
@@ -260,7 +596,7 @@ def decide_outputsize(conn: psycopg.Connection, data_id: int, timeframe: str = "
     return "compact"
 
 
-def insert_stock_prices(
+def insert_stock_ohlcv(
     conn: psycopg.Connection,
     data_id: int,
     rows: Iterable[Mapping[str, object]],
@@ -298,6 +634,8 @@ def insert_stock_prices(
         low_v = safe_num(row.get("low"))
         close_v = safe_num(row.get("close"))
         adj_v = safe_num(row.get("adjusted_close"))
+        dividend_v = safe_num(row.get("dividend_amount"))
+        split_v = safe_num(row.get("split_coefficient"))
 
         # Skip rows with all NULL price values
         if all(v is None for v in [open_v, high_v, low_v, close_v, adj_v]):
@@ -311,6 +649,8 @@ def insert_stock_prices(
             low_v,
             close_v,
             adj_v,
+            dividend_v,
+            split_v,
             safe_num(row.get("volume")),
             row.get("source", "alphavantage"),
         ))
@@ -326,6 +666,7 @@ def insert_stock_prices(
         "ON CONFLICT (data_id, date) DO UPDATE SET "
         "open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, "
         "close = EXCLUDED.close, adjusted_close = EXCLUDED.adjusted_close, "
+        "dividend_amount = EXCLUDED.dividend_amount, split_coefficient = EXCLUDED.split_coefficient, "
         "volume = EXCLUDED.volume, source = EXCLUDED.source"
         if update_existing
         else "ON CONFLICT (data_id, date) DO NOTHING"
@@ -339,17 +680,18 @@ def insert_stock_prices(
             values_placeholders = []
             params = []
             for row_data in batch:
-                values_placeholders.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s)")
+                values_placeholders.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
                 params.extend(row_data)
 
             sql_stmt = (
-                "INSERT INTO stock_prices "
-                "(data_id, date, open, high, low, close, adjusted_close, volume, source) "
+                "INSERT INTO stock_ohlcv "
+                "(data_id, date, open, high, low, close, adjusted_close, dividend_amount, split_coefficient, volume, source) "
                 "VALUES " + ",".join(values_placeholders) + " " + conflict_clause
             )
 
             cur.execute(sql_stmt, params)
-            total_inserted += len(batch)
+            # Use rowcount to get ACTUAL inserts (excludes ON CONFLICT skipped rows)
+            total_inserted += cur.rowcount
 
     conn.commit()
     return total_inserted
@@ -358,21 +700,6 @@ def insert_stock_prices(
 
 
 # --- Feature store helpers (computed_features / feature_definitions) ---
-
-_INDICATOR_COLUMNS: Dict[str, List[str]] = {
-    "rsi": ["rsi_14"],
-    "adx": ["adx_14"],
-    "sma20": ["sma_20"],
-    "sma50": ["sma_50"],
-    "sma200": ["sma_200"],
-    "ema12": ["ema_12"],
-    "ema26": ["ema_26"],
-    "macd": ["macd", "macd_signal", "macd_hist"],
-    "bbands": ["bb_upper", "bb_middle", "bb_lower"],
-    "stoch": ["stoch_k", "stoch_d"],
-    "psar": ["psar"],
-}
-
 
 def ensure_feature_definitions(
     conn: psycopg.Connection, defs: Sequence[Mapping[str, object]]
@@ -414,53 +741,61 @@ def ensure_feature_definitions(
     return ids
 
 
-def ensure_indicator_feature_definitions(conn: psycopg.Connection, indicators: Sequence[str]) -> Dict[str, int]:
+def load_feature_definitions_from_json(path: str) -> List[Dict[str, object]]:
     """
-    Create/ensure feature_definitions entries for requested indicator columns.
-    Returns mapping column_name -> feature_id (e.g., "rsi_14" -> 5).
-    """
-    seen_cols: Dict[str, str] = {}
-    for ind in indicators:
-        cols = _INDICATOR_COLUMNS.get(ind)
-        if not cols:
-            continue
-        for col in cols:
-            seen_cols[col] = ind
-    if not seen_cols:
-        return {}
+    Load feature definitions from JSON file(s).
 
-    defs = []
-    for col, ind in seen_cols.items():
-        defs.append(
-            {
-                "name": f"indicator_{col}",
-                "function_name": "indicator",
-                "params": {"indicator": ind},
-                "source_table": "stock_prices",
-                "source_column": "close",
-                "store_table": "computed_features",
-                "store_column": "value",
-                "store_type": "double precision",
-                "active": True,
-            }
-        )
-    name_to_id = ensure_feature_definitions(conn, defs)
-    ensure_store_targets(conn, defs)
-    # Build column -> id map
-    col_to_id: Dict[str, int] = {}
-    for col in seen_cols:
-        fid = name_to_id.get(f"indicator_{col}")
-        if fid is not None:
-            col_to_id[col] = fid
-    return col_to_id
+    Args:
+        path: Path to a JSON file or directory containing JSON files
+
+    Returns:
+        List of feature definition dicts
+
+    Raises:
+        ValueError: If required fields are missing
+        json.JSONDecodeError: If JSON is malformed
+    """
+    import json
+    from pathlib import Path as PathlibPath
+
+    path_obj = PathlibPath(path)
+    definitions: List[Dict[str, object]] = []
+
+    if path_obj.is_file():
+        # Load single file
+        with open(path_obj) as f:
+            data = json.load(f)
+            _validate_feature_definition(data)
+            definitions.append(data)
+    elif path_obj.is_dir():
+        # Load all JSON files in directory
+        for json_file in sorted(path_obj.glob("*.json")):
+            with open(json_file) as f:
+                data = json.load(f)
+                _validate_feature_definition(data)
+                definitions.append(data)
+    else:
+        raise ValueError(f"Path does not exist: {path}")
+
+    return definitions
 
 
-def ensure_all_indicator_feature_definitions(conn: psycopg.Connection) -> Dict[str, int]:
-    """
-    Convenience to seed definitions for all known indicators in _INDICATOR_COLUMNS.
-    Returns column -> feature_id map.
-    """
-    return ensure_indicator_feature_definitions(conn, list(_INDICATOR_COLUMNS.keys()))
+def _validate_feature_definition(definition: Dict[str, object]) -> None:
+    """Validate that a feature definition has all required fields."""
+    required_fields = [
+        "name",
+        "function_name",
+        "source_table",
+        "source_column",
+        "store_table",
+        "store_column",
+        "store_type",
+        "active"
+    ]
+
+    for field in required_fields:
+        if field not in definition:
+            raise ValueError(f"Missing required field '{field}' in feature definition: {definition.get('name', 'unknown')}")
 
 
 def ensure_store_targets(conn: psycopg.Connection, defs: Sequence[Mapping[str, object]]) -> None:
@@ -513,6 +848,7 @@ def insert_computed_features(
     update_existing: bool = False,
     skip_before: Optional[date] = None,
     batch_size: int = 200,
+    sync_commit: bool = False,
 ) -> int:
     """
     Insert tall computed feature rows using feature_map of column -> feature_id.
@@ -567,47 +903,129 @@ def insert_computed_features(
         return 0
 
     chunk_size = max(1, batch_size)
-    total = 0
 
     # Check if prepared statements are enabled via the pool
     from g2.db import pool as db_pool
     prepare_enabled = db_pool.should_prepare_statements()
 
-    for i in range(0, len(prepared), chunk_size):
-        batch = prepared[i : i + chunk_size]
-        batch_size_actual = len(batch)
-
-        # Use prepared statements for common batch sizes when enabled
-        use_prepared = prepare_enabled and batch_size_actual in [50, 100, 200]
-
-        params: List[object] = []
-        for fid, did, dt, val, source in batch:
-            params.extend([fid, did, dt, val, source])
-
+    # Helper function to perform the actual insert
+    def do_insert() -> int:
+        """Perform the batch insert operation."""
+        total = 0
+        sync_commit_changed = False
         try:
-            # Build the SQL statement
-            conflict = (
-                "ON CONFLICT (feature_id, data_id, date) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source"
-                if update_existing
-                else "ON CONFLICT (feature_id, data_id, date) DO NOTHING"
-            )
-            values_sql = ",".join(["(%s::int, %s::int, %s::date, %s::double precision, %s::text)"] * batch_size_actual)
-            stmt = (
-                "INSERT INTO computed_features (feature_id, data_id, date, value, source) VALUES "
-                + values_sql
-                + " "
-                + conflict
+            # Disable synchronous_commit for the entire operation if requested
+            if not sync_commit:
+                with conn.cursor() as cur:
+                    cur.execute("SET synchronous_commit TO OFF;")
+                sync_commit_changed = True
+
+            for i in range(0, len(prepared), chunk_size):
+                batch = prepared[i : i + chunk_size]
+                batch_size_actual = len(batch)
+
+                # Use prepared statements whenever enabled
+                use_prepared = prepare_enabled
+
+                params: List[object] = []
+                for fid, did, dt, val, source in batch:
+                    params.extend([fid, did, dt, val, source])
+
+                # Build the SQL statement
+                conflict = (
+                    "ON CONFLICT (feature_id, data_id, date) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source"
+                    if update_existing
+                    else "ON CONFLICT (feature_id, data_id, date) DO NOTHING"
+                )
+                values_sql = ",".join(["(%s::int, %s::int, %s::date, %s::double precision, %s::text)"] * batch_size_actual)
+                stmt = (
+                    "INSERT INTO computed_features (feature_id, data_id, date, value, source) VALUES "
+                    + values_sql
+                    + " "
+                    + conflict
+                )
+
+                with conn.cursor() as cur:
+                    # Use psycopg3's automatic prepared statement caching for common batch sizes
+                    # This reduces parsing overhead by 10-30%
+                    if use_prepared:
+                        cur.execute(stmt, params, prepare=True)
+                    else:
+                        cur.execute(stmt, params)
+
+                total += len(batch)
+            conn.commit()
+            return total
+        finally:
+            # Reset synchronous_commit back to default if we changed it
+            if sync_commit_changed:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("RESET synchronous_commit;")
+                except Exception:
+                    # Ignore errors during reset (connection might be closed)
+                    pass
+
+    # OPTIMISTIC INSERT: Try insert first, create chunks only if needed
+    try:
+        # Fast path: try insert without chunk creation (works 99.9% of the time)
+        return do_insert()
+
+    except Exception as exc:
+        # Check if this is a chunk-not-found error
+        error_msg = str(exc).lower()
+        is_chunk_error = (
+            "no chunks found" in error_msg or
+            "could not find chunk" in error_msg or
+            "chunk not found" in error_msg or
+            "insert or update on table" in error_msg and "violates" not in error_msg
+        )
+
+        if is_chunk_error:
+            # Slow path (rare): create missing chunks and retry
+            import warnings
+            from g2.utils.timescale import ensure_chunks_for_date_range
+            from datetime import timedelta
+
+            # Find date range
+            dates = [dt for _, _, dt, _, _ in prepared]
+            min_date = min(dates)
+            max_date = max(dates)
+            buffer = timedelta(days=1)
+
+            warnings.warn(
+                f"Chunk not found for date range {min_date} to {max_date}. "
+                f"Auto-creating chunks (this is a one-time operation)."
             )
 
-            with conn.cursor() as cur:
-                # Use psycopg3's automatic prepared statement caching for common batch sizes
-                # This reduces parsing overhead by 10-30%
-                if use_prepared:
-                    cur.execute(stmt, params, prepare=True)
-                else:
-                    cur.execute(stmt, params)
-        except Exception as exc:
-            sample = batch[:3]
+            try:
+                # Use separate connection to avoid deadlock with autocommit writers
+                # Autocommit mode can cause circular lock dependencies when multiple
+                # workers try to create chunks simultaneously
+                with psycopg.connect(conn.info.dsn) as chunk_conn:
+                    chunk_conn.autocommit = False  # Transaction mode prevents lock conflicts
+                    ensure_chunks_for_date_range(
+                        chunk_conn,
+                        "computed_features",
+                        min_date - buffer,
+                        max_date + buffer,
+                        chunk_interval_days=30
+                    )
+            except Exception as chunk_err:
+                raise Exception(
+                    f"Failed to create chunks for {min_date} to {max_date}: {chunk_err}"
+                ) from exc
+
+            # Retry insert after creating chunks
+            try:
+                return do_insert()
+            except Exception as retry_exc:
+                raise Exception(
+                    f"Insert failed even after creating chunks: {retry_exc}"
+                ) from exc
+        else:
+            # Different error - format with debug info and re-raise
+            sample = prepared[:3]
             sample_types = [
                 {
                     "feature_id": type(x[0]).__name__,
@@ -618,7 +1036,6 @@ def insert_computed_features(
                 }
                 for x in sample
             ]
-            raise Exception(f"insert_computed_features failed: {exc}; sample_types={sample_types}; sample={sample}") from exc
-        total += len(batch)
-    conn.commit()
-    return total
+            raise Exception(
+                f"insert_computed_features failed: {exc}; sample_types={sample_types}; sample={sample}"
+            ) from exc

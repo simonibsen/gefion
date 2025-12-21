@@ -20,28 +20,56 @@ ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
 
 
 class RateLimiter:
-    """Token-bucket rate limiter."""
+    """Rate limiter with minimum spacing to prevent burst patterns.
 
-    def __init__(self, calls_per_minute: int):
+    AlphaVantage requires requests to be spread evenly across the 1-minute window,
+    not just under 5/sec. We enforce minimum spacing between consecutive requests.
+    """
+
+    def __init__(self, calls_per_minute: int, calls_per_second: int = 4):
         self.capacity = calls_per_minute
         self.tokens = calls_per_minute
         self.updated = time.monotonic()
+        # Enforce minimum spacing: for 75/min, that's 0.8 sec/call
+        # Add 10% buffer for safety: 0.8 * 1.10 = 0.88 seconds minimum spacing
+        # This gives ~68 calls/min (90% capacity utilization) vs 60/min with 25% buffer
+        self.min_spacing = (60.0 / calls_per_minute) * 1.10
+        self.last_request = 0.0  # Track last request time
         self.lock = threading.Lock()
 
     def acquire(self) -> None:
         with self.lock:
             now = time.monotonic()
             elapsed = now - self.updated
-            # refill tokens
+
+            # Per-minute token bucket: refill tokens
             refill = (self.capacity / 60.0) * elapsed
             if refill > 0:
                 self.tokens = min(self.capacity, self.tokens + refill)
                 self.updated = now
-            if self.tokens >= 1:
+
+            # Check minimum spacing since last request
+            time_since_last = now - self.last_request
+
+            # Can proceed if we have tokens AND enough time has passed
+            if self.tokens >= 1 and time_since_last >= self.min_spacing:
                 self.tokens -= 1
+                self.last_request = now
                 return
-            # wait for next token
-            sleep_for = (1 - self.tokens) * (60.0 / self.capacity)
+
+            # Calculate how long to wait
+            if self.tokens < 1:
+                # Wait for per-minute token bucket to refill
+                wait_for_tokens = (1 - self.tokens) * (60.0 / self.capacity)
+            else:
+                wait_for_tokens = 0.0
+
+            # Wait for minimum spacing
+            wait_for_spacing = max(0.0, self.min_spacing - time_since_last)
+
+            # Wait for the longer of the two constraints
+            sleep_for = max(wait_for_tokens, wait_for_spacing)
+
         time.sleep(sleep_for)
         self.acquire()
 
@@ -52,7 +80,16 @@ class AlphaVantageClient:
     def __init__(self, api_key: Optional[str] = None, calls_per_minute: int = 75, session: Optional[requests.Session] = None):
         self.api_key = api_key or os.getenv("ALPHAVANTAGE_API_KEY")
         if not self.api_key:
-            raise ValueError("ALPHAVANTAGE_API_KEY is required")
+            raise ValueError(
+                "ALPHAVANTAGE_API_KEY is required.\n"
+                "\n"
+                "To fix this:\n"
+                "  1. Get a free API key from: https://www.alphavantage.co/support/#api-key\n"
+                "  2. Add to your .env file: ALPHAVANTAGE_API_KEY=your_key_here\n"
+                "  3. Or set environment variable: export ALPHAVANTAGE_API_KEY=your_key_here\n"
+                "\n"
+                "See: docs/USER_GUIDE.md#api-keys"
+            )
         self.session = session or requests.Session()
         self.rate = RateLimiter(calls_per_minute)
 

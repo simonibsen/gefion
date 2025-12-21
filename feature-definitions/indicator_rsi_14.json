@@ -1,0 +1,14 @@
+{
+  "name": "indicator_rsi_14",
+  "function_name": "indicator",
+  "params": {
+    "indicator": "rsi",
+    "period": 14
+  },
+  "source_table": "stock_ohlcv",
+  "source_column": "close",
+  "store_table": "computed_features",
+  "store_column": "value",
+  "store_type": "double precision",
+  "active": true
+}

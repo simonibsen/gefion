@@ -17,25 +17,70 @@ from psycopg import sql
 from g2.alphavantage.catalog import parse_daily_adjusted, parse_listing_status
 from g2.alphavantage.client import AlphaVantageClient
 from g2.db import schema
-from g2.db.ingest import decide_outputsize, insert_stock_prices, upsert_stock, latest_price_date
+from g2.db.ingest import (
+    decide_outputsize,
+    insert_stock_ohlcv,
+    upsert_stock,
+    latest_price_date,
+    filter_symbols_needing_update,
+    filter_new_rows,
+)
 from g2.utils.progress import ProgressReporter
 
-from datetime import date
+from datetime import date, timedelta
 
 
 def _today_date() -> date:
     return date.today()
 
 
-def _expected_market_date() -> date:
-    """Return the most recent likely market day (weekend-aware)."""
+def _expected_market_date(include_today: bool = False) -> date:
+    """Return the most recent likely market day with complete data (weekend-aware).
+
+    Args:
+        include_today: If True, considers today's data available (useful after market close).
+                      If False (default), only expects data through yesterday.
+
+    Market close is 4pm ET (9pm UTC). By default, we conservatively use yesterday
+    to avoid false positives before market data is published.
+    """
+    from datetime import datetime
+    import pytz
+
     today = date.today()
-    # Simple weekend adjustment; holidays can be added later if needed.
-    if today.weekday() == 5:  # Saturday
-        return today.replace(day=today.day - 1)
-    if today.weekday() == 6:  # Sunday
-        return today.replace(day=today.day - 2)
-    return today
+
+    # If include_today is explicitly requested, use today
+    if include_today:
+        # Weekend adjustment for today
+        if today.weekday() == 5:  # Saturday -> Friday
+            return today - timedelta(days=1)
+        if today.weekday() == 6:  # Sunday -> Friday
+            return today - timedelta(days=2)
+        return today
+
+    # Auto-detect based on current time (after 4pm ET, assume today's data exists)
+    try:
+        et_tz = pytz.timezone('America/New_York')
+        now_et = datetime.now(et_tz)
+        market_close_hour = 16  # 4pm ET
+
+        if now_et.hour >= market_close_hour and today.weekday() < 5:  # Weekday after 4pm
+            # Weekend adjustment for today
+            if today.weekday() == 5:  # Saturday -> Friday
+                return today - timedelta(days=1)
+            return today
+    except Exception:
+        # If timezone check fails, fall through to conservative default
+        pass
+
+    # Default: use yesterday as most recent complete trading day
+    yesterday = today - timedelta(days=1)
+    # Weekend adjustment for yesterday
+    if yesterday.weekday() == 5:  # Saturday -> Friday
+        return yesterday - timedelta(days=1)
+    if yesterday.weekday() == 6:  # Sunday -> Friday
+        return yesterday - timedelta(days=2)
+    return yesterday
 
 
 def _parse_listing_csv(csv_text: str) -> List[Mapping[str, str]]:
@@ -98,8 +143,28 @@ def ingest_prices_for_symbols(
     timeframe: str = "auto",
     update_existing: bool = False,
     progress: Optional[ProgressReporter] = None,
+    status: Optional[str] = "Active",
+    target_date: Optional[date] = None,
 ) -> int:
-    """Fetch and ingest prices for symbols in parallel."""
+    """
+    Fetch and ingest prices for symbols in parallel.
+
+    Args:
+        db_url: Database connection URL
+        client: AlphaVantage API client
+        symbols: List of symbols to ingest
+        max_workers: Number of parallel API fetch workers
+        writer_workers: Number of parallel database writer workers
+        timeframe: Timeframe for fetching data ('auto', 'full', or 'compact')
+        update_existing: Whether to update existing price data
+        progress: Optional progress reporter
+        status: Stock status to set (defaults to 'Active'). Set to None to not update status.
+        target_date: Maximum date to allow (prevents inserting future/partial data).
+                    Defaults to None (no limit).
+
+    Returns:
+        Total number of rows inserted
+    """
     inserted_total = 0
 
     fetch_count = 0
@@ -108,7 +173,9 @@ def ingest_prices_for_symbols(
     with psycopg.connect(db_url) as conn:
         schema.create_stocks_table(conn)
         schema.migrate_stock_tables_to_data_id(conn)
-        schema.create_stock_prices_table(conn)
+        schema.create_stock_ohlcv_table(conn)
+        # Note: Bulk filtering moved to CLI layer for better performance
+        # (filters once for all symbols instead of once per 50-symbol chunk)
     # Bounded queue prevents memory exhaustion when fetchers outpace writers
     work_queue: queue.Queue[Tuple[str, list, str]] = queue.Queue(maxsize=200)
     writer_done = object()
@@ -118,14 +185,8 @@ def ingest_prices_for_symbols(
         nonlocal fetch_count
         try:
             with psycopg.connect(db_url) as conn:
-                data_id = upsert_stock(conn, sym)
-                latest = latest_price_date(conn, data_id)
-                target_date = _expected_market_date()
-                # Skip only when not refreshing existing rows
-                if not update_existing and latest and latest >= target_date:
-                    if progress:
-                        progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "up-to-date", "outputsize": "skip"})
-                    return
+                data_id = upsert_stock(conn, sym, status=status)
+
                 if timeframe == "auto":
                     outputsize = decide_outputsize(conn, data_id, timeframe)
                 elif timeframe == "full":
@@ -134,11 +195,30 @@ def ingest_prices_for_symbols(
                     outputsize = "compact"
 
             payload = client.fetch_daily_adjusted(sym, outputsize=outputsize)
+
+            # Check for API error responses (rate limits, invalid symbols, etc.)
+            if any(k in payload for k in ("Note", "Error Message", "Information")):
+                error_msg = payload.get("Note") or payload.get("Error Message") or payload.get("Information")
+                if progress:
+                    progress.step_done(sym, error=True, meta={"inserted": 0, "reason": error_msg})
+                return
+
             rows = parse_daily_adjusted(symbol=sym, payload=payload)
             if not rows:
                 if progress:
                     progress.step_done(sym, error=True, meta={"inserted": 0, "reason": "empty payload"})
                 return
+
+            # Filter to only new rows unless we are explicitly refreshing/upserting
+            if not update_existing:
+                with psycopg.connect(db_url) as filter_conn:
+                    rows = filter_new_rows(filter_conn, data_id, rows, target_date=target_date)
+
+            if not rows:
+                if progress:
+                    progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "no new data", "outputsize": "skip"})
+                return
+
             api_latest = rows[0]["date"]
             cache_key = sym
             if cache_key in latest_cache and latest_cache[cache_key] >= api_latest:
@@ -164,18 +244,20 @@ def ingest_prices_for_symbols(
                 if item is writer_done:
                     break
                 sym, rows, outputsize = item
-                data_id = upsert_stock(conn, sym)
                 try:
                     retries = 0
                     backoff = 0.1
                     while True:
                         try:
+                            # upsert_stock can also encounter deadlocks with parallel writers,
+                            # so include it in the retry loop
+                            data_id = upsert_stock(conn, sym, status=status)
                             inserted = _batch_insert_prices(conn, data_id, rows, update_existing)
                             break
                         except errors.DeadlockDetected:
                             time.sleep(0.1 + random.random() * 0.2)
                             retries += 1
-                        except errors.OutOfSharedMemory:
+                        except errors.InsufficientResources:
                             time.sleep(backoff)
                             retries += 1
                             backoff = min(backoff * 2, 2.0)
@@ -256,7 +338,7 @@ def ingest_prices_for_symbols(
                 else "ON CONFLICT (data_id, date) DO NOTHING"
             )
             sql_stmt = (
-                "INSERT INTO stock_prices "
+                "INSERT INTO stock_ohlcv "
                 "(data_id, date, open, high, low, close, adjusted_close, volume, source) VALUES "
                 + ",".join(values_sql)
                 + " "
@@ -264,7 +346,8 @@ def ingest_prices_for_symbols(
             )
             with conn.cursor() as cur:
                 cur.execute(sql_stmt, params)
-            total += len(params) // 9
+                # Use rowcount to get ACTUAL inserts (excludes ON CONFLICT skipped rows)
+                total += cur.rowcount
         conn.commit()
         return total
 
@@ -273,17 +356,21 @@ def ingest_prices_for_symbols(
     with ThreadPoolExecutor(max_workers=writer_threads) as writer_pool:
         writer_futures = [writer_pool.submit(writer_worker) for _ in range(writer_threads)]
 
-        # Fetch in parallel
-        fetch_workers = max_workers
-        with ThreadPoolExecutor(max_workers=fetch_workers) as fetch_pool:
-            futures = {fetch_pool.submit(fetch_worker, sym): sym for sym in symbols}
-            for fut in as_completed(futures):
-                # Drain exceptions
-                fut.result()
+        try:
+            # Fetch in parallel
+            fetch_workers = max_workers
+            with ThreadPoolExecutor(max_workers=fetch_workers) as fetch_pool:
+                futures = {fetch_pool.submit(fetch_worker, sym): sym for sym in symbols}
+                for fut in as_completed(futures):
+                    # Drain exceptions
+                    fut.result()
+        finally:
+            # CRITICAL: Signal writers to finish even if fetch phase fails
+            # Without this, writer threads block forever on queue.get() during shutdown
+            for _ in range(writer_threads):
+                work_queue.put(writer_done)
 
-        # Signal writers to finish
-        for _ in range(writer_threads):
-            work_queue.put(writer_done)
+        # Wait for writers to complete
         for fut in writer_futures:
             fut.result()
 

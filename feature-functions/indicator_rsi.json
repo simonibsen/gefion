@@ -1,0 +1,10 @@
+{
+  "name": "indicator_rsi",
+  "version": "1.0",
+  "language": "python",
+  "description": "Relative Strength Index (RSI) - momentum oscillator that measures speed and magnitude of price changes. Values range from 0-100, with >70 indicating overbought and <30 indicating oversold conditions.",
+  "status": "active",
+  "enabled": true,
+  "created_by": "g2-migration",
+  "function_body": "import pandas as pd\n\ndef compute(rows, specs):\n    \"\"\"\n    Compute Relative Strength Index (RSI).\n    \n    Args:\n        rows: Price data rows with 'date', 'close', 'adjusted_close'\n        specs: Feature specs with optional 'period' (default: 14)\n    \n    Returns:\n        List of rows with date and rsi_14 values\n    \"\"\"\n    if not rows:\n        return []\n    \n    df = pd.DataFrame(rows)\n    if df.empty:\n        return []\n    \n    df = df.sort_values('date')\n    \n    # Use adjusted_close if available, otherwise close\n    close_col = 'adjusted_close' if 'adjusted_close' in df.columns else 'close'\n    if close_col not in df.columns:\n        return []\n    \n    close = pd.to_numeric(df[close_col], errors='coerce')\n    if close.isna().all():\n        return []\n    \n    # Get period from specs (default: 14)\n    period = specs.get('period', 14)\n    \n    # Calculate RSI\n    delta = close.diff()\n    gain = delta.clip(lower=0)\n    loss = -delta.clip(upper=0)\n    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()\n    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()\n    rs = avg_gain / avg_loss.replace(0, pd.NA)\n    rsi = 100 - (100 / (1 + rs))\n    rsi = pd.to_numeric(rsi, errors='coerce').fillna(100.0).infer_objects(copy=False)\n    \n    df['rsi_14'] = rsi\n    \n    # Convert to results format\n    results = []\n    for _, row in df.iterrows():\n        if pd.notna(row['rsi_14']):\n            results.append({\n                'date': row['date'],\n                'rsi_14': float(row['rsi_14'])\n            })\n    \n    return results\n"
+}

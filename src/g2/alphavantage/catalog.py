@@ -55,6 +55,8 @@ def parse_daily_adjusted(symbol: str, payload: Mapping[str, object]) -> List[Dic
                     "close": float(values.get("4. close")),
                     "adjusted_close": float(values.get("5. adjusted close")),
                     "volume": int(values.get("6. volume")),
+                    "dividend_amount": float(values.get("7. dividend amount")),
+                    "split_coefficient": float(values.get("8. split coefficient")),
                 }
             )
         except (TypeError, ValueError, AttributeError):

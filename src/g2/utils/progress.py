@@ -108,13 +108,25 @@ class ProgressReporter:
         table.add_column("Metric", style="cyan")
         table.add_column("Value", justify="right", style="green")
 
-        table.add_row("Overall", f"{overall_pct:.1f}%")
-        table.add_row("Success", f"{self.successes} ({success_pct:.1f}%)")
-        table.add_row("Errors", f"{self.errors} ({error_pct:.1f}%)")
+        # Overall with color based on completion
+        overall_color = "green" if overall_pct >= 100 else "yellow" if overall_pct >= 50 else "white"
+        table.add_row("Overall", f"[{overall_color}]{overall_pct:.1f}%[/{overall_color}]")
+
+        # Success in green
+        table.add_row("Success", f"[green]{self.successes} ({success_pct:.1f}%)[/green]")
+
+        # Errors in red if any, green if none
+        error_color = "red" if self.errors > 0 else "green"
+        table.add_row("Errors", f"[{error_color}]{self.errors} ({error_pct:.1f}%)[/{error_color}]")
+
         if self.data_errors > 0 or self.resource_errors > 0:
-            table.add_row("  Data errors", f"{self.data_errors}")
-            table.add_row("  Resource errors", f"{self.resource_errors}")
-        table.add_row("Inserted total", f"{self.inserted_total}")
+            if self.data_errors > 0:
+                table.add_row("  Data errors", f"[yellow]{self.data_errors}[/yellow]")
+            if self.resource_errors > 0:
+                table.add_row("  Resource errors", f"[red]{self.resource_errors}[/red]")
+
+        # Inserted total with formatting
+        table.add_row("Inserted total", f"[cyan]{self.inserted_total:,}[/cyan]")
         table.add_row("Rate", f"{rate:.2f}/s")
         table.add_row("Elapsed", self._format_time(elapsed))
         if eta is not None:
@@ -130,17 +142,19 @@ class ProgressReporter:
             else:
                 table.add_row(label, str(self.workers))
         if hasattr(self, "writer_workers") and self.writer_workers:
-            table.add_row("Writers", str(self.writer_workers))
+            table.add_row("Writers", f"[magenta]{self.writer_workers}[/magenta]")
         if hasattr(self, "mode") and self.mode:
-            table.add_row("Mode", self.mode)
+            table.add_row("Mode", f"[blue]{self.mode}[/blue]")
+        if hasattr(self, "batch_size") and self.batch_size:
+            table.add_row("Batch size", f"[magenta]{self.batch_size:,}[/magenta]")
         if self.queue_depth is not None:
             table.add_row("Queue", f"{self.queue_depth}")
         if self.fetch_completed is not None:
-            table.add_row("Fetched", f"{self.fetch_completed}")
+            table.add_row("Fetched", f"{self.fetch_completed:,}")
         if self.last_ok:
-            table.add_row("Last OK", f"{self.last_ok} ({self.last_ok_inserted or 0})")
+            table.add_row("Last OK", f"[green]{self.last_ok}[/green] [dim]({self.last_ok_inserted or 0:,})[/dim]")
         if self.last_err:
-            table.add_row("Last Err", f"{self.last_err}")
+            table.add_row("Last Err", f"[red]{self.last_err}[/red]")
 
         if self.error_examples:
             table.add_row("─" * 8, "─" * 8)
@@ -281,7 +295,7 @@ class ProgressReporter:
                         formatted = ", ".join([f"{feat}: {err}" for feat, err in unique_failures])
                         self.failed_features.append((label or "", formatted))
             if meta and "inserted" in meta and not error:
-                self.recent_updates.append(f"{label} inserted {meta['inserted']}")
+                self.recent_updates.append(f"[cyan]{label}[/cyan] inserted [green]{meta['inserted']:,}[/green]")
 
         if self.json_output:
             self._emit_json(label, meta, status="progress" if self.done < self.total else "complete")

@@ -11,7 +11,7 @@ import psycopg
 import pytest
 
 from g2.db import schema
-from g2.db.ingest import upsert_stock, insert_stock_prices
+from g2.db.ingest import upsert_stock, insert_stock_ohlcv
 
 
 def create_connection():
@@ -37,7 +37,7 @@ def setup_tables(conn):
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS computed_features CASCADE;")
         cur.execute("DROP TABLE IF EXISTS feature_definitions CASCADE;")
-        cur.execute("DROP TABLE IF EXISTS stock_prices CASCADE;")
+        cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
         cur.execute("DROP TABLE IF EXISTS stocks CASCADE;")
 
         # Create stocks table
@@ -48,9 +48,9 @@ def setup_tables(conn):
             );
         """)
 
-        # Create stock_prices with composite index
+        # Create stock_ohlcv with composite index
         cur.execute("""
-            CREATE TABLE stock_prices (
+            CREATE TABLE stock_ohlcv (
                 id BIGSERIAL PRIMARY KEY,
                 data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
                 date DATE NOT NULL,
@@ -59,6 +59,8 @@ def setup_tables(conn):
                 low NUMERIC(18,6),
                 close NUMERIC(18,6),
                 adjusted_close NUMERIC(18,6),
+                dividend_amount NUMERIC(18,6),
+                split_coefficient NUMERIC(18,6),
                 volume BIGINT,
                 source TEXT,
                 UNIQUE (data_id, date)
@@ -67,8 +69,8 @@ def setup_tables(conn):
 
         # Add composite index
         cur.execute("""
-            CREATE INDEX stock_prices_data_id_date_idx
-                ON stock_prices(data_id, date DESC);
+            CREATE INDEX stock_ohlcv_data_id_date_idx
+                ON stock_ohlcv(data_id, date DESC);
         """)
 
         # Create feature_definitions
@@ -108,18 +110,18 @@ def setup_tables(conn):
     yield
 
 
-def test_stock_prices_composite_index_exists(conn):
-    """Test that the composite index on stock_prices exists."""
+def test_stock_ohlcv_composite_index_exists(conn):
+    """Test that the composite index on stock_ohlcv exists."""
     with conn.cursor() as cur:
         cur.execute("""
             SELECT indexname, indexdef
             FROM pg_indexes
-            WHERE tablename = 'stock_prices'
-            AND indexname = 'stock_prices_data_id_date_idx';
+            WHERE tablename = 'stock_ohlcv'
+            AND indexname = 'stock_ohlcv_data_id_date_idx';
         """)
         result = cur.fetchone()
 
-    assert result is not None, "Composite index stock_prices_data_id_date_idx should exist"
+    assert result is not None, "Composite index stock_ohlcv_data_id_date_idx should exist"
     assert "data_id" in result[1], "Index should include data_id"
     assert "date" in result[1], "Index should include date"
 
@@ -157,13 +159,13 @@ def test_composite_index_used_in_query_plan(conn):
             "source": "test",
         })
 
-    insert_stock_prices(conn, stock_id, rows, update_existing=False)
+    insert_stock_ohlcv(conn, stock_id, rows, update_existing=False)
 
     # Check query plan for single-stock query
     with conn.cursor() as cur:
         cur.execute("""
             EXPLAIN (FORMAT JSON)
-            SELECT date, close FROM stock_prices
+            SELECT date, close FROM stock_ohlcv
             WHERE data_id = %s AND date >= %s AND date <= %s
             ORDER BY date DESC;
         """, (stock_id, base_date, base_date + timedelta(days=50)))
@@ -196,13 +198,13 @@ def test_composite_index_improves_range_queries(conn):
             "source": "test",
         })
 
-    insert_stock_prices(conn, stock_id, rows, update_existing=False)
+    insert_stock_ohlcv(conn, stock_id, rows, update_existing=False)
 
     # Query a specific date range (should use index)
     start = time.time()
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT date, close FROM stock_prices
+            SELECT date, close FROM stock_ohlcv
             WHERE data_id = %s
             AND date >= %s
             AND date <= %s
@@ -222,20 +224,20 @@ def test_schema_create_includes_indexes(conn):
     # Clean slate
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS stocks CASCADE;")
-        cur.execute("DROP TABLE IF EXISTS stock_prices CASCADE;")
+        cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
 
     # Use schema functions
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
 
     # Check if composite index exists
     with conn.cursor() as cur:
         cur.execute("""
             SELECT indexname FROM pg_indexes
-            WHERE tablename = 'stock_prices'
+            WHERE tablename = 'stock_ohlcv'
             AND indexname LIKE '%data_id%date%';
         """)
         indexes = cur.fetchall()
 
     # Should have at least one composite index on (data_id, date)
-    assert len(indexes) > 0, "schema.create_stock_prices_table should create composite indexes"
+    assert len(indexes) > 0, "schema.create_stock_ohlcv_table should create composite indexes"

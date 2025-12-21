@@ -1,0 +1,566 @@
+# G2 MCP Server Workflows
+
+Comprehensive end-to-end workflows for using the G2 MCP Server through Claude Desktop.
+
+## Table of Contents
+
+1. [Complete ML Pipeline: Quantile Regression](#complete-ml-pipeline-quantile-regression)
+2. [Trend Classification System](#trend-classification-system)
+3. [Combined Signal System](#combined-signal-system)
+4. [Model Performance Monitoring](#model-performance-monitoring)
+5. [Data Quality & Exploration](#data-quality--exploration)
+6. [Production Deployment Patterns](#production-deployment-patterns)
+
+---
+
+## Complete ML Pipeline: Quantile Regression
+
+**Goal:** Build a quantile regression model for multi-horizon return prediction.
+
+### Step 1: Data Preparation
+
+**Prompt:**
+```
+Update prices and features for NASDAQ exchange, limit to 100 symbols.
+Use local computation for faster processing.
+```
+
+**What happens:**
+- Fetches latest OHLCV data from AlphaVantage
+- Time-aware: before 4pm ET gets yesterday's data, after 4pm ET includes today
+- Computes technical indicators (RSI, MACD, Bollinger Bands, etc.)
+- Computes cross-sectional features (market-relative percentile ranks, z-scores)
+
+**Verification:**
+```
+Show me how many stocks have price data from the last week
+```
+
+### Step 2: Build Training Dataset
+
+**Prompt:**
+```
+Build a dataset named "nasdaq_momentum" version "v1" for NASDAQ exchange,
+limit to 100 symbols, horizons 7, 30, 90 days.
+Export CSVs to datasets/nasdaq_momentum.
+```
+
+**Output:**
+- Creates manifest in `ml_datasets` table
+- Exports 3 CSV files:
+  - `prices.csv` - Historical OHLCV data
+  - `features.csv` - Technical indicators + cross-sectional features
+  - `labels.csv` - Future return labels for each horizon
+
+**Verification:**
+```
+Check the database - how many rows are in the nasdaq_momentum dataset?
+```
+
+### Step 3: Train Model
+
+**Prompt:**
+```
+Train a quantile regression model named "momentum_v1" version "20251218"
+on dataset "nasdaq_momentum" version "v1" using XGBoost.
+Save artifacts to models directory.
+```
+
+**What happens:**
+- Trains 9 models (3 quantiles × 3 horizons): q10, q50, q90 for h7, h30, h90
+- Saves model artifacts to `models/momentum_v1_20251218_h7/`, `h30/`, `h90/`
+- Registers model in `ml_models` table
+
+**Training time:** 5-15 seconds for 100 stocks
+
+### Step 4: Generate Predictions
+
+**Prompt:**
+```
+Generate predictions for AAPL, MSFT, GOOGL, TSLA, NVDA using model
+"momentum_v1" version "20251218" for today's date.
+```
+
+**Output:**
+- Fetches latest features from database
+- Generates q10/q50/q90 predictions for each horizon
+- Stores in `quantile_predictions` table
+
+### Step 5: Query Results
+
+**Prompt:**
+```
+Show me the latest predictions for AAPL from momentum_v1.
+What's the median 30-day return prediction and uncertainty (IQR)?
+```
+
+**Example response:**
+```
+AAPL (2024-12-18):
+- 7-day:  q10=-0.5%, q50=+1.2%, q90=+3.1% (IQR=3.6%)
+- 30-day: q10=-1.8%, q50=+2.5%, q90=+7.2% (IQR=9.0%)
+- 90-day: q10=-5.2%, q50=+4.8%, q90=+15.1% (IQR=20.3%)
+```
+
+### Step 6: Evaluate Performance
+
+**Prompt:**
+```
+Evaluate momentum_v1 version 20251218 from 2024-01-01 to 2024-12-01.
+How well calibrated are the quantiles?
+```
+
+**Metrics returned:**
+- **q10 calibration:** Should be ~10% (actual coverage rate)
+- **q50 calibration:** Should be ~50% (median accuracy)
+- **q90 calibration:** Should be ~90% (upper bound coverage)
+- **Pinball loss:** Lower is better
+- **IQR:** Average uncertainty width
+
+---
+
+## Trend Classification System
+
+**Goal:** Build a 5-class trend classifier (strong_down, weak_down, flat, weak_up, strong_up).
+
+### Step 1: Same Data Preparation
+
+```
+Update prices and features for NASDAQ exchange, limit to 100 symbols.
+```
+
+### Step 2: Build Dataset (Same as Quantile)
+
+```
+Build a dataset named "nasdaq_trends" version "v1" for NASDAQ exchange,
+limit to 100 symbols, horizons 7, 30, 90 days.
+Use weak thresholds 0.02, 0.05, 0.10 and strong thresholds 0.05, 0.10, 0.20.
+Export to datasets/nasdaq_trends.
+```
+
+**Note:** The weak/strong thresholds define class boundaries:
+- `strong_down`: return < -strong_threshold
+- `weak_down`: -strong_threshold ≤ return < -weak_threshold
+- `flat`: -weak_threshold ≤ return ≤ +weak_threshold
+- `weak_up`: +weak_threshold < return ≤ +strong_threshold
+- `strong_up`: return > +strong_threshold
+
+### Step 3: Train Classifier
+
+**Prompt:**
+```
+Train a trend classifier named "trend_v1" version "20251218"
+on dataset "nasdaq_trends" version "v1" using XGBoost.
+```
+
+**What happens:**
+- Trains 3 multi-class classifiers (one per horizon)
+- Each predicts 5 classes with probabilities
+- Saves to `models/trend_v1_20251218_h7/`, `h30/`, `h90/`
+
+### Step 4: Generate Trend Predictions
+
+**Prompt:**
+```
+Generate trend predictions for AAPL, MSFT, GOOGL using trend_v1
+version 20251218 for today.
+```
+
+**Output stored in `trend_predictions` table:**
+```
+AAPL (h7):
+  strong_down: 5%
+  weak_down: 15%
+  flat: 30%
+  weak_up: 35%
+  strong_up: 15%
+  → Predicted class: weak_up (35% probability)
+```
+
+### Step 5: Query Trend Predictions
+
+**Prompt:**
+```
+Show me all stocks predicted as "strong_up" for the 7-day horizon
+with probability > 40%
+```
+
+**SQL Query (via query_database):**
+```sql
+SELECT
+    s.symbol,
+    tp.horizon_days,
+    tp.predicted_class,
+    tp.strong_up_prob,
+    tp.prediction_date
+FROM trend_predictions tp
+JOIN stocks s ON tp.data_id = s.id
+JOIN ml_models m ON tp.model_id = m.id
+WHERE m.name = 'trend_v1'
+  AND tp.horizon_days = 7
+  AND tp.predicted_class = 'strong_up'
+  AND tp.strong_up_prob > 0.40
+ORDER BY tp.strong_up_prob DESC
+LIMIT 20
+```
+
+---
+
+## Combined Signal System
+
+**Goal:** Use both quantile predictions and trend classifications for robust signals.
+
+### Signal Logic
+
+**High-conviction long signal:**
+- Quantile: q50 > +2% AND q10 > 0% (median positive, downside protected)
+- Trend: predicted_class IN ('weak_up', 'strong_up') AND probability > 40%
+- Cross-sectional: percentile_rank > 0.70 (top 30% momentum)
+
+**Prompt:**
+```
+Find stocks with strong positive outlook:
+- 30-day median return prediction > 2%
+- 30-day q10 (downside) > 0%
+- Trend classification is weak_up or strong_up with > 40% probability
+- Include the stock's momentum percentile rank
+
+Show top 10 ranked by q50 prediction.
+```
+
+**SQL Query:**
+```sql
+WITH latest_predictions AS (
+    SELECT
+        s.symbol,
+        qp.q10,
+        qp.q50,
+        qp.q90,
+        (qp.q90 - qp.q10) as iqr,
+        tp.predicted_class,
+        tp.weak_up_prob + tp.strong_up_prob as up_prob
+    FROM quantile_predictions qp
+    JOIN trend_predictions tp ON
+        qp.data_id = tp.data_id AND
+        qp.horizon_days = tp.horizon_days AND
+        qp.prediction_date = tp.prediction_date
+    JOIN stocks s ON qp.data_id = s.id
+    WHERE qp.horizon_days = 30
+      AND qp.prediction_date = (SELECT MAX(prediction_date) FROM quantile_predictions)
+)
+SELECT *
+FROM latest_predictions
+WHERE q50 > 0.02
+  AND q10 > 0
+  AND predicted_class IN ('weak_up', 'strong_up')
+  AND up_prob > 0.40
+ORDER BY q50 DESC
+LIMIT 10
+```
+
+### Portfolio Construction
+
+**Prompt:**
+```
+For the top 10 stocks from the signal screening:
+1. Show me their current momentum percentile rank (cross-sectional feature)
+2. What's the average IQR (uncertainty)?
+3. Which ones have the best risk/reward (q50 / IQR)?
+```
+
+---
+
+## Model Performance Monitoring
+
+**Goal:** Track model degradation and trigger retraining when needed.
+
+### Daily Performance Check
+
+**Prompt:**
+```
+Show me all model evaluation runs from the last 30 days.
+Focus on calibration drift: are the q10/q50/q90 coverage rates staying close to target?
+```
+
+**Expected output:**
+```
+momentum_v1 (evaluated 2024-12-15):
+  h7:  q10=11.2% (target 10%), q50=52.1% (target 50%), q90=88.9% (target 90%)
+  h30: q10=9.8%  (target 10%), q50=49.5% (target 50%), q90=91.2% (target 90%)
+  h90: q10=8.5%  (target 10%), q50=47.8% (target 50%), q90=89.1% (target 90%)
+
+trend_v1 (evaluated 2024-12-15):
+  Overall accuracy: 42% (5-class)
+  Macro F1: 0.38
+```
+
+### Degradation Detection
+
+**Prompt:**
+```
+Compare model performance over time - has momentum_v1's calibration gotten worse?
+Show me q50_calibration for the last 5 evaluation runs.
+```
+
+**Decision rule:**
+- If q50 calibration drifts > 5% from target (50%) → retrain
+- If q10/q90 coverage drifts > 10% from target → retrain
+- If pinball loss increases > 20% from baseline → retrain
+
+### A/B Testing New Models
+
+**Prompt:**
+```
+I just trained momentum_v2 with different features.
+Compare its calibration metrics to momentum_v1 for the same evaluation period.
+Which one performs better?
+```
+
+---
+
+## Data Quality & Exploration
+
+### Coverage Audit
+
+**Prompt:**
+```
+How complete is our data coverage?
+- How many stocks have price data?
+- What's the date range?
+- Are there any gaps in recent data?
+- How many stocks were updated today vs yesterday?
+```
+
+**Follow-up queries:**
+```
+Show me stocks that haven't been updated in over 3 days
+
+Which stocks have the most complete feature coverage?
+
+Are there any stocks with unusual price patterns (e.g., > 50% single-day moves)?
+```
+
+### Feature Distribution Analysis
+
+**Prompt:**
+```
+What's the distribution of RSI values across all stocks today?
+Are we seeing any unusual clustering (e.g., everything oversold)?
+```
+
+**SQL:**
+```sql
+SELECT
+    CASE
+        WHEN rsi_14 < 30 THEN 'oversold'
+        WHEN rsi_14 > 70 THEN 'overbought'
+        ELSE 'neutral'
+    END as rsi_zone,
+    COUNT(*) as stock_count,
+    ROUND(AVG(rsi_14), 2) as avg_rsi
+FROM computed_features cf
+JOIN feature_definitions fd ON cf.feature_id = fd.id
+WHERE fd.name = 'rsi_14'
+  AND cf.date = CURRENT_DATE
+GROUP BY rsi_zone
+```
+
+### Cross-Sectional Sanity Checks
+
+**Prompt:**
+```
+Check cross-sectional features for today:
+- Verify percentile ranks are uniformly distributed (should be ~10% in each decile)
+- Check for any stocks with extreme z-scores (> 3 std devs)
+```
+
+---
+
+## Production Deployment Patterns
+
+### Daily Automation
+
+**Cron job (outside MCP):**
+```bash
+#!/bin/bash
+# Daily at 5pm ET (after market close)
+0 17 * * 1-5 /path/to/daily_update.sh
+```
+
+**daily_update.sh:**
+```bash
+#!/bin/bash
+cd /path/to/g2
+
+# 1. Update data
+.venv/bin/g2 data-update --exchange NASDAQ --limit 500 --local
+
+# 2. Generate predictions
+TODAY=$(date +%Y-%m-%d)
+.venv/bin/g2 ml predict \
+  --model-name momentum_v1 --model-version 20251218 \
+  --prediction-date $TODAY --exchange NASDAQ --limit 500
+
+.venv/bin/g2 ml predict-classifier \
+  --model-name trend_v1 --model-version 20251218 \
+  --prediction-date $TODAY --exchange NASDAQ --limit 500
+
+# 3. Check for degradation (weekly on Fridays)
+if [ $(date +%u) -eq 5 ]; then
+  END_DATE=$(date +%Y-%m-%d)
+  START_DATE=$(date -d '30 days ago' +%Y-%m-%d)
+
+  .venv/bin/g2 ml eval \
+    --model-name momentum_v1 --model-version 20251218 \
+    --start-date $START_DATE --end-date $END_DATE
+fi
+```
+
+### Interactive Morning Briefing (via MCP)
+
+**Prompt:**
+```
+Good morning! Give me today's trading briefing:
+
+1. How many stocks were updated overnight?
+2. Show me the top 10 stocks by combined signal strength (quantile + trend)
+3. Any unusual market conditions (extreme RSI, volatility spikes)?
+4. Model performance - any degradation detected?
+```
+
+### Real-time Signal Alerts
+
+**Prompt:**
+```
+Monitor for new strong_up signals throughout the day.
+When a stock gets classified as strong_up with > 50% probability,
+show me its full profile: predictions, features, recent price action.
+```
+
+---
+
+## Best Practices
+
+### Data Management
+
+1. **Update frequency:** Daily after market close (5-6pm ET)
+2. **Feature computation:** Use `--local` for speed (no API rate limits)
+3. **Time-awareness:** System automatically prevents partial intraday data
+
+### Model Training
+
+1. **Dataset versioning:** Use semantic versions (v1, v2, v3) for datasets
+2. **Model versioning:** Use YYYYMMDD format for easy sorting
+3. **Retraining cadence:** Weekly for trend models, monthly for quantile models
+4. **A/B testing:** Always compare new model to baseline before deployment
+
+### Prediction Generation
+
+1. **Generate fresh predictions daily** after data update
+2. **Store all predictions** for backtesting and analysis
+3. **Set prediction_date explicitly** for reproducibility
+
+### Monitoring
+
+1. **Weekly evaluation runs** to catch degradation early
+2. **Track calibration drift** as primary metric
+3. **Compare against baseline** for relative performance
+4. **Alert on >5% calibration drift** or >20% loss increase
+
+### Signal Generation
+
+1. **Combine multiple signals** (quantile + trend + cross-sectional)
+2. **Use uncertainty (IQR)** for position sizing
+3. **Apply cross-sectional filters** to find relative strength
+4. **Backtest signal combinations** before live deployment
+
+---
+
+## Troubleshooting Workflows
+
+### "No predictions found"
+
+**Check:**
+1. Did prediction generation complete? Check logs
+2. Is the date correct? Use ISO format YYYY-MM-DD
+3. Are symbols in the database? Query stocks table
+4. Check model_id matches in predictions table
+
+### "Model performance degraded"
+
+**Actions:**
+1. Evaluate on recent data to confirm
+2. Check for data quality issues (missing features, stale prices)
+3. Compare feature distributions (before vs now)
+4. Retrain with updated data
+5. A/B test new model vs current
+
+### "Features missing for some stocks"
+
+**Diagnosis:**
+```
+Which stocks are missing RSI?
+SELECT s.symbol
+FROM stocks s
+LEFT JOIN computed_features cf ON s.id = cf.data_id
+LEFT JOIN feature_definitions fd ON cf.feature_id = fd.id AND fd.name = 'rsi_14'
+WHERE cf.id IS NULL
+  AND s.status = 'Active'
+```
+
+**Fix:**
+```
+Run feature computation for missing stocks:
+g2 feat-compute --symbols <comma-separated> --local
+```
+
+---
+
+## Advanced Workflows
+
+### Multi-Model Ensemble
+
+Train 3 models with different algorithms, average their predictions:
+
+```
+1. Train momentum_xgb (XGBoost)
+2. Train momentum_lgb (LightGBM)
+3. Train momentum_sklearn (quantile regression)
+
+Query all 3, compute ensemble average, use for final signal
+```
+
+### Rolling Window Backtesting
+
+Evaluate model on expanding window to detect regime changes:
+
+```
+Evaluate model on:
+- 2024-01-01 to 2024-03-31 (Q1)
+- 2024-01-01 to 2024-06-30 (H1)
+- 2024-01-01 to 2024-09-30 (Q1-Q3)
+- 2024-01-01 to 2024-12-31 (Full year)
+
+Plot calibration drift over time
+```
+
+### Feature Importance Analysis
+
+Ask Claude to:
+1. Query prediction confidence by feature availability
+2. Find which features correlate most with accurate predictions
+3. Identify redundant features for pruning
+
+---
+
+## Next Steps
+
+After mastering these workflows:
+
+1. **Add backtesting tools** to MCP server (coming in Phase 2)
+2. **Implement portfolio optimization** using predictions
+3. **Build screening dashboards** with real-time signal updates
+4. **Create automated trading signals** with risk management
+5. **Deploy production monitoring** with alerting
+
+See [NEXT_STEPS.md](../NEXT_STEPS.md) for roadmap.

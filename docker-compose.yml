@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: timescale/timescaledb:2.12.0-pg14
@@ -9,18 +7,30 @@ services:
       [
         "postgres",
         "-c", "shared_preload_libraries=timescaledb",
+        "-c", "max_locks_per_transaction=256"
       ]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-g2}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-g2pass}
       POSTGRES_DB: ${POSTGRES_DB:-g2}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ${POSTGRES_DATA_DIR:-./db}:/var/lib/postgresql/data
+      #- ${POSTGRES_DATA_DIR:-./db}:/var/lib/postgresql/data
       - ./docker/initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-g2} -d ${POSTGRES_DB:-g2}"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  ml:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ml
+    working_dir: /app
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-g2}:${POSTGRES_PASSWORD:-g2pass}@postgres:5432/${POSTGRES_DB:-g2}}
+    depends_on:
+      postgres:
+        condition: service_healthy

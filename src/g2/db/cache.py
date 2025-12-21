@@ -60,7 +60,7 @@ def prefetch_latest_prices(
         cur.execute("""
             SELECT s.id, MAX(sp.date) as latest_date
             FROM unnest(%s::int[]) as s(id)
-            LEFT JOIN stock_prices sp ON sp.data_id = s.id
+            LEFT JOIN stock_ohlcv sp ON sp.data_id = s.id
             GROUP BY s.id;
         """, (list(stock_ids),))
         rows = cur.fetchall()
