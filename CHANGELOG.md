@@ -8,6 +8,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+#### Generic Feature Architecture (2025-12-21)
+
+**Major architectural refactoring** replacing type-specific meta-functions with a single generic, database-driven feature computation system.
+
+**What Changed:**
+
+- **Deleted** 681 lines of type-specific code (`indicators.py`, `derivatives.py`)
+- **Added** single `compute_features_generic()` function handling all feature types
+- **Enhanced** schema with plural `source_tables` and `source_columns` (JSONB arrays)
+- **Updated** all 5 indicator plugins to use generic meta-function
+- **Simplified** dispatcher registration to use generic function for all types
+
+**Benefits:**
+
+- Single code path for all feature types (indicators, derivatives, etc.)
+- Support for multi-column features (e.g., ADX requires high/low/close)
+- Database-driven plugin architecture
+- Cache mechanism for shared computations
+- Dramatically simplified and more maintainable codebase
+
+**Migration Guide:**
+
+1. **Schema**: Run `sql/migrations/003_plural_source_columns.sql` to add plural columns
+2. **Plugins**: All plugins now use `called_by='compute_features_generic'`
+3. **API**: Use `compute_features_generic()` instead of `compute_indicators()` or `compute_derivatives()`
+
+**Breaking Changes:**
+
+- Old `compute_indicators()` and `compute_derivatives()` functions removed
+- Plugins must have `called_by='compute_features_generic'` to be discovered
+- Tests for old type-specific functions will fail (functionality replaced)
+
+**Commits:**
+- 957aa1fe: Schema migration for plural source columns
+- b7144f7c: Generic meta-function implementation
+- 0c97f1f4: Plugin migration to generic architecture
+- 21fbff76: Delete type-specific meta-functions
+
+**Tests:** 13 new tests added, all passing (5 schema + 8 generic)
+
 #### Momentum Trading Strategy (MVP)
 
 Implemented simple price-based momentum strategy for demonstration and testing.
