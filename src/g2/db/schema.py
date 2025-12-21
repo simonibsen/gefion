@@ -122,7 +122,12 @@ def create_stock_ohlcv_table(conn: Connection) -> None:
 
 
 def create_feature_definitions_table(conn: Connection) -> None:
-    """Descriptor table for computed features."""
+    """Descriptor table for computed features.
+
+    Supports both legacy singular columns (source_table, source_column)
+    and new plural columns (source_tables, source_columns) for features
+    requiring multiple input columns.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -133,6 +138,8 @@ def create_feature_definitions_table(conn: Connection) -> None:
                 params JSONB,
                 source_table TEXT,
                 source_column TEXT,
+                source_tables JSONB,
+                source_columns JSONB,
                 store_table TEXT DEFAULT 'computed_features',
                 store_column TEXT,
                 store_type TEXT DEFAULT 'double precision',
