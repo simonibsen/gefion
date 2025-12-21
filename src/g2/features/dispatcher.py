@@ -255,6 +255,150 @@ class PluginOrchestrator:
         return None
 
 
+def compute_features_generic(
+    rows: Mapping[str, Any] | List[Mapping[str, Any]],
+    specs: List[Mapping[str, Any]] | List[str],
+    db_conn: psycopg.Connection,
+    return_failures: bool = False,
+) -> List[Dict[str, Any]] | Tuple[List[Dict[str, Any]], List[Tuple[str, str]]]:
+    """
+    Generic meta-function for all feature types.
+
+    Replaces type-specific meta-functions (compute_indicators, compute_derivatives)
+    with a single generic implementation that uses the plugin architecture.
+
+    Args:
+        rows: Source data rows (e.g., OHLCV data)
+        specs: Feature specs from feature_definitions or string indicators
+        db_conn: Database connection for plugin discovery (required)
+        return_failures: Whether to return (results, failures) tuple
+
+    Returns:
+        List of computed feature rows, or (rows, failures) if return_failures=True
+
+    Example:
+        rows = [
+            {'date': date(2025, 1, 1), 'close': 100.0, 'high': 101.0, 'low': 99.0},
+            {'date': date(2025, 1, 2), 'close': 102.0, 'high': 103.0, 'low': 101.0},
+        ]
+        specs = [{
+            'type': 'adx',
+            'name': 'indicator_adx_14',
+            'params': {'indicator': 'adx', 'period': 14},
+            'source_tables': ['stock_ohlcv'],
+            'source_columns': ['high', 'low', 'close']
+        }]
+        results = compute_features_generic(rows, specs, db_conn)
+    """
+    import pandas as pd
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    if db_conn is None:
+        raise ValueError("db_conn is required for plugin-based feature computation")
+
+    # Prepare DataFrame from source rows
+    df = pd.DataFrame(rows if isinstance(rows, list) else [rows])
+    if df.empty:
+        return ([], []) if return_failures else []
+
+    df = df.sort_values("date").copy()
+
+    # Ensure numeric types for common OHLCV columns
+    for col in ["open", "high", "low", "close", "adjusted_close", "volume"]:
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Drop rows with no price data
+    df = df.dropna(subset=["close", "adjusted_close"], how="all")
+    if df.empty:
+        return ([], []) if return_failures else []
+
+    # Discover and load plugins
+    # Note: Using 'compute_indicators' for now since plugins have called_by='compute_indicators'
+    # TODO: Update plugins to use called_by='compute_features' in Phase 3
+    orchestrator = PluginOrchestrator(db_conn, 'compute_indicators')
+
+    # Convert spec format if needed
+    converted_specs = []
+    for spec in specs:
+        if isinstance(spec, str):
+            # String format: "rsi" or "sma20" -> dict format
+            import re
+            match = re.match(r'([a-z]+)(\\d+)?', spec)
+            if match:
+                base_indicator = match.group(1)
+                period_str = match.group(2)
+                period = int(period_str) if period_str else None
+
+                params = {'indicator': spec}
+                if period is not None:
+                    params['period'] = period
+
+                converted_specs.append({
+                    'type': spec,
+                    'name': f'indicator_{spec}',
+                    'params': params
+                })
+            else:
+                converted_specs.append({
+                    'type': spec,
+                    'name': f'indicator_{spec}',
+                    'params': {'indicator': spec}
+                })
+        else:
+            # Already dict format
+            converted_specs.append(spec)
+
+    # Initialize cache for shared intermediate values
+    cache = {}
+
+    # TODO: Call precompute hook for domain-specific optimizations
+    # precompute_shared_intermediates(df, converted_specs, cache)
+
+    # Execute plugins and get results
+    failed_features: List[Tuple[str, str]] = []
+
+    try:
+        result_df = orchestrator.execute_plugins(df, converted_specs, cache)
+    except Exception as e:
+        logger.warning(f"Plugin execution failed: {e}")
+        return ([], []) if return_failures else []
+
+    # Add source column
+    result_df["source"] = "local"
+
+    # Convert DataFrame to list of dicts (same format as original)
+    records = result_df.to_dict("records")
+
+    # Filter out NaN values and format results
+    indicator_cols = [
+        "rsi_14", "adx_14", "sma_20", "sma_50", "sma_200",
+        "ema_12", "ema_26", "macd", "macd_signal", "macd_hist",
+        "bb_upper", "bb_middle", "bb_lower", "stoch_k", "stoch_d", "psar"
+    ]
+
+    results: List[Dict[str, Any]] = []
+    for record in records:
+        out: Dict[str, Any] = {"date": record["date"], "source": "local"}
+        has_indicators = False
+
+        for col in indicator_cols:
+            if col in record:
+                val = record[col]
+                if pd.notna(val):
+                    out[col] = float(val)
+                    has_indicators = True
+
+        if has_indicators:
+            results.append(out)
+
+    if return_failures:
+        return results, failed_features
+    return results
+
+
 def compute_features(
     conn: psycopg.Connection,
     data_id: int,
