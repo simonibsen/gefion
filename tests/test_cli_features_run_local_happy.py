@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from g2 import cli
 from g2.db import schema
-from g2.db.ingest import ensure_all_indicator_feature_definitions
+from g2.db.ingest import load_feature_definitions_from_json, ensure_feature_definitions
 
 runner = CliRunner()
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
@@ -41,10 +41,12 @@ def test_features_run_local_succeeds(monkeypatch, tmp_path):
     conn = require_db()
     conn.autocommit = True
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
-    ensure_all_indicator_feature_definitions(conn, indicators=["adx"])
+    # Load ADX feature definition from JSON
+    feature_defs = load_feature_definitions_from_json("feature-definitions/indicator_adx_14.json")
+    ensure_feature_definitions(conn, feature_defs)
     with conn.cursor() as cur:
         cur.execute("INSERT INTO stocks (symbol) VALUES ('AAA') RETURNING id;")
         stock_id = cur.fetchone()[0]
@@ -69,7 +71,7 @@ def test_features_run_local_succeeds(monkeypatch, tmp_path):
             args.extend(r)
         placeholders = ",".join(["(%s,%s,%s,%s,%s,%s,%s,%s,%s)"] * len(rows))
         cur.execute(
-            f"INSERT INTO stock_prices (data_id, date, open, high, low, close, adjusted_close, volume, source) VALUES {placeholders}",
+            f"INSERT INTO stock_ohlcv (data_id, date, open, high, low, close, adjusted_close, volume, source) VALUES {placeholders}",
             args,
         )
     conn.close()

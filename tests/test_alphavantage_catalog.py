@@ -33,7 +33,17 @@ def test_parse_daily_adjusted_from_demo_payload():
     assert rows  # non-empty
     first = rows[0]
     assert first["symbol"] == "IBM"
-    assert {"date", "open", "high", "low", "close", "adjusted_close", "volume"} <= set(first.keys())
+    assert {
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adjusted_close",
+        "dividend_amount",
+        "split_coefficient",
+        "volume",
+    } <= set(first.keys())
 
 
 def test_parse_cpi_monthly_from_demo_payload():

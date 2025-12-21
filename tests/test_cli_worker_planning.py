@@ -10,6 +10,48 @@ from g2 import cli
 runner = CliRunner()
 
 
+class FakeCursor:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, *args, **kwargs):
+        return None
+
+    def fetchone(self):
+        return (None,)
+
+    def fetchall(self):
+        return []
+
+
+class FakeConn:
+    def __init__(self):
+        self.autocommit = True
+
+    def cursor(self):
+        return FakeCursor()
+
+    def commit(self):
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+@pytest.fixture(autouse=True)
+def stub_psycopg(monkeypatch):
+    # Avoid real database connections in CLI tests
+    import psycopg
+
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: FakeConn())
+
+
 def _listings_file(tmp_path: Path) -> Path:
     payload = {
         "data": [
@@ -73,7 +115,8 @@ def test_data_update_uses_planned_workers(monkeypatch, tmp_path):
 
 
 def test_universe_ingest_uses_planned_workers(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/testdb")
+    db_url = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:6432/testdb")
+    monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("ALPHAVANTAGE_API_KEY", "demo")
 
     listings_file = _listings_file(tmp_path)
@@ -94,6 +137,7 @@ def test_universe_ingest_uses_planned_workers(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "get_available_connections", fake_get_available)
     monkeypatch.setattr(cli, "plan_workers", fake_plan)
     monkeypatch.setattr(cli, "ingest_prices_for_symbols", fake_price_ingest)
+    monkeypatch.setattr("g2.ingest.universe.filter_symbols_needing_update", lambda conn, syms, target: list(syms))
     monkeypatch.setattr(cli, "AlphaVantageClient", lambda *a, **kw: object())
 
     res = runner.invoke(

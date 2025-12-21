@@ -45,15 +45,15 @@ def test_stocks_table_exists(conn):
     assert [c[0] for c in cols][:2] == ["id", "symbol"]
 
 
-def test_stock_prices_hypertable(conn):
+def test_stock_ohlcv_hypertable(conn):
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT hypertable_name
             FROM timescaledb_information.hypertables
-            WHERE hypertable_name = 'stock_prices';
+            WHERE hypertable_name = 'stock_ohlcv';
             """
         )
         assert cur.fetchone() is not None
@@ -62,19 +62,32 @@ def test_stock_prices_hypertable(conn):
             """
             SELECT column_name
             FROM information_schema.columns
-            WHERE table_name = 'stock_prices'
+            WHERE table_name = 'stock_ohlcv'
             ORDER BY ordinal_position;
             """
         )
         cols = [r[0] for r in cur.fetchall()]
 
-        assert ["id", "data_id", "date", "open", "high", "low", "close", "adjusted_close", "volume", "source"] == cols
+        assert [
+            "id",
+            "data_id",
+            "date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "adjusted_close",
+            "dividend_amount",
+            "split_coefficient",
+            "volume",
+            "source",
+        ] == cols
 
         cur.execute(
             """
             SELECT constraint_type, constraint_name
             FROM information_schema.table_constraints
-            WHERE table_name = 'stock_prices'
+            WHERE table_name = 'stock_ohlcv'
             ORDER BY constraint_type;
             """
         )
@@ -82,9 +95,9 @@ def test_stock_prices_hypertable(conn):
         assert "PRIMARY KEY" in constraints
 
 
-def test_stock_prices_unique_per_stock_and_date(conn):
+def test_stock_ohlcv_unique_per_stock_and_date(conn):
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -94,8 +107,8 @@ def test_stock_prices_unique_per_stock_and_date(conn):
         stock_id = cur.fetchone()[0]
         cur.execute(
             """
-            INSERT INTO stock_prices (data_id, date) VALUES (%s, '2023-01-01');
-            INSERT INTO stock_prices (data_id, date) VALUES (%s, '2023-01-02');
+            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-01');
+            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-02');
             """,
             (stock_id, stock_id),
         )
@@ -103,7 +116,7 @@ def test_stock_prices_unique_per_stock_and_date(conn):
         with pytest.raises(psycopg.errors.UniqueViolation):
             cur.execute(
                 """
-                INSERT INTO stock_prices (data_id, date) VALUES (%s, '2023-01-01');
+                INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-01');
                 """,
                 (stock_id,),
             )

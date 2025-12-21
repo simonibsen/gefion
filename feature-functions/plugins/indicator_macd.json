@@ -1,0 +1,11 @@
+{
+  "name": "indicator_macd",
+  "version": "1.0",
+  "language": "python",
+  "description": "MACD (Moving Average Convergence Divergence) plugin - computes MACD, signal, and histogram",
+  "status": "active",
+  "enabled": true,
+  "called_by": "compute_features_generic",
+  "created_by": "g2-plugin-migration",
+  "function_body": "import pandas as pd\n\ndef compute(df, spec, cache=None):\n    \"\"\"\n    Compute MACD indicator.\n    \n    Args:\n        df: DataFrame with OHLCV data\n        spec: Feature spec\n        cache: Optional cache dict\n    \n    Returns:\n        DataFrame with ['date', 'macd', 'macd_signal', 'macd_hist'] columns\n    \"\"\"\n    if df.empty:\n        return pd.DataFrame(columns=['date', 'macd', 'macd_signal', 'macd_hist'])\n    \n    # Get close price\n    close = df['adjusted_close'].fillna(df['close'])\n    \n    # Compute MACD components\n    ema12 = close.ewm(span=12, adjust=False).mean()\n    ema26 = close.ewm(span=26, adjust=False).mean()\n    macd = ema12 - ema26\n    macd_signal = macd.ewm(span=9, adjust=False).mean()\n    macd_hist = macd - macd_signal\n    \n    # Return result\n    result = df[['date']].copy()\n    result['ema_12'] = ema12\n    result['ema_26'] = ema26\n    result['macd'] = macd\n    result['macd_signal'] = macd_signal\n    result['macd_hist'] = macd_hist\n    return result\n"
+}

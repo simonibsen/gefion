@@ -5,7 +5,7 @@ import psycopg
 import pytest
 
 from g2.db import schema
-from g2.db.ingest import trim_stock_prices, upsert_stock
+from g2.db.ingest import trim_stock_ohlcv, upsert_stock
 
 
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
@@ -31,19 +31,19 @@ def clean_db():
     yield
 
 
-def test_trim_stock_prices_date_and_symbol():
+def test_trim_stock_ohlcv_date_and_symbol():
     conn = require_db()
     conn.autocommit = True
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
 
     s1 = upsert_stock(conn, "AAA")
     s2 = upsert_stock(conn, "BBB")
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO stock_prices (data_id, date) VALUES (%s, %s), (%s, %s), (%s, %s);
-            INSERT INTO stock_prices (data_id, date) VALUES (%s, %s), (%s, %s);
+            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, %s), (%s, %s), (%s, %s);
+            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, %s), (%s, %s);
             """,
             (
                 s1,
@@ -58,11 +58,11 @@ def test_trim_stock_prices_date_and_symbol():
                 date(2024, 1, 1),
             ),
         )
-    deleted = trim_stock_prices(conn, before=date(2023, 6, 1), after=date(2023, 12, 31), symbols=["AAA"])
+    deleted = trim_stock_ohlcv(conn, before=date(2023, 6, 1), after=date(2023, 12, 31), symbols=["AAA"])
     # Should delete AAA before 2023-06-01 and after 2023-12-31 (two rows), BBB untouched
     assert deleted == 2
     with conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM stock_prices;")
+        cur.execute("SELECT COUNT(*) FROM stock_ohlcv;")
         total = cur.fetchone()[0]
     assert total == 3
     conn.close()

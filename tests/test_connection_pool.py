@@ -49,7 +49,7 @@ def setup_pool():
 def setup_tables(conn):
     """Setup minimal tables for testing."""
     with conn.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS stock_prices CASCADE;")
+        cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
         cur.execute("DROP TABLE IF EXISTS stocks CASCADE;")
         cur.execute("""
             CREATE TABLE stocks (

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Fix stock_prices table for TimescaleDB compatibility.
+Fix stock_ohlcv table for TimescaleDB compatibility.
 
 Run this if you see errors like:
 "cannot create a unique index without the column 'date' (used in partitioning)"
 
-This script will drop and recreate the stock_prices table properly.
+This script will drop and recreate the stock_ohlcv table properly.
 """
 import os
 import sys
@@ -20,7 +20,7 @@ from g2.config import load_settings
 
 
 def main():
-    print("🔧 Fixing stock_prices table for TimescaleDB compatibility...")
+    print("🔧 Fixing stock_ohlcv table for TimescaleDB compatibility...")
 
     # Load database URL
     try:
@@ -40,7 +40,7 @@ def main():
                 cur.execute("""
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables
-                        WHERE table_schema = 'public' AND table_name = 'stock_prices'
+                        WHERE table_schema = 'public' AND table_name = 'stock_ohlcv'
                     );
                 """)
                 table_exists = cur.fetchone()[0]
@@ -50,7 +50,7 @@ def main():
                         cur.execute("""
                             SELECT EXISTS (
                                 SELECT FROM timescaledb_information.hypertables
-                                WHERE hypertable_schema = 'public' AND hypertable_name = 'stock_prices'
+                                WHERE hypertable_schema = 'public' AND hypertable_name = 'stock_ohlcv'
                             );
                         """)
                         is_hypertable = cur.fetchone()[0]
@@ -60,19 +60,19 @@ def main():
                             return 0
                         else:
                             print("⚠️  Table exists but is not a hypertable. Dropping...")
-                            cur.execute("DROP TABLE IF EXISTS stock_prices CASCADE;")
+                            cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
                             print("✅ Dropped old table")
                     except Exception as e:
                         print(f"⚠️  Could not check hypertable status: {e}")
                         print("Dropping table anyway...")
-                        cur.execute("DROP TABLE IF EXISTS stock_prices CASCADE;")
+                        cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
                 else:
                     print("ℹ️  Table doesn't exist yet")
 
             # Recreate table properly
-            print("Creating stock_prices table as hypertable...")
+            print("Creating stock_ohlcv table as hypertable...")
             schema.create_stocks_table(conn)
-            schema.create_stock_prices_table(conn)
+            schema.create_stock_ohlcv_table(conn)
             print("✅ Table created successfully!")
 
             # Verify
@@ -80,7 +80,7 @@ def main():
                 cur.execute("""
                     SELECT EXISTS (
                         SELECT FROM timescaledb_information.hypertables
-                        WHERE hypertable_schema = 'public' AND hypertable_name = 'stock_prices'
+                        WHERE hypertable_schema = 'public' AND hypertable_name = 'stock_ohlcv'
                     );
                 """)
                 is_hypertable = cur.fetchone()[0]

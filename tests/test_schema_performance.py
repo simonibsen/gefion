@@ -42,17 +42,17 @@ def _index_names(cur, table):
     return cur.fetchall()
 
 
-def test_stock_prices_brin_and_chunk(conn):
+def test_stock_ohlcv_brin_and_chunk(conn):
     schema.create_stocks_table(conn)
-    schema.create_stock_prices_table(conn)
+    schema.create_stock_ohlcv_table(conn)
     with conn.cursor() as cur:
-        names = _index_names(cur, "stock_prices")
+        names = _index_names(cur, "stock_ohlcv")
         assert any("BRIN" in idxdef for _, idxdef in names)
         cur.execute(
             """
             SELECT chunk_time_interval
             FROM timescaledb_information.hypertables
-            WHERE hypertable_name = 'stock_prices';
+            WHERE hypertable_name = 'stock_ohlcv';
             """
         )
         interval = cur.fetchone()[0]

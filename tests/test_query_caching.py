@@ -14,7 +14,7 @@ from g2.db.cache import (
     prefetch_feature_ids,
     StockMetadataCache,
 )
-from g2.db.ingest import upsert_stock, insert_stock_prices
+from g2.db.ingest import upsert_stock, insert_stock_ohlcv
 
 
 def create_connection():
@@ -40,7 +40,7 @@ def setup_tables(conn):
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS computed_features CASCADE;")
         cur.execute("DROP TABLE IF EXISTS feature_definitions CASCADE;")
-        cur.execute("DROP TABLE IF EXISTS stock_prices CASCADE;")
+        cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
         cur.execute("DROP TABLE IF EXISTS stocks CASCADE;")
 
         cur.execute("""
@@ -51,7 +51,7 @@ def setup_tables(conn):
         """)
 
         cur.execute("""
-            CREATE TABLE stock_prices (
+            CREATE TABLE stock_ohlcv (
                 id BIGSERIAL PRIMARY KEY,
                 data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
                 date DATE NOT NULL,
@@ -60,6 +60,8 @@ def setup_tables(conn):
                 low NUMERIC(18,6),
                 close NUMERIC(18,6),
                 adjusted_close NUMERIC(18,6),
+                dividend_amount NUMERIC(18,6),
+                split_coefficient NUMERIC(18,6),
                 volume BIGINT,
                 source TEXT,
                 UNIQUE (data_id, date)
@@ -109,7 +111,7 @@ def test_prefetch_latest_prices(conn):
     base_date = date(2020, 1, 1)
 
     # Add prices for stock1
-    insert_stock_prices(conn, stock1_id, [{
+    insert_stock_ohlcv(conn, stock1_id, [{
         "date": base_date,
         "close": 100.0,
         "adjusted_close": 100.0,
@@ -117,7 +119,7 @@ def test_prefetch_latest_prices(conn):
     }], update_existing=False)
 
     # Add prices for stock2 (later date)
-    insert_stock_prices(conn, stock2_id, [{
+    insert_stock_ohlcv(conn, stock2_id, [{
         "date": base_date + timedelta(days=10),
         "close": 200.0,
         "adjusted_close": 200.0,
@@ -191,7 +193,7 @@ def test_stock_metadata_cache_with_prices(conn):
     stock2_id = upsert_stock(conn, "PRICE2")
 
     base_date = date(2021, 1, 1)
-    insert_stock_prices(conn, stock1_id, [{
+    insert_stock_ohlcv(conn, stock1_id, [{
         "date": base_date,
         "close": 100.0,
         "adjusted_close": 100.0,
