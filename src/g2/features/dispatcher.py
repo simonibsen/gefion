@@ -316,9 +316,7 @@ def compute_features_generic(
         return ([], []) if return_failures else []
 
     # Discover and load plugins
-    # Note: Using 'compute_indicators' for now since plugins have called_by='compute_indicators'
-    # TODO: Update plugins to use called_by='compute_features' in Phase 3
-    orchestrator = PluginOrchestrator(db_conn, 'compute_indicators')
+    orchestrator = PluginOrchestrator(db_conn, 'compute_features_generic')
 
     # Convert spec format if needed
     converted_specs = []
