@@ -1496,20 +1496,13 @@ def _fetch_from_generic_table(
     ]
 
 
-# Register indicator compute function (will be imported)
+# Register generic compute function
 def _register_default_functions():
     """Register default compute functions."""
-    try:
-        from g2.features.indicators import compute_indicators
-        register_compute_function('indicator', compute_indicators)
-    except ImportError:
-        pass
-
-    try:
-        from g2.features.derivatives import compute_derivatives
-        register_compute_function('derivative', compute_derivatives)
-    except ImportError:
-        pass
+    # Register generic function for all feature types
+    register_compute_function('indicator', compute_features_generic)
+    register_compute_function('derivative', compute_features_generic)
+    register_compute_function('compute_features', compute_features_generic)
 
 
 # Auto-register on import
