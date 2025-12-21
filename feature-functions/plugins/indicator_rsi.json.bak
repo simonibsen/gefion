@@ -5,7 +5,7 @@
   "description": "RSI (Relative Strength Index) plugin - computes RSI for any period",
   "status": "active",
   "enabled": true,
-  "called_by": "compute_features_generic",
+  "called_by": "compute_indicators",
   "created_by": "g2-plugin-migration",
   "function_body": "import pandas as pd\nimport numpy as np\n\ndef compute(df, spec, cache=None):\n    \"\"\"\n    Compute RSI indicator.\n    \n    Args:\n        df: DataFrame with OHLCV data including 'date' and price columns\n        spec: Feature spec with params like {'indicator': 'rsi', 'period': 14}\n        cache: Optional cache dict containing shared helper functions\n    \n    Returns:\n        DataFrame with ['date', 'rsi_<period>'] columns\n    \"\"\"\n    if df.empty:\n        return pd.DataFrame(columns=['date', 'rsi_14'])\n    \n    # Get parameters\n    params = spec.get('params', {})\n    period = params.get('period', 14)\n    \n    # Get close price (prefer adjusted_close)\n    close = df['adjusted_close'].fillna(df['close'])\n    \n    # Compute RSI\n    delta = close.diff()\n    gain = delta.clip(lower=0)\n    loss = -delta.clip(upper=0)\n    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()\n    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()\n    rs = avg_gain / avg_loss.replace(0, pd.NA)\n    rsi = 100 - (100 / (1 + rs))\n    rsi = pd.to_numeric(rsi, errors='coerce').fillna(100.0)\n    \n    # Return result\n    result = df[['date']].copy()\n    result[f'rsi_{period}'] = rsi\n    return result\n"
 }
