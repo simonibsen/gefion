@@ -189,13 +189,12 @@ def compute_indicators(
     price_rows: Iterable[Mapping[str, object]],
     indicators: Iterable[str | Mapping[str, object]],
     return_failures: bool = False,
-    db_conn: Optional['psycopg.Connection'] = None,
+    db_conn: 'psycopg.Connection' = None,
 ) -> List[Dict[str, object]] | tuple[List[Dict[str, object]], List[tuple[str, str]]]:
     """
     Compute technical indicators from price data.
 
-    Meta-function that orchestrates indicator plugins from the database when
-    db_conn is provided, or falls back to built-in implementations.
+    Meta-function that orchestrates indicator plugins from the database.
 
     Args:
         price_rows: Price data rows (OHLCV)
@@ -203,16 +202,29 @@ def compute_indicators(
                    or a list of compute spec dicts from feature_definitions
                    (e.g., [{"type": "rsi", "name": "indicator_rsi_14", ...}])
         return_failures: If True, return (results, failures) tuple
-        db_conn: Optional database connection for plugin discovery
+        db_conn: Database connection for plugin discovery (required)
 
     Returns:
         List of computed indicator rows, or (rows, failures) if return_failures=True
     """
-    # If db_conn provided, use plugin architecture
-    if db_conn is not None:
-        return _compute_indicators_with_plugins(price_rows, indicators, return_failures, db_conn)
+    if db_conn is None:
+        raise ValueError("db_conn is required for plugin-based indicator computation")
 
-    # Otherwise, use built-in implementations (backward compatibility)
+    return _compute_indicators_with_plugins(price_rows, indicators, return_failures, db_conn)
+
+
+def _compute_indicators_legacy(
+    price_rows: Iterable[Mapping[str, object]],
+    indicators: Iterable[str | Mapping[str, object]],
+    return_failures: bool = False,
+) -> List[Dict[str, object]] | tuple[List[Dict[str, object]], List[tuple[str, str]]]:
+    """
+    DEPRECATED: Built-in indicator implementations (kept for reference only).
+
+    This function contains the original inline indicator implementations.
+    It is no longer used in production - all indicator computation now goes
+    through the plugin architecture via compute_indicators().
+    """
     df = pd.DataFrame(price_rows)
     if df.empty:
         return ([], []) if return_failures else []

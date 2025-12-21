@@ -1039,6 +1039,319 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ---
 
+### 24. Generic Feature Architecture (Foundation Refactoring)
+
+**Status**: In Progress (2025-12-21)
+**Priority**: Critical (architectural foundation)
+**Effort**: 1-2 weeks
+
+**Context**: Current architecture has type-specific meta-functions (indicators.py, derivatives.py) with duplicated orchestration logic. This refactoring eliminates all type-specific code in favor of a single generic, database-driven feature computation architecture.
+
+**Goals**:
+- Single generic meta-function replaces all type-specific functions
+- Support features requiring multiple source columns (e.g., ADX needs high/low/close)
+- Preserve batching performance (1x DataFrame creation per stock)
+- Enable shared computation caching (e.g., EMA-12 used in both direct indicators and MACD)
+- Maintain point-in-time correctness
+
+**Expected Performance**: 94-98% of current performance (2-6% overhead acceptable for architectural benefits)
+
+---
+
+#### Phase 1: Schema Migration for Plural Source Columns
+
+**TDD Approach**: Write failing tests → Implement schema → Make tests pass
+
+**Action Items**:
+- [ ] Write failing tests for plural source columns:
+  - Feature definition with multiple source_columns
+  - Feature definition with multiple source_tables
+  - Backward compatibility with existing singular columns
+- [ ] Implement schema migration:
+  - Add `source_tables` JSONB array to feature_definitions
+  - Add `source_columns` JSONB array to feature_definitions
+  - Migrate existing singular columns to plural format
+  - Update schema.py with new table definition
+- [ ] Make tests pass:
+  - Test loading feature definitions with plural columns
+  - Test backward compatibility (fall back to singular if plural not present)
+
+**Files to create/modify**:
+- `sql/migrations/003_plural_source_columns.sql` (new migration)
+- `src/g2/db/schema.py` (update feature_definitions table)
+- `tests/test_plural_source_columns.py` (new TDD tests)
+
+**Success Criteria**:
+- Migration runs without errors
+- Existing feature definitions still work
+- New plural format supported
+- All tests pass
+
+---
+
+#### Phase 2: Generic Meta-Function Implementation
+
+**TDD Approach**: Write failing tests → Implement compute_features() → Make tests pass
+
+**Action Items**:
+- [ ] Write failing tests for generic meta-function:
+  - Single source column (RSI use case)
+  - Multiple source columns (ADX use case: high/low/close)
+  - Shared computation caching (EMA-12 used in multiple features)
+  - Precompute hook for optimizations
+  - Empty data handling
+  - Plugin failure isolation
+- [ ] Implement generic compute_features():
+  - Read source_tables/source_columns from feature specs
+  - Fetch union of all needed columns in single query
+  - Create PluginOrchestrator instance
+  - Initialize cache dict for shared intermediates
+  - Call precompute_shared_intermediates() hook
+  - Execute plugins via orchestrator.execute_plugins()
+  - Format and return results
+- [ ] Implement cache mechanism:
+  - Plugins can store/retrieve intermediate values
+  - Cache key format: "{indicator}_{params_hash}"
+  - Example: cache["ema_12"] = ema_12_series
+- [ ] Implement precompute hook:
+  - Optional optimization function
+  - Runs before plugins execute
+  - Can populate cache with known shared computations
+  - Example: precompute EMAs if multiple features need them
+- [ ] Make tests pass:
+  - All test cases passing
+  - Performance benchmarks within 94-98% range
+
+**Files to create/modify**:
+- `src/g2/features/dispatcher.py` (add compute_features function)
+- `src/g2/features/precompute.py` (new file for precompute hooks)
+- `tests/test_generic_compute_features.py` (new TDD tests)
+- `tests/test_feature_cache.py` (cache mechanism tests)
+
+**Implementation Pattern**:
+```python
+def compute_features(
+    rows: Iterable[Mapping[str, object]],
+    specs: Iterable[Mapping[str, object]],
+    db_conn: 'psycopg.Connection',
+    return_failures: bool = False,
+) -> List[Dict[str, object]] | tuple[List[Dict[str, object]], List[tuple[str, str]]]:
+    """
+    Generic meta-function for all feature types.
+
+    Args:
+        rows: Source data rows
+        specs: Feature specs from feature_definitions
+        db_conn: Database connection for plugin discovery
+        return_failures: Whether to return failures
+
+    Returns:
+        Computed feature rows, or (rows, failures) if return_failures=True
+    """
+    # Prepare DataFrame from source rows
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return ([], []) if return_failures else []
+
+    # Sort and clean data
+    df = df.sort_values("date").copy()
+
+    # Ensure numeric types for common columns
+    for col in ["open", "high", "low", "close", "adjusted_close", "volume"]:
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Initialize cache and precompute shared intermediates
+    cache = {}
+    precompute_shared_intermediates(df, specs, cache)
+
+    # Discover and execute plugins
+    orchestrator = PluginOrchestrator(db_conn, 'compute_features')
+    failed_features: List[tuple[str, str]] = []
+
+    try:
+        result_df = orchestrator.execute_plugins(df, specs, cache)
+    except Exception as e:
+        logger.warning(f"Plugin execution failed: {e}")
+        return ([], []) if return_failures else []
+
+    # Format results
+    result_df["source"] = "local"
+    records = result_df.to_dict("records")
+
+    # Filter out NaN values
+    # (implementation continues...)
+```
+
+**Success Criteria**:
+- Generic function handles all feature types
+- Performance within target range
+- All existing tests still pass
+- Cache mechanism working
+- Precompute hook functional
+
+---
+
+#### Phase 3: Feature Definition Migration
+
+**TDD Approach**: Update definitions → Verify with tests
+
+**Action Items**:
+- [ ] Update all feature definitions to plural format:
+  - Single column indicators: `source_columns: ["close"]`
+  - Multi-column indicators: `source_columns: ["high", "low", "close"]`
+  - Update `function_name` to reference generic meta-function
+- [ ] Test each updated definition:
+  - Load definition from JSON
+  - Compute features using generic function
+  - Verify output matches legacy implementation
+- [ ] Create migration script (optional):
+  - Automatically convert singular → plural
+  - Validate all definitions before commit
+
+**Files to modify**:
+- All JSON files in `feature-definitions/`
+- Examples:
+  - `indicator_rsi_14.json`: `source_columns: ["close"]`
+  - `indicator_adx_14.json`: `source_columns: ["high", "low", "close"]`
+  - `indicator_macd.json`: `source_columns: ["close"]`
+
+**Migration Pattern**:
+```json
+{
+  "name": "indicator_adx_14",
+  "function_name": "compute_features",
+  "params": {
+    "indicator": "adx",
+    "period": 14
+  },
+  "source_tables": ["stock_ohlcv"],
+  "source_columns": ["high", "low", "close"],
+  "store_table": "computed_features",
+  "store_column": "value",
+  "store_type": "double precision",
+  "active": true
+}
+```
+
+**Success Criteria**:
+- All feature definitions updated
+- No regression in feature values
+- Integration tests pass
+
+---
+
+#### Phase 4: Delete Type-Specific Meta-Functions
+
+**TDD Approach**: Remove files → Update imports → Verify all tests pass
+
+**Action Items**:
+- [ ] Delete type-specific meta-functions:
+  - DELETE `src/g2/features/indicators.py`
+  - DELETE `src/g2/features/derivatives.py`
+- [ ] Update imports throughout codebase:
+  - Replace `from g2.features.indicators import compute_indicators`
+  - With `from g2.features.dispatcher import compute_features`
+- [ ] Update dispatcher registration:
+  - Remove indicator/derivative specific registrations
+  - Register generic compute_features for all types
+- [ ] Update tests:
+  - Remove tests specific to deleted files
+  - Ensure integration tests use generic function
+- [ ] Run full test suite:
+  - All tests must pass
+  - No import errors
+  - No regressions
+
+**Files to delete**:
+- `src/g2/features/indicators.py` (entire file)
+- `src/g2/features/derivatives.py` (entire file)
+- `tests/test_compute_indicators_metafunction.py` (if specific to deleted code)
+
+**Files to modify**:
+- `src/g2/features/dispatcher.py` (update registrations)
+- Any file importing deleted modules
+- Integration tests
+
+**Success Criteria**:
+- No references to deleted files remain
+- All tests passing
+- No performance regression
+- Code is cleaner and more maintainable
+
+---
+
+#### Phase 5: Performance Validation
+
+**Action Items**:
+- [ ] Run performance benchmarks:
+  - Feature computation time (before vs. after)
+  - Memory usage (before vs. after)
+  - Database query count (should be same)
+- [ ] Verify batching preserved:
+  - 1x DataFrame creation per stock (not 17x)
+  - Confirm with profiling
+- [ ] Test cache effectiveness:
+  - Measure cache hit rate for shared intermediates
+  - Verify EMA reuse in MACD computation
+- [ ] Document performance results:
+  - Add benchmark results to CHANGELOG
+  - Note any optimizations applied
+
+**Target Metrics**:
+- Feature computation time: 94-98% of baseline
+- DataFrame creation: 1x per stock (no regression)
+- Batching: Preserved (all features in single call)
+- Cache hit rate: >80% for shared intermediates
+
+**Files to create**:
+- `benchmarks/bench_generic_features.py`
+- Add results to CHANGELOG.md
+
+---
+
+#### Architecture Before/After
+
+**Before** (Type-Specific):
+```
+feature_definitions → dispatcher → indicators.py → plugins
+                    → dispatcher → derivatives.py → plugins
+```
+
+**After** (Generic):
+```
+feature_definitions → dispatcher → compute_features() → plugins
+```
+
+**Key Changes**:
+1. **Eliminated**: indicators.py, derivatives.py (type-specific code)
+2. **Added**: Plural source_columns, cache mechanism, precompute hook
+3. **Preserved**: PluginOrchestrator, batching, point-in-time correctness
+
+---
+
+#### Dependencies & Risks
+
+**Dependencies**:
+- Requires TimescaleDB database
+- Requires existing plugin architecture (already in place)
+- Requires feature_definitions and feature_functions tables
+
+**Risks & Mitigations**:
+- **Risk**: Performance degradation beyond acceptable range
+  - **Mitigation**: Benchmark each phase, use precompute hook for optimizations
+- **Risk**: Breaking existing feature computations
+  - **Mitigation**: TDD approach, extensive integration tests
+- **Risk**: Plugin compatibility issues
+  - **Mitigation**: Test each plugin individually, verify outputs match legacy
+
+**Rollback Plan**:
+- Phase 1-2: Revert schema migration, keep old code
+- Phase 3-4: Restore deleted files from git history
+- Each phase is a separate commit for easy rollback
+
+---
+
 ## Implementation Recommendations
 
 ### For Path A (Trading-First):
@@ -1083,7 +1396,7 @@ Update this section as items are completed:
 - ✅ Trend classification model
 - ✅ Error messages & CLI help
 
-**In Progress**: None
+**In Progress**: Generic Feature Architecture (#24)
 
-**Next Up**: Choose strategic path (A, B, or C)
+**Next Up**: Complete generic feature architecture, then choose strategic path (A, B, or C)
 
