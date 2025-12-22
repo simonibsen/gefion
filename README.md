@@ -563,6 +563,8 @@ export $(cat .env.example | xargs)
 g2 span-check
 ```
 
+Tip: during development, run `g2 span-check` after performance-sensitive changes to see recent traces and grab the printed Tempo API link for the selected trace.
+
 More details: [docs/TEMPO_QUICKSTART.md](docs/TEMPO_QUICKSTART.md) and [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 
 ## Running Tests
