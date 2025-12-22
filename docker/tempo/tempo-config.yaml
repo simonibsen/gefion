@@ -37,3 +37,16 @@ storage:
     pool:
       max_workers: 100
       queue_depth: 10000
+
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+  storage:
+    path: /tmp/tempo/generator/wal
+  ring:
+    kvstore:
+      store: inmemory
+
+overrides:
+  metrics_generator_processors: [service-graphs, span-metrics, local-blocks]
