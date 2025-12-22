@@ -27,6 +27,7 @@ T = TypeVar('T')
 from g2.alphavantage.catalog import parse_daily_adjusted, parse_listing_status
 from g2.alphavantage.client import AlphaVantageClient
 from g2.db import schema
+from g2.observability import create_span
 from g2.db.ingest import (
     decide_outputsize,
     insert_stock_ohlcv,
@@ -208,12 +209,13 @@ def ingest_prices_for_symbols(
     fetch_count = 0
 
     # Ensure schema exists once before parallel work
-    with psycopg.connect(db_url) as conn:
-        schema.create_stocks_table(conn)
-        schema.migrate_stock_tables_to_data_id(conn)
-        schema.create_stock_ohlcv_table(conn)
-        # Note: Bulk filtering moved to CLI layer for better performance
-        # (filters once for all symbols instead of once per 50-symbol chunk)
+    with create_span("ingest_prices.schema_init"):
+        with psycopg.connect(db_url) as conn:
+            schema.create_stocks_table(conn)
+            schema.migrate_stock_tables_to_data_id(conn)
+            schema.create_stock_ohlcv_table(conn)
+            # Note: Bulk filtering moved to CLI layer for better performance
+            # (filters once for all symbols instead of once per 50-symbol chunk)
     # Bounded queue prevents memory exhaustion when fetchers outpace writers
     work_queue: queue.Queue[Tuple[str, list, str]] = queue.Queue(maxsize=200)
     writer_done = object()

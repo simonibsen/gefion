@@ -29,7 +29,7 @@ from g2.features.dispatcher import compute_features
 from g2.config import load_settings
 from g2.db import schema
 from psycopg.types.json import Json
-from g2.observability import create_span, set_attributes, get_current_span, shutdown as otel_shutdown
+from g2.observability import create_span, set_attributes, add_event, get_current_span, shutdown as otel_shutdown
 from g2.db import migrate
 from g2.db.ingest import (
     insert_stock_ohlcv,
@@ -1669,16 +1669,18 @@ def db_health(
     emit("DB health", data=health, json_output=json_output)
 
 
-@app.command("tempo-check")
-def tempo_check(
-    tempo_url: Optional[str] = typer.Option(None, help="Tempo base URL (default: $TEMPO_URL or http://localhost:3200)"),
-    service_name: Optional[str] = typer.Option(None, help="Service name tag (default: $OTEL_SERVICE_NAME or g2)"),
-    limit: int = typer.Option(10, min=1, max=100, help="Number of recent traces to inspect"),
-    trace_id: Optional[str] = typer.Option(None, help="Specific trace ID to inspect (default: most recent)"),
-    show_spans: bool = typer.Option(True, "--show-spans/--no-show-spans", help="Print a span list"),
-    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+def _span_check_impl(
+    backend: str,
+    tempo_url: Optional[str],
+    service_name: Optional[str],
+    limit: int,
+    trace_id: Optional[str],
+    show_spans: bool,
+    json_output: Optional[bool],
 ) -> None:
-    """Check recent Grafana Tempo traces for basic quality and structure."""
+    if backend != "tempo":
+        emit_error(f"Unsupported backend: {backend}", json_output=json_output)
+
     tempo_url = tempo_url or os.getenv("TEMPO_URL", "http://localhost:3200")
     service_name = service_name or os.getenv("OTEL_SERVICE_NAME", "g2")
 
@@ -1732,6 +1734,7 @@ def tempo_check(
     error_count = sum(1 for s in spans if _is_error_status(((s["span"].get("status") or {}).get("code"))))
 
     result = {
+        "backend": backend,
         "tempo_url": tempo_url,
         "service_name": service_name,
         "trace_count": trace_count,
@@ -1755,7 +1758,8 @@ def tempo_check(
         return
 
     console = Console()
-    console.print("Tempo trace check", style="bold")
+    console.print("Span check", style="bold")
+    console.print(f"Backend: {backend}", style="dim")
     console.print(f"Tempo URL: {tempo_url}", style="dim")
     console.print(f"Service: {service_name}", style="dim")
     console.print(f"Traces found: {trace_count}", style="dim")
@@ -1788,6 +1792,30 @@ def tempo_check(
     console.print("")
     console.print("View in Grafana: http://localhost:3000/explore", style="dim")
     console.print('Query: service.name = "g2"', style="dim")
+
+
+@app.command("span-check")
+def span_check(
+    backend: str = typer.Option("tempo", help="Trace backend (default: tempo)"),
+    tempo_url: Optional[str] = typer.Option(None, help="Tempo base URL (default: $TEMPO_URL or http://localhost:3200)"),
+    service_name: Optional[str] = typer.Option(None, help="Service name tag (default: $OTEL_SERVICE_NAME or g2)"),
+    limit: int = typer.Option(10, min=1, max=100, help="Number of recent traces to inspect"),
+    trace_id: Optional[str] = typer.Option(None, help="Specific trace ID to inspect (default: most recent)"),
+    show_spans: bool = typer.Option(True, "--show-spans/--no-show-spans", help="Print a span list"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Check recent traces in the configured backend (Tempo by default)."""
+    otel_enabled = os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
+    if not otel_enabled:
+        emit(
+            "OTEL_ENABLED is not true; traces may be missing.",
+            data={"hint": "export $(cat .env.example | xargs)"},
+            json_output=json_output,
+        )
+    _span_check_impl(backend, tempo_url, service_name, limit, trace_id, show_spans, json_output)
+
+
+
 
 
 @app.command("db-init")
@@ -3058,40 +3086,67 @@ def _update_all_impl(
     if refresh:
         timeframe = "full"
         refresh_existing = True
+    main_span = get_current_span()
+    set_attributes(
+        main_span,
+        calls_per_minute=calls_per_minute,
+        feature_batch_size=feature_batch_size,
+        refresh_existing=refresh_existing,
+        refresh=refresh,
+        timeframe=timeframe,
+    )
 
     # Resolve universe
     symbols: List[str] = []
     client: Optional[AlphaVantageClient] = None
+    universe_source = "unknown"
     try:
-        if listings_file:
-            listings = load_listings_from_file(listings_file)
-            filtered = filter_listings(listings, exchange=exchange, status=status)
-            symbols = [row["symbol"] for row in filtered]
-        else:
-            # If exchange not provided, try to infer from existing stocks
-            if exchange is None:
-                try:
-                    with db_connection(url) as conn:
-                        init_schema_tables(conn, ["stocks"])
-                        with conn.cursor() as cur:
-                            cur.execute("SELECT DISTINCT symbol FROM stocks;")
-                            symbols = [r[0] for r in cur.fetchall()]
-                except Exception:
-                    symbols = []
-            if not symbols:
-                try:
-                    client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key, calls_per_minute=calls_per_minute)
-                except ValueError as exc:
-                    emit(str(exc), json_output=json_output, error=True)
-                    raise typer.Exit(code=2)
-                listings = fetch_listings(client)
+        with create_span(
+            "data_update.resolve_universe",
+            exchange=exchange or "inferred",
+            status=status,
+            listings_file=bool(listings_file),
+        ) as resolve_span:
+            if listings_file:
+                universe_source = "file"
+                listings = load_listings_from_file(listings_file)
                 filtered = filter_listings(listings, exchange=exchange, status=status)
                 symbols = [row["symbol"] for row in filtered]
+            else:
+                # If exchange not provided, try to infer from existing stocks
+                if exchange is None:
+                    try:
+                        with db_connection(url) as conn:
+                            init_schema_tables(conn, ["stocks"])
+                            with conn.cursor() as cur:
+                                cur.execute("SELECT DISTINCT symbol FROM stocks;")
+                                symbols = [r[0] for r in cur.fetchall()]
+                        if symbols:
+                            universe_source = "stocks_table"
+                    except Exception:
+                        symbols = []
+                if not symbols:
+                    universe_source = "alphavantage"
+                    try:
+                        client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key, calls_per_minute=calls_per_minute)
+                    except ValueError as exc:
+                        emit(str(exc), json_output=json_output, error=True)
+                        raise typer.Exit(code=2)
+                    listings = fetch_listings(client)
+                    filtered = filter_listings(listings, exchange=exchange, status=status)
+                    symbols = [row["symbol"] for row in filtered]
+            set_attributes(
+                resolve_span,
+                source=universe_source,
+                symbol_count=len(symbols),
+                limit=limit or 0,
+            )
     except req_exc.RequestException as exc:
         emit(f"Failed to fetch listings: {exc}", json_output=json_output, error=True)
         raise typer.Exit(code=2)
     if limit:
         symbols = symbols[:limit]
+    set_attributes(main_span, symbol_count=len(symbols), universe_source=universe_source)
     if not symbols:
         emit("No symbols matched filters; nothing to ingest.", json_output=json_output, error=True)
         raise typer.Exit(code=1)
@@ -3120,17 +3175,29 @@ def _update_all_impl(
     # Calculate target date to prevent inserting partial/future data
     from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
     target_date = _expected_market_date()
+    set_attributes(main_span, target_date=str(target_date))
 
     # Bulk filter symbols that don't need price updates (skip API calls for up-to-date symbols)
     price_symbols = symbols
     price_skipped = 0
     if not refresh_existing:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["stocks", "stock_ohlcv"])
-            price_symbols = filter_symbols_needing_update(conn, symbols, target_date)
-            price_skipped = len(symbols) - len(price_symbols)
-            if price_skipped > 0 and not json_output:
-                emit(f"Skipped {price_skipped} up-to-date symbols, processing {len(price_symbols)} symbols for prices", json_output=False)
+        with create_span(
+            "data_update.price_filter",
+            total_symbols=len(symbols),
+            target_date=str(target_date),
+        ) as filter_span:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["stocks", "stock_ohlcv"])
+                price_symbols = filter_symbols_needing_update(conn, symbols, target_date)
+                price_skipped = len(symbols) - len(price_symbols)
+                if price_skipped > 0 and not json_output:
+                    emit(f"Skipped {price_skipped} up-to-date symbols, processing {len(price_symbols)} symbols for prices", json_output=False)
+            set_attributes(
+                filter_span,
+                price_symbols=len(price_symbols),
+                skipped=price_skipped,
+            )
+    set_attributes(main_span, price_symbols=len(price_symbols), price_skipped=price_skipped)
 
     # Prices
     price_reporter = ProgressReporter(total=len(price_symbols), json_output=json_output, enabled=progress)
@@ -3143,24 +3210,48 @@ def _update_all_impl(
         if price_live:
             price_live.__enter__()
     try:
-        if client is None:
-            client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key, calls_per_minute=calls_per_minute)
-        price_inserted = 0
-        for sym_chunk in chunked(price_symbols, 50):
-            price_inserted += ingest_prices_for_symbols(
-                db_url=url,
-                client=client,
-                symbols=sym_chunk,
-                max_workers=price_fetch,
-                writer_workers=price_writer,
-                timeframe=timeframe,
-                update_existing=refresh_existing,
-                progress=price_reporter,
-                target_date=target_date,
+        with create_span(
+            "data_update.price_ingest",
+            symbol_count=len(price_symbols),
+            timeframe=timeframe,
+            update_existing=refresh_existing,
+            fetch_workers=price_fetch,
+            writer_workers=price_writer,
+        ) as price_span:
+            if client is None:
+                client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key, calls_per_minute=calls_per_minute)
+            price_inserted = 0
+            for chunk_index, sym_chunk in enumerate(chunked(price_symbols, 50), start=1):
+                chunk_start = time.monotonic()
+                before_inserted = price_inserted
+                price_inserted += ingest_prices_for_symbols(
+                    db_url=url,
+                    client=client,
+                    symbols=sym_chunk,
+                    max_workers=price_fetch,
+                    writer_workers=price_writer,
+                    timeframe=timeframe,
+                    update_existing=refresh_existing,
+                    progress=price_reporter,
+                    target_date=target_date,
+                )
+                add_event(
+                    price_span,
+                    "price_chunk_complete",
+                    chunk_index=chunk_index,
+                    chunk_size=len(sym_chunk),
+                    inserted=price_inserted - before_inserted,
+                    duration_ms=int((time.monotonic() - chunk_start) * 1000),
+                )
+            if price_live:
+                price_live.update(price_reporter._build_table())
+            price_reporter.complete(live=price_live)
+            set_attributes(
+                price_span,
+                inserted=price_inserted,
+                errors=price_reporter.errors,
+                skipped=price_skipped,
             )
-        if price_live:
-            price_live.update(price_reporter._build_table())
-        price_reporter.complete(live=price_live)
     except Exception as exc:
         if price_live:
             price_live.__exit__(type(exc), exc, exc.__traceback__)
@@ -3171,54 +3262,109 @@ def _update_all_impl(
 
     # Features - compute ALL active features
     # Feature definitions must already exist (imported via g2 feat-def-import)
-    # Compute all active features using generic dispatcher
-    feature_reporter = ProgressReporter(total=len(all_symbols), json_output=json_output, enabled=progress)
-    feature_reporter.workers = feature_fetch
-    feature_reporter.mode = "local"
+    active_feature_defs: Optional[int] = None
+    with create_span("data_update.feature_defs") as defs_span:
+        try:
+            with db_connection(url) as conn:
+                init_schema_tables(conn, ["feature_definitions"])
+                with conn.cursor() as cur:
+                    cur.execute("SELECT count(*) FROM feature_definitions WHERE active = TRUE;")
+                    active_feature_defs = cur.fetchone()[0]
+            set_attributes(defs_span, active_feature_defs=active_feature_defs)
+        except Exception as exc:
+            set_attributes(defs_span, error=True)
+            defs_span.record_exception(exc)
+    if active_feature_defs is not None:
+        set_attributes(main_span, active_feature_defs=active_feature_defs)
+
+    features_inserted = 0
+    feature_errors = 0
     feat_live: Optional[Live] = None
-    if progress and not json_output:
-        feat_live = feature_reporter.start_live()
-        if feat_live:
-            feat_live.__enter__()
+    feature_reporter: Optional[ProgressReporter] = None
+    if active_feature_defs == 0:
+        with create_span(
+            "data_update.feature_compute",
+            symbol_count=len(all_symbols),
+            batch_size=feature_batch_size,
+            incremental=not refresh,
+            update_existing=refresh_existing,
+            fetch_workers=feature_fetch,
+            writer_workers=feature_writer,
+            active_feature_defs=0,
+            skipped=True,
+        ):
+            if not json_output:
+                emit("No active feature definitions; skipping feature computation", json_output=False)
+    else:
+        # Compute all active features using generic dispatcher
+        feature_reporter = ProgressReporter(total=len(all_symbols), json_output=json_output, enabled=progress)
+        feature_reporter.workers = feature_fetch
+        feature_reporter.mode = "local"
+        if progress and not json_output:
+            feat_live = feature_reporter.start_live()
+            if feat_live:
+                feat_live.__enter__()
     try:
-        features_inserted = 0
-        for symbol in all_symbols:
-            try:
-                with db_connection(url) as conn:
-                    from g2.db.ingest import upsert_stock
-                    data_id = upsert_stock(conn, symbol)
+        if active_feature_defs != 0:
+            with create_span(
+                "data_update.feature_compute",
+                symbol_count=len(all_symbols),
+                batch_size=feature_batch_size,
+                incremental=not refresh,
+                update_existing=refresh_existing,
+                fetch_workers=feature_fetch,
+                writer_workers=feature_writer,
+                active_feature_defs=active_feature_defs,
+            ) as feature_span:
+                for symbol in all_symbols:
+                    with create_span("data_update.feature_symbol", symbol=symbol) as symbol_span:
+                        try:
+                            with db_connection(url) as conn:
+                                from g2.db.ingest import upsert_stock
+                                data_id = upsert_stock(conn, symbol)
+                                set_attributes(symbol_span, data_id=data_id)
 
-                    # Compute ALL active features (indicators, derivatives, etc.)
-                    # TODO: Add dependency ordering via feature_definitions.depends_on field
-                    result = compute_features(
-                        conn,
-                        data_id=data_id,
-                        function_names=None,  # None = compute all active features
-                        incremental=not refresh,
-                        update_existing=refresh_existing,
-                        feature_batch_size=feature_batch_size,
-                    )
+                                # Compute ALL active features (indicators, derivatives, etc.)
+                                # TODO: Add dependency ordering via feature_definitions.depends_on field
+                                result = compute_features(
+                                    conn,
+                                    data_id=data_id,
+                                    function_names=None,  # None = compute all active features
+                                    incremental=not refresh,
+                                    update_existing=refresh_existing,
+                                    feature_batch_size=feature_batch_size,
+                                )
 
-                    inserted = result.get('summary', {}).get('total_inserted', 0)
-                    features_inserted += inserted
+                                inserted = result.get("summary", {}).get("total_inserted", 0)
+                                features_inserted += inserted
+                                set_attributes(symbol_span, inserted=inserted, error=False)
 
-                    if feature_reporter:
-                        feature_reporter.step_done(
-                            symbol,
-                            error=False,
-                            meta={"inserted": inserted}
-                        )
-            except Exception as exc:
+                                if feature_reporter:
+                                    feature_reporter.step_done(
+                                        symbol,
+                                        error=False,
+                                        meta={"inserted": inserted},
+                                    )
+                        except Exception as exc:
+                            symbol_span.record_exception(exc)
+                            set_attributes(symbol_span, error=True)
+                            if feature_reporter:
+                                feature_reporter.step_done(
+                                    symbol,
+                                    error=True,
+                                    meta={"inserted": 0, "reason": str(exc)},
+                                )
+
+                if feat_live and feature_reporter:
+                    feat_live.update(feature_reporter._build_table())
                 if feature_reporter:
-                    feature_reporter.step_done(
-                        symbol,
-                        error=True,
-                        meta={"inserted": 0, "reason": str(exc)}
-                    )
-
-        if feat_live:
-            feat_live.update(feature_reporter._build_table())
-        feature_reporter.complete(live=feat_live)
+                    feature_reporter.complete(live=feat_live)
+                    feature_errors = feature_reporter.errors
+                set_attributes(
+                    feature_span,
+                    inserted=features_inserted,
+                    errors=feature_errors,
+                )
     except Exception as exc:
         if feat_live:
             feat_live.__exit__(type(exc), exc, exc.__traceback__)
@@ -3234,6 +3380,9 @@ def _update_all_impl(
         symbol_count=len(symbols),
         price_inserted=price_inserted,
         features_inserted=features_inserted,
+        price_errors=price_reporter.errors,
+        feature_errors=feature_errors,
+        price_skipped=price_skipped,
         price_fetch_workers=price_fetch,
         price_writer_workers=price_writer,
         feature_fetch_workers=feature_fetch,
