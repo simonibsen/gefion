@@ -27,7 +27,7 @@ T = TypeVar('T')
 from g2.alphavantage.catalog import parse_daily_adjusted, parse_listing_status
 from g2.alphavantage.client import AlphaVantageClient
 from g2.db import schema
-from g2.observability import create_span
+from g2.observability import create_span, set_attributes
 from g2.db.ingest import (
     decide_outputsize,
     insert_stock_ohlcv,
@@ -287,22 +287,30 @@ def ingest_prices_for_symbols(
                 try:
                     retries = 0
                     backoff = 0.1
-                    while True:
-                        try:
-                            # upsert_stock can also encounter deadlocks with parallel writers,
-                            # so include it in the retry loop
-                            data_id = upsert_stock(conn, sym, status=status)
-                            inserted = _batch_insert_prices(conn, data_id, rows, update_existing)
-                            break
-                        except errors.DeadlockDetected:
-                            time.sleep(0.1 + random.random() * 0.2)
-                            retries += 1
-                        except errors.InsufficientResources:
-                            time.sleep(backoff)
-                            retries += 1
-                            backoff = min(backoff * 2, 2.0)
-                        if retries >= 5:
-                            raise
+                    with create_span(
+                        "ingest_prices.write_symbol",
+                        symbol=sym,
+                        outputsize=outputsize,
+                        update_existing=update_existing,
+                        row_count=len(rows),
+                    ) as write_span:
+                        while True:
+                            try:
+                                # upsert_stock can also encounter deadlocks with parallel writers,
+                                # so include it in the retry loop
+                                data_id = upsert_stock(conn, sym, status=status)
+                                inserted = _batch_insert_prices(conn, data_id, rows, update_existing)
+                                break
+                            except errors.DeadlockDetected:
+                                time.sleep(0.1 + random.random() * 0.2)
+                                retries += 1
+                            except errors.InsufficientResources:
+                                time.sleep(backoff)
+                                retries += 1
+                                backoff = min(backoff * 2, 2.0)
+                            if retries >= 5:
+                                raise
+                        set_attributes(write_span, inserted=inserted, retries=retries)
                     inserted_total += inserted
                     if progress:
                         progress.step_done(sym, error=False, meta={"inserted": inserted, "outputsize": outputsize})
@@ -393,8 +401,20 @@ def ingest_prices_for_symbols(
 
     # Start writer pool (small to avoid deadlocks)
     writer_threads = max(1, writer_workers)
+    writer_ctx = otel_context.get_current() if OTEL_AVAILABLE else None
     with ThreadPoolExecutor(max_workers=writer_threads) as writer_pool:
-        writer_futures = [writer_pool.submit(writer_worker) for _ in range(writer_threads)]
+        if OTEL_AVAILABLE:
+            def make_writer_with_context():
+                def writer_with_context():
+                    token = otel_context.attach(writer_ctx)
+                    try:
+                        return writer_worker()
+                    finally:
+                        otel_context.detach(token)
+                return writer_with_context
+            writer_futures = [writer_pool.submit(make_writer_with_context()) for _ in range(writer_threads)]
+        else:
+            writer_futures = [writer_pool.submit(writer_worker) for _ in range(writer_threads)]
 
         try:
             # Fetch in parallel
