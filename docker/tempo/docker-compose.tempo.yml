@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  tempo:
+    image: grafana/tempo:latest
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    user: "0:0"  # Run as root to avoid permission issues with Colima
+    volumes:
+      - ./tempo-config.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"    # Tempo HTTP (query/API)
+      - "4317:4317"    # OTLP gRPC (recommended)
+      - "4318:4318"    # OTLP HTTP
+    networks:
+      - tempo
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    ports:
+      - "3000:3000"
+    networks:
+      - tempo
+    depends_on:
+      - tempo
+
+volumes:
+  tempo-data:
+  grafana-data:
+
+networks:
+  tempo:
