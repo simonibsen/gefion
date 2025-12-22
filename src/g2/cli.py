@@ -1739,6 +1739,7 @@ def _span_check_impl(
         "service_name": service_name,
         "trace_count": trace_count,
         "selected_trace_id": selected_trace_id,
+        "tempo_trace_api_url": f"{tempo_url.rstrip('/')}/api/traces/{selected_trace_id}",
         "total_spans": len(spans),
         "application_spans": app_span_count,
         "database_spans": db_span_count,
@@ -1771,6 +1772,7 @@ def _span_check_impl(
 
     console.print("")
     console.print(f"Selected trace: {selected_trace_id}", style="bold")
+    console.print(f"Tempo trace API: {tempo_url.rstrip('/')}/api/traces/{selected_trace_id}", style="dim")
     console.print(f"Total spans: {len(spans)}", style="dim")
     console.print(f"Application spans (g2.observability): {app_span_count}", style="dim")
     console.print(f"Database spans (auto-instrumented): {db_span_count}", style="dim")
