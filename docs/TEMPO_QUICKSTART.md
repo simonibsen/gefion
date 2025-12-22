@@ -122,7 +122,7 @@ Then in Grafana:
 You can also sanity-check via the CLI:
 
 ```bash
-g2 tempo-check
+g2 span-check
 ```
 
 ## Configuration Options

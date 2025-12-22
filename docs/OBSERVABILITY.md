@@ -41,8 +41,9 @@ g2 feat-compute --symbols AAPL --function-names indicator --profile
 4. Sanity-check ingestion:
 
 ```bash
-g2 tempo-check
+g2 span-check
 ```
+
 
 5. View traces:
 
@@ -84,6 +85,15 @@ export OTEL_ENABLED=true
 export OTEL_EXPORTER=console
 ```
 
+## Tempo API checks
+
+Quick checks to confirm the Tempo API is responding and receiving traces:
+
+```bash
+curl -s http://localhost:3200/api/search
+curl -s "http://localhost:3200/api/search?tags=service.name=g2&limit=5"
+```
+
 ## Troubleshooting
 
 No traces appearing:
@@ -92,5 +102,5 @@ No traces appearing:
 - Confirm Grafana: `curl -s http://localhost:3000/api/health`
 - Confirm Tempo API: `curl -s http://localhost:3200/api/search`
 - Confirm g2 config: `env | rg '^OTEL_'`
-- Run: `g2 tempo-check` (shows trace counts + span counts)
+- Run: `g2 span-check` (shows trace counts + span counts)
 - Check Tempo logs: `docker compose -f docker/tempo/docker-compose.tempo.yml logs tempo`

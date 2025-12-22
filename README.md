@@ -555,6 +555,16 @@ graph TB
 
 Tempo/Grafana docker files live in `docker/tempo/` (start with `docker compose -f docker/tempo/docker-compose.tempo.yml up -d`).
 
+Observability quick start (Tempo):
+
+```bash
+docker compose -f docker/tempo/docker-compose.tempo.yml up -d
+export $(cat .env.example | xargs)
+g2 span-check
+```
+
+More details: [docs/TEMPO_QUICKSTART.md](docs/TEMPO_QUICKSTART.md) and [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
+
 ## Running Tests
 
 ```bash

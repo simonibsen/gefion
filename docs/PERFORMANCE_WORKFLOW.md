@@ -20,7 +20,7 @@ export $(cat .env.example | xargs)
 g2 feat-compute --symbols AAPL,MSFT,GOOGL --function-names indicator --profile
 
 # Check the trace
-g2 tempo-check
+g2 span-check
 ```
 
 **What to look for:**
@@ -89,7 +89,7 @@ Run the same operation again with tracing enabled:
 ```bash
 g2 feat-compute --symbols AAPL,MSFT,GOOGL --function-names indicator --profile --batch-size 10000
 
-g2 tempo-check
+g2 span-check
 ```
 
 **Compare the traces:**
@@ -147,7 +147,7 @@ In Grafana, I see:
 
 API check shows details:
 ```bash
-g2 tempo-check
+g2 span-check
 ```
 
 Output shows:
@@ -263,7 +263,7 @@ g2 feat-compute --symbols AAPL --function-names indicator --profile
 
 ```bash
 # Via CLI
-g2 tempo-check
+g2 span-check
 
 # Via UI
 open http://localhost:3000/explore
@@ -323,7 +323,7 @@ env | grep OTEL
 ```bash
 # Tempo batches traces - wait 10-30 seconds then refresh
 sleep 30
-g2 tempo-check
+g2 span-check
 ```
 
 **Too many traces cluttering view?**
