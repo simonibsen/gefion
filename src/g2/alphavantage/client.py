@@ -16,6 +16,8 @@ import requests
 from requests import exceptions as req_exc
 from requests.exceptions import JSONDecodeError
 
+from g2.observability import create_span, set_attributes
+
 ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
 
 
@@ -97,27 +99,52 @@ class AlphaVantageClient:
         return self.get_with_retry(function, retries=5, backoff=3.0, **params)
 
     def get_with_retry(self, function: str, retries: int = 3, backoff: float = 2.0, **params: str) -> Mapping[str, object]:
-        payload: Dict[str, str] = {"function": function, "apikey": self.api_key}
-        payload.update({k: v for k, v in params.items() if v is not None})
-        attempt = 0
-        while True:
-            try:
-                self.rate.acquire()
-                resp = self.session.get(ALPHAVANTAGE_URL, params=payload, timeout=30)
-                resp.raise_for_status()
+        with create_span(
+            "alphavantage.api_call",
+            function=function,
+            symbol=params.get("symbol", ""),
+            outputsize=params.get("outputsize", ""),
+        ) as span:
+            payload: Dict[str, str] = {"function": function, "apikey": self.api_key}
+            payload.update({k: v for k, v in params.items() if v is not None})
+            attempt = 0
+            while True:
                 try:
-                    data = resp.json()
-                except JSONDecodeError:
-                    data = {"text": resp.text}
-                # Treat empty payload as retryable
-                if not data:
-                    raise req_exc.RequestException("empty payload")
-                return data
-            except (req_exc.ConnectionError, req_exc.Timeout, req_exc.ChunkedEncodingError, req_exc.RequestException):
-                attempt += 1
-                if attempt > retries:
-                    raise
-                time.sleep(backoff * attempt)
+                    # Record rate limiting wait
+                    rate_start = time.monotonic()
+                    self.rate.acquire()
+                    rate_wait = time.monotonic() - rate_start
+
+                    # Make HTTP request
+                    http_start = time.monotonic()
+                    resp = self.session.get(ALPHAVANTAGE_URL, params=payload, timeout=30)
+                    http_duration = time.monotonic() - http_start
+
+                    resp.raise_for_status()
+                    try:
+                        data = resp.json()
+                    except JSONDecodeError:
+                        data = {"text": resp.text}
+                    # Treat empty payload as retryable
+                    if not data:
+                        raise req_exc.RequestException("empty payload")
+
+                    # Add timing attributes
+                    set_attributes(
+                        span,
+                        rate_wait_ms=int(rate_wait * 1000),
+                        http_duration_ms=int(http_duration * 1000),
+                        attempts=attempt + 1,
+                        response_size_bytes=len(str(data)),
+                    )
+
+                    return data
+                except (req_exc.ConnectionError, req_exc.Timeout, req_exc.ChunkedEncodingError, req_exc.RequestException):
+                    attempt += 1
+                    if attempt > retries:
+                        set_attributes(span, failed=True, attempts=attempt)
+                        raise
+                    time.sleep(backoff * attempt)
 
     def fetch_daily_adjusted(self, symbol: str, outputsize: str = "compact") -> Mapping[str, object]:
         return self.get("TIME_SERIES_DAILY_ADJUSTED", symbol=symbol, outputsize=outputsize)

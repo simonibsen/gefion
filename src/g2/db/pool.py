@@ -13,6 +13,8 @@ import os
 from psycopg_pool import ConnectionPool
 import psycopg
 
+from g2.observability import create_span, set_attributes
+
 
 _pool: Optional[ConnectionPool] = None
 
@@ -93,11 +95,19 @@ def get_connection():
     if _pool is None:
         raise RuntimeError("Connection pool not initialized. Call init_pool() first.")
 
-    conn = _pool.getconn()
-    try:
-        yield conn
-    finally:
-        _pool.putconn(conn)
+    with create_span("db.get_connection") as span:
+        # Get pool stats before acquiring connection
+        if hasattr(_pool, '_pool'):
+            pool_size = _pool._pool.qsize() if hasattr(_pool._pool, 'qsize') else 0
+            set_attributes(span, pool_available=pool_size)
+
+        conn = _pool.getconn()
+        try:
+            set_attributes(span, connection_acquired=True)
+            yield conn
+        finally:
+            _pool.putconn(conn)
+            set_attributes(span, connection_returned=True)
 
 
 def get_connection_direct(conninfo: str):

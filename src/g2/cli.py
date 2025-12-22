@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import click
 import psycopg
 from psycopg import sql
+import requests
 import typer
 from typer.core import TyperGroup
 from requests import exceptions as req_exc
@@ -28,6 +29,7 @@ from g2.features.dispatcher import compute_features
 from g2.config import load_settings
 from g2.db import schema
 from psycopg.types.json import Json
+from g2.observability import create_span, set_attributes, get_current_span, shutdown as otel_shutdown
 from g2.db import migrate
 from g2.db.ingest import (
     insert_stock_ohlcv,
@@ -113,6 +115,13 @@ def emit_error(message: str, json_output: Optional[bool] = None, data: Optional[
 def emit_json(payload: dict) -> None:
     """Lightweight JSON emitter to mirror emit() when only a payload is needed."""
     typer.echo(json.dumps(payload))
+
+
+def _tempo_get_json(tempo_url: str, path: str, *, params: Optional[dict] = None, timeout_s: float = 3.0) -> dict:
+    url = f"{tempo_url.rstrip('/')}{path}"
+    resp = requests.get(url, params=params, timeout=timeout_s)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _export_feature_functions(conn, names: Optional[List[str]] = None) -> list[dict]:
@@ -1660,6 +1669,127 @@ def db_health(
     emit("DB health", data=health, json_output=json_output)
 
 
+@app.command("tempo-check")
+def tempo_check(
+    tempo_url: Optional[str] = typer.Option(None, help="Tempo base URL (default: $TEMPO_URL or http://localhost:3200)"),
+    service_name: Optional[str] = typer.Option(None, help="Service name tag (default: $OTEL_SERVICE_NAME or g2)"),
+    limit: int = typer.Option(10, min=1, max=100, help="Number of recent traces to inspect"),
+    trace_id: Optional[str] = typer.Option(None, help="Specific trace ID to inspect (default: most recent)"),
+    show_spans: bool = typer.Option(True, "--show-spans/--no-show-spans", help="Print a span list"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Check recent Grafana Tempo traces for basic quality and structure."""
+    tempo_url = tempo_url or os.getenv("TEMPO_URL", "http://localhost:3200")
+    service_name = service_name or os.getenv("OTEL_SERVICE_NAME", "g2")
+
+    try:
+        search = _tempo_get_json(
+            tempo_url,
+            "/api/search",
+            params={"tags": f"service.name={service_name}", "limit": limit},
+        )
+    except Exception as exc:
+        emit_error(
+            f"Tempo search failed: {exc}",
+            json_output=json_output,
+            data={"hint": f"Ensure Tempo is running and reachable at {tempo_url} (docker compose -f docker/tempo/docker-compose.tempo.yml up -d)"},
+        )
+
+    traces = search.get("traces") or []
+    trace_count = (search.get("metrics") or {}).get("inspectedTraces", 0)
+    if not traces:
+        emit(
+            f"No traces found for service '{service_name}'",
+            data={
+                "tempo_url": tempo_url,
+                "hint": "Generate traces with: export $(cat .env.example | xargs) && .venv/bin/python tests/test_otel_smoke.py",
+            },
+            json_output=json_output,
+        )
+        return
+
+    selected_trace_id = trace_id or traces[0].get("traceID")
+    if not selected_trace_id:
+        emit_error("Tempo search returned traces without traceID", json_output=json_output)
+
+    try:
+        detail = _tempo_get_json(tempo_url, f"/api/traces/{selected_trace_id}")
+    except Exception as exc:
+        emit_error(f"Tempo trace fetch failed: {exc}", json_output=json_output)
+
+    spans: list[dict] = []
+    for batch in detail.get("batches") or []:
+        for scope_spans in batch.get("scopeSpans") or []:
+            scope_name = ((scope_spans.get("scope") or {}).get("name")) or ""
+            for span in scope_spans.get("spans") or []:
+                spans.append({"scope": scope_name, "span": span})
+
+    def _is_error_status(status_code: object) -> bool:
+        return status_code in ("STATUS_CODE_ERROR", 2, "2")
+
+    app_span_count = sum(1 for s in spans if s["scope"] == "g2.observability")
+    db_span_count = sum(1 for s in spans if str(s["scope"]).startswith("opentelemetry.instrumentation"))
+    error_count = sum(1 for s in spans if _is_error_status(((s["span"].get("status") or {}).get("code"))))
+
+    result = {
+        "tempo_url": tempo_url,
+        "service_name": service_name,
+        "trace_count": trace_count,
+        "selected_trace_id": selected_trace_id,
+        "total_spans": len(spans),
+        "application_spans": app_span_count,
+        "database_spans": db_span_count,
+        "error_spans": error_count,
+        "recent_traces": [
+            {
+                "rootTraceName": t.get("rootTraceName"),
+                "durationMs": t.get("durationMs"),
+                "traceID": t.get("traceID"),
+            }
+            for t in traces[:limit]
+        ],
+    }
+
+    if json_output:
+        emit_json({"status": "ok", **result})
+        return
+
+    console = Console()
+    console.print("Tempo trace check", style="bold")
+    console.print(f"Tempo URL: {tempo_url}", style="dim")
+    console.print(f"Service: {service_name}", style="dim")
+    console.print(f"Traces found: {trace_count}", style="dim")
+    console.print("")
+    console.print("Recent traces:", style="bold")
+    for t in traces[: min(limit, len(traces))]:
+        tid = (t.get("traceID") or "")[:16]
+        console.print(f"  {t.get('rootTraceName')} - {t.get('durationMs')}ms (trace_id: {tid}...)", style="dim")
+
+    console.print("")
+    console.print(f"Selected trace: {selected_trace_id}", style="bold")
+    console.print(f"Total spans: {len(spans)}", style="dim")
+    console.print(f"Application spans (g2.observability): {app_span_count}", style="dim")
+    console.print(f"Database spans (auto-instrumented): {db_span_count}", style="dim")
+    console.print(f"Error spans: {error_count}", style="dim")
+
+    if show_spans:
+        console.print("")
+        console.print("Spans:", style="bold")
+        for s in spans:
+            span = s["span"]
+            start = int(span.get("startTimeUnixNano") or 0)
+            end = int(span.get("endTimeUnixNano") or 0)
+            duration_ms = round((end - start) / 1_000_000) if end and start else 0
+            has_parent = bool(span.get("parentSpanId"))
+            attrs = span.get("attributes") or []
+            prefix = "  └─" if has_parent else "┌─"
+            console.print(f"  {prefix} {span.get('name')} ({duration_ms}ms, {len(attrs)} attrs) [{s['scope']}]", style="dim")
+
+    console.print("")
+    console.print("View in Grafana: http://localhost:3000/explore", style="dim")
+    console.print('Query: service.name = "g2"', style="dim")
+
+
 @app.command("db-init")
 def db_init(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
@@ -2447,6 +2577,41 @@ def features_compute(
         # Full refresh of all features for all stocks
         g2 features-compute --all-features --full
     """
+    with create_span(
+        "cli.feat-compute",
+        symbols=symbols or "all",
+        features=features or "all",
+        function_names=function_names or "all",
+        incremental=incremental,
+        parallel_functions=parallel_functions,
+        writer_workers=writer_workers
+    ):
+        return _features_compute_impl(
+            symbols, features, all_features, function_names, incremental, update_existing,
+            max_workers, feature_batch_size, profile, sync_commit, writer_workers,
+            parallel_functions, max_parallel_functions, db_url, json_output, progress
+        )
+
+
+def _features_compute_impl(
+    symbols: Optional[str],
+    features: Optional[str],
+    all_features: bool,
+    function_names: Optional[str],
+    incremental: bool,
+    update_existing: bool,
+    max_workers: Optional[int],
+    feature_batch_size: int,
+    profile: bool,
+    sync_commit: bool,
+    writer_workers: int,
+    parallel_functions: bool,
+    max_parallel_functions: Optional[int],
+    db_url: Optional[str],
+    json_output: bool,
+    progress: bool,
+) -> None:
+    """Internal implementation of features_compute."""
     from g2.features.dispatcher import compute_features
 
     url = _db_url(db_url)
@@ -2763,6 +2928,15 @@ def features_compute(
                 if live:
                     live.__exit__(None, None, None)
 
+            # Add metrics to trace span
+            current_span = get_current_span()
+            set_attributes(current_span,
+                total_inserted=total_inserted,
+                stocks_processed=len(symbol_list),
+                error_count=len(errors),
+                success_rate=(len(symbol_list) - len(errors)) / max(1, len(symbol_list))
+            )
+
             # Output summary
             if json_output:
                 output = {
@@ -2860,6 +3034,26 @@ def update_all(
         # Incremental update for all stocks
         g2 data-update
     """
+    with create_span(
+        "cli.data-update",
+        exchange=exchange or "inferred",
+        timeframe=timeframe,
+        refresh=refresh,
+        limit=limit or 0,
+    ):
+        _update_all_impl(
+            exchange, status, timeframe, feature_batch_size, refresh_existing,
+            refresh, limit, max_workers, writer_workers, calls_per_minute,
+            db_url, listings_file, progress, json_output
+        )
+
+
+def _update_all_impl(
+    exchange, status, timeframe, feature_batch_size, refresh_existing,
+    refresh, limit, max_workers, writer_workers, calls_per_minute,
+    db_url, listings_file, progress, json_output
+):
+    """Implementation of data-update (separated for tracing)."""
     url = _db_url(db_url)
     if refresh:
         timeframe = "full"
@@ -3032,6 +3226,19 @@ def update_all(
     finally:
         if feat_live:
             feat_live.__exit__(None, None, None)
+
+    # Add span attributes for tracing
+    span = get_current_span()
+    set_attributes(
+        span,
+        symbol_count=len(symbols),
+        price_inserted=price_inserted,
+        features_inserted=features_inserted,
+        price_fetch_workers=price_fetch,
+        price_writer_workers=price_writer,
+        feature_fetch_workers=feature_fetch,
+        feature_writer_workers=feature_writer,
+    )
 
     emit(
         "Update complete",
@@ -3423,7 +3630,15 @@ def backtest_run(
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
-    app()
+    import atexit
+    # Register shutdown handler to flush traces on exit
+    atexit.register(otel_shutdown)
+
+    try:
+        app()
+    finally:
+        # Ensure traces are flushed even on early exit
+        otel_shutdown()
 
 
 if __name__ == "__main__":  # pragma: no cover

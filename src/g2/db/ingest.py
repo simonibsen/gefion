@@ -9,6 +9,8 @@ from psycopg import sql
 from psycopg import errors
 from psycopg.types.json import Json
 
+from g2.observability import create_span, set_attributes, get_current_span
+
 
 def upsert_stock(conn: psycopg.Connection, symbol: str, status: Optional[str] = None) -> int:
     """
@@ -853,6 +855,33 @@ def insert_computed_features(
     """
     Insert tall computed feature rows using feature_map of column -> feature_id.
     """
+    with create_span(
+        "insert_computed_features",
+        data_id=data_id,
+        feature_count=len(feature_map),
+        batch_size=batch_size,
+        update_existing=update_existing,
+        sync_commit=sync_commit
+    ):
+        result = _insert_computed_features_impl(
+            conn, data_id, rows, feature_map, update_existing, skip_before, batch_size, sync_commit
+        )
+        current_span = get_current_span()
+        set_attributes(current_span, rows_inserted=result)
+        return result
+
+
+def _insert_computed_features_impl(
+    conn: psycopg.Connection,
+    data_id: int,
+    rows: Iterable[Mapping[str, object]],
+    feature_map: Mapping[str, int],
+    update_existing: bool,
+    skip_before: Optional[date],
+    batch_size: int,
+    sync_commit: bool,
+) -> int:
+    """Internal implementation of insert_computed_features."""
     def to_date(val):
         if val is None:
             return None
