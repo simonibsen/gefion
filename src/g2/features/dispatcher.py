@@ -26,6 +26,7 @@ except ImportError:
     PSUTIL_AVAILABLE = False
 
 from g2.db.ingest import insert_computed_features
+from g2.observability import create_span, set_attributes, add_event, get_current_span
 
 
 # Registry mapping function_name -> compute function
@@ -437,6 +438,39 @@ def compute_features(
             'summary': {'total_inserted': 150, 'total_errors': 0}
         }
     """
+    with create_span(
+        "compute_features",
+        data_id=data_id,
+        incremental=incremental,
+        full_refresh=full_refresh,
+        parallel_functions=parallel_functions,
+        writer_workers=writer_workers,
+        function_names=str(function_names) if function_names else "all",
+        feature_names=str(feature_names) if feature_names else "all"
+    ):
+        return _compute_features_impl(
+            conn, data_id, function_names, feature_names, incremental,
+            full_refresh, update_existing, feature_batch_size, writer_workers,
+            profile, sync_commit, parallel_functions, max_parallel_functions
+        )
+
+
+def _compute_features_impl(
+    conn: psycopg.Connection,
+    data_id: int,
+    function_names: Optional[List[str]],
+    feature_names: Optional[List[str]],
+    incremental: bool,
+    full_refresh: bool,
+    update_existing: bool,
+    feature_batch_size: int,
+    writer_workers: int,
+    profile: bool,
+    sync_commit: bool,
+    parallel_functions: bool,
+    max_parallel_functions: Optional[int],
+) -> Dict[str, Any]:
+    """Internal implementation of compute_features."""
     # Ensure fresh resolution per run (cache still used within this call)
     _FUNCTION_CACHE.clear()
     _FUNCTION_CACHE_SOURCE.clear()
@@ -472,11 +506,15 @@ def compute_features(
     total_errors: List[Dict[str, Any]] = []
 
     # Step 1: Read active feature definitions
+    current_span = get_current_span()
+    add_event(current_span, "fetch_feature_definitions_start")
     feature_defs = _fetch_feature_definitions(
         conn,
         function_names=function_names,
         feature_names=feature_names
     )
+    add_event(current_span, "fetch_feature_definitions_complete", count=len(feature_defs))
+    set_attributes(current_span, feature_count=len(feature_defs))
 
     if not feature_defs:
         return {
@@ -490,6 +528,7 @@ def compute_features(
 
     # Step 2: Group by function_name
     grouped_by_function = _group_by_function_name(feature_defs)
+    set_attributes(current_span, function_group_count=len(grouped_by_function))
 
     # Optional writer queue for pipelined writes
     write_queue: Optional[queue.Queue] = None
@@ -783,6 +822,16 @@ def compute_features(
     if profile and timings:
         results['summary']['timing'] = {k: round(v, 6) for k, v in timings.items()}
 
+    # Add final metrics to current span
+    set_attributes(current_span,
+        total_inserted=total_inserted,
+        total_errors=len(total_errors),
+        error_rate=len(total_errors) / max(1, total_inserted + len(total_errors))
+    )
+    if profile and timings:
+        for key, value in timings.items():
+            set_attributes(current_span, **{f"timing.{key}": value})
+
     return results
 
 
@@ -911,6 +960,36 @@ def _process_function_group(
 
     Returns: {'inserted': count, 'errors': [...]}
     """
+    with create_span(
+        "process_function_group",
+        function_name=function_name,
+        data_id=data_id,
+        feature_count=len(features),
+        incremental=incremental
+    ):
+        return _process_function_group_impl(
+            conn, data_id, function_name, features, incremental, update_existing,
+            latest_by_feature, feature_batch_size, writer, timings, timings_lock,
+            cache, cache_lock
+        )
+
+
+def _process_function_group_impl(
+    conn: psycopg.Connection,
+    data_id: int,
+    function_name: str,
+    features: List[Tuple],
+    incremental: bool,
+    update_existing: bool,
+    latest_by_feature: Dict[int, Optional[date]],
+    feature_batch_size: int,
+    writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int]], int]],
+    timings: Optional[Dict[str, float]],
+    timings_lock: Optional[threading.Lock],
+    cache: Optional[Dict[str, Any]],
+    cache_lock: Optional[threading.Lock],
+) -> Dict[str, Any]:
+    """Internal implementation of _process_function_group."""
     # Get compute function (DB overrides code registry)
     compute_func = _resolve_compute_function(conn, function_name)
 

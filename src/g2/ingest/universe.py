@@ -3,20 +3,31 @@ from __future__ import annotations
 import csv
 import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import wraps
 import queue
 import random
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Iterable, List, Mapping, Optional, Sequence, Tuple, TypeVar
 
 import psycopg
 from psycopg import errors
 from psycopg import sql
 
+# Try to import OpenTelemetry context propagation (optional)
+try:
+    from opentelemetry import context as otel_context
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
+
+T = TypeVar('T')
+
 from g2.alphavantage.catalog import parse_daily_adjusted, parse_listing_status
 from g2.alphavantage.client import AlphaVantageClient
 from g2.db import schema
+from g2.observability import create_span
 from g2.db.ingest import (
     decide_outputsize,
     insert_stock_ohlcv,
@@ -28,6 +39,34 @@ from g2.db.ingest import (
 from g2.utils.progress import ProgressReporter
 
 from datetime import date, timedelta
+
+
+def propagate_context(func: Callable[..., T]) -> Callable[..., T]:
+    """
+    Decorator that captures and propagates OpenTelemetry context to worker threads.
+
+    This ensures trace spans created in thread pool workers are properly nested
+    under their parent spans.
+    """
+    if not OTEL_AVAILABLE:
+        return func
+
+    @wraps(func)
+    def wrapper(*args, **kwargs) -> T:
+        # Capture current context
+        ctx = otel_context.get_current()
+
+        # Create a function that attaches context before executing
+        def run_with_context():
+            token = otel_context.attach(ctx)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                otel_context.detach(token)
+
+        return run_with_context()
+
+    return wrapper
 
 
 def _today_date() -> date:
@@ -170,12 +209,13 @@ def ingest_prices_for_symbols(
     fetch_count = 0
 
     # Ensure schema exists once before parallel work
-    with psycopg.connect(db_url) as conn:
-        schema.create_stocks_table(conn)
-        schema.migrate_stock_tables_to_data_id(conn)
-        schema.create_stock_ohlcv_table(conn)
-        # Note: Bulk filtering moved to CLI layer for better performance
-        # (filters once for all symbols instead of once per 50-symbol chunk)
+    with create_span("ingest_prices.schema_init"):
+        with psycopg.connect(db_url) as conn:
+            schema.create_stocks_table(conn)
+            schema.migrate_stock_tables_to_data_id(conn)
+            schema.create_stock_ohlcv_table(conn)
+            # Note: Bulk filtering moved to CLI layer for better performance
+            # (filters once for all symbols instead of once per 50-symbol chunk)
     # Bounded queue prevents memory exhaustion when fetchers outpace writers
     work_queue: queue.Queue[Tuple[str, list, str]] = queue.Queue(maxsize=200)
     writer_done = object()
@@ -360,7 +400,21 @@ def ingest_prices_for_symbols(
             # Fetch in parallel
             fetch_workers = max_workers
             with ThreadPoolExecutor(max_workers=fetch_workers) as fetch_pool:
-                futures = {fetch_pool.submit(fetch_worker, sym): sym for sym in symbols}
+                # Capture context and create wrapped worker for each symbol
+                if OTEL_AVAILABLE:
+                    ctx = otel_context.get_current()
+                    def make_context_worker(symbol: str):
+                        def worker_with_context():
+                            token = otel_context.attach(ctx)
+                            try:
+                                return fetch_worker(symbol)
+                            finally:
+                                otel_context.detach(token)
+                        return worker_with_context
+                    futures = {fetch_pool.submit(make_context_worker(sym)): sym for sym in symbols}
+                else:
+                    futures = {fetch_pool.submit(fetch_worker, sym): sym for sym in symbols}
+
                 for fut in as_completed(futures):
                     # Drain exceptions
                     fut.result()
