@@ -547,10 +547,13 @@ graph TB
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design and DB-first architecture
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) - Optimization techniques
+- [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) - OpenTelemetry + Grafana Tempo for performance investigation
 - [docs/WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md](docs/WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md) - White paper on technical analysis and ML
 - [mcp-server/README.md](mcp-server/README.md) - Natural language interface setup
 - [docs/archive/ml/](docs/archive/ml/) - ML vision and future roadmap
 - [PROGRESS.md](PROGRESS.md) - Current status and recent changes
+
+Tempo/Grafana docker files live in `docker/tempo/` (start with `docker compose -f docker/tempo/docker-compose.tempo.yml up -d`).
 
 ## Running Tests
 
