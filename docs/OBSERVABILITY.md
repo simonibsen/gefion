@@ -44,12 +44,23 @@ g2 feat-compute --symbols AAPL --function-names indicator --profile
 g2 span-check
 ```
 
+`g2 span-check` prints recent traces plus a direct Tempo API link for the selected trace, which is handy during development performance checks.
 
 5. View traces:
 
 - Open http://localhost:3000
 - Explore → Tempo
 - Query: `service.name = "g2"`
+
+## Development Use
+
+After performance-sensitive changes, run:
+
+```bash
+g2 span-check
+```
+
+Use the printed Tempo API link to inspect the selected trace details without hunting in the UI, then compare traces before/after your change.
 
 ## Configuration
 
