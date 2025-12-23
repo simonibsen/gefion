@@ -3785,38 +3785,65 @@ def mcp_setup(
     db_url: Optional[str] = typer.Option(None, help="Database URL (default: from environment or postgresql://g2:g2pass@localhost:5432/g2)"),
     api_key: Optional[str] = typer.Option(None, help="AlphaVantage API key (default: from environment)"),
     force: bool = typer.Option(False, "--force", help="Overwrite existing configuration"),
+    targets: Optional[str] = typer.Option("all", help="Targets to configure: 'desktop', 'cli', or 'all' (default: all)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """Configure MCP server for use with AI assistants.
 
-    This command creates or updates the MCP server configuration file for AI
-    assistants. It determines the correct paths and settings automatically.
+    This command creates or updates the MCP server configuration for AI assistants.
+    It determines the correct paths and settings automatically and can configure
+    multiple targets at once.
 
-    The configuration file location depends on your platform:
-    - macOS: ~/Library/Application Support/Claude/claude_desktop_config.json
-    - Windows: %APPDATA%\\Claude\\claude_desktop_config.json
-    - Linux: ~/.config/Claude/claude_desktop_config.json
+    Configuration targets:
+    - desktop: Claude Desktop App (GUI)
+    - cli: Claude Code CLI and OpenAI-compatible tools
+    - all: Both desktop and CLI (default)
+
+    Configuration file locations:
+    - Claude Desktop (macOS): ~/Library/Application Support/Claude/claude_desktop_config.json
+    - Claude Code CLI (macOS): ~/.config/claude-code/mcp_config.json
+    - Windows Desktop: %APPDATA%\\Claude\\claude_desktop_config.json
+    - Windows CLI: %APPDATA%\\claude-code\\mcp_config.json
+    - Linux Desktop: ~/.config/Claude/claude_desktop_config.json
+    - Linux CLI: ~/.config/claude-code/mcp_config.json
 
     Example:
-        g2 mcp-setup
-        g2 mcp-setup --db-url postgresql://user:pass@localhost/db
-        g2 mcp-setup --force  # Overwrite existing config
+        g2 mcp-setup                    # Configure all targets
+        g2 mcp-setup --targets cli      # Configure only CLI
+        g2 mcp-setup --targets desktop  # Configure only desktop
+        g2 mcp-setup --force            # Overwrite existing config
     """
     import platform
     import sys
     from pathlib import Path
 
     try:
-        # Determine config file location
-        system = platform.system()
-        if system == "Darwin":  # macOS
-            config_dir = Path.home() / "Library" / "Application Support" / "Claude"
-        elif system == "Windows":
-            config_dir = Path(os.environ.get("APPDATA", "")) / "Claude"
-        else:  # Linux
-            config_dir = Path.home() / ".config" / "Claude"
+        # Parse targets
+        target_list = [t.strip().lower() for t in targets.split(',')]
+        if 'all' in target_list:
+            target_list = ['desktop', 'cli']
 
-        config_file = config_dir / "claude_desktop_config.json"
+        # Determine config file locations based on platform
+        system = platform.system()
+        config_files = []
+
+        if 'desktop' in target_list:
+            if system == "Darwin":  # macOS
+                desktop_config = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+            elif system == "Windows":
+                desktop_config = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
+            else:  # Linux
+                desktop_config = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+            config_files.append(('desktop', desktop_config))
+
+        if 'cli' in target_list:
+            if system == "Darwin":  # macOS
+                cli_config = Path.home() / ".config" / "claude-code" / "mcp_config.json"
+            elif system == "Windows":
+                cli_config = Path(os.environ.get("APPDATA", "")) / "claude-code" / "mcp_config.json"
+            else:  # Linux
+                cli_config = Path.home() / ".config" / "claude-code" / "mcp_config.json"
+            config_files.append(('cli', cli_config))
 
         # Get absolute path to g2 project root
         cli_file = Path(__file__).resolve()
@@ -3843,89 +3870,95 @@ def mcp_setup(
         python_path = sys.executable
 
         # Prepare MCP server config
-        mcp_config = {
-            "mcpServers": {
-                "g2": {
-                    "command": python_path,
-                    "args": [str(server_path)],
-                    "env": {
-                        "DATABASE_URL": db_url,
-                    }
-                }
-            }
+        expected_config = {
+            "command": python_path,
+            "args": [str(server_path)],
+            "env": {"DATABASE_URL": db_url}
         }
-
-        # Add API key if provided
         if api_key:
-            mcp_config["mcpServers"]["g2"]["env"]["ALPHAVANTAGE_API_KEY"] = api_key
+            expected_config["env"]["ALPHAVANTAGE_API_KEY"] = api_key
 
-        # Check if config file exists and load it
-        existing_config = {}
-        config_unchanged = False
-        if config_file.exists():
-            with open(config_file, 'r') as f:
-                existing_config = json.load(f)
+        # Process each config file
+        results = []
+        all_unchanged = True
 
-            # Check if g2 server already configured
-            if "mcpServers" in existing_config and "g2" in existing_config.get("mcpServers", {}):
-                existing_g2_config = existing_config["mcpServers"]["g2"]
+        for target_name, config_file in config_files:
+            config_unchanged = False
+            existing_config = {}
 
-                # Check if the configuration matches what we would set
-                expected_config = {
-                    "command": python_path,
-                    "args": [str(server_path)],
-                    "env": {"DATABASE_URL": db_url}
-                }
-                if api_key:
-                    expected_config["env"]["ALPHAVANTAGE_API_KEY"] = api_key
+            # Check if config file exists and load it
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    existing_config = json.load(f)
 
-                # Compare configurations (ignoring key order)
-                if (existing_g2_config.get("command") == expected_config["command"] and
-                    existing_g2_config.get("args") == expected_config["args"] and
-                    existing_g2_config.get("env", {}) == expected_config["env"]):
-                    # Configuration is already correct - idempotent success
-                    config_unchanged = True
-                elif not force:
-                    emit_error(
-                        f"MCP server already configured in {config_file} with different settings. "
-                        "Use --force to overwrite.",
-                        json_output=json_output
-                    )
-                    raise typer.Exit(1)
+                # Check if g2 server already configured
+                if "mcpServers" in existing_config and "g2" in existing_config.get("mcpServers", {}):
+                    existing_g2_config = existing_config["mcpServers"]["g2"]
 
-        # Only write if config changed or doesn't exist
-        if not config_unchanged:
-            # Merge configurations
-            if not existing_config.get("mcpServers"):
-                existing_config["mcpServers"] = {}
-            existing_config["mcpServers"]["g2"] = mcp_config["mcpServers"]["g2"]
+                    # Compare configurations (ignoring key order)
+                    if (existing_g2_config.get("command") == expected_config["command"] and
+                        existing_g2_config.get("args") == expected_config["args"] and
+                        existing_g2_config.get("env", {}) == expected_config["env"]):
+                        # Configuration is already correct - idempotent success
+                        config_unchanged = True
+                    elif not force:
+                        emit_error(
+                            f"MCP server already configured in {config_file} with different settings. "
+                            "Use --force to overwrite.",
+                            json_output=json_output
+                        )
+                        raise typer.Exit(1)
 
-            # Create config directory if it doesn't exist
-            config_dir.mkdir(parents=True, exist_ok=True)
+            # Only write if config changed or doesn't exist
+            if not config_unchanged:
+                all_unchanged = False
+                # Merge configurations
+                if not existing_config.get("mcpServers"):
+                    existing_config["mcpServers"] = {}
+                existing_config["mcpServers"]["g2"] = expected_config
 
-            # Write configuration
-            with open(config_file, 'w') as f:
-                json.dump(existing_config, f, indent=2)
+                # Create config directory if it doesn't exist
+                config_file.parent.mkdir(parents=True, exist_ok=True)
+
+                # Write configuration
+                with open(config_file, 'w') as f:
+                    json.dump(existing_config, f, indent=2)
+
+            results.append({
+                "target": target_name,
+                "config_file": str(config_file),
+                "config_unchanged": config_unchanged,
+            })
 
         result = {
-            "config_file": str(config_file),
+            "targets": results,
             "server_path": str(server_path),
             "python_path": python_path,
             "database_url": db_url,
             "api_key_set": bool(api_key),
-            "config_unchanged": config_unchanged,
+            "all_unchanged": all_unchanged,
         }
 
         if json_output:
             emit("MCP Setup Complete", data=result, json_output=True)
         else:
             console = Console()
-            if config_unchanged:
+            if all_unchanged:
                 console.print("\n[bold green]✓ MCP Server Configuration Already Up-to-Date[/bold green]\n")
             else:
                 console.print("\n[bold green]✓ MCP Server Configuration Complete[/bold green]\n")
-            console.print(f"Config file: [cyan]{config_file}[/cyan]")
-            console.print(f"Server path: [cyan]{server_path}[/cyan]")
+
+            # Show results for each target
+            for target_result in results:
+                target_name = target_result['target']
+                target_file = target_result['config_file']
+                unchanged = target_result['config_unchanged']
+
+                status = "[dim]unchanged[/dim]" if unchanged else "[green]updated[/green]"
+                console.print(f"{target_name.capitalize()}: {status}")
+                console.print(f"  [dim]{target_file}[/dim]")
+
+            console.print(f"\nServer path: [cyan]{server_path}[/cyan]")
             console.print(f"Python: [cyan]{python_path}[/cyan]")
             console.print(f"Database: [cyan]{db_url}[/cyan]")
             if api_key:
@@ -3933,13 +3966,16 @@ def mcp_setup(
             else:
                 console.print(f"API Key: [yellow]⚠ Not set (optional)[/yellow]")
 
-            if not config_unchanged:
+            if not all_unchanged:
                 console.print("\n[bold]Next steps:[/bold]")
-                console.print("1. Restart your AI assistant application")
-                console.print("2. The 'g2' MCP server should now be available")
+                if any(r['target'] == 'desktop' and not r['config_unchanged'] for r in results):
+                    console.print("• Restart Claude Desktop App")
+                if any(r['target'] == 'cli' and not r['config_unchanged'] for r in results):
+                    console.print("• Restart Claude Code CLI or OpenAI-compatible tools")
+                console.print("\nThe 'g2' MCP server should now be available")
             else:
-                console.print("\n[dim]Configuration is already correct. No changes needed.[/dim]")
-            console.print("\n[dim]To update this config, run: g2 mcp-setup --force[/dim]")
+                console.print("\n[dim]All configurations are already correct. No changes needed.[/dim]")
+            console.print("\n[dim]To update configs, run: g2 mcp-setup --force[/dim]")
 
     except typer.Exit:
         raise
