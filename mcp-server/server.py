@@ -382,6 +382,8 @@ async def list_tools() -> List[Tool]:
                     "trace_id": {"type": "string", "description": "Trace ID to fetch (required)"},
                     "backend": {"type": "string", "description": "Trace backend to use (default: tempo)", "default": "tempo"},
                     "backend_url": {"type": "string", "description": "Backend base URL (default: http://localhost:3200 for Tempo)"},
+                    "include_raw": {"type": "boolean", "description": "Include raw trace data (very verbose, default: false)", "default": False},
+                    "max_spans": {"type": "integer", "description": "Limit number of spans returned (default: unlimited)"},
                 },
                 "required": ["trace_id"],
             },
@@ -962,10 +964,12 @@ async def _trace_detail(args: Dict[str, Any]) -> Dict[str, Any]:
     backend = args.get('backend', 'tempo')
     backend_url = args.get('backend_url', 'http://localhost:3200')
     trace_id = args['trace_id']
+    include_raw = args.get('include_raw', False)
+    max_spans = args.get('max_spans')
 
     # Currently only Tempo is implemented, but structured for future backends
     if backend == 'tempo':
-        return await _get_tempo_trace_detail(backend_url, trace_id)
+        return await _get_tempo_trace_detail(backend_url, trace_id, include_raw=include_raw, max_spans=max_spans)
     else:
         return {
             'success': False,
@@ -974,7 +978,12 @@ async def _trace_detail(args: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
-async def _get_tempo_trace_detail(tempo_url: str, trace_id: str) -> Dict[str, Any]:
+async def _get_tempo_trace_detail(
+    tempo_url: str,
+    trace_id: str,
+    include_raw: bool = False,
+    max_spans: Optional[int] = None
+) -> Dict[str, Any]:
     """Get detailed trace from Tempo backend."""
     import requests
 
@@ -1010,19 +1019,37 @@ async def _get_tempo_trace_detail(tempo_url: str, trace_id: str) -> Dict[str, An
         db_span_count = sum(1 for s in spans if 'opentelemetry.instrumentation' in s.get('scope', ''))
         error_count = sum(1 for s in spans if s.get('status', {}).get('code') in ['STATUS_CODE_ERROR', 2, '2'])
 
-        return {
+        # Limit spans if max_spans is specified
+        total_spans = len(spans)
+        if max_spans is not None and max_spans > 0:
+            spans = spans[:max_spans]
+            truncated = total_spans - len(spans)
+        else:
+            truncated = 0
+
+        result = {
             'success': True,
             'backend': 'tempo',
             'trace_id': trace_id,
             'backend_url': tempo_url,
             'trace_api_url': url,
-            'total_spans': len(spans),
+            'total_spans': total_spans,
             'application_spans': app_span_count,
             'database_spans': db_span_count,
             'error_spans': error_count,
             'spans': spans,
-            'raw_trace': trace_data,
         }
+
+        # Only include raw trace if explicitly requested
+        if include_raw:
+            result['raw_trace'] = trace_data
+
+        # Add truncation info if applicable
+        if truncated > 0:
+            result['spans_truncated'] = truncated
+            result['note'] = f'Showing {len(spans)} of {total_spans} spans (use max_spans parameter to adjust)'
+
+        return result
 
     except requests.exceptions.RequestException as e:
         return {
