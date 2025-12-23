@@ -9,6 +9,19 @@ G2 uses an automated migration system to manage database schema changes across d
 
 ## Quick Start
 
+### Checking Migration Status
+
+```bash
+# Check database health including pending migrations
+g2 db-health
+
+# Output:
+#   ⚠️  Pending migrations: 2
+#       - 005_add_user_preferences
+#       - 006_add_indexes
+#   Run 'g2 db-migrate' to apply pending migrations
+```
+
 ### Running Migrations
 
 ```bash
@@ -20,6 +33,26 @@ g2 db-migrate --dry-run
 
 # Apply migrations to a specific database
 g2 db-migrate --db-url postgresql://user:pass@host:5432/db
+```
+
+### Automatic Warnings
+
+The system automatically warns about pending migrations:
+
+**Before data operations:**
+```bash
+g2 data-update
+# Output:
+# ⚠️  Warning: 2 pending migration(s) detected. Database schema may be out of sync.
+#   - 005_add_user_preferences
+#   - 006_add_indexes
+#   Run 'g2 db-migrate' to apply migrations before proceeding.
+```
+
+**During health checks:**
+```bash
+g2 db-health
+# Shows pending migrations in health report
 ```
 
 ### Creating a New Migration
