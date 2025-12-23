@@ -37,6 +37,12 @@ Claude: [Queries database and shows predictions]
 - `data_update` - Update prices and compute features (time-aware: before 4pm ET = yesterday's data, after 4pm ET = today's data)
 - `features_list` - List all registered technical indicators + cross-sectional features (percentile ranks, z-scores)
 
+### Observability Tools
+- `span_check` - Check recent traces for performance monitoring and debugging (backend-agnostic)
+- `trace_search` - Search for traces by criteria (tags, duration, service name)
+- `trace_detail` - Get detailed trace information for a specific trace ID
+- `trace_compare` - Compare two traces to quantify performance improvements
+
 ## Installation
 
 ### Option 1: Local Development (Recommended for getting started)

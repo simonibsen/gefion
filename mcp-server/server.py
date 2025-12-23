@@ -9,11 +9,13 @@ Provides MCP tools for:
 - Database queries (predictions, model performance)
 - Feature management (technical indicators + cross-sectional market-relative features)
 - Data ingestion (time-aware to prevent partial intraday data)
+- Observability (trace analysis, performance monitoring via Grafana Tempo)
 """
 
 import asyncio
 import json
 import subprocess
+import os
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 
@@ -318,6 +320,98 @@ async def list_tools() -> List[Tool]:
                 "required": ["sql"],
             },
         ),
+
+        # Observability Tools
+        Tool(
+            name="span_check",
+            description=(
+                "Check recent traces for performance monitoring and debugging. "
+                "Returns trace statistics, span counts, error detection, and recent trace list. "
+                "Use this to: validate tracing is working, find slow operations, detect errors, "
+                "get trace IDs for deeper analysis, monitor system health after operations. "
+                "Backend-agnostic: uses configured trace backend (Tempo by default)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Number of recent traces to inspect (1-100)", "default": 10},
+                    "trace_id": {"type": "string", "description": "Specific trace ID to inspect (default: most recent)"},
+                    "service_name": {"type": "string", "description": "Service name tag to filter by", "default": "g2"},
+                    "backend": {"type": "string", "description": "Trace backend to use (default: tempo)", "default": "tempo"},
+                    "backend_url": {"type": "string", "description": "Backend base URL (default: http://localhost:3200 for Tempo)"},
+                    "show_spans": {"type": "boolean", "description": "Include detailed span list in output", "default": True},
+                },
+            },
+        ),
+
+        Tool(
+            name="trace_search",
+            description=(
+                "Search for traces by criteria (tags, duration, service). "
+                "Returns list of matching traces with metadata (traceID, duration, root span name). "
+                "Use this to: find traces for specific symbols, find slow operations, "
+                "filter by feature names, search for operations in a time range. "
+                "Backend-agnostic: works with any OpenTelemetry-compatible backend."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "service_name": {"type": "string", "description": "Service name to search for", "default": "g2"},
+                    "tags": {"type": "string", "description": "Tags to filter by (e.g., 'symbol=AAPL' or 'function_name=indicator')"},
+                    "min_duration": {"type": "string", "description": "Minimum duration (e.g., '1s', '500ms')"},
+                    "max_duration": {"type": "string", "description": "Maximum duration (e.g., '10s', '5000ms')"},
+                    "limit": {"type": "integer", "description": "Maximum number of traces to return", "default": 20},
+                    "backend": {"type": "string", "description": "Trace backend to use (default: tempo)", "default": "tempo"},
+                    "backend_url": {"type": "string", "description": "Backend base URL (default: http://localhost:3200 for Tempo)"},
+                },
+            },
+        ),
+
+        Tool(
+            name="trace_detail",
+            description=(
+                "Get detailed trace information for a specific trace ID. "
+                "Returns complete trace with all spans, attributes, timing, and hierarchy. "
+                "Use this to: analyze bottlenecks in a specific operation, investigate errors, "
+                "understand span relationships, extract custom attributes and events. "
+                "Backend-agnostic: works with any OpenTelemetry-compatible backend."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "trace_id": {"type": "string", "description": "Trace ID to fetch (required)"},
+                    "backend": {"type": "string", "description": "Trace backend to use (default: tempo)", "default": "tempo"},
+                    "backend_url": {"type": "string", "description": "Backend base URL (default: http://localhost:3200 for Tempo)"},
+                },
+                "required": ["trace_id"],
+            },
+        ),
+
+        Tool(
+            name="trace_compare",
+            description=(
+                "Compare two traces to quantify performance improvements or regressions. "
+                "Analyzes differences in total duration, span counts, and individual span timings. "
+                "Use this to: validate optimizations worked, measure performance improvements, "
+                "identify which specific operations got faster/slower, compare different approaches. "
+                "Returns percentage improvements and detailed breakdown by span type."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "trace_id_before": {"type": "string", "description": "Trace ID from before the change (baseline)"},
+                    "trace_id_after": {"type": "string", "description": "Trace ID from after the change (optimized)"},
+                    "focus_spans": {
+                        "type": "array",
+                        "description": "Optional list of span names to focus comparison on (e.g., ['insert_computed_features', 'compute_features'])",
+                        "items": {"type": "string"}
+                    },
+                    "backend": {"type": "string", "description": "Trace backend to use (default: tempo)", "default": "tempo"},
+                    "backend_url": {"type": "string", "description": "Backend base URL (default: http://localhost:3200 for Tempo)"},
+                },
+                "required": ["trace_id_before", "trace_id_after"],
+            },
+        ),
     ]
 
 
@@ -348,6 +442,14 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _features_list(arguments)
         elif name == "query_database":
             result = await _query_database(arguments)
+        elif name == "span_check":
+            result = await _span_check(arguments)
+        elif name == "trace_search":
+            result = await _trace_search(arguments)
+        elif name == "trace_detail":
+            result = await _trace_detail(arguments)
+        elif name == "trace_compare":
+            result = await _trace_compare(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -743,6 +845,328 @@ async def _query_database(args: Dict[str, Any]) -> Dict[str, Any]:
             'error': str(e),
             'sql': sql
         }
+
+
+async def _span_check(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Check recent traces using g2 span-check command (backend-agnostic)."""
+    cmd = ['span-check']
+
+    if args.get('limit'):
+        cmd.extend(['--limit', str(args['limit'])])
+    if args.get('trace_id'):
+        cmd.extend(['--trace-id', args['trace_id']])
+    if args.get('service_name'):
+        cmd.extend(['--service-name', args['service_name']])
+    if args.get('backend'):
+        cmd.extend(['--backend', args['backend']])
+    if args.get('backend_url'):
+        # Map backend_url to the appropriate CLI flag based on backend
+        backend = args.get('backend', 'tempo')
+        if backend == 'tempo':
+            cmd.extend(['--tempo-url', args['backend_url']])
+        # Future backends can be added here
+    if args.get('show_spans') is False:
+        cmd.append('--no-show-spans')
+
+    return await executor.run(*cmd)
+
+
+async def _trace_search(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Search for traces using the trace backend API (backend-agnostic)."""
+    import requests
+
+    backend = args.get('backend', 'tempo')
+    backend_url = args.get('backend_url', 'http://localhost:3200')
+    service_name = args.get('service_name', 'g2')
+    limit = args.get('limit', 20)
+
+    # Currently only Tempo is implemented, but structured for future backends
+    if backend == 'tempo':
+        return await _search_tempo(backend_url, service_name, limit, args)
+    else:
+        return {
+            'success': False,
+            'error': f'Unsupported trace backend: {backend}',
+            'supported_backends': ['tempo']
+        }
+
+
+async def _search_tempo(tempo_url: str, service_name: str, limit: int, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Search traces in Tempo backend."""
+    import requests
+
+    # Build search parameters
+    params = {
+        'limit': limit
+    }
+
+    # Build tags filter
+    tags = []
+    tags.append(f'service.name={service_name}')
+
+    if args.get('tags'):
+        tags.append(args['tags'])
+
+    params['tags'] = ' && '.join(tags) if len(tags) > 1 else tags[0]
+
+    # Add duration filters if specified
+    if args.get('min_duration'):
+        params['minDuration'] = args['min_duration']
+    if args.get('max_duration'):
+        params['maxDuration'] = args['max_duration']
+
+    try:
+        url = f"{tempo_url.rstrip('/')}/api/search"
+        response = requests.get(url, params=params, timeout=5.0)
+        response.raise_for_status()
+
+        data = response.json()
+        traces = data.get('traces', [])
+
+        return {
+            'success': True,
+            'backend': 'tempo',
+            'traces': [
+                {
+                    'trace_id': t.get('traceID'),
+                    'root_trace_name': t.get('rootTraceName'),
+                    'duration_ms': t.get('durationMs'),
+                    'start_time': t.get('startTimeUnixNano'),
+                }
+                for t in traces
+            ],
+            'count': len(traces),
+            'backend_url': tempo_url,
+            'search_params': params,
+        }
+
+    except requests.exceptions.RequestException as e:
+        return {
+            'success': False,
+            'error': f'Failed to connect to trace backend: {str(e)}',
+            'backend': 'tempo',
+            'backend_url': tempo_url,
+            'suggestion': 'Ensure Tempo is running: docker compose -f docker/tempo/docker-compose.tempo.yml up -d'
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'backend': 'tempo',
+            'backend_url': tempo_url
+        }
+
+
+async def _trace_detail(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Get detailed trace information for a specific trace ID (backend-agnostic)."""
+    backend = args.get('backend', 'tempo')
+    backend_url = args.get('backend_url', 'http://localhost:3200')
+    trace_id = args['trace_id']
+
+    # Currently only Tempo is implemented, but structured for future backends
+    if backend == 'tempo':
+        return await _get_tempo_trace_detail(backend_url, trace_id)
+    else:
+        return {
+            'success': False,
+            'error': f'Unsupported trace backend: {backend}',
+            'supported_backends': ['tempo']
+        }
+
+
+async def _get_tempo_trace_detail(tempo_url: str, trace_id: str) -> Dict[str, Any]:
+    """Get detailed trace from Tempo backend."""
+    import requests
+
+    try:
+        url = f"{tempo_url.rstrip('/')}/api/traces/{trace_id}"
+        response = requests.get(url, timeout=5.0)
+        response.raise_for_status()
+
+        trace_data = response.json()
+
+        # Extract spans from the trace
+        spans = []
+        for batch in trace_data.get('batches', []):
+            for scope_spans in batch.get('scopeSpans', []):
+                scope_name = ((scope_spans.get('scope') or {}).get('name')) or ''
+                for span in scope_spans.get('spans', []):
+                    spans.append({
+                        'scope': scope_name,
+                        'name': span.get('name'),
+                        'span_id': span.get('spanId'),
+                        'parent_span_id': span.get('parentSpanId'),
+                        'start_time': span.get('startTimeUnixNano'),
+                        'end_time': span.get('endTimeUnixNano'),
+                        'attributes': {
+                            attr.get('key'): attr.get('value', {})
+                            for attr in span.get('attributes', [])
+                        },
+                        'status': span.get('status', {}),
+                    })
+
+        # Count span types
+        app_span_count = sum(1 for s in spans if 'g2.observability' in s.get('scope', ''))
+        db_span_count = sum(1 for s in spans if 'opentelemetry.instrumentation' in s.get('scope', ''))
+        error_count = sum(1 for s in spans if s.get('status', {}).get('code') in ['STATUS_CODE_ERROR', 2, '2'])
+
+        return {
+            'success': True,
+            'backend': 'tempo',
+            'trace_id': trace_id,
+            'backend_url': tempo_url,
+            'trace_api_url': url,
+            'total_spans': len(spans),
+            'application_spans': app_span_count,
+            'database_spans': db_span_count,
+            'error_spans': error_count,
+            'spans': spans,
+            'raw_trace': trace_data,
+        }
+
+    except requests.exceptions.RequestException as e:
+        return {
+            'success': False,
+            'error': f'Failed to fetch trace from backend: {str(e)}',
+            'backend': 'tempo',
+            'trace_id': trace_id,
+            'backend_url': tempo_url,
+            'suggestion': 'Ensure Tempo is running and the trace ID is valid'
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'backend': 'tempo',
+            'trace_id': trace_id,
+            'backend_url': tempo_url
+        }
+
+
+async def _trace_compare(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Compare two traces to quantify performance differences."""
+    backend = args.get('backend', 'tempo')
+    backend_url = args.get('backend_url', 'http://localhost:3200')
+    trace_id_before = args['trace_id_before']
+    trace_id_after = args['trace_id_after']
+    focus_spans = args.get('focus_spans', [])
+
+    # Fetch both traces
+    if backend == 'tempo':
+        before_result = await _get_tempo_trace_detail(backend_url, trace_id_before)
+        after_result = await _get_tempo_trace_detail(backend_url, trace_id_after)
+    else:
+        return {
+            'success': False,
+            'error': f'Unsupported trace backend: {backend}',
+            'supported_backends': ['tempo']
+        }
+
+    # Check if both fetches succeeded
+    if not before_result.get('success'):
+        return {
+            'success': False,
+            'error': f"Failed to fetch 'before' trace: {before_result.get('error')}",
+            'trace_id_before': trace_id_before
+        }
+    if not after_result.get('success'):
+        return {
+            'success': False,
+            'error': f"Failed to fetch 'after' trace: {after_result.get('error')}",
+            'trace_id_after': trace_id_after
+        }
+
+    # Calculate total duration from root spans
+    before_spans = before_result['spans']
+    after_spans = after_result['spans']
+
+    # Find root span (no parent) and calculate duration
+    def calculate_trace_duration(spans):
+        root_spans = [s for s in spans if not s.get('parent_span_id')]
+        if root_spans:
+            root = root_spans[0]
+            start = int(root['start_time'])
+            end = int(root['end_time'])
+            return (end - start) / 1_000_000  # Convert nanoseconds to milliseconds
+        return 0
+
+    before_duration_ms = calculate_trace_duration(before_spans)
+    after_duration_ms = calculate_trace_duration(after_spans)
+
+    # Calculate improvement
+    duration_improvement_pct = 0
+    if before_duration_ms > 0:
+        duration_improvement_pct = ((before_duration_ms - after_duration_ms) / before_duration_ms) * 100
+
+    # Compare span counts
+    before_total_spans = len(before_spans)
+    after_total_spans = len(after_spans)
+    before_app_spans = before_result['application_spans']
+    after_app_spans = after_result['application_spans']
+    before_db_spans = before_result['database_spans']
+    after_db_spans = after_result['database_spans']
+
+    # Analyze specific spans if focus_spans provided
+    span_comparisons = []
+    if focus_spans:
+        for span_name in focus_spans:
+            before_matches = [s for s in before_spans if s['name'] == span_name]
+            after_matches = [s for s in after_spans if s['name'] == span_name]
+
+            if before_matches and after_matches:
+                # Calculate average duration for this span type
+                before_avg = sum(
+                    (int(s['end_time']) - int(s['start_time'])) / 1_000_000
+                    for s in before_matches
+                ) / len(before_matches)
+                after_avg = sum(
+                    (int(s['end_time']) - int(s['start_time'])) / 1_000_000
+                    for s in after_matches
+                ) / len(after_matches)
+
+                improvement = 0
+                if before_avg > 0:
+                    improvement = ((before_avg - after_avg) / before_avg) * 100
+
+                span_comparisons.append({
+                    'span_name': span_name,
+                    'before_avg_ms': round(before_avg, 2),
+                    'after_avg_ms': round(after_avg, 2),
+                    'improvement_pct': round(improvement, 1),
+                    'before_count': len(before_matches),
+                    'after_count': len(after_matches)
+                })
+
+    return {
+        'success': True,
+        'backend': backend,
+        'trace_id_before': trace_id_before,
+        'trace_id_after': trace_id_after,
+        'overall': {
+            'before_duration_ms': round(before_duration_ms, 2),
+            'after_duration_ms': round(after_duration_ms, 2),
+            'duration_improvement_pct': round(duration_improvement_pct, 1),
+            'faster': after_duration_ms < before_duration_ms
+        },
+        'span_counts': {
+            'before': {
+                'total': before_total_spans,
+                'application': before_app_spans,
+                'database': before_db_spans
+            },
+            'after': {
+                'total': after_total_spans,
+                'application': after_app_spans,
+                'database': after_db_spans
+            },
+            'changes': {
+                'total': after_total_spans - before_total_spans,
+                'application': after_app_spans - before_app_spans,
+                'database': after_db_spans - before_db_spans
+            }
+        },
+        'focused_spans': span_comparisons if span_comparisons else None
+    }
 
 
 # ============================================================================
