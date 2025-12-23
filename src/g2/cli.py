@@ -1910,6 +1910,88 @@ def db_init(
         emit_error(f"Initialization failed: {exc}", json_output=json_output)
 
 
+@app.command("db-migrate")
+def db_migrate(
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    migrations_dir: Optional[Path] = typer.Option(None, help="Migrations directory (default: sql/migrations)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show pending migrations without applying"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Run database migrations from sql/migrations/ directory.
+
+    Migrations are applied in order (001, 002, 003, etc.) and tracked
+    in the schema_migrations table. Already-applied migrations are
+    automatically skipped. Safe to run multiple times (idempotent).
+
+    Examples:
+        # Run all pending migrations
+        g2 db-migrate
+
+        # Show pending migrations without applying
+        g2 db-migrate --dry-run
+
+        # Run migrations on specific database
+        g2 db-migrate --db-url postgresql://user:pass@host:5432/db
+
+        # Use custom migrations directory
+        g2 db-migrate --migrations-dir /path/to/migrations
+    """
+    from g2.db.migrate import run_migrations
+    from pathlib import Path as PathLib
+    import g2
+
+    url = _db_url(db_url)
+
+    # Find migrations directory
+    if migrations_dir is None:
+        package_dir = PathLib(g2.__file__).parent.parent.parent
+        migrations_dir = package_dir / "sql" / "migrations"
+
+    if not migrations_dir.exists():
+        emit_error(
+            f"Migrations directory not found: {migrations_dir}",
+            json_output=json_output
+        )
+        return
+
+    try:
+        with psycopg.connect(url) as conn:
+            conn.autocommit = True
+
+            if not json_output:
+                if dry_run:
+                    emit("Checking for pending migrations...")
+                else:
+                    emit("Running database migrations...")
+
+            result = run_migrations(conn, migrations_dir, dry_run=dry_run)
+
+            # Format output
+            if dry_run:
+                total = len(result['migrations'])
+                pending_count = len([m for m in result['migrations'] if m['status'] == 'pending'])
+                message = f"Found {total} total migrations: {result['skipped']} already applied, {pending_count} pending"
+            else:
+                message = f"Migrations complete: {result['applied']} applied, {result['skipped']} skipped"
+
+            emit(
+                message,
+                data={
+                    "applied": result["applied"],
+                    "skipped": result["skipped"],
+                    "migrations": result["migrations"],
+                    "migrations_dir": str(migrations_dir),
+                    "dry_run": dry_run
+                },
+                json_output=json_output
+            )
+
+    except Exception as exc:
+        emit_error(f"Migration failed: {exc}", json_output=json_output)
+        raise typer.Exit(code=1)
+
+
 @app.command("db-tune")
 def db_tune(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
