@@ -3801,11 +3801,11 @@ def mcp_setup(
 
     Configuration file locations:
     - Claude Desktop (macOS): ~/Library/Application Support/Claude/claude_desktop_config.json
-    - Claude Code CLI (macOS): ~/.config/claude-code/mcp_config.json
+    - Claude Code CLI (macOS): ~/.config/claude/mcp_config.json
     - Windows Desktop: %APPDATA%\\Claude\\claude_desktop_config.json
-    - Windows CLI: %APPDATA%\\claude-code\\mcp_config.json
+    - Windows CLI: %APPDATA%\\claude\\mcp_config.json
     - Linux Desktop: ~/.config/Claude/claude_desktop_config.json
-    - Linux CLI: ~/.config/claude-code/mcp_config.json
+    - Linux CLI: ~/.config/claude/mcp_config.json
 
     Example:
         g2 mcp-setup                    # Configure all targets
@@ -3818,6 +3818,13 @@ def mcp_setup(
     from pathlib import Path
 
     try:
+        # Load environment variables from .env file if it exists
+        from pathlib import Path
+        env_file = Path.cwd() / '.env'
+        if env_file.exists():
+            from dotenv import load_dotenv
+            load_dotenv(env_file)
+
         # Parse targets
         target_list = [t.strip().lower() for t in targets.split(',')]
         if 'all' in target_list:
@@ -3838,11 +3845,11 @@ def mcp_setup(
 
         if 'cli' in target_list:
             if system == "Darwin":  # macOS
-                cli_config = Path.home() / ".config" / "claude-code" / "mcp_config.json"
+                cli_config = Path.home() / ".config" / "claude" / "mcp_config.json"
             elif system == "Windows":
-                cli_config = Path(os.environ.get("APPDATA", "")) / "claude-code" / "mcp_config.json"
+                cli_config = Path(os.environ.get("APPDATA", "")) / "claude" / "mcp_config.json"
             else:  # Linux
-                cli_config = Path.home() / ".config" / "claude-code" / "mcp_config.json"
+                cli_config = Path.home() / ".config" / "claude" / "mcp_config.json"
             config_files.append(('cli', cli_config))
 
         # Get absolute path to g2 project root
@@ -3860,7 +3867,7 @@ def mcp_setup(
 
         # Get database URL
         if not db_url:
-            db_url = os.environ.get('DATABASE_URL', 'postgresql://g2:g2pass@localhost:5432/g2')
+            db_url = os.environ.get('DATABASE_URL', 'postgresql://g2:g2pass@localhost:6432/g2')
 
         # Get API key
         if not api_key:
