@@ -25,6 +25,13 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
+# Try to import OpenTelemetry context propagation (optional)
+try:
+    from opentelemetry import context as otel_context
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
+
 from g2.db.ingest import insert_computed_features
 from g2.observability import create_span, set_attributes, add_event, get_current_span
 
@@ -368,15 +375,34 @@ def compute_features_generic(
     # Add source column
     result_df["source"] = "local"
 
+    # Build mapping from plugin output columns to feature names
+    # This maps the actual columns returned by plugins (e.g., "rsi_14")
+    # to the feature names expected by the dispatcher (e.g., "indicator_rsi_14")
+    column_to_feature: Dict[str, str] = {}
+    for spec in converted_specs:
+        feature_name = spec.get('name', '')
+        # Determine what column the plugin would have returned
+        # For indicators, plugins return columns like "rsi_14", "sma_20", etc.
+        # The params are at the top level of the spec, not nested under 'params'
+        indicator = spec.get('indicator', '')
+        period = spec.get('period')
+
+        # Build expected plugin output column name
+        if period:
+            plugin_col = f"{indicator}_{period}"
+        else:
+            plugin_col = indicator
+
+        # Map plugin column to feature name
+        if plugin_col in result_df.columns:
+            column_to_feature[plugin_col] = feature_name
+
     # Convert DataFrame to list of dicts (same format as original)
     records = result_df.to_dict("records")
 
-    # Filter out NaN values and format results
-    indicator_cols = [
-        "rsi_14", "adx_14", "sma_20", "sma_50", "sma_200",
-        "ema_12", "ema_26", "macd", "macd_signal", "macd_hist",
-        "bb_upper", "bb_middle", "bb_lower", "stoch_k", "stoch_d", "psar"
-    ]
+    # Dynamically determine indicator columns from result DataFrame
+    # Exclude metadata columns (date, source) to get only computed features
+    indicator_cols = [col for col in result_df.columns if col not in ['date', 'source']]
 
     results: List[Dict[str, Any]] = []
     for record in records:
@@ -387,7 +413,9 @@ def compute_features_generic(
             if col in record:
                 val = record[col]
                 if pd.notna(val):
-                    out[col] = float(val)
+                    # Use feature name if we have a mapping, otherwise use plugin column name
+                    output_col = column_to_feature.get(col, col)
+                    out[output_col] = float(val)
                     has_indicators = True
 
         if has_indicators:
@@ -575,21 +603,26 @@ def _compute_features_impl(
         write_queue = queue.Queue(maxsize=200)
 
         def writer_loop():
-            # Each writer thread gets its own connection from the pool
-            # to avoid thread-safety violations (psycopg connections are not thread-safe)
+            # Acquire connection per-write instead of holding for thread lifetime
+            # This reduces pool contention and allows connections to be reused
+            # between writes when threads are idle waiting on the queue
             from g2.db import pool as db_pool
-            try:
-                with db_pool.get_connection() as writer_conn:
-                    writer_conn.autocommit = True
-                    while True:
-                        item = write_queue.get()
-                        if item is stop_token:
-                            write_queue.task_done()
-                            break
+
+            while True:
+                # Wait for work item (no connection held during idle wait)
+                item = write_queue.get()
+                if item is stop_token:
+                    write_queue.task_done()
+                    break
+
+                # Acquire connection only for the duration of the write
+                try:
+                    with db_pool.get_connection() as writer_conn:
+                        writer_conn.autocommit = True
                         try:
                             start = time.monotonic()
                             insert_computed_features(
-                                writer_conn,  # Use thread-local connection, not shared conn
+                                writer_conn,
                                 data_id=data_id,
                                 rows=item["rows"],
                                 feature_map=item["feature_map"],
@@ -610,25 +643,37 @@ def _compute_features_impl(
                             evt = item.get("event")
                             if evt:
                                 evt.set()
-                        finally:
-                            write_queue.task_done()
-            except Exception as exc:
-                # Connection acquisition failure - critical error
-                # Drain the queue and set all events to prevent deadlock
-                writer_errors.append(exc)
-                try:
-                    while True:
-                        item = write_queue.get_nowait()
-                        if item is not stop_token:
-                            evt = item.get("event")
-                            if evt:
-                                evt.set()
-                        write_queue.task_done()
-                except queue.Empty:
-                    pass
+                except Exception as exc:
+                    # Connection acquisition failure
+                    writer_errors.append(exc)
+                    evt = item.get("event")
+                    if evt:
+                        evt.set()
+                finally:
+                    write_queue.task_done()
+
+        # Capture context for propagation to writer threads
+        writer_ctx = otel_context.get_current() if OTEL_AVAILABLE else None
+
+        def make_writer_with_context():
+            """Create a context-aware wrapper for writer_loop."""
+            def writer_with_context():
+                if OTEL_AVAILABLE and writer_ctx:
+                    token = otel_context.attach(writer_ctx)
+                    try:
+                        return writer_loop()
+                    finally:
+                        otel_context.detach(token)
+                else:
+                    return writer_loop()
+            return writer_with_context
 
         for _ in range(writer_workers):
-            t = threading.Thread(target=writer_loop, daemon=True)
+            # Use context-aware wrapper if OpenTelemetry is available
+            if OTEL_AVAILABLE and writer_ctx:
+                t = threading.Thread(target=make_writer_with_context(), daemon=True)
+            else:
+                t = threading.Thread(target=writer_loop, daemon=True)
             t.start()
             writer_threads.append(t)
 
@@ -649,25 +694,63 @@ def _compute_features_impl(
             max_parallel = 4
 
         with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+            # Capture context for propagation to executor threads
+            if OTEL_AVAILABLE:
+                executor_ctx = otel_context.get_current()
+                def make_context_worker(data_id, func_name, features, incremental, update_existing,
+                                       latest_by_feature, feature_batch_size, writer, timings,
+                                       timings_lock, cache, cache_lock, sync_commit):
+                    """Create context-aware wrapper for function group processing."""
+                    def worker_with_context():
+                        token = otel_context.attach(executor_ctx)
+                        try:
+                            return _process_function_group_with_connection(
+                                data_id, func_name, features, incremental, update_existing,
+                                latest_by_feature, feature_batch_size, writer, timings,
+                                timings_lock, cache, cache_lock, sync_commit
+                            )
+                        finally:
+                            otel_context.detach(token)
+                    return worker_with_context
+
             # Submit all function groups for parallel execution
             future_to_func = {}
             for func_name, features in grouped_by_function.items():
-                future = executor.submit(
-                    _process_function_group_with_connection,
-                    data_id,
-                    func_name,
-                    features,
-                    incremental=incremental and not full_refresh,
-                    update_existing=update_existing,
-                    latest_by_feature=latest_by_feature,
-                    feature_batch_size=feature_batch_size,
-                    writer=enqueue_or_write,
-                    timings=timings if profile else None,
-                    timings_lock=timings_lock if profile else None,
-                    cache=cache,
-                    cache_lock=cache_lock,
-                    sync_commit=sync_commit,
-                )
+                if OTEL_AVAILABLE:
+                    # Submit context-aware wrapper
+                    future = executor.submit(
+                        make_context_worker(
+                            data_id, func_name, features,
+                            incremental=incremental and not full_refresh,
+                            update_existing=update_existing,
+                            latest_by_feature=latest_by_feature,
+                            feature_batch_size=feature_batch_size,
+                            writer=enqueue_or_write,
+                            timings=timings if profile else None,
+                            timings_lock=timings_lock if profile else None,
+                            cache=cache,
+                            cache_lock=cache_lock,
+                            sync_commit=sync_commit,
+                        )
+                    )
+                else:
+                    # Submit directly without context propagation
+                    future = executor.submit(
+                        _process_function_group_with_connection,
+                        data_id,
+                        func_name,
+                        features,
+                        incremental=incremental and not full_refresh,
+                        update_existing=update_existing,
+                        latest_by_feature=latest_by_feature,
+                        feature_batch_size=feature_batch_size,
+                        writer=enqueue_or_write,
+                        timings=timings if profile else None,
+                        timings_lock=timings_lock if profile else None,
+                        cache=cache,
+                        cache_lock=cache_lock,
+                        sync_commit=sync_commit,
+                    )
                 future_to_func[future] = func_name
 
             # Collect results as they complete
@@ -738,6 +821,9 @@ def _compute_features_impl(
                         write_queue.put(item)
                         break
                     items.append(item)
+                    # Must call task_done() for each get_nowait() to keep task counter balanced
+                    # when we put() items back below
+                    write_queue.task_done()
             except queue.Empty:
                 pass
 
