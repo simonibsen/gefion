@@ -3801,11 +3801,11 @@ def mcp_setup(
 
     Configuration file locations:
     - Claude Desktop (macOS): ~/Library/Application Support/Claude/claude_desktop_config.json
-    - Claude Code CLI (macOS): ~/.config/claude/mcp_config.json
+    - Claude Code CLI (macOS): ~/.claude.json
     - Windows Desktop: %APPDATA%\\Claude\\claude_desktop_config.json
-    - Windows CLI: %APPDATA%\\claude\\mcp_config.json
+    - Windows CLI: %USERPROFILE%\\.claude.json
     - Linux Desktop: ~/.config/Claude/claude_desktop_config.json
-    - Linux CLI: ~/.config/claude/mcp_config.json
+    - Linux CLI: ~/.claude.json
 
     Example:
         g2 mcp-setup                    # Configure all targets
@@ -3844,12 +3844,8 @@ def mcp_setup(
             config_files.append(('desktop', desktop_config))
 
         if 'cli' in target_list:
-            if system == "Darwin":  # macOS
-                cli_config = Path.home() / ".config" / "claude" / "mcp_config.json"
-            elif system == "Windows":
-                cli_config = Path(os.environ.get("APPDATA", "")) / "claude" / "mcp_config.json"
-            else:  # Linux
-                cli_config = Path.home() / ".config" / "claude" / "mcp_config.json"
+            # Claude Code CLI uses ~/.claude.json on all platforms
+            cli_config = Path.home() / ".claude.json"
             config_files.append(('cli', cli_config))
 
         # Get absolute path to g2 project root
