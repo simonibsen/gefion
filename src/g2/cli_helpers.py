@@ -96,6 +96,7 @@ def upsert_feature_function(
             - min_app_version (optional): Minimum app version
             - enabled (optional): Whether enabled (default: True)
             - created_by (optional): Creator (default: "cli")
+            - called_by (optional): Parent meta-function name for plugin architecture
         return_id: If True, return the function ID
 
     Returns:
@@ -128,6 +129,7 @@ def upsert_feature_function(
         "min_app_version": payload.get("min_app_version"),
         "enabled": payload.get("enabled", True),
         "created_by": payload.get("created_by", "cli"),
+        "called_by": payload.get("called_by"),
     }
 
     with conn.cursor() as cur:
@@ -135,10 +137,10 @@ def upsert_feature_function(
             """
             INSERT INTO feature_functions
             (name, version, status, description, language, function_body, inputs, output_name, output_type,
-             param_schema, defaults, dependencies, checksum, tags, min_app_version, enabled, created_by)
+             param_schema, defaults, dependencies, checksum, tags, min_app_version, enabled, created_by, called_by)
             VALUES (%(name)s, %(version)s, %(status)s, %(description)s, %(language)s, %(function_body)s,
                     %(inputs)s, %(output_name)s, %(output_type)s, %(param_schema)s, %(defaults)s,
-                    %(dependencies)s, %(checksum)s, %(tags)s, %(min_app_version)s, %(enabled)s, %(created_by)s)
+                    %(dependencies)s, %(checksum)s, %(tags)s, %(min_app_version)s, %(enabled)s, %(created_by)s, %(called_by)s)
             ON CONFLICT (name, version) DO UPDATE SET
                 status = EXCLUDED.status,
                 description = EXCLUDED.description,
@@ -155,6 +157,7 @@ def upsert_feature_function(
                 min_app_version = EXCLUDED.min_app_version,
                 enabled = EXCLUDED.enabled,
                 created_by = EXCLUDED.created_by,
+                called_by = EXCLUDED.called_by,
                 updated_at = NOW()
             """ + ("RETURNING id;" if return_id else ";"),
             params,
