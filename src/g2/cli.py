@@ -400,9 +400,11 @@ def _auto_workers(compute_locally: bool, calls_per_minute: int) -> int:
         return max(2, min(8, cpu_count))
     else:
         # API rate-limited - calculate based on calls per minute
-        # Assume each worker makes ~15 calls/minute on average
-        # Be conservative to avoid hitting rate limits
-        api_workers = max(2, min(10, calls_per_minute // 30))
+        # With shared RateLimiter, more workers = better utilization
+        # Each worker waits for network I/O (~1-2s per call on average)
+        # Formula: workers = calls_per_min / 10 (allows ~6 calls/min per worker)
+        # This provides good throughput while RateLimiter enforces rate limits
+        api_workers = max(2, min(10, calls_per_minute // 10))
         return api_workers
 
 
@@ -1610,10 +1612,32 @@ def ingest_universe(
 @app.command("db-health")
 def db_health(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    migrations_dir: Optional[Path] = typer.Option(None, help="Migrations directory (default: sql/migrations)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
-    """Report basic DB health: connections, chunk intervals, BRIN indexes, table presence."""
+    """
+    Report database health: connections, tables, indexes, and migration status.
+
+    Checks database configuration, table presence, chunk intervals, BRIN indexes,
+    compression status, and pending migrations.
+    """
+    with create_span("cli.db-health"):
+        _db_health_impl(db_url, migrations_dir, json_output)
+
+
+def _db_health_impl(db_url, migrations_dir, json_output):
+    """Implementation of db-health (separated for tracing)."""
+    from g2.db.migrate import check_pending_migrations, get_applied_migrations
+    from pathlib import Path as PathLib
+    import g2
+
     url = _db_url(db_url)
+
+    # Find migrations directory
+    if migrations_dir is None:
+        package_dir = PathLib(g2.__file__).parent.parent.parent
+        migrations_dir = package_dir / "sql" / "migrations"
+
     health: Dict[str, Any] = {}
     avail = get_available_connections(url)
     if isinstance(avail, tuple):
@@ -1635,11 +1659,11 @@ def db_health(
                 try:
                     cur.execute(
                         """
-                        SELECT h.hypertable_name, d.interval_length
+                        SELECT h.hypertable_name, d.time_interval
                         FROM timescaledb_information.hypertables h
                         LEFT JOIN timescaledb_information.dimensions d
                           ON h.hypertable_name = d.hypertable_name
-                        WHERE h.hypertable_name = ANY(%s) AND (d.interval_length IS NOT NULL OR d.column_name = 'date');
+                        WHERE h.hypertable_name = ANY(%s) AND (d.time_interval IS NOT NULL OR d.column_name = 'date');
                         """,
                         (tables,),
                     )
@@ -1662,11 +1686,98 @@ def db_health(
                     if "BRIN" in idxdef.upper():
                         brin[table] = True
                 health["brin_indexes"] = brin
+
+                # Check migration status
+                migration_status = {}
+                try:
+                    # Check if schema_migrations table exists
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'schema_migrations'
+                        );
+                    """)
+                    has_migrations_table = cur.fetchone()[0]
+                    migration_status["migrations_table_exists"] = has_migrations_table
+
+                    # Check for pending migrations (this will internally get applied migrations)
+                    if migrations_dir.exists():
+                        pending = check_pending_migrations(conn, migrations_dir)
+                        # Calculate applied count from migration files
+                        from g2.db.migrate import scan_migration_files
+                        all_migrations = scan_migration_files(migrations_dir)
+                        migration_status["applied_count"] = len(all_migrations) - len(pending)
+                        migration_status["pending_count"] = len(pending)
+                        migration_status["pending_list"] = [
+                            {"version": m["version"], "name": m["name"]}
+                            for m in pending
+                        ]
+                    else:
+                        # No migrations directory - check DB for applied count
+                        if has_migrations_table:
+                            from g2.db.migrate import get_applied_migrations
+                            applied = get_applied_migrations(conn)
+                            migration_status["applied_count"] = len(applied)
+                        else:
+                            migration_status["applied_count"] = 0
+                        migration_status["pending_count"] = 0
+                        migration_status["pending_list"] = []
+
+                    # Check compression status
+                    try:
+                        cur.execute("""
+                            SELECT hypertable_name, compression_enabled
+                            FROM timescaledb_information.hypertables
+                            WHERE hypertable_name IN ('stock_ohlcv', 'computed_features');
+                        """)
+                        compression_info = cur.fetchall()
+                        if compression_info:
+                            enabled_count = sum(1 for _, enabled in compression_info if enabled)
+                            migration_status["compression_status"] = f"{enabled_count}/{len(compression_info)} hypertables"
+                        else:
+                            migration_status["compression_status"] = "no hypertables"
+                    except Exception:
+                        migration_status["compression_status"] = "unavailable"
+
+                except Exception as e:
+                    migration_status["error"] = str(e)
+
+                health["migrations"] = migration_status
+
     except Exception as exc:
         emit_error(f"DB health failed: {exc}", json_output=json_output)
         return
 
-    emit("DB health", data=health, json_output=json_output)
+    # Enhanced output
+    if not json_output:
+        emit("Database Health Report:")
+        emit(f"  Connections: {health.get('available_connections', 'unknown')}")
+
+        tables = health.get("tables", {})
+        for table, exists in tables.items():
+            status = "✓" if exists else "✗"
+            emit(f"  Table {table}: {status}")
+
+        migrations = health.get("migrations", {})
+        if migrations:
+            applied = migrations.get("applied_count", 0)
+            pending = migrations.get("pending_count", 0)
+            emit(f"  Applied migrations: {applied}")
+
+            if pending > 0:
+                emit(f"  ⚠️  Pending migrations: {pending}")
+                for m in migrations.get("pending_list", []):
+                    emit(f"      - {m['version']}_{m['name']}")
+                emit("  Run 'g2 db-migrate' to apply pending migrations")
+            else:
+                emit(f"  ✓ Pending migrations: 0")
+
+            compression = migrations.get("compression_status", "unknown")
+            emit(f"  Compression: {compression}")
+
+        emit("", data=health, json_output=False)
+    else:
+        emit("DB health", data=health, json_output=json_output)
 
 
 def _span_check_impl(
@@ -1840,9 +1951,12 @@ def db_init(
         # Check results in JSON format
         g2 db-init --json
     """
-    import subprocess
-    import sys
+    with create_span("cli.db-init"):
+        _db_init_impl(db_url, json_output)
 
+
+def _db_init_impl(db_url, json_output):
+    """Implementation of db-init (separated for tracing)."""
     url = _db_url(db_url)
 
     # Find the schema.sql file relative to the package
@@ -1859,46 +1973,29 @@ def db_init(
         return
 
     try:
-        # Read the schema file content
-        with open(schema_path, 'r') as f:
-            schema_sql = f.read()
-
-        # Parse the database URL to get connection parameters
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-
-        # Build psql command (use stdin instead of -f to avoid snap confinement issues)
-        env = os.environ.copy()
-        if parsed.password:
-            env['PGPASSWORD'] = parsed.password
-
-        cmd = [
-            'psql',
-            '-h', parsed.hostname or 'localhost',
-            '-p', str(parsed.port or 5432),
-            '-U', parsed.username or 'postgres',
-            '-d', parsed.path.lstrip('/') if parsed.path else 'postgres'
-        ]
-
         if not json_output:
             emit("Initializing database schema...")
 
-        # Pipe schema SQL via stdin (works with snap-confined psql)
-        result = subprocess.run(
-            cmd,
-            input=schema_sql,
-            env=env,
-            capture_output=True,
-            text=True
-        )
+        # Read and execute schema SQL via psycopg (provides trace visibility)
+        schema_sql = schema_path.read_text()
 
-        if result.returncode != 0:
-            emit_error(
-                f"Database initialization failed: {result.stderr}",
-                json_output=json_output,
-                data={"stderr": result.stderr, "stdout": result.stdout}
-            )
-            return
+        # Filter out psql meta-commands (same pattern as migration system)
+        lines = schema_sql.split('\n')
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip psql meta-commands (lines starting with \)
+            if stripped.startswith('\\'):
+                continue
+            filtered_lines.append(line)
+
+        filtered_sql = '\n'.join(filtered_lines)
+
+        # Execute schema SQL via psycopg connection (enables proper tracing)
+        with db_connection(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(filtered_sql)
+            conn.commit()
 
         emit(
             "Database initialized successfully",
@@ -1937,6 +2034,12 @@ def db_migrate(
         # Use custom migrations directory
         g2 db-migrate --migrations-dir /path/to/migrations
     """
+    with create_span("cli.db-migrate", dry_run=dry_run):
+        _db_migrate_impl(db_url, migrations_dir, dry_run, json_output)
+
+
+def _db_migrate_impl(db_url, migrations_dir, dry_run, json_output):
+    """Implementation of db-migrate (separated for tracing)."""
     from g2.db.migrate import run_migrations
     from pathlib import Path as PathLib
     import g2
@@ -2006,6 +2109,16 @@ def db_tune(
     Apply Timescale tuning: set chunk intervals and optional compression policies.
     Safe to re-run; ignores missing tables.
     """
+    with create_span(
+        "cli.db-tune",
+        chunk_days=chunk_days,
+        compress_after_days=compress_after_days,
+    ):
+        _db_tune_impl(db_url, chunk_days, compress_after_days, show_chunk_ranges, json_output)
+
+
+def _db_tune_impl(db_url, chunk_days, compress_after_days, show_chunk_ranges, json_output):
+    """Implementation of db-tune (separated for tracing)."""
     from g2.utils.timescale import get_chunk_date_range
 
     url = _db_url(db_url)
@@ -3003,7 +3116,25 @@ def _features_compute_impl(
                     prev_resource_errors = reporter.resource_errors
 
                     with ThreadPoolExecutor(max_workers=current_workers) as executor:
-                        futures = {executor.submit(process_stock, sym): sym for sym in batch_symbols}
+                        # Capture context for propagation to worker threads
+                        from g2.observability import is_enabled
+                        if is_enabled():
+                            from opentelemetry import context as otel_context
+                            worker_ctx = otel_context.get_current()
+
+                            def make_process_stock_with_context(symbol):
+                                """Create context-aware wrapper for process_stock."""
+                                def worker_with_context():
+                                    token = otel_context.attach(worker_ctx)
+                                    try:
+                                        return process_stock(symbol)
+                                    finally:
+                                        otel_context.detach(token)
+                                return worker_with_context
+
+                            futures = {executor.submit(make_process_stock_with_context(sym)): sym for sym in batch_symbols}
+                        else:
+                            futures = {executor.submit(process_stock, sym): sym for sym in batch_symbols}
 
                         for future in as_completed(futures):
                             result = future.result()
@@ -3179,6 +3310,30 @@ def _update_all_impl(
         refresh=refresh,
         timeframe=timeframe,
     )
+
+    # Check for pending migrations before running data operations
+    from g2.db.migrate import check_pending_migrations
+    from pathlib import Path as PathLib
+    import g2
+    try:
+        package_dir = PathLib(g2.__file__).parent.parent.parent
+        migrations_dir = package_dir / "sql" / "migrations"
+
+        if migrations_dir.exists():
+            with db_connection(url) as conn:
+                pending = check_pending_migrations(conn, migrations_dir)
+                if pending:
+                    warning_msg = f"⚠️  Warning: {len(pending)} pending migration(s) detected. Database schema may be out of sync."
+                    if not json_output:
+                        emit(warning_msg)
+                        for m in pending:
+                            emit(f"  - {m['version']}_{m['name']}")
+                        emit("  Run 'g2 db-migrate' to apply migrations before proceeding.")
+                        emit("")
+                    set_attributes(main_span, pending_migrations=len(pending), migrations_warning=True)
+    except Exception:
+        # Don't fail data-update if migration check fails
+        pass
 
     # Resolve universe
     symbols: List[str] = []
