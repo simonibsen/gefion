@@ -3859,37 +3859,53 @@ def mcp_setup(
         if api_key:
             mcp_config["mcpServers"]["g2"]["env"]["ALPHAVANTAGE_API_KEY"] = api_key
 
-        # Check if config file exists
+        # Check if config file exists and load it
         existing_config = {}
+        config_unchanged = False
         if config_file.exists():
-            if not force:
-                with open(config_file, 'r') as f:
-                    existing_config = json.load(f)
+            with open(config_file, 'r') as f:
+                existing_config = json.load(f)
 
-                # Check if g2 server already configured
-                if "mcpServers" in existing_config and "g2" in existing_config.get("mcpServers", {}):
+            # Check if g2 server already configured
+            if "mcpServers" in existing_config and "g2" in existing_config.get("mcpServers", {}):
+                existing_g2_config = existing_config["mcpServers"]["g2"]
+
+                # Check if the configuration matches what we would set
+                expected_config = {
+                    "command": python_path,
+                    "args": [str(server_path)],
+                    "env": {"DATABASE_URL": db_url}
+                }
+                if api_key:
+                    expected_config["env"]["ALPHAVANTAGE_API_KEY"] = api_key
+
+                # Compare configurations (ignoring key order)
+                if (existing_g2_config.get("command") == expected_config["command"] and
+                    existing_g2_config.get("args") == expected_config["args"] and
+                    existing_g2_config.get("env", {}) == expected_config["env"]):
+                    # Configuration is already correct - idempotent success
+                    config_unchanged = True
+                elif not force:
                     emit_error(
-                        f"MCP server already configured in {config_file}. "
+                        f"MCP server already configured in {config_file} with different settings. "
                         "Use --force to overwrite.",
                         json_output=json_output
                     )
                     raise typer.Exit(1)
-            else:
-                # Load existing config to merge
-                with open(config_file, 'r') as f:
-                    existing_config = json.load(f)
 
-        # Merge configurations
-        if not existing_config.get("mcpServers"):
-            existing_config["mcpServers"] = {}
-        existing_config["mcpServers"]["g2"] = mcp_config["mcpServers"]["g2"]
+        # Only write if config changed or doesn't exist
+        if not config_unchanged:
+            # Merge configurations
+            if not existing_config.get("mcpServers"):
+                existing_config["mcpServers"] = {}
+            existing_config["mcpServers"]["g2"] = mcp_config["mcpServers"]["g2"]
 
-        # Create config directory if it doesn't exist
-        config_dir.mkdir(parents=True, exist_ok=True)
+            # Create config directory if it doesn't exist
+            config_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write configuration
-        with open(config_file, 'w') as f:
-            json.dump(existing_config, f, indent=2)
+            # Write configuration
+            with open(config_file, 'w') as f:
+                json.dump(existing_config, f, indent=2)
 
         result = {
             "config_file": str(config_file),
@@ -3897,13 +3913,17 @@ def mcp_setup(
             "python_path": python_path,
             "database_url": db_url,
             "api_key_set": bool(api_key),
+            "config_unchanged": config_unchanged,
         }
 
         if json_output:
             emit("MCP Setup Complete", data=result, json_output=True)
         else:
             console = Console()
-            console.print("\n[bold green]✓ MCP Server Configuration Complete[/bold green]\n")
+            if config_unchanged:
+                console.print("\n[bold green]✓ MCP Server Configuration Already Up-to-Date[/bold green]\n")
+            else:
+                console.print("\n[bold green]✓ MCP Server Configuration Complete[/bold green]\n")
             console.print(f"Config file: [cyan]{config_file}[/cyan]")
             console.print(f"Server path: [cyan]{server_path}[/cyan]")
             console.print(f"Python: [cyan]{python_path}[/cyan]")
@@ -3912,10 +3932,14 @@ def mcp_setup(
                 console.print(f"API Key: [green]✓ Set[/green]")
             else:
                 console.print(f"API Key: [yellow]⚠ Not set (optional)[/yellow]")
-            console.print("\n[bold]Next steps:[/bold]")
-            console.print("1. Restart your AI assistant application")
-            console.print("2. The 'g2' MCP server should now be available")
-            console.print("\n[dim]To update this config later, run: g2 mcp-setup --force[/dim]")
+
+            if not config_unchanged:
+                console.print("\n[bold]Next steps:[/bold]")
+                console.print("1. Restart your AI assistant application")
+                console.print("2. The 'g2' MCP server should now be available")
+            else:
+                console.print("\n[dim]Configuration is already correct. No changes needed.[/dim]")
+            console.print("\n[dim]To update this config, run: g2 mcp-setup --force[/dim]")
 
     except typer.Exit:
         raise
