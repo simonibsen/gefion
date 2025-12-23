@@ -217,7 +217,7 @@ def ingest_prices_for_symbols(
             # Note: Bulk filtering moved to CLI layer for better performance
             # (filters once for all symbols instead of once per 50-symbol chunk)
     # Bounded queue prevents memory exhaustion when fetchers outpace writers
-    work_queue: queue.Queue[Tuple[str, list, str]] = queue.Queue(maxsize=200)
+    work_queue: queue.Queue[Tuple[str, int, list, str]] = queue.Queue(maxsize=200)
     writer_done = object()
     latest_cache: dict[str, int] = {}
 
@@ -266,7 +266,7 @@ def ingest_prices_for_symbols(
                     progress.step_done(sym, error=False, meta={"inserted": 0, "reason": "no change", "outputsize": "skip"})
                 return
             latest_cache[cache_key] = api_latest
-            work_queue.put((sym, rows, outputsize))
+            work_queue.put((sym, data_id, rows, outputsize))
             nonlocal fetch_count
             fetch_count += 1
             if progress:
@@ -283,7 +283,7 @@ def ingest_prices_for_symbols(
                 item = work_queue.get()
                 if item is writer_done:
                     break
-                sym, rows, outputsize = item
+                sym, data_id, rows, outputsize = item
                 try:
                     retries = 0
                     backoff = 0.1
@@ -296,9 +296,7 @@ def ingest_prices_for_symbols(
                     ) as write_span:
                         while True:
                             try:
-                                # upsert_stock can also encounter deadlocks with parallel writers,
-                                # so include it in the retry loop
-                                data_id = upsert_stock(conn, sym, status=status)
+                                # data_id already obtained by fetch_worker, no need to upsert again
                                 inserted = _batch_insert_prices(conn, data_id, rows, update_existing)
                                 break
                             except errors.DeadlockDetected:
