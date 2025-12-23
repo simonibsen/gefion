@@ -3780,6 +3780,152 @@ def backtest_run(
         raise typer.Exit(1)
 
 
+@app.command("mcp-setup")
+def mcp_setup(
+    db_url: Optional[str] = typer.Option(None, help="Database URL (default: from environment or postgresql://g2:g2pass@localhost:5432/g2)"),
+    api_key: Optional[str] = typer.Option(None, help="AlphaVantage API key (default: from environment)"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing configuration"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Configure MCP server for use with AI assistants.
+
+    This command creates or updates the MCP server configuration file for AI
+    assistants. It determines the correct paths and settings automatically.
+
+    The configuration file location depends on your platform:
+    - macOS: ~/Library/Application Support/Claude/claude_desktop_config.json
+    - Windows: %APPDATA%\\Claude\\claude_desktop_config.json
+    - Linux: ~/.config/Claude/claude_desktop_config.json
+
+    Example:
+        g2 mcp-setup
+        g2 mcp-setup --db-url postgresql://user:pass@localhost/db
+        g2 mcp-setup --force  # Overwrite existing config
+    """
+    import platform
+    import sys
+    from pathlib import Path
+
+    try:
+        # Determine config file location
+        system = platform.system()
+        if system == "Darwin":  # macOS
+            config_dir = Path.home() / "Library" / "Application Support" / "Claude"
+        elif system == "Windows":
+            config_dir = Path(os.environ.get("APPDATA", "")) / "Claude"
+        else:  # Linux
+            config_dir = Path.home() / ".config" / "Claude"
+
+        config_file = config_dir / "claude_desktop_config.json"
+
+        # Get absolute path to g2 project root
+        cli_file = Path(__file__).resolve()
+        g2_root = cli_file.parent.parent.parent
+        server_path = g2_root / "mcp-server" / "server.py"
+
+        if not server_path.exists():
+            emit_error(
+                f"MCP server not found at {server_path}. "
+                "Are you running this from the g2 project directory?",
+                json_output=json_output
+            )
+            raise typer.Exit(1)
+
+        # Get database URL
+        if not db_url:
+            db_url = os.environ.get('DATABASE_URL', 'postgresql://g2:g2pass@localhost:5432/g2')
+
+        # Get API key
+        if not api_key:
+            api_key = os.environ.get('ALPHAVANTAGE_API_KEY', '')
+
+        # Get Python interpreter path
+        python_path = sys.executable
+
+        # Prepare MCP server config
+        mcp_config = {
+            "mcpServers": {
+                "g2": {
+                    "command": python_path,
+                    "args": [str(server_path)],
+                    "env": {
+                        "DATABASE_URL": db_url,
+                    }
+                }
+            }
+        }
+
+        # Add API key if provided
+        if api_key:
+            mcp_config["mcpServers"]["g2"]["env"]["ALPHAVANTAGE_API_KEY"] = api_key
+
+        # Check if config file exists
+        existing_config = {}
+        if config_file.exists():
+            if not force:
+                with open(config_file, 'r') as f:
+                    existing_config = json.load(f)
+
+                # Check if g2 server already configured
+                if "mcpServers" in existing_config and "g2" in existing_config.get("mcpServers", {}):
+                    emit_error(
+                        f"MCP server already configured in {config_file}. "
+                        "Use --force to overwrite.",
+                        json_output=json_output
+                    )
+                    raise typer.Exit(1)
+            else:
+                # Load existing config to merge
+                with open(config_file, 'r') as f:
+                    existing_config = json.load(f)
+
+        # Merge configurations
+        if not existing_config.get("mcpServers"):
+            existing_config["mcpServers"] = {}
+        existing_config["mcpServers"]["g2"] = mcp_config["mcpServers"]["g2"]
+
+        # Create config directory if it doesn't exist
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write configuration
+        with open(config_file, 'w') as f:
+            json.dump(existing_config, f, indent=2)
+
+        result = {
+            "config_file": str(config_file),
+            "server_path": str(server_path),
+            "python_path": python_path,
+            "database_url": db_url,
+            "api_key_set": bool(api_key),
+        }
+
+        if json_output:
+            emit("MCP Setup Complete", data=result, json_output=True)
+        else:
+            console = Console()
+            console.print("\n[bold green]✓ MCP Server Configuration Complete[/bold green]\n")
+            console.print(f"Config file: [cyan]{config_file}[/cyan]")
+            console.print(f"Server path: [cyan]{server_path}[/cyan]")
+            console.print(f"Python: [cyan]{python_path}[/cyan]")
+            console.print(f"Database: [cyan]{db_url}[/cyan]")
+            if api_key:
+                console.print(f"API Key: [green]✓ Set[/green]")
+            else:
+                console.print(f"API Key: [yellow]⚠ Not set (optional)[/yellow]")
+            console.print("\n[bold]Next steps:[/bold]")
+            console.print("1. Restart your AI assistant application")
+            console.print("2. The 'g2' MCP server should now be available")
+            console.print("\n[dim]To update this config later, run: g2 mcp-setup --force[/dim]")
+
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        emit_error(f"Setup failed: {exc}", json_output=json_output)
+        raise typer.Exit(1)
+
+
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
     import atexit
     # Register shutdown handler to flush traces on exit
