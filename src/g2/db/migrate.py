@@ -332,6 +332,26 @@ def apply_migration(conn: Connection, migration: dict) -> None:
     )
 
 
+def check_pending_migrations(conn: Connection, migrations_dir) -> list[dict]:
+    """
+    Check for pending migrations without applying them.
+
+    Args:
+        conn: Database connection
+        migrations_dir: Path to migrations directory
+
+    Returns:
+        List of pending migration dicts (empty if none pending)
+    """
+    try:
+        all_migrations = scan_migration_files(migrations_dir)
+        # Note: get_pending_migrations() calls get_applied_migrations() which calls ensure_migrations_table()
+        return get_pending_migrations(conn, all_migrations)
+    except Exception:
+        # If we can't check (e.g., table doesn't exist yet), return empty
+        return []
+
+
 def run_migrations(
     conn: Connection,
     migrations_dir,
