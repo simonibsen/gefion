@@ -45,7 +45,9 @@ Claude: [Queries database and shows predictions]
 
 ## Installation
 
-### Option 1: Local Development (Recommended for getting started)
+### Quick Setup (Recommended)
+
+The easiest way to set up the MCP server:
 
 1. **Install g2 with ML dependencies:**
    ```bash
@@ -53,15 +55,47 @@ Claude: [Queries database and shows predictions]
    pip install -e ".[ml_extended]"
    ```
 
-2. **Install MCP server:**
+2. **Install MCP server dependencies:**
    ```bash
    cd mcp-server
    pip install -r requirements.txt
    ```
 
-3. **Configure Claude Desktop:**
+3. **Run the setup command:**
+   ```bash
+   g2 mcp-setup
+   ```
 
-   Edit your Claude Desktop config file:
+   This automatically:
+   - Detects your platform and config file location
+   - Finds the correct Python interpreter and server path
+   - Creates or updates your MCP configuration
+   - Uses DATABASE_URL and ALPHAVANTAGE_API_KEY from environment if set
+
+   Optional flags:
+   ```bash
+   g2 mcp-setup --db-url postgresql://user:pass@localhost/db
+   g2 mcp-setup --api-key your_api_key_here
+   g2 mcp-setup --force  # Overwrite existing configuration
+   ```
+
+4. **Start PostgreSQL:**
+   ```bash
+   cd /path/to/g2
+   docker compose up -d postgres
+   ```
+
+5. **Restart your AI assistant**
+
+   The g2 tools should now appear in the tool list.
+
+### Manual Setup
+
+If you prefer to configure manually:
+
+1. **Install dependencies** (same as quick setup steps 1-2)
+
+2. **Edit your AI assistant config file:**
    - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
    - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
    - Linux: `~/.config/Claude/claude_desktop_config.json`
@@ -82,15 +116,7 @@ Claude: [Queries database and shows predictions]
    }
    ```
 
-4. **Start PostgreSQL:**
-   ```bash
-   cd /path/to/g2
-   docker compose up -d postgres
-   ```
-
-5. **Restart Claude Desktop**
-
-   The g2 tools should now appear in Claude's tool list.
+3. **Follow steps 4-5 from Quick Setup**
 
 ### Option 2: Docker Deployment (Production)
 
