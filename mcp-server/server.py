@@ -542,6 +542,41 @@ async def list_tools() -> List[Tool]:
                 "required": ["trace_id_before", "trace_id_after"],
             },
         ),
+
+        # Infrastructure Tools
+        Tool(
+            name="health_check",
+            description=(
+                "Check health of g2 infrastructure services (PostgreSQL, Tempo, Docker). "
+                "Returns status for each service with helpful error messages and suggestions "
+                "if services are down. Use this to: diagnose infrastructure issues, verify "
+                "services are running before operations, get docker-compose commands to start services."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "service": {
+                        "type": "string",
+                        "description": "Specific service to check (postgres, tempo, docker) or omit to check all",
+                        "enum": ["postgres", "tempo", "docker"]
+                    },
+                },
+            },
+        ),
+
+        Tool(
+            name="docker_status",
+            description=(
+                "Check status of docker compose services. "
+                "Returns list of running containers with health status, ports, and uptime. "
+                "Use this to: see which containers are running, check container health, "
+                "view port mappings, diagnose container issues."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
     ]
 
 
@@ -580,6 +615,10 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _trace_detail(arguments)
         elif name == "trace_compare":
             result = await _trace_compare(arguments)
+        elif name == "health_check":
+            result = await _health_check(arguments)
+        elif name == "docker_status":
+            result = await _docker_status(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -1365,6 +1404,90 @@ async def _trace_compare(args: Dict[str, Any]) -> Dict[str, Any]:
         },
         'focused_spans': span_comparisons if span_comparisons else None
     }
+
+
+async def _health_check(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Check health of infrastructure services."""
+    service = args.get('service')
+
+    if service:
+        # Check specific service
+        cmd = ['health', '--service', service]
+    else:
+        # Check all services
+        cmd = ['health']
+
+    return await executor.run(*cmd)
+
+
+async def _docker_status(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Check docker compose services status."""
+    try:
+        result = subprocess.run(
+            ['docker', 'compose', 'ps', '--format', 'json'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode != 0:
+            return {
+                'success': False,
+                'error': result.stderr or result.stdout,
+                'suggestion': 'Check if Docker is running:\n  docker --version\n\nOr start services:\n  docker compose up -d'
+            }
+
+        # Parse JSON output
+        try:
+            containers = []
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    container = json.loads(line)
+                    containers.append({
+                        'name': container.get('Name'),
+                        'service': container.get('Service'),
+                        'state': container.get('State'),
+                        'status': container.get('Status'),
+                        'health': container.get('Health', 'N/A'),
+                        'ports': container.get('Publishers', [])
+                    })
+
+            return {
+                'success': True,
+                'containers': containers,
+                'count': len(containers)
+            }
+        except json.JSONDecodeError:
+            # Fallback to plain text output
+            result_plain = subprocess.run(
+                ['docker', 'compose', 'ps'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            return {
+                'success': True,
+                'output': result_plain.stdout,
+                'note': 'Plain text output (JSON parsing failed)'
+            }
+
+    except FileNotFoundError:
+        return {
+            'success': False,
+            'error': 'Docker not found',
+            'suggestion': 'Install Docker:\n  https://docs.docker.com/get-docker/'
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            'success': False,
+            'error': 'Docker command timed out',
+            'suggestion': 'Docker may be unresponsive. Check Docker Desktop or daemon.'
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
 
 
 # ============================================================================

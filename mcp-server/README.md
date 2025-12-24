@@ -43,6 +43,10 @@ Claude: [Queries database and shows predictions]
 - `trace_detail` - Get detailed trace information for a specific trace ID
 - `trace_compare` - Compare two traces to quantify performance improvements
 
+### Infrastructure Tools
+- `health_check` - Check health of g2 infrastructure services (PostgreSQL, Tempo, Docker) with helpful error messages
+- `docker_status` - Check docker compose services status, health, ports, and uptime
+
 ## Service Health Checks
 
 The MCP server automatically checks required services before executing tools and provides helpful error messages if services are down.

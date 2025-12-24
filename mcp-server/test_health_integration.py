@@ -158,3 +158,47 @@ class TestMCPHealthIntegration:
 
         # Verify overhead is minimal
         assert cached_duration < first_duration / 5  # At least 5x faster when cached
+
+
+class TestHealthCheckTool:
+    """Tests for health_check MCP tool."""
+
+    def test_health_check_tool_returns_all_services(self):
+        """Test that health_check tool returns status for all services."""
+        # This test defines expected behavior for the health_check MCP tool
+        # Expected: Returns Docker, PostgreSQL, and Tempo health status
+        pass  # Will implement after adding tool
+
+    def test_health_check_tool_with_service_filter(self):
+        """Test health_check with specific service filter."""
+        # Expected: Can check just postgres, tempo, or docker individually
+        pass
+
+    def test_health_check_tool_returns_json_format(self):
+        """Test that health_check returns properly formatted JSON."""
+        # Expected: Returns {"status": "ok", "services": {...}}
+        pass
+
+
+class TestDockerStatusTool:
+    """Tests for docker_status MCP tool."""
+
+    def test_docker_status_lists_running_containers(self):
+        """Test that docker_status shows running containers."""
+        # Expected: Lists containers from docker compose ps
+        pass
+
+    def test_docker_status_shows_health_status(self):
+        """Test that container health status is included."""
+        # Expected: Shows healthy/unhealthy for containers with healthchecks
+        pass
+
+    def test_docker_status_handles_no_containers(self):
+        """Test docker_status when no containers are running."""
+        # Expected: Returns empty list or helpful message
+        pass
+
+    def test_docker_status_includes_port_mappings(self):
+        """Test that port mappings are shown."""
+        # Expected: Shows port forwards like "6432->5432/tcp"
+        pass
