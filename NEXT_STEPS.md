@@ -1039,7 +1039,72 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ---
 
-### 24. Generic Feature Architecture (Foundation Refactoring) ✅ COMPLETE
+### 24. MCP Developer Experience
+
+**Status**: Planned
+**Priority**: Medium (developer productivity)
+**Effort**: 1-2 weeks
+
+**Context**: MCP server currently requires external client (Claude Desktop, Claude Code). No standalone mode or CLI integration. Discovered when manually assembling system status instead of using existing `system_status` MCP tool.
+
+**Problem**:
+- MCP tools not accessible during CLI-based development
+- No way to test MCP tools without configuring external client
+- Duplication: both CLI commands and MCP tools for same functionality
+- Poor developer experience: need to switch between CLI and MCP client
+
+**Action Items**:
+- [ ] **MCP Server Management**:
+  - Add `g2 mcp-server start` command (background process)
+  - Add `g2 mcp-server stop` command
+  - Add `g2 mcp-server status` command (show running status, PID)
+  - Add `g2 mcp-server logs` command (tail server logs)
+- [ ] **CLI Integration with MCP**:
+  - Add `g2 mcp-call <tool> [args]` for direct MCP tool invocation
+  - Example: `g2 mcp-call system_status`
+  - Example: `g2 mcp-call dev_status --path A`
+- [ ] **Hybrid CLI Commands**:
+  - Add `g2 system-status` CLI command (uses MCP if available, falls back to direct)
+  - Add `g2 dev-status` CLI command (uses MCP if available)
+  - Auto-detect MCP server availability
+- [ ] **MCP Tool Discovery**:
+  - Add `g2 mcp-tools list` (show all available MCP tools)
+  - Add `g2 mcp-tools info <tool>` (show tool schema and description)
+  - Add `g2 mcp-tools test <tool>` (test tool execution)
+- [ ] **Development Workflow Integration**:
+  - Add MCP server setup to DEVELOPMENT.md
+  - Add optional post-checkout hook (remind to start MCP server)
+  - Add `g2 health` check for MCP server status
+- [ ] **Built-in MCP Client**:
+  - Create `src/g2/mcp_client.py` (stdio-based MCP client)
+  - Handle server lifecycle (start/stop/restart)
+  - Connection management and error handling
+
+**Files to create/modify**:
+- `src/g2/cli.py` (add mcp-server, mcp-call, system-status, dev-status commands)
+- `src/g2/mcp_client.py` (new - built-in MCP client)
+- `src/g2/mcp_server_manager.py` (new - server process management)
+- `DEVELOPMENT.md` (add MCP server to workflow)
+- `docs/MCP_DEVELOPER_GUIDE.md` (new - comprehensive MCP development guide)
+- `.git/hooks/post-checkout` (optional - MCP reminder)
+
+**Success Criteria**:
+- Can start/stop MCP server via CLI
+- Can call MCP tools without external client
+- MCP tools accessible during development
+- Clear error messages when MCP unavailable
+- Documentation for MCP development workflow
+
+**Benefits**:
+- Improved developer productivity
+- Easier MCP tool testing and debugging
+- Unified interface (CLI + MCP)
+- Better error handling and diagnostics
+- Self-service MCP setup
+
+---
+
+### 25. Generic Feature Architecture (Foundation Refactoring) ✅ COMPLETE
 
 **Status**: Complete (2025-12-21)
 **Priority**: Critical (architectural foundation)
@@ -1351,7 +1416,9 @@ feature_definitions → dispatcher → compute_features() → plugins
 2. Optimize performance #20 - 2 weeks
 3. Set up CI/CD #21 - 1 week
 4. Write documentation #22 - 2 weeks
-5. **Milestone**: Production-ready infrastructure
+5. Testing & QA #23 - 2-3 weeks
+6. MCP developer experience #24 - 1-2 weeks (optional, improves DX)
+7. **Milestone**: Production-ready infrastructure
 
 ### Recommended Sequence:
 If uncertain, follow this order:
@@ -1376,12 +1443,22 @@ Update this section as items are completed:
 - ✅ Error messages & CLI help
 
 **Completed** (2025-12-21):
-- ✅ Generic Feature Architecture (#24) - All 5 phases complete
+- ✅ Generic Feature Architecture (#25) - All 5 phases complete
   - Schema migration for plural source columns
   - Generic meta-function implementation
   - Plugin migration
   - Deleted 681 lines of type-specific code
   - 13 new tests, all passing
+
+**Completed** (2025-12-24):
+- ✅ Development roadmap tool (dev_status MCP tool)
+  - Parses DEVELOPMENT.md, NEXT_STEPS.md, PROGRESS.md
+  - Provides intelligent next-step suggestions
+  - Filters by path (A/B/C), status, priority
+  - Identifies quick wins
+- ✅ MCP Developer Experience (#24) added to roadmap
+  - Identified gap: MCP tools not accessible during CLI development
+  - Proposed CLI integration and standalone MCP client
 
 **In Progress**: None
 
