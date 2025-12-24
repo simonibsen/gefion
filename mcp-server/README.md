@@ -52,6 +52,14 @@ Claude: [Queries database and shows predictions]
   * Prioritized issues (critical/high/medium/low)
   * Actionable suggestions with exact commands
   * Ordered next steps workflow
+- **`dev_status`** - **Development roadmap and next steps guidance**
+  * Parses DEVELOPMENT.md, NEXT_STEPS.md, PROGRESS.md
+  * Current development phase identification
+  * Completed/in-progress/planned items tracking
+  * Strategic path options (Trading-First/ML-First/Scale-First)
+  * Ready-to-start tasks with prerequisites met
+  * Development rules reminders (TDD, commit format)
+  * Quick wins identification (high priority, low effort)
 - `health_check` - Quick infrastructure health check only (use system_status for full picture)
 - `docker_status` - Docker-specific status check (use system_status for full picture)
 
@@ -110,6 +118,82 @@ The `system_status` tool provides comprehensive analysis with actionable suggest
 - "Is my data current?" → Analyzes staleness
 - "Why aren't predictions working?" → Identifies missing components
 - "How do I get started?" → Guides through setup
+
+## Development Roadmap Guidance
+
+The `dev_status` tool analyzes development documentation to provide roadmap guidance:
+
+**Example Output:**
+```json
+{
+  "success": true,
+  "current_phase": "Strategic Direction Choice (Path A/B/C)",
+  "development_rules": {
+    "tdd_required": true,
+    "commit_format": "conventional commits",
+    "test_minimum": 488,
+    "no_ai_attribution": true
+  },
+  "completed_items": [
+    {
+      "number": 1,
+      "title": "Fix Trim Command Behavior",
+      "status": "completed",
+      "priority": "high",
+      "effort": "2-3 days"
+    }
+  ],
+  "in_progress_items": [],
+  "planned_items": [
+    {
+      "number": 13,
+      "title": "Strategy Comparison Framework",
+      "status": "planned",
+      "priority": "medium",
+      "effort": "1-2 weeks",
+      "path": "A"
+    }
+  ],
+  "strategic_paths": {
+    "A": {
+      "name": "Trading-First (Production Trading Platform)",
+      "goal": "Ship a complete, production-ready trading platform",
+      "timeline": "6-8 weeks",
+      "best_for": "Users who want to make real trading decisions"
+    }
+  },
+  "recommended_next_steps": [
+    {
+      "item": "#13",
+      "title": "Strategy Comparison Framework",
+      "priority": "medium",
+      "effort": "1-2 weeks",
+      "path": "A"
+    }
+  ],
+  "quick_wins": [
+    {
+      "number": 15,
+      "title": "Parquet Dataset Format",
+      "priority": "high",
+      "effort": "1 week"
+    }
+  ]
+}
+```
+
+**Use Cases:**
+- "What should I work on next?" → Shows prioritized tasks
+- "Am I ready for Item #13?" → Check prerequisites (implicit via status)
+- "Show high-priority tasks" → Filter by priority
+- "What's left in Path A?" → Filter by strategic path
+- "What are quick wins?" → High priority, low effort items
+- "What are the TDD requirements?" → Development rules reminder
+
+**Filters Available:**
+- `path`: A (Trading), B (ML), C (Scale)
+- `status`: completed, in_progress, planned
+- `priority`: high, medium, low
 
 ## Service Health Checks
 

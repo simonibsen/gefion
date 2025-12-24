@@ -592,6 +592,38 @@ async def list_tools() -> List[Tool]:
                 "properties": {},
             },
         ),
+
+        Tool(
+            name="dev_status",
+            description=(
+                "Analyze development roadmap and suggest next steps. "
+                "Parses DEVELOPMENT.md, NEXT_STEPS.md, and PROGRESS.md to provide: "
+                "current phase, completed items, in-progress work, strategic path options (Trading/ML/Scale), "
+                "ready-to-start tasks with prerequisites met, effort estimates, and development rules. "
+                "Use this to: plan what to work on next, understand project status, identify quick wins, "
+                "check if prerequisites are met for a task, get reminded of TDD/commit requirements."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Filter by strategic path (A: Trading-First, B: ML-First, C: Scale-First)",
+                        "enum": ["A", "B", "C"]
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by completion status",
+                        "enum": ["completed", "in_progress", "planned"]
+                    },
+                    "priority": {
+                        "type": "string",
+                        "description": "Filter by priority level",
+                        "enum": ["high", "medium", "low"]
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -636,6 +668,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _health_check(arguments)
         elif name == "docker_status":
             result = await _docker_status(arguments)
+        elif name == "dev_status":
+            result = await _dev_status(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -1688,6 +1722,209 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
     status_result["summary"] = f"{len(sorted_issues)} issue(s) found" if sorted_issues else "All systems operational"
 
     return status_result
+
+
+async def _dev_status(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Analyze development roadmap and suggest next steps."""
+    import re
+
+    # Filters from arguments
+    path_filter = args.get('path')  # A, B, or C
+    status_filter = args.get('status')  # completed, in_progress, planned
+    priority_filter = args.get('priority')  # high, medium, low
+
+    dev_status_result = {
+        "success": True,
+        "current_phase": None,
+        "development_rules": {},
+        "completed_items": [],
+        "in_progress_items": [],
+        "planned_items": [],
+        "strategic_paths": {},
+        "recommended_next_steps": [],
+        "quick_wins": [],
+    }
+
+    # Read documentation files
+    base_path = Path(".")
+
+    # Parse DEVELOPMENT.md
+    dev_md_path = base_path / "DEVELOPMENT.md"
+    if dev_md_path.exists():
+        try:
+            dev_content = dev_md_path.read_text()
+
+            # Extract development rules
+            dev_status_result["development_rules"] = {
+                "tdd_required": "Write tests FIRST" in dev_content,
+                "commit_format": "conventional commits",
+                "test_minimum": 488 if "488 tests passing" in dev_content else None,
+                "no_ai_attribution": "NEVER mention AI tools" in dev_content,
+            }
+        except Exception as e:
+            dev_status_result["development_rules"]["error"] = f"Failed to parse DEVELOPMENT.md: {e}"
+
+    # Parse NEXT_STEPS.md
+    next_steps_path = base_path / "NEXT_STEPS.md"
+    if next_steps_path.exists():
+        try:
+            next_steps_content = next_steps_path.read_text()
+
+            # Extract current phase
+            phase_match = re.search(r'\*\*Next Up\*\*:\s*(.+)', next_steps_content)
+            if phase_match:
+                dev_status_result["current_phase"] = phase_match.group(1).strip()
+            elif "Strategic Direction" in next_steps_content or "Choose strategic path" in next_steps_content:
+                dev_status_result["current_phase"] = "Strategic Direction Choice (Path A/B/C)"
+
+            # Parse items with regex patterns
+            # Pattern: ### N. Title\n**Status**: ✅ Complete / In Progress / Planned
+            item_pattern = r'###\s+(\d+)\.\s+(.+?)\n.*?\*\*Status\*\*:\s*(.*?)\n.*?\*\*Priority\*\*:\s*(.*?)\n.*?\*\*Effort\*\*:\s*(.*?)(?:\n|$)'
+
+            items = []
+
+            # Find all items (numbered sections)
+            for match in re.finditer(r'###\s+(\d+)\.\s+(.+?)(?=\n\n|\n###|$)', next_steps_content, re.DOTALL):
+                item_num = match.group(1)
+                item_text = match.group(2)
+
+                # Extract title (first line)
+                title_match = re.match(r'(.+?)(?:\n|$)', item_text)
+                title = title_match.group(1).strip() if title_match else f"Item #{item_num}"
+
+                # Extract status
+                status = "planned"
+                if "✅ Complete" in item_text or "Status**: ✅" in item_text:
+                    status = "completed"
+                elif "In Progress" in item_text:
+                    status = "in_progress"
+
+                # Extract priority
+                priority_match = re.search(r'\*\*Priority\*\*:\s*(\w+)', item_text)
+                priority = priority_match.group(1).lower() if priority_match else None
+
+                # Extract effort
+                effort_match = re.search(r'\*\*Effort\*\*:\s*(.+?)(?:\n|$)', item_text)
+                effort = effort_match.group(1).strip() if effort_match else None
+
+                # Extract path (A/B/C)
+                path = None
+                if "Path A:" in item_text or "Trading-First" in item_text:
+                    path = "A"
+                elif "Path B:" in item_text or "ML-First" in item_text:
+                    path = "B"
+                elif "Path C:" in item_text or "Scale-First" in item_text:
+                    path = "C"
+
+                # Extract files to create/modify
+                files_to_create = []
+                files_match = re.search(r'\*\*Files (?:created|to create)\*\*:(.+?)(?:\n\n|\*\*)', item_text, re.DOTALL)
+                if files_match:
+                    for line in files_match.group(1).split('\n'):
+                        line = line.strip()
+                        if line.startswith('- '):
+                            files_to_create.append(line[2:].strip())
+
+                item_data = {
+                    "number": int(item_num),
+                    "title": title,
+                    "status": status,
+                    "priority": priority,
+                    "effort": effort,
+                    "path": path,
+                    "files_to_create": files_to_create if files_to_create else None,
+                }
+
+                # Apply filters
+                if status_filter and status != status_filter:
+                    continue
+                if priority_filter and priority != priority_filter:
+                    continue
+                if path_filter and path != path_filter:
+                    continue
+
+                # Categorize
+                if status == "completed":
+                    dev_status_result["completed_items"].append(item_data)
+                elif status == "in_progress":
+                    dev_status_result["in_progress_items"].append(item_data)
+                else:
+                    dev_status_result["planned_items"].append(item_data)
+
+                # Identify quick wins (high priority, low effort)
+                if priority == "high" and effort and ("1 week" in effort or "days" in effort):
+                    dev_status_result["quick_wins"].append(item_data)
+
+                items.append(item_data)
+
+            # Parse strategic paths
+            paths_section = re.search(r'## Strategic Direction: Three Paths Forward(.+?)(?=\n##|\Z)', next_steps_content, re.DOTALL)
+            if paths_section:
+                paths_text = paths_section.group(1)
+
+                # Path A
+                path_a = re.search(r'## Path A: (.+?)\n\n\*\*Goal\*\*:\s*(.+?)\n.*?\*\*Timeline\*\*:\s*(.+?)\n.*?\*\*Best For\*\*:\s*(.+?)\n', paths_text, re.DOTALL)
+                if path_a:
+                    dev_status_result["strategic_paths"]["A"] = {
+                        "name": path_a.group(1).strip(),
+                        "goal": path_a.group(2).strip(),
+                        "timeline": path_a.group(3).strip(),
+                        "best_for": path_a.group(4).strip(),
+                    }
+
+                # Path B
+                path_b = re.search(r'## Path B: (.+?)\n\n\*\*Goal\*\*:\s*(.+?)\n.*?\*\*Timeline\*\*:\s*(.+?)\n.*?\*\*Best For\*\*:\s*(.+?)\n', paths_text, re.DOTALL)
+                if path_b:
+                    dev_status_result["strategic_paths"]["B"] = {
+                        "name": path_b.group(1).strip(),
+                        "goal": path_b.group(2).strip(),
+                        "timeline": path_b.group(3).strip(),
+                        "best_for": path_b.group(4).strip(),
+                    }
+
+                # Path C
+                path_c = re.search(r'## Path C: (.+?)\n\n\*\*Goal\*\*:\s*(.+?)\n.*?\*\*Timeline\*\*:\s*(.+?)\n.*?\*\*Best For\*\*:\s*(.+?)\n', paths_text, re.DOTALL)
+                if path_c:
+                    dev_status_result["strategic_paths"]["C"] = {
+                        "name": path_c.group(1).strip(),
+                        "goal": path_c.group(2).strip(),
+                        "timeline": path_c.group(3).strip(),
+                        "best_for": path_c.group(4).strip(),
+                    }
+
+            # Recommend next steps (planned items with no dependencies)
+            for item in dev_status_result["planned_items"][:5]:  # Top 5
+                recommendation = {
+                    "item": f"#{item['number']}",
+                    "title": item["title"],
+                    "priority": item["priority"],
+                    "effort": item["effort"],
+                    "path": item["path"],
+                }
+                dev_status_result["recommended_next_steps"].append(recommendation)
+
+        except Exception as e:
+            dev_status_result["error"] = f"Failed to parse NEXT_STEPS.md: {e}"
+    else:
+        dev_status_result["error"] = "NEXT_STEPS.md not found"
+
+    # Parse PROGRESS.md for recent changes
+    progress_path = base_path / "PROGRESS.md"
+    if progress_path.exists():
+        try:
+            progress_content = progress_path.read_text()
+
+            # Extract recent changes (latest heading with date)
+            recent_match = re.search(r'###\s+(.+?202\d.*?)\n\n(.+?)(?=\n###|\Z)', progress_content, re.DOTALL)
+            if recent_match:
+                dev_status_result["recent_changes"] = {
+                    "date": recent_match.group(1).strip(),
+                    "summary": recent_match.group(2).strip()[:500] + "..." if len(recent_match.group(2)) > 500 else recent_match.group(2).strip(),
+                }
+        except Exception as e:
+            dev_status_result["progress_error"] = f"Failed to parse PROGRESS.md: {e}"
+
+    return dev_status_result
 
 
 async def _health_check(args: Dict[str, Any]) -> Dict[str, Any]:
