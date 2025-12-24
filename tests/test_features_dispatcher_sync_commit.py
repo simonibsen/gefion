@@ -1,10 +1,34 @@
 from datetime import date
 
 from g2.features import dispatcher
+from g2.db import pool as db_pool
 
 
 def test_writer_uses_sync_commit_flag(monkeypatch):
     calls = {}
+
+    # Mock connection
+    class FakeConn:
+        def __init__(self):
+            self.autocommit = False
+        def cursor(self):
+            return self
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def execute(self, *args):
+            pass
+        def fetchone(self):
+            return None
+        def fetchall(self):
+            return []
+        def close(self):
+            pass
+        def commit(self):
+            pass
+
+    fake_conn = FakeConn()
 
     monkeypatch.setattr(dispatcher, "_fetch_feature_definitions", lambda conn, function_names=None, feature_names=None: [
         (1, "feat1", "indicator", {}, "stock_ohlcv", "close", "computed_features", "value")
@@ -22,8 +46,18 @@ def test_writer_uses_sync_commit_flag(monkeypatch):
 
     monkeypatch.setattr(dispatcher, "insert_computed_features", fake_insert)
 
+    # Mock connection pool
+    def fake_get_connection():
+        return FakeConn()
+
+    def fake_should_prepare_statements():
+        return False
+
+    monkeypatch.setattr(db_pool, "get_connection", fake_get_connection)
+    monkeypatch.setattr(db_pool, "should_prepare_statements", fake_should_prepare_statements)
+
     res = dispatcher.compute_features(
-        conn=None,
+        conn=fake_conn,
         data_id=1,
         writer_workers=1,
         sync_commit=False,
