@@ -81,7 +81,7 @@ def test_features_run_batch_size_passed(monkeypatch):
     res = runner.invoke(
         cli.app,
         [
-            "features-run",
+            "feat-compute",
             "--features",
             "indicator_adx_14",
             "--exchange",

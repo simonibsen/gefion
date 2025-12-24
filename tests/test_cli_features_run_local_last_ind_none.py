@@ -81,7 +81,7 @@ def test_features_run_local_with_last_ind_none(monkeypatch):
     res = runner.invoke(
         cli.app,
         [
-            "features-run",
+            "feat-compute",
             "--features",
             "indicator_adx_14",
             "--exchange",

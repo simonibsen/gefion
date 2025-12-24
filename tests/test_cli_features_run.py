@@ -76,7 +76,7 @@ def test_features_run_infers_symbols_and_runs(monkeypatch):
     monkeypatch.setattr(cli, "ingest_indicators_for_symbols", dummy_ingest)
     # no listings fetch needed; symbols from DB
 
-    res = runner.invoke(cli.app, ["features-run", "--features", "indicator_rsi_14", "--json"])
+    res = runner.invoke(cli.app, ["feat-compute", "--features", "indicator_rsi_14", "--json"])
     assert res.exit_code == 0
     payload = json.loads(res.stdout)
     assert payload["status"] == "ok"
@@ -90,7 +90,7 @@ def test_features_run_requires_feature_names(monkeypatch):
             pass
 
     monkeypatch.setattr(cli, "AlphaVantageClient", DummyClient)
-    res = runner.invoke(cli.app, ["features-run", "--json"])
+    res = runner.invoke(cli.app, ["feat-compute", "--json"])
     assert res.exit_code != 0
     payload = json.loads(res.stdout)
     assert payload["status"] == "error"
