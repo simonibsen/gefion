@@ -44,8 +44,65 @@ Claude: [Queries database and shows predictions]
 - `trace_compare` - Compare two traces to quantify performance improvements
 
 ### Infrastructure Tools
-- `health_check` - Check health of g2 infrastructure services (PostgreSQL, Tempo, Docker) with helpful error messages
-- `docker_status` - Check docker compose services status, health, ports, and uptime
+- **`system_status`** - **Comprehensive system status with intelligent suggestions** (use this first!)
+  * Infrastructure health (PostgreSQL, Tempo, Docker)
+  * Data freshness analysis (days since last update)
+  * Missing components detection (features, data)
+  * Prioritized issues (critical/high/medium/low)
+  * Actionable suggestions with exact commands
+  * Ordered next steps workflow
+- `health_check` - Quick infrastructure health check only (use system_status for full picture)
+- `docker_status` - Docker-specific status check (use system_status for full picture)
+
+## Intelligent System Status
+
+The `system_status` tool provides comprehensive analysis with actionable suggestions:
+
+**Example Output:**
+```json
+{
+  "status": "needs_attention",
+  "summary": "2 issue(s) found",
+  "infrastructure": {
+    "docker": {"running": true},
+    "postgres": {"running": true},
+    "tempo": {"running": true}
+  },
+  "data": {
+    "stocks": 2,
+    "ohlcv_rows": 3,
+    "latest_date": "2024-01-01",
+    "days_since_update": 358,
+    "feature_rows": 0
+  },
+  "issues": [
+    {
+      "type": "stale_data",
+      "description": "Price data is 358 days old (last: 2024-01-01)",
+      "priority": "high",
+      "command": "g2 data-update --exchange NASDAQ --limit 10"
+    },
+    {
+      "type": "no_features",
+      "description": "Features not computed (0 rows)",
+      "priority": "medium",
+      "command": "g2 feat-compute --symbols AAPL,MSFT --all-features"
+    }
+  ],
+  "next_steps": [
+    "1. Update price data: g2 data-update",
+    "2. Compute features: g2 feat-compute",
+    "3. Build ML dataset: g2 ml dataset-build",
+    "4. Train model: g2 ml train"
+  ]
+}
+```
+
+**Use Cases:**
+- "What should I do next?" → Shows ordered workflow
+- "Is my data current?" → Analyzes staleness
+- "Why aren't predictions working?" → Identifies missing components
+- "How do I get started?" → Guides through setup
 
 ## Service Health Checks
 

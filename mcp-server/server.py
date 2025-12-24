@@ -545,12 +545,28 @@ async def list_tools() -> List[Tool]:
 
         # Infrastructure Tools
         Tool(
+            name="system_status",
+            description=(
+                "Comprehensive system status check with intelligent suggestions. "
+                "Analyzes infrastructure health (PostgreSQL, Tempo, Docker), data freshness, "
+                "missing features, and provides prioritized actionable suggestions for next steps. "
+                "Use this to: get complete system overview, diagnose issues, understand what to do next, "
+                "plan workflow (data update → feature computation → ML training). "
+                "Returns: infrastructure status, data metrics, identified issues with priorities, "
+                "specific commands to run, ordered next steps."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+
+        Tool(
             name="health_check",
             description=(
-                "Check health of g2 infrastructure services (PostgreSQL, Tempo, Docker). "
-                "Returns status for each service with helpful error messages and suggestions "
-                "if services are down. Use this to: diagnose infrastructure issues, verify "
-                "services are running before operations, get docker-compose commands to start services."
+                "Quick infrastructure health check (PostgreSQL, Tempo, Docker). "
+                "For comprehensive status with suggestions, use system_status instead. "
+                "Use this for: fast targeted health check without data analysis."
             ),
             inputSchema={
                 "type": "object",
@@ -567,10 +583,9 @@ async def list_tools() -> List[Tool]:
         Tool(
             name="docker_status",
             description=(
-                "Check status of docker compose services. "
-                "Returns list of running containers with health status, ports, and uptime. "
-                "Use this to: see which containers are running, check container health, "
-                "view port mappings, diagnose container issues."
+                "Check docker compose services status. "
+                "For comprehensive status, use system_status instead. "
+                "Use this for: quick docker-specific check."
             ),
             inputSchema={
                 "type": "object",
@@ -615,6 +630,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _trace_detail(arguments)
         elif name == "trace_compare":
             result = await _trace_compare(arguments)
+        elif name == "system_status":
+            result = await _system_status(arguments)
         elif name == "health_check":
             result = await _health_check(arguments)
         elif name == "docker_status":
@@ -1404,6 +1421,191 @@ async def _trace_compare(args: Dict[str, Any]) -> Dict[str, Any]:
         },
         'focused_spans': span_comparisons if span_comparisons else None
     }
+
+
+async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Comprehensive system status with intelligent suggestions.
+
+    Analyzes:
+    - Infrastructure health (PostgreSQL, Tempo, Docker)
+    - Data freshness and completeness
+    - Missing components (features, models, etc.)
+
+    Returns:
+    - Complete status overview
+    - Prioritized issues
+    - Actionable suggestions with commands
+    - Ordered next steps
+    """
+    from datetime import datetime, date
+
+    status_result = {
+        "success": True,
+        "timestamp": datetime.now().isoformat(),
+        "infrastructure": {},
+        "data": {},
+        "issues": [],
+        "suggestions": [],
+        "next_steps": []
+    }
+
+    # 1. Check Infrastructure Health
+    infra_health = {}
+    for service in ["docker", "postgres", "tempo"]:
+        health_status = health_cache.get_or_check(
+            service,
+            lambda s=service: check_service_health(s)
+        )
+        infra_health[service] = health_status
+
+        if not health_status.get("running", True):
+            status_result["issues"].append({
+                "type": "infrastructure_down",
+                "service": service,
+                "description": f"{service.upper()} is not running",
+                "priority": "critical",
+                "command": health_status.get("suggestion", f"Start {service}"),
+            })
+
+    status_result["infrastructure"] = infra_health
+
+    # 2. Analyze Data State (if PostgreSQL is up)
+    if infra_health.get("postgres", {}).get("running", False):
+        try:
+            # Get data metrics via g2 CLI
+            db_check = await executor.run('db-health')
+
+            # Query for data freshness
+            query_result = subprocess.run(
+                ['g2', 'query-database', '--sql',
+                 "SELECT "
+                 "(SELECT COUNT(*) FROM stocks) as total_stocks, "
+                 "(SELECT COUNT(*) FROM stock_ohlcv) as ohlcv_rows, "
+                 "(SELECT MAX(date) FROM stock_ohlcv) as latest_date, "
+                 "(SELECT COUNT(*) FROM computed_features) as feature_rows, "
+                 "(SELECT COUNT(DISTINCT feature_id) FROM computed_features) as unique_features",
+                 '--json'],
+                capture_output=True,
+                text=True,
+                env={**os.environ, **executor.env},
+                timeout=10
+            )
+
+            if query_result.returncode == 0:
+                try:
+                    query_data = json.loads(query_result.stdout)
+                    if query_data.get('success') and query_data.get('rows'):
+                        row = query_data['rows'][0]
+                        stocks = int(row[0]) if row[0] else 0
+                        ohlcv_rows = int(row[1]) if row[1] else 0
+                        latest_date_str = row[2]
+                        feature_rows = int(row[3]) if row[3] else 0
+                        unique_features = int(row[4]) if row[4] else 0
+
+                        status_result["data"] = {
+                            "stocks": stocks,
+                            "ohlcv_rows": ohlcv_rows,
+                            "latest_date": latest_date_str,
+                            "feature_rows": feature_rows,
+                            "unique_features": unique_features
+                        }
+
+                        # Analyze data freshness
+                        if latest_date_str:
+                            latest_date = datetime.strptime(latest_date_str, '%Y-%m-%d').date()
+                            days_old = (date.today() - latest_date).days
+                            status_result["data"]["days_since_update"] = days_old
+
+                            if days_old > 1:
+                                status_result["issues"].append({
+                                    "type": "stale_data",
+                                    "description": f"Price data is {days_old} days old (last: {latest_date_str})",
+                                    "priority": "high" if days_old > 7 else "medium",
+                                    "command": "g2 data-update --exchange NASDAQ --limit 10"
+                                })
+
+                        # Check for missing data
+                        if stocks == 0:
+                            status_result["issues"].append({
+                                "type": "no_data",
+                                "description": "No stocks in database",
+                                "priority": "critical",
+                                "command": "g2 data-update --exchange NASDAQ --limit 10"
+                            })
+                        elif ohlcv_rows == 0:
+                            status_result["issues"].append({
+                                "type": "no_prices",
+                                "description": "No price data ingested",
+                                "priority": "high",
+                                "command": "g2 data-update --exchange NASDAQ --limit 10"
+                            })
+
+                        # Check for missing features
+                        if feature_rows == 0 and ohlcv_rows > 0:
+                            status_result["issues"].append({
+                                "type": "no_features",
+                                "description": "Features not computed (0 rows)",
+                                "priority": "medium",
+                                "command": "g2 feat-compute --symbols AAPL,MSFT --all-features"
+                            })
+
+                except (json.JSONDecodeError, IndexError, ValueError) as e:
+                    status_result["data"]["error"] = f"Failed to parse data metrics: {str(e)}"
+
+        except Exception as e:
+            status_result["data"]["error"] = f"Failed to query database: {str(e)}"
+
+    # 3. Generate Prioritized Suggestions
+    # Sort issues by priority
+    priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    sorted_issues = sorted(
+        status_result["issues"],
+        key=lambda x: priority_order.get(x.get("priority", "low"), 99)
+    )
+
+    status_result["issues"] = sorted_issues
+    status_result["suggestions"] = [
+        {
+            "description": issue["description"],
+            "command": issue["command"],
+            "priority": issue["priority"]
+        }
+        for issue in sorted_issues
+    ]
+
+    # 4. Generate Ordered Next Steps
+    if not sorted_issues:
+        status_result["next_steps"] = [
+            "✅ System is healthy and up-to-date",
+            "Optional: Run 'g2 ml dataset-build' to create ML datasets",
+            "Optional: Train models with 'g2 ml train'"
+        ]
+        status_result["status"] = "healthy"
+    else:
+        # Build workflow based on issues
+        steps = []
+        issue_types = [issue["type"] for issue in sorted_issues]
+
+        if any(t == "infrastructure_down" for t in issue_types):
+            steps.append("1. Fix infrastructure: Start required services")
+
+        if any(t in ["no_data", "no_prices", "stale_data"] for t in issue_types):
+            steps.append(f"{len(steps)+1}. Update price data: g2 data-update")
+
+        if "no_features" in issue_types:
+            steps.append(f"{len(steps)+1}. Compute features: g2 feat-compute")
+
+        if steps:
+            steps.append(f"{len(steps)+1}. Build ML dataset: g2 ml dataset-build")
+            steps.append(f"{len(steps)+1}. Train model: g2 ml train")
+
+        status_result["next_steps"] = steps
+        status_result["status"] = "needs_attention"
+
+    status_result["summary"] = f"{len(sorted_issues)} issue(s) found" if sorted_issues else "All systems operational"
+
+    return status_result
 
 
 async def _health_check(args: Dict[str, Any]) -> Dict[str, Any]:
