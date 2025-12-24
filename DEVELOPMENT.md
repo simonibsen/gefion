@@ -17,7 +17,7 @@
 
 ### 3. Testing Requirements
 - All tests must pass before push
-- Minimum: 468 tests passing
+- Minimum: 488 tests passing
 - Test command:
   ```bash
   ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest tests/
@@ -34,10 +34,29 @@
 3. Never skip tests to make CI pass
 4. Document why tests are retired if obsolete
 
+## Git Hooks
+
+The project uses Git hooks to enforce development rules:
+
+### commit-msg Hook
+Located at `.git/hooks/commit-msg`, this hook enforces:
+- Rejects commits with "Claude" in author name
+- Rejects commits with anthropic.com email addresses
+- Rejects commits with "Co-Authored-By: Claude" in messages
+
+This prevents AI attribution from appearing in the git history.
+
+### pre-push Hook
+Located at `.git/hooks/pre-push`, this hook:
+- Runs full test suite before push
+- Aborts push if any tests fail
+
+Both hooks are executable and run automatically.
+
 ## Pre-Commit Checklist
 
 - [ ] Tests written first (TDD approach)
-- [ ] All tests passing (468+ passing, 0 failed)
+- [ ] All tests passing (488+ passing, 0 failed)
 - [ ] Commit message reviewed (no AI tool mentions)
 - [ ] Code follows existing patterns
 - [ ] No unnecessary changes or refactoring

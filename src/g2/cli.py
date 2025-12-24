@@ -31,6 +31,7 @@ from g2.db import schema
 from psycopg.types.json import Json
 from g2.observability import create_span, set_attributes, add_event, get_current_span, shutdown as otel_shutdown
 from g2.db import migrate
+from g2 import health
 from g2.db.ingest import (
     insert_stock_ohlcv,
     upsert_stock,
@@ -1928,7 +1929,68 @@ def span_check(
     _span_check_impl(backend, tempo_url, service_name, limit, trace_id, show_spans, json_output)
 
 
+@app.command("health")
+def health_check(
+    service: Optional[str] = typer.Option(None, help="Check specific service (postgres, tempo, docker)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Check health of g2 infrastructure services.
 
+    Checks PostgreSQL, Tempo, and Docker availability with helpful error messages
+    and suggestions for fixing issues.
+
+    Examples:
+        # Check all services
+        g2 health
+
+        # Check specific service
+        g2 health --service postgres
+
+        # JSON output
+        g2 health --json
+    """
+    if service:
+        # Check specific service
+        service_lower = service.lower()
+        if service_lower == "postgres":
+            status = health.check_postgres_health()
+        elif service_lower == "tempo":
+            status = health.check_tempo_health()
+        elif service_lower == "docker":
+            status = health.check_docker_services()
+        else:
+            emit_error(f"Unknown service: {service}. Valid options: postgres, tempo, docker", json_output=json_output)
+            return
+
+        if json_output:
+            emit_json({
+                "status": "ok" if status["running"] else "error",
+                "service": service_lower,
+                **status
+            })
+        else:
+            console = Console()
+            status_icon = "✅" if status["running"] else "❌"
+            console.print(f"\n{status_icon} {service_lower.upper()}: {status['message']}\n", style="bold")
+
+            if not status["running"] and "suggestion" in status:
+                console.print(f"   → {status['suggestion']}\n")
+            elif status["running"] and "version" in status:
+                console.print(f"   Version: {status['version']}\n")
+    else:
+        # Check all services
+        all_status = health.check_all_services()
+
+        if json_output:
+            emit_json({
+                "status": "ok",
+                "services": all_status
+            })
+        else:
+            report = health.format_health_report(all_status)
+            console = Console()
+            console.print(report)
 
 
 @app.command("db-init")
