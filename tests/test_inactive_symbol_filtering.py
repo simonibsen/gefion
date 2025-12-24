@@ -20,6 +20,11 @@ def db_conn():
     url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
     with psycopg.connect(url) as conn:
         conn.autocommit = True
+        # Ensure tables exist before cleanup
+        schema.create_stocks_table(conn)
+        schema.create_stock_ohlcv_table(conn)
+        schema.create_feature_definitions_table(conn)
+        schema.create_computed_features_table(conn)
         # Clean up before tests
         with conn.cursor() as cur:
             cur.execute("""

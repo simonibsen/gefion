@@ -10,6 +10,7 @@ Comprehensive end-to-end workflows for using the G2 MCP Server through Claude De
 4. [Model Performance Monitoring](#model-performance-monitoring)
 5. [Data Quality & Exploration](#data-quality--exploration)
 6. [Production Deployment Patterns](#production-deployment-patterns)
+7. [Performance Monitoring & Observability](#performance-monitoring--observability)
 
 ---
 
@@ -513,6 +514,311 @@ WHERE cf.id IS NULL
 Run feature computation for missing stocks:
 g2 feat-compute --symbols <comma-separated> --local
 ```
+
+---
+
+## Advanced Workflows
+
+### Multi-Model Ensemble
+
+Train 3 models with different algorithms, average their predictions:
+
+```
+1. Train momentum_xgb (XGBoost)
+2. Train momentum_lgb (LightGBM)
+3. Train momentum_sklearn (quantile regression)
+
+Query all 3, compute ensemble average, use for final signal
+```
+
+### Rolling Window Backtesting
+
+Evaluate model on expanding window to detect regime changes:
+
+```
+Evaluate model on:
+- 2024-01-01 to 2024-03-31 (Q1)
+- 2024-01-01 to 2024-06-30 (H1)
+- 2024-01-01 to 2024-09-30 (Q1-Q3)
+- 2024-01-01 to 2024-12-31 (Full year)
+
+Plot calibration drift over time
+```
+
+### Feature Importance Analysis
+
+Ask Claude to:
+1. Query prediction confidence by feature availability
+2. Find which features correlate most with accurate predictions
+3. Identify redundant features for pruning
+
+---
+
+## Performance Monitoring & Observability
+
+**Goal:** Use Grafana Tempo traces to monitor system performance, debug slow operations, and optimize the ML pipeline.
+
+### Prerequisites
+
+Start Tempo + Grafana:
+```bash
+docker compose -f docker/tempo/docker-compose.tempo.yml up -d
+```
+
+Enable tracing:
+```bash
+export OTEL_ENABLED=true
+export OTEL_EXPORTER=otlp
+export OTEL_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_SERVICE_NAME=g2
+```
+
+### Workflow 1: Health Check After Operations
+
+**Use case:** After running a data update or feature computation, verify the operation completed successfully and check for performance issues.
+
+**Prompt:**
+```
+I just ran a data update for NASDAQ. Check the recent traces to see:
+1. Did it complete without errors?
+2. How long did it take?
+3. Are there any performance bottlenecks?
+```
+
+**MCP Tools Used:**
+- `span_check` - Get overview of recent traces with error detection
+
+**What Claude does:**
+1. Calls `span_check` with default parameters
+2. Analyzes trace statistics:
+   - Total spans vs application spans vs database spans
+   - Error span count (should be 0)
+   - Duration of the operation
+3. Reports any issues or confirms healthy execution
+
+**Example output:**
+```
+Trace Check Results:
+✓ Found 15 recent traces for service "g2"
+✓ Most recent: cli.data-update (4523ms)
+✓ Total spans: 124
+  - Application spans: 42
+  - Database spans: 82
+  - Error spans: 0
+
+Performance: Normal (4.5 seconds for data update)
+Status: Healthy - no errors detected
+```
+
+### Workflow 2: Investigate Slow Operations
+
+**Use case:** Feature computation is taking longer than expected. Find the bottleneck.
+
+**Prompt:**
+```
+My feature computation for 100 symbols took 5 minutes. That seems slow.
+Can you find the bottleneck?
+```
+
+**MCP Tools Used:**
+1. `tempo_search` - Find recent feature computation traces
+2. `tempo_trace_detail` - Get detailed span information for the slowest trace
+
+**What Claude does:**
+1. Searches for traces with `tags=function_name=indicator`
+2. Identifies the slowest trace
+3. Fetches detailed span data
+4. Analyzes span hierarchy to find bottlenecks:
+   - Database write time
+   - Computation time
+   - Connection pool contention
+5. Provides optimization recommendations
+
+**Example analysis:**
+```
+Bottleneck Analysis:
+
+Trace: cli.feat-compute (5m 23s)
+├─ compute_features (5m 18s)
+│  └─ process_function_group (4m 45s)
+│     └─ insert_computed_features (4m 12s) ⚠️ BOTTLENECK
+
+Root cause: Database writes taking 78% of total time
+
+Recommendations:
+1. Increase --batch-size from 2000 to 10000
+2. Consider using --parallel flag for multi-symbol computation
+3. Check database connection pool size (currently seeing pool_available=0)
+
+Expected improvement: 60-70% faster with batch size increase
+```
+
+### Workflow 3: Compare Before/After Optimization
+
+**Use case:** You've made an optimization change and want to verify it improved performance.
+
+**Prompt:**
+```
+I increased the batch size to 10000. Can you compare the trace before and after
+to see if it's faster?
+```
+
+**MCP Tools Used:**
+1. `tempo_search` - Find traces before and after the change
+2. `span_check` - Get detailed span breakdown for comparison
+
+**What Claude does:**
+1. Searches for recent traces, sorted by time
+2. Identifies "before" and "after" traces
+3. Compares key metrics:
+   - Total duration
+   - Database span count
+   - Insert operation time
+4. Calculates improvement percentage
+
+**Example output:**
+```
+Performance Comparison:
+
+Before (batch_size=2000):
+- Total time: 5m 23s (323s)
+- insert_computed_features: 4m 12s (252s)
+- Database spans: 156 operations
+
+After (batch_size=10000):
+- Total time: 2m 8s (128s)
+- insert_computed_features: 1m 24s (84s)
+- Database spans: 32 operations
+
+Improvement:
+✓ 60% faster overall (323s → 128s)
+✓ 67% faster database writes (252s → 84s)
+✓ 79% fewer database operations (156 → 32)
+
+Result: Optimization successful!
+```
+
+### Workflow 4: Find Errors and Debug Issues
+
+**Use case:** Something went wrong during ML training. Find what failed.
+
+**Prompt:**
+```
+My model training failed. Can you check the traces to see what went wrong?
+```
+
+**MCP Tools Used:**
+1. `span_check` - Check for error spans
+2. `tempo_trace_detail` - Get detailed error information
+
+**What Claude does:**
+1. Calls `span_check` to find traces with errors
+2. Identifies which span failed
+3. Fetches detailed trace to see error attributes and events
+4. Extracts error message and stack trace
+5. Suggests fix based on error type
+
+**Example debugging:**
+```
+Error Found:
+
+Trace: cli.ml-train (12.3s)
+├─ ml_train_quantile (12.1s)
+│  └─ load_training_data (0.2s) ❌ ERROR
+
+Error details:
+- Status: STATUS_CODE_ERROR
+- Message: "Dataset 'nasdaq_momentum' version 'v2' not found"
+- Location: src/g2/ml/train.py:145
+
+Root cause: Dataset version mismatch
+
+Fix: Either:
+1. Build dataset version 'v2': ml dataset-build --name nasdaq_momentum --version v2
+2. Use existing version 'v1': ml train --dataset-version v1
+```
+
+### Workflow 5: Search for Specific Operations
+
+**Use case:** Find all traces where AAPL feature computation took longer than 1 second.
+
+**Prompt:**
+```
+Show me all AAPL feature computations that took longer than 1 second in the last hour.
+I want to understand why AAPL is slower than other symbols.
+```
+
+**MCP Tools Used:**
+- `tempo_search` with tag and duration filters
+
+**What Claude does:**
+1. Searches with `tags=symbol=AAPL`, `min_duration=1s`
+2. Lists matching traces
+3. Analyzes patterns across multiple traces
+4. Compares AAPL traces to other symbols
+
+**Example analysis:**
+```
+Found 8 traces for AAPL > 1s:
+
+Trace Pattern Analysis:
+- Average duration: 1.8s
+- Compare to MSFT average: 0.4s
+- AAPL is 4.5x slower
+
+Common pattern in slow AAPL traces:
+- indicator_macd span: 1.2s (vs 0.2s for MSFT)
+- Likely cause: AAPL has 10 years of historical data vs 2 years for MSFT
+
+Recommendation:
+- Consider limiting historical data window for computation
+- Or implement incremental updates for long-history symbols
+```
+
+### Workflow 6: Production Monitoring
+
+**Use case:** Set up continuous monitoring to catch performance regressions.
+
+**Prompt:**
+```
+I want to monitor my production data pipeline. Set up observability with 1% sampling
+so I can catch performance issues without overhead.
+```
+
+**Configuration Claude suggests:**
+```bash
+# .env.production
+OTEL_ENABLED=true
+OTEL_EXPORTER=otlp
+OTEL_OTLP_ENDPOINT=http://tempo.production:4317
+OTEL_SERVICE_NAME=g2-production
+OTEL_SAMPLING_RATE=0.01  # 1% sampling = low overhead
+```
+
+**Monitoring workflow:**
+```
+Every day at 6pm:
+1. Check span_check for any error spans
+2. Compare p95 duration vs baseline
+3. Alert if >20% slower than baseline or any errors
+```
+
+### Integration with ML Workflows
+
+**Combined workflow:** After training a model, automatically check performance.
+
+**Prompt:**
+```
+Train model momentum_v2 on nasdaq_momentum dataset, then check the trace
+to see how long training took and if there were any issues.
+```
+
+**What happens:**
+1. Claude calls `ml_train` tool
+2. Training completes
+3. Claude automatically calls `span_check`
+4. Reports training time and any performance issues
+5. Stores baseline for future comparison
 
 ---
 

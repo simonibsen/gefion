@@ -59,14 +59,24 @@ def test_trim_all_computed_features_by_date():
             {
                 "name": "test_feature_1",
                 "function_name": "dummy",
+                "params": {},
+                "source_table": "stock_ohlcv",
+                "source_column": "close",
                 "store_table": "computed_features",
                 "store_column": "value",
+                "store_type": "double precision",
+                "active": True,
             },
             {
                 "name": "test_feature_2",
                 "function_name": "dummy",
+                "params": {},
+                "source_table": "stock_ohlcv",
+                "source_column": "close",
                 "store_table": "computed_features",
                 "store_column": "value",
+                "store_type": "double precision",
+                "active": True,
             },
         ],
     )
@@ -78,24 +88,28 @@ def test_trim_all_computed_features_by_date():
 
         # Insert 6 rows total (3 dates x 2 features)
         cur.execute(
-            """
-            INSERT INTO computed_features (data_id, feature_id, date, value)
-            VALUES
-                (%s, %s, %s, 10.0),  -- 2023-01-01, feature 1
-                (%s, %s, %s, 20.0),  -- 2023-01-01, feature 2
-                (%s, %s, %s, 30.0),  -- 2023-06-01, feature 1
-                (%s, %s, %s, 40.0),  -- 2023-06-01, feature 2
-                (%s, %s, %s, 50.0),  -- 2024-01-01, feature 1
-                (%s, %s, %s, 60.0);  -- 2024-01-01, feature 2
-            """,
-            (
-                stock_id, feature_ids[0], date(2023, 1, 1),
-                stock_id, feature_ids[1], date(2023, 1, 1),
-                stock_id, feature_ids[0], date(2023, 6, 1),
-                stock_id, feature_ids[1], date(2023, 6, 1),
-                stock_id, feature_ids[0], date(2024, 1, 1),
-                stock_id, feature_ids[1], date(2024, 1, 1),
-            ),
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 10.0)",
+            (stock_id, feature_ids[0], date(2023, 1, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 20.0)",
+            (stock_id, feature_ids[1], date(2023, 1, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 30.0)",
+            (stock_id, feature_ids[0], date(2023, 6, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 40.0)",
+            (stock_id, feature_ids[1], date(2023, 6, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 50.0)",
+            (stock_id, feature_ids[0], date(2024, 1, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 60.0)",
+            (stock_id, feature_ids[1], date(2024, 1, 1)),
         )
 
     # Trim ALL features before 2023-06-01 (should delete 2 rows)
@@ -128,8 +142,13 @@ def test_trim_all_computed_features_by_symbol():
             {
                 "name": "test_feature",
                 "function_name": "dummy",
+                "params": {},
+                "source_table": "stock_ohlcv",
+                "source_column": "close",
                 "store_table": "computed_features",
                 "store_column": "value",
+                "store_type": "double precision",
+                "active": True,
             },
         ],
     )
@@ -140,20 +159,20 @@ def test_trim_all_computed_features_by_symbol():
 
         # Insert data for both stocks
         cur.execute(
-            """
-            INSERT INTO computed_features (data_id, feature_id, date, value)
-            VALUES
-                (%s, %s, %s, 10.0),  -- AAPL 2023-01-01
-                (%s, %s, %s, 20.0),  -- AAPL 2024-01-01
-                (%s, %s, %s, 30.0),  -- MSFT 2023-01-01
-                (%s, %s, %s, 40.0);  -- MSFT 2024-01-01
-            """,
-            (
-                aapl_id, feature_id, date(2023, 1, 1),
-                aapl_id, feature_id, date(2024, 1, 1),
-                msft_id, feature_id, date(2023, 1, 1),
-                msft_id, feature_id, date(2024, 1, 1),
-            ),
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 10.0)",
+            (aapl_id, feature_id, date(2023, 1, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 20.0)",
+            (aapl_id, feature_id, date(2024, 1, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 30.0)",
+            (msft_id, feature_id, date(2023, 1, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 40.0)",
+            (msft_id, feature_id, date(2024, 1, 1)),
         )
 
     # Trim only AAPL features before 2023-06-01 (should delete 1 row)
@@ -184,8 +203,13 @@ def test_trim_all_computed_features_before_and_after():
             {
                 "name": "test_feature",
                 "function_name": "dummy",
+                "params": {},
+                "source_table": "stock_ohlcv",
+                "source_column": "close",
                 "store_table": "computed_features",
                 "store_column": "value",
+                "store_type": "double precision",
+                "active": True,
             },
         ],
     )
@@ -195,20 +219,20 @@ def test_trim_all_computed_features_before_and_after():
         feature_id = cur.fetchone()[0]
 
         cur.execute(
-            """
-            INSERT INTO computed_features (data_id, feature_id, date, value)
-            VALUES
-                (%s, %s, %s, 10.0),  -- 2023-01-01
-                (%s, %s, %s, 20.0),  -- 2023-06-01
-                (%s, %s, %s, 30.0),  -- 2024-01-01
-                (%s, %s, %s, 40.0);  -- 2024-12-31
-            """,
-            (
-                stock_id, feature_id, date(2023, 1, 1),
-                stock_id, feature_id, date(2023, 6, 1),
-                stock_id, feature_id, date(2024, 1, 1),
-                stock_id, feature_id, date(2024, 12, 31),
-            ),
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 10.0)",
+            (stock_id, feature_id, date(2023, 1, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 20.0)",
+            (stock_id, feature_id, date(2023, 6, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 30.0)",
+            (stock_id, feature_id, date(2024, 1, 1)),
+        )
+        cur.execute(
+            "INSERT INTO computed_features (data_id, feature_id, date, value) VALUES (%s, %s, %s, 40.0)",
+            (stock_id, feature_id, date(2024, 12, 31)),
         )
 
     # Trim before 2023-06-01 AND after 2024-01-01 (should delete 2 rows)

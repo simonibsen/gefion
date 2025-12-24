@@ -15,19 +15,28 @@ def create_connection():
         pytest.skip(f"DB not available: {exc}")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def conn():
     connection = create_connection()
     connection.autocommit = True
+    with connection.cursor() as cur:
+        # Drop tables but keep extension intact
+        cur.execute("""
+            DO $$ DECLARE
+                r RECORD;
+            BEGIN
+                FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+                    EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+                END LOOP;
+            END $$;
+        """)
+        # Ensure TimescaleDB extension is available
+        try:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+        except psycopg.errors.DuplicateObject:
+            pass
     yield connection
     connection.close()
-
-
-@pytest.fixture(autouse=True)
-def clean_db(conn):
-    with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-    yield
 
 
 def test_stocks_table_exists(conn):
@@ -106,11 +115,12 @@ def test_stock_ohlcv_unique_per_stock_and_date(conn):
         )
         stock_id = cur.fetchone()[0]
         cur.execute(
-            """
-            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-01');
-            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-02');
-            """,
-            (stock_id, stock_id),
+            "INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-01')",
+            (stock_id,),
+        )
+        cur.execute(
+            "INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-02')",
+            (stock_id,),
         )
 
         with pytest.raises(psycopg.errors.UniqueViolation):

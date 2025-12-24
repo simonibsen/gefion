@@ -8,6 +8,7 @@ from g2.db import pool as db_pool
 
 def test_insert_computed_features_uses_prepared_for_large_batches(monkeypatch):
     called = {}
+    all_calls = []
 
     class FakeCursor:
         def __enter__(self):
@@ -17,9 +18,12 @@ def test_insert_computed_features_uses_prepared_for_large_batches(monkeypatch):
             return False
 
         def execute(self, stmt, params=None, prepare=False):
-            called["prepare"] = prepare
-            called["stmt"] = stmt
-            called["params_len"] = len(params or [])
+            all_calls.append({"stmt": stmt, "prepare": prepare, "params_len": len(params or [])})
+            # Capture the INSERT statement specifically
+            if "INSERT" in stmt:
+                called["prepare"] = prepare
+                called["stmt"] = stmt
+                called["params_len"] = len(params or [])
 
     class FakeConn:
         def __init__(self):

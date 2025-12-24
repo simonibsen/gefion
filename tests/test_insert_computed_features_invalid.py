@@ -39,6 +39,8 @@ def test_insert_computed_features_bad_data_id_skips():
             "name": "indicator_adx_14",
             "function_name": "indicator",
             "params": {"indicator": "adx"},
+            "source_table": "stock_ohlcv",
+            "source_column": "close",
             "store_table": "computed_features",
             "store_column": "value",
             "store_type": "double precision",

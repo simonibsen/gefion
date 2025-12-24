@@ -400,9 +400,11 @@ def _auto_workers(compute_locally: bool, calls_per_minute: int) -> int:
         return max(2, min(8, cpu_count))
     else:
         # API rate-limited - calculate based on calls per minute
-        # Assume each worker makes ~15 calls/minute on average
-        # Be conservative to avoid hitting rate limits
-        api_workers = max(2, min(10, calls_per_minute // 30))
+        # With shared RateLimiter, more workers = better utilization
+        # Each worker waits for network I/O (~1-2s per call on average)
+        # Formula: workers = calls_per_min / 10 (allows ~6 calls/min per worker)
+        # This provides good throughput while RateLimiter enforces rate limits
+        api_workers = max(2, min(10, calls_per_minute // 10))
         return api_workers
 
 
@@ -1610,10 +1612,32 @@ def ingest_universe(
 @app.command("db-health")
 def db_health(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    migrations_dir: Optional[Path] = typer.Option(None, help="Migrations directory (default: sql/migrations)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
-    """Report basic DB health: connections, chunk intervals, BRIN indexes, table presence."""
+    """
+    Report database health: connections, tables, indexes, and migration status.
+
+    Checks database configuration, table presence, chunk intervals, BRIN indexes,
+    compression status, and pending migrations.
+    """
+    with create_span("cli.db-health"):
+        _db_health_impl(db_url, migrations_dir, json_output)
+
+
+def _db_health_impl(db_url, migrations_dir, json_output):
+    """Implementation of db-health (separated for tracing)."""
+    from g2.db.migrate import check_pending_migrations, get_applied_migrations
+    from pathlib import Path as PathLib
+    import g2
+
     url = _db_url(db_url)
+
+    # Find migrations directory
+    if migrations_dir is None:
+        package_dir = PathLib(g2.__file__).parent.parent.parent
+        migrations_dir = package_dir / "sql" / "migrations"
+
     health: Dict[str, Any] = {}
     avail = get_available_connections(url)
     if isinstance(avail, tuple):
@@ -1635,11 +1659,11 @@ def db_health(
                 try:
                     cur.execute(
                         """
-                        SELECT h.hypertable_name, d.interval_length
+                        SELECT h.hypertable_name, d.time_interval
                         FROM timescaledb_information.hypertables h
                         LEFT JOIN timescaledb_information.dimensions d
                           ON h.hypertable_name = d.hypertable_name
-                        WHERE h.hypertable_name = ANY(%s) AND (d.interval_length IS NOT NULL OR d.column_name = 'date');
+                        WHERE h.hypertable_name = ANY(%s) AND (d.time_interval IS NOT NULL OR d.column_name = 'date');
                         """,
                         (tables,),
                     )
@@ -1662,11 +1686,98 @@ def db_health(
                     if "BRIN" in idxdef.upper():
                         brin[table] = True
                 health["brin_indexes"] = brin
+
+                # Check migration status
+                migration_status = {}
+                try:
+                    # Check if schema_migrations table exists
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'schema_migrations'
+                        );
+                    """)
+                    has_migrations_table = cur.fetchone()[0]
+                    migration_status["migrations_table_exists"] = has_migrations_table
+
+                    # Check for pending migrations (this will internally get applied migrations)
+                    if migrations_dir.exists():
+                        pending = check_pending_migrations(conn, migrations_dir)
+                        # Calculate applied count from migration files
+                        from g2.db.migrate import scan_migration_files
+                        all_migrations = scan_migration_files(migrations_dir)
+                        migration_status["applied_count"] = len(all_migrations) - len(pending)
+                        migration_status["pending_count"] = len(pending)
+                        migration_status["pending_list"] = [
+                            {"version": m["version"], "name": m["name"]}
+                            for m in pending
+                        ]
+                    else:
+                        # No migrations directory - check DB for applied count
+                        if has_migrations_table:
+                            from g2.db.migrate import get_applied_migrations
+                            applied = get_applied_migrations(conn)
+                            migration_status["applied_count"] = len(applied)
+                        else:
+                            migration_status["applied_count"] = 0
+                        migration_status["pending_count"] = 0
+                        migration_status["pending_list"] = []
+
+                    # Check compression status
+                    try:
+                        cur.execute("""
+                            SELECT hypertable_name, compression_enabled
+                            FROM timescaledb_information.hypertables
+                            WHERE hypertable_name IN ('stock_ohlcv', 'computed_features');
+                        """)
+                        compression_info = cur.fetchall()
+                        if compression_info:
+                            enabled_count = sum(1 for _, enabled in compression_info if enabled)
+                            migration_status["compression_status"] = f"{enabled_count}/{len(compression_info)} hypertables"
+                        else:
+                            migration_status["compression_status"] = "no hypertables"
+                    except Exception:
+                        migration_status["compression_status"] = "unavailable"
+
+                except Exception as e:
+                    migration_status["error"] = str(e)
+
+                health["migrations"] = migration_status
+
     except Exception as exc:
         emit_error(f"DB health failed: {exc}", json_output=json_output)
         return
 
-    emit("DB health", data=health, json_output=json_output)
+    # Enhanced output
+    if not json_output:
+        emit("Database Health Report:")
+        emit(f"  Connections: {health.get('available_connections', 'unknown')}")
+
+        tables = health.get("tables", {})
+        for table, exists in tables.items():
+            status = "✓" if exists else "✗"
+            emit(f"  Table {table}: {status}")
+
+        migrations = health.get("migrations", {})
+        if migrations:
+            applied = migrations.get("applied_count", 0)
+            pending = migrations.get("pending_count", 0)
+            emit(f"  Applied migrations: {applied}")
+
+            if pending > 0:
+                emit(f"  ⚠️  Pending migrations: {pending}")
+                for m in migrations.get("pending_list", []):
+                    emit(f"      - {m['version']}_{m['name']}")
+                emit("  Run 'g2 db-migrate' to apply pending migrations")
+            else:
+                emit(f"  ✓ Pending migrations: 0")
+
+            compression = migrations.get("compression_status", "unknown")
+            emit(f"  Compression: {compression}")
+
+        emit("", data=health, json_output=False)
+    else:
+        emit("DB health", data=health, json_output=json_output)
 
 
 def _span_check_impl(
@@ -1739,6 +1850,7 @@ def _span_check_impl(
         "service_name": service_name,
         "trace_count": trace_count,
         "selected_trace_id": selected_trace_id,
+        "tempo_trace_api_url": f"{tempo_url.rstrip('/')}/api/traces/{selected_trace_id}",
         "total_spans": len(spans),
         "application_spans": app_span_count,
         "database_spans": db_span_count,
@@ -1771,6 +1883,7 @@ def _span_check_impl(
 
     console.print("")
     console.print(f"Selected trace: {selected_trace_id}", style="bold")
+    console.print(f"Tempo trace API: {tempo_url.rstrip('/')}/api/traces/{selected_trace_id}", style="dim")
     console.print(f"Total spans: {len(spans)}", style="dim")
     console.print(f"Application spans (g2.observability): {app_span_count}", style="dim")
     console.print(f"Database spans (auto-instrumented): {db_span_count}", style="dim")
@@ -1838,9 +1951,12 @@ def db_init(
         # Check results in JSON format
         g2 db-init --json
     """
-    import subprocess
-    import sys
+    with create_span("cli.db-init"):
+        _db_init_impl(db_url, json_output)
 
+
+def _db_init_impl(db_url, json_output):
+    """Implementation of db-init (separated for tracing)."""
     url = _db_url(db_url)
 
     # Find the schema.sql file relative to the package
@@ -1857,46 +1973,29 @@ def db_init(
         return
 
     try:
-        # Read the schema file content
-        with open(schema_path, 'r') as f:
-            schema_sql = f.read()
-
-        # Parse the database URL to get connection parameters
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-
-        # Build psql command (use stdin instead of -f to avoid snap confinement issues)
-        env = os.environ.copy()
-        if parsed.password:
-            env['PGPASSWORD'] = parsed.password
-
-        cmd = [
-            'psql',
-            '-h', parsed.hostname or 'localhost',
-            '-p', str(parsed.port or 5432),
-            '-U', parsed.username or 'postgres',
-            '-d', parsed.path.lstrip('/') if parsed.path else 'postgres'
-        ]
-
         if not json_output:
             emit("Initializing database schema...")
 
-        # Pipe schema SQL via stdin (works with snap-confined psql)
-        result = subprocess.run(
-            cmd,
-            input=schema_sql,
-            env=env,
-            capture_output=True,
-            text=True
-        )
+        # Read and execute schema SQL via psycopg (provides trace visibility)
+        schema_sql = schema_path.read_text()
 
-        if result.returncode != 0:
-            emit_error(
-                f"Database initialization failed: {result.stderr}",
-                json_output=json_output,
-                data={"stderr": result.stderr, "stdout": result.stdout}
-            )
-            return
+        # Filter out psql meta-commands (same pattern as migration system)
+        lines = schema_sql.split('\n')
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip psql meta-commands (lines starting with \)
+            if stripped.startswith('\\'):
+                continue
+            filtered_lines.append(line)
+
+        filtered_sql = '\n'.join(filtered_lines)
+
+        # Execute schema SQL via psycopg connection (enables proper tracing)
+        with db_connection(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(filtered_sql)
+            conn.commit()
 
         emit(
             "Database initialized successfully",
@@ -1906,6 +2005,94 @@ def db_init(
 
     except Exception as exc:
         emit_error(f"Initialization failed: {exc}", json_output=json_output)
+
+
+@app.command("db-migrate")
+def db_migrate(
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    migrations_dir: Optional[Path] = typer.Option(None, help="Migrations directory (default: sql/migrations)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show pending migrations without applying"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Run database migrations from sql/migrations/ directory.
+
+    Migrations are applied in order (001, 002, 003, etc.) and tracked
+    in the schema_migrations table. Already-applied migrations are
+    automatically skipped. Safe to run multiple times (idempotent).
+
+    Examples:
+        # Run all pending migrations
+        g2 db-migrate
+
+        # Show pending migrations without applying
+        g2 db-migrate --dry-run
+
+        # Run migrations on specific database
+        g2 db-migrate --db-url postgresql://user:pass@host:5432/db
+
+        # Use custom migrations directory
+        g2 db-migrate --migrations-dir /path/to/migrations
+    """
+    with create_span("cli.db-migrate", dry_run=dry_run):
+        _db_migrate_impl(db_url, migrations_dir, dry_run, json_output)
+
+
+def _db_migrate_impl(db_url, migrations_dir, dry_run, json_output):
+    """Implementation of db-migrate (separated for tracing)."""
+    from g2.db.migrate import run_migrations
+    from pathlib import Path as PathLib
+    import g2
+
+    url = _db_url(db_url)
+
+    # Find migrations directory
+    if migrations_dir is None:
+        package_dir = PathLib(g2.__file__).parent.parent.parent
+        migrations_dir = package_dir / "sql" / "migrations"
+
+    if not migrations_dir.exists():
+        emit_error(
+            f"Migrations directory not found: {migrations_dir}",
+            json_output=json_output
+        )
+        return
+
+    try:
+        with psycopg.connect(url) as conn:
+            conn.autocommit = True
+
+            if not json_output:
+                if dry_run:
+                    emit("Checking for pending migrations...")
+                else:
+                    emit("Running database migrations...")
+
+            result = run_migrations(conn, migrations_dir, dry_run=dry_run)
+
+            # Format output
+            if dry_run:
+                total = len(result['migrations'])
+                pending_count = len([m for m in result['migrations'] if m['status'] == 'pending'])
+                message = f"Found {total} total migrations: {result['skipped']} already applied, {pending_count} pending"
+            else:
+                message = f"Migrations complete: {result['applied']} applied, {result['skipped']} skipped"
+
+            emit(
+                message,
+                data={
+                    "applied": result["applied"],
+                    "skipped": result["skipped"],
+                    "migrations": result["migrations"],
+                    "migrations_dir": str(migrations_dir),
+                    "dry_run": dry_run
+                },
+                json_output=json_output
+            )
+
+    except Exception as exc:
+        emit_error(f"Migration failed: {exc}", json_output=json_output)
+        raise typer.Exit(code=1)
 
 
 @app.command("db-tune")
@@ -1922,6 +2109,16 @@ def db_tune(
     Apply Timescale tuning: set chunk intervals and optional compression policies.
     Safe to re-run; ignores missing tables.
     """
+    with create_span(
+        "cli.db-tune",
+        chunk_days=chunk_days,
+        compress_after_days=compress_after_days,
+    ):
+        _db_tune_impl(db_url, chunk_days, compress_after_days, show_chunk_ranges, json_output)
+
+
+def _db_tune_impl(db_url, chunk_days, compress_after_days, show_chunk_ranges, json_output):
+    """Implementation of db-tune (separated for tracing)."""
     from g2.utils.timescale import get_chunk_date_range
 
     url = _db_url(db_url)
@@ -2747,7 +2944,7 @@ def _features_compute_impl(
             # - Scale up when resources are available
             # - Scale down when resources are constrained
             # - Respect user's max_workers as absolute limit (if specified)
-            start_workers = 2  # Always start conservatively
+            start_workers = min(2, max_w)  # Start conservatively but respect max_workers
 
             # Use resource-aware limiter for dynamic scaling based on system resources
             # This will periodically check CPU, memory, and DB connections
@@ -2919,7 +3116,25 @@ def _features_compute_impl(
                     prev_resource_errors = reporter.resource_errors
 
                     with ThreadPoolExecutor(max_workers=current_workers) as executor:
-                        futures = {executor.submit(process_stock, sym): sym for sym in batch_symbols}
+                        # Capture context for propagation to worker threads
+                        from g2.observability import is_enabled
+                        if is_enabled():
+                            from opentelemetry import context as otel_context
+                            worker_ctx = otel_context.get_current()
+
+                            def make_process_stock_with_context(symbol):
+                                """Create context-aware wrapper for process_stock."""
+                                def worker_with_context():
+                                    token = otel_context.attach(worker_ctx)
+                                    try:
+                                        return process_stock(symbol)
+                                    finally:
+                                        otel_context.detach(token)
+                                return worker_with_context
+
+                            futures = {executor.submit(make_process_stock_with_context(sym)): sym for sym in batch_symbols}
+                        else:
+                            futures = {executor.submit(process_stock, sym): sym for sym in batch_symbols}
 
                         for future in as_completed(futures):
                             result = future.result()
@@ -3010,6 +3225,11 @@ def _features_compute_impl(
     except Exception as exc:
         emit_error(f"Computation failed: {exc}", json_output=json_output)
     finally:
+        # Flush telemetry to ensure root span is sent before exit
+        # This prevents "root span not yet received" in large traces
+        from g2.observability import flush_telemetry
+        flush_telemetry()
+
         # Only close pool if we initialized it (don't close pools managed by caller)
         if pool_needed:
             db_pool.close_pool()
@@ -3095,6 +3315,30 @@ def _update_all_impl(
         refresh=refresh,
         timeframe=timeframe,
     )
+
+    # Check for pending migrations before running data operations
+    from g2.db.migrate import check_pending_migrations
+    from pathlib import Path as PathLib
+    import g2
+    try:
+        package_dir = PathLib(g2.__file__).parent.parent.parent
+        migrations_dir = package_dir / "sql" / "migrations"
+
+        if migrations_dir.exists():
+            with db_connection(url) as conn:
+                pending = check_pending_migrations(conn, migrations_dir)
+                if pending:
+                    warning_msg = f"⚠️  Warning: {len(pending)} pending migration(s) detected. Database schema may be out of sync."
+                    if not json_output:
+                        emit(warning_msg)
+                        for m in pending:
+                            emit(f"  - {m['version']}_{m['name']}")
+                        emit("  Run 'g2 db-migrate' to apply migrations before proceeding.")
+                        emit("")
+                    set_attributes(main_span, pending_migrations=len(pending), migrations_warning=True)
+    except Exception:
+        # Don't fail data-update if migration check fails
+        pass
 
     # Resolve universe
     symbols: List[str] = []
@@ -3775,6 +4019,215 @@ def backtest_run(
             f"Backtest failed: {e}",
             json_output=json_output
         )
+        raise typer.Exit(1)
+
+
+@app.command("mcp-setup")
+def mcp_setup(
+    db_url: Optional[str] = typer.Option(None, help="Database URL (default: from environment or postgresql://g2:g2pass@localhost:5432/g2)"),
+    api_key: Optional[str] = typer.Option(None, help="AlphaVantage API key (default: from environment)"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing configuration"),
+    targets: Optional[str] = typer.Option("all", help="Targets to configure: 'desktop', 'cli', or 'all' (default: all)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Configure MCP server for use with AI assistants.
+
+    This command creates or updates the MCP server configuration for AI assistants.
+    It determines the correct paths and settings automatically and can configure
+    multiple targets at once.
+
+    Configuration targets:
+    - desktop: Claude Desktop App (GUI)
+    - cli: Claude Code CLI and OpenAI-compatible tools
+    - all: Both desktop and CLI (default)
+
+    Configuration file locations:
+    - Claude Desktop (macOS): ~/Library/Application Support/Claude/claude_desktop_config.json
+    - Claude Code CLI (macOS): ~/.claude.json
+    - Windows Desktop: %APPDATA%\\Claude\\claude_desktop_config.json
+    - Windows CLI: %USERPROFILE%\\.claude.json
+    - Linux Desktop: ~/.config/Claude/claude_desktop_config.json
+    - Linux CLI: ~/.claude.json
+
+    Example:
+        g2 mcp-setup                    # Configure all targets
+        g2 mcp-setup --targets cli      # Configure only CLI
+        g2 mcp-setup --targets desktop  # Configure only desktop
+        g2 mcp-setup --force            # Overwrite existing config
+    """
+    import platform
+    import sys
+    from pathlib import Path
+
+    try:
+        # Load environment variables from .env file if it exists
+        from pathlib import Path
+        env_file = Path.cwd() / '.env'
+        if env_file.exists():
+            from dotenv import load_dotenv
+            load_dotenv(env_file)
+
+        # Parse targets
+        target_list = [t.strip().lower() for t in targets.split(',')]
+        if 'all' in target_list:
+            target_list = ['desktop', 'cli']
+
+        # Determine config file locations based on platform
+        system = platform.system()
+        config_files = []
+
+        if 'desktop' in target_list:
+            if system == "Darwin":  # macOS
+                desktop_config = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+            elif system == "Windows":
+                desktop_config = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
+            else:  # Linux
+                desktop_config = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+            config_files.append(('desktop', desktop_config))
+
+        if 'cli' in target_list:
+            # Claude Code CLI uses ~/.claude.json on all platforms
+            cli_config = Path.home() / ".claude.json"
+            config_files.append(('cli', cli_config))
+
+        # Get absolute path to g2 project root
+        cli_file = Path(__file__).resolve()
+        g2_root = cli_file.parent.parent.parent
+        server_path = g2_root / "mcp-server" / "server.py"
+
+        if not server_path.exists():
+            emit_error(
+                f"MCP server not found at {server_path}. "
+                "Are you running this from the g2 project directory?",
+                json_output=json_output
+            )
+            raise typer.Exit(1)
+
+        # Get database URL
+        if not db_url:
+            db_url = os.environ.get('DATABASE_URL', 'postgresql://g2:g2pass@localhost:6432/g2')
+
+        # Get API key
+        if not api_key:
+            api_key = os.environ.get('ALPHAVANTAGE_API_KEY', '')
+
+        # Get Python interpreter path
+        python_path = sys.executable
+
+        # Prepare MCP server config
+        expected_config = {
+            "command": python_path,
+            "args": [str(server_path)],
+            "env": {"DATABASE_URL": db_url}
+        }
+        if api_key:
+            expected_config["env"]["ALPHAVANTAGE_API_KEY"] = api_key
+
+        # Process each config file
+        results = []
+        all_unchanged = True
+
+        for target_name, config_file in config_files:
+            config_unchanged = False
+            existing_config = {}
+
+            # Check if config file exists and load it
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    existing_config = json.load(f)
+
+                # Check if g2 server already configured
+                if "mcpServers" in existing_config and "g2" in existing_config.get("mcpServers", {}):
+                    existing_g2_config = existing_config["mcpServers"]["g2"]
+
+                    # Compare configurations (ignoring key order)
+                    if (existing_g2_config.get("command") == expected_config["command"] and
+                        existing_g2_config.get("args") == expected_config["args"] and
+                        existing_g2_config.get("env", {}) == expected_config["env"]):
+                        # Configuration is already correct - idempotent success
+                        config_unchanged = True
+                    elif not force:
+                        emit_error(
+                            f"MCP server already configured in {config_file} with different settings. "
+                            "Use --force to overwrite.",
+                            json_output=json_output
+                        )
+                        raise typer.Exit(1)
+
+            # Only write if config changed or doesn't exist
+            if not config_unchanged:
+                all_unchanged = False
+                # Merge configurations
+                if not existing_config.get("mcpServers"):
+                    existing_config["mcpServers"] = {}
+                existing_config["mcpServers"]["g2"] = expected_config
+
+                # Create config directory if it doesn't exist
+                config_file.parent.mkdir(parents=True, exist_ok=True)
+
+                # Write configuration
+                with open(config_file, 'w') as f:
+                    json.dump(existing_config, f, indent=2)
+
+            results.append({
+                "target": target_name,
+                "config_file": str(config_file),
+                "config_unchanged": config_unchanged,
+            })
+
+        result = {
+            "targets": results,
+            "server_path": str(server_path),
+            "python_path": python_path,
+            "database_url": db_url,
+            "api_key_set": bool(api_key),
+            "all_unchanged": all_unchanged,
+        }
+
+        if json_output:
+            emit("MCP Setup Complete", data=result, json_output=True)
+        else:
+            console = Console()
+            if all_unchanged:
+                console.print("\n[bold green]✓ MCP Server Configuration Already Up-to-Date[/bold green]\n")
+            else:
+                console.print("\n[bold green]✓ MCP Server Configuration Complete[/bold green]\n")
+
+            # Show results for each target
+            for target_result in results:
+                target_name = target_result['target']
+                target_file = target_result['config_file']
+                unchanged = target_result['config_unchanged']
+
+                status = "[dim]unchanged[/dim]" if unchanged else "[green]updated[/green]"
+                console.print(f"{target_name.capitalize()}: {status}")
+                console.print(f"  [dim]{target_file}[/dim]")
+
+            console.print(f"\nServer path: [cyan]{server_path}[/cyan]")
+            console.print(f"Python: [cyan]{python_path}[/cyan]")
+            console.print(f"Database: [cyan]{db_url}[/cyan]")
+            if api_key:
+                console.print(f"API Key: [green]✓ Set[/green]")
+            else:
+                console.print(f"API Key: [yellow]⚠ Not set (optional)[/yellow]")
+
+            if not all_unchanged:
+                console.print("\n[bold]Next steps:[/bold]")
+                if any(r['target'] == 'desktop' and not r['config_unchanged'] for r in results):
+                    console.print("• Restart Claude Desktop App")
+                if any(r['target'] == 'cli' and not r['config_unchanged'] for r in results):
+                    console.print("• Restart Claude Code CLI or OpenAI-compatible tools")
+                console.print("\nThe 'g2' MCP server should now be available")
+            else:
+                console.print("\n[dim]All configurations are already correct. No changes needed.[/dim]")
+            console.print("\n[dim]To update configs, run: g2 mcp-setup --force[/dim]")
+
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        emit_error(f"Setup failed: {exc}", json_output=json_output)
         raise typer.Exit(1)
 
 

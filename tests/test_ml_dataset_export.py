@@ -7,9 +7,20 @@ from g2.ml.dataset import export_dataset_artifacts
 class _FakeCursor:
     def __init__(self):
         self._rows = []
+        self._call_count = 0
 
     def execute(self, *args, **kwargs):
-        self._rows = []
+        self._call_count += 1
+        # First call: prices query - return sample price data
+        if self._call_count == 1:
+            from datetime import date
+            self._rows = [
+                ("IBM", date(2024, 1, 1), 100.0, 105.0, 99.0, 103.0, 103.0, 1000000),
+                ("IBM", date(2024, 1, 2), 103.0, 108.0, 102.0, 106.0, 106.0, 1100000),
+            ]
+        # Second call: features query - return empty (not testing features)
+        else:
+            self._rows = []
 
     def fetchall(self):
         return list(self._rows)
@@ -22,8 +33,11 @@ class _FakeCursor:
 
 
 class _FakeConn:
+    def __init__(self):
+        self._cursor = _FakeCursor()
+
     def cursor(self):
-        return _FakeCursor()
+        return self._cursor
 
 
 def _read_csv_header(path: Path) -> list[str]:
@@ -35,8 +49,12 @@ def _read_csv_header(path: Path) -> list[str]:
 def test_export_dataset_artifacts_writes_csvs(tmp_path):
     manifest = {
         "universe": {"symbols": ["IBM"]},
-        "horizons_days": [7, 30, 90],
-        "label_spec": {"thresholds": {"7": {"weak": 0.02, "strong": 0.05}}},
+        "horizons_days": [1],  # Use short horizon that works with 2 data points
+        "label_spec": {
+            "thresholds": {
+                "1": {"weak": 0.02, "strong": 0.05},
+            }
+        },
     }
     export_dataset_artifacts(_FakeConn(), manifest=manifest, out_dir=tmp_path)
 

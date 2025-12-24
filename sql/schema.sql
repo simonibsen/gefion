@@ -141,6 +141,13 @@ CREATE INDEX IF NOT EXISTS computed_features_idx
 CREATE INDEX IF NOT EXISTS computed_features_feature_data_date_idx
     ON computed_features(feature_id, data_id, date DESC);
 
+-- Feature definitions indexes
+-- Partial index for active feature lookups (most common query pattern)
+-- Optimized for: SELECT ... FROM feature_definitions WHERE active = TRUE AND function_name IN (...)
+CREATE INDEX IF NOT EXISTS idx_feature_definitions_active_function
+    ON feature_definitions(active, function_name)
+    WHERE active = TRUE;
+
 -- =============================================================================
 -- SUMMARY
 -- =============================================================================
