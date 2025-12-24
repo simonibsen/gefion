@@ -172,8 +172,9 @@ def test_fallback_without_pool():
     # Close any existing pool
     pool.close_pool()
 
-    # Verify prepared statements are disabled
-    assert pool.should_prepare_statements() is False
+    # Without pool, defaults to env var (G2_PREPARE_STATEMENTS, default="1")
+    # This changed from False to True by default for better performance
+    assert pool.should_prepare_statements() is True
 
     # Use direct connection (no pool)
     with psycopg.connect(db_url) as conn:
