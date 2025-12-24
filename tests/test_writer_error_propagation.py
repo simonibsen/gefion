@@ -16,7 +16,8 @@ import pytest
 
 from g2.db import schema, pool
 from g2.db.ingest import upsert_stock
-from g2.features.dispatcher import compute_features, register_compute_function
+from g2.features.dispatcher import compute_features
+from g2.cli_helpers import upsert_feature_function
 
 
 @pytest.fixture
@@ -53,6 +54,20 @@ def setup_db(db_conn):
                 (stock_id, base_date + timedelta(days=i), 100.0, 102.0, 99.0, 101.0, 101.0, 1000000)
             )
 
+    # Register test compute function in feature_functions table
+    test_function_body = '''
+def compute(rows, specs):
+    return [{"date": row["date"], "error_test_feature": float(row["close"])} for row in rows]
+'''
+    upsert_feature_function(db_conn, {
+        "name": "test_error",
+        "version": "1.0",
+        "language": "python",
+        "function_body": test_function_body,
+        "status": "active",
+        "enabled": True,
+    })
+
     # Register test feature
     with db_conn.cursor() as cur:
         cur.execute(
@@ -71,6 +86,7 @@ def setup_db(db_conn):
     with db_conn.cursor() as cur:
         cur.execute("DELETE FROM computed_features WHERE data_id = %s", (stock_id,))
         cur.execute("DELETE FROM feature_definitions WHERE name = %s", ("error_test_feature",))
+        cur.execute("DELETE FROM feature_functions WHERE name = %s", ("test_error",))
         cur.execute("DELETE FROM stocks WHERE symbol = %s", ("ERRORTEST",))
 
 
@@ -82,12 +98,6 @@ def test_writer_errors_are_propagated(db_conn, setup_db):
     With the fix, errors should cause an exception to be raised.
     """
     stock_id = setup_db
-
-    # Register a test compute function
-    def test_error_compute(rows, specs):
-        return [{"date": row["date"], "error_test_feature": float(row["close"])} for row in rows]
-
-    register_compute_function("test_error", test_error_compute)
 
     # Initialize connection pool
     url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
@@ -138,10 +148,19 @@ def test_compute_features_fails_on_writer_errors(db_conn, setup_db):
     """
     stock_id = setup_db
 
-    def test_compute(rows, specs):
-        return [{"date": row["date"], "error_test_feature": float(row["close"])} for row in rows]
-
-    register_compute_function("test_error2", test_compute)
+    # Register test compute function in feature_functions table
+    test_function_body = '''
+def compute(rows, specs):
+    return [{"date": row["date"], "error_test_feature": float(row["close"])} for row in rows]
+'''
+    upsert_feature_function(db_conn, {
+        "name": "test_error2",
+        "version": "1.0",
+        "language": "python",
+        "function_body": test_function_body,
+        "status": "active",
+        "enabled": True,
+    })
 
     # Register another feature for this test
     with db_conn.cursor() as cur:
@@ -190,4 +209,5 @@ def test_compute_features_fails_on_writer_errors(db_conn, setup_db):
         # Cleanup
         with db_conn.cursor() as cur:
             cur.execute("DELETE FROM feature_definitions WHERE name = %s", ("error_test_feature2",))
+            cur.execute("DELETE FROM feature_functions WHERE name = %s", ("test_error2",))
         pool.close_pool()

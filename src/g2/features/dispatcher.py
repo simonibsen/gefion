@@ -36,21 +36,9 @@ from g2.db.ingest import insert_computed_features
 from g2.observability import create_span, set_attributes, add_event, get_current_span
 
 
-# Registry mapping function_name -> compute function
-COMPUTE_FUNCTIONS: Dict[str, Callable] = {}
+# Function cache for resolved DB functions
 _FUNCTION_CACHE: Dict[str, Callable] = {}
 _FUNCTION_CACHE_SOURCE: Dict[str, str] = {}
-
-
-def register_compute_function(function_name: str, compute_func: Callable) -> None:
-    """
-    Register a compute function for a given function_name.
-
-    Args:
-        function_name: The function_name from feature_definitions (e.g., 'indicator', 'derivative')
-        compute_func: The compute function to call
-    """
-    COMPUTE_FUNCTIONS[function_name] = compute_func
 
 
 class PluginOrchestrator:
@@ -1278,17 +1266,9 @@ def _resolve_compute_function(conn: psycopg.Connection, function_name: str) -> O
     db_func = _load_db_function(conn, function_name)
     if db_func:
         fn, version = db_func
-        if function_name in COMPUTE_FUNCTIONS:
-            warnings.warn(f"Using DB function '{function_name}' (version {version}) overriding code registry")
         _FUNCTION_CACHE[function_name] = fn
         _FUNCTION_CACHE_SOURCE[function_name] = f"db:{version}" if version else "db"
         return fn
-
-    code_func = COMPUTE_FUNCTIONS.get(function_name)
-    if code_func:
-        _FUNCTION_CACHE[function_name] = code_func
-        _FUNCTION_CACHE_SOURCE[function_name] = "code"
-        return code_func
 
     return None
 
@@ -1712,13 +1692,3 @@ def _fetch_from_generic_table(
 
 
 # Register generic compute function
-def _register_default_functions():
-    """Register default compute functions."""
-    # Register generic function for all feature types
-    register_compute_function('indicator', compute_features_generic)
-    register_compute_function('derivative', compute_features_generic)
-    register_compute_function('compute_features', compute_features_generic)
-
-
-# Auto-register on import
-_register_default_functions()

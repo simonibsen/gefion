@@ -20,7 +20,8 @@ import pytest
 
 from g2.db import schema, pool
 from g2.db.ingest import upsert_stock
-from g2.features.dispatcher import compute_features, register_compute_function
+from g2.features.dispatcher import compute_features
+from g2.cli_helpers import upsert_feature_function
 
 
 @pytest.fixture
@@ -57,6 +58,20 @@ def setup_db(db_conn):
                 (stock_id, base_date + timedelta(days=i), 100.0, 102.0, 99.0, 101.0, 101.0, 1000000)
             )
 
+    # Register test compute function in feature_functions table
+    test_function_body = '''
+def compute(rows, specs):
+    return [{"date": row["date"], "timing_test_feature": float(row["close"])} for row in rows]
+'''
+    upsert_feature_function(db_conn, {
+        "name": "test_timing",
+        "version": "1.0",
+        "language": "python",
+        "function_body": test_function_body,
+        "status": "active",
+        "enabled": True,
+    })
+
     # Register test feature
     with db_conn.cursor() as cur:
         cur.execute(
@@ -75,6 +90,7 @@ def setup_db(db_conn):
     with db_conn.cursor() as cur:
         cur.execute("DELETE FROM computed_features WHERE data_id = %s", (stock_id,))
         cur.execute("DELETE FROM feature_definitions WHERE name = %s", ("timing_test_feature",))
+        cur.execute("DELETE FROM feature_functions WHERE name = %s", ("test_timing",))
         cur.execute("DELETE FROM stocks WHERE symbol = %s", ("TIMINGTEST",))
 
 
@@ -86,14 +102,6 @@ def test_timing_metrics_are_thread_safe(db_conn, setup_db):
     With the fix, all updates are protected by a lock.
     """
     stock_id = setup_db
-
-    # Register a test compute function
-    def test_timing_compute(rows, specs):
-        # Add a small delay to increase chance of race conditions
-        time.sleep(0.001)
-        return [{"date": row["date"], "timing_test_feature": float(row["close"])} for row in rows]
-
-    register_compute_function("test_timing", test_timing_compute)
 
     # Initialize connection pool
     url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
