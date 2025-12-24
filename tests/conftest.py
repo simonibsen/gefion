@@ -8,6 +8,44 @@ from typing import Optional, List
 from g2.cli_helpers import upsert_feature_function
 
 
+def create_test_function(conn, name: str = "test_func", returns_value: str = "close") -> None:
+    """
+    Create a simple test function in the database.
+
+    Args:
+        conn: Database connection
+        name: Function name (default: "test_func")
+        returns_value: What value to return as feature (default: "close")
+
+    Example:
+        create_test_function(conn, "my_test_func", "volume")
+    """
+    function_body = f'''
+import pandas as pd
+
+def compute(rows, specs):
+    """Simple test function."""
+    if not rows:
+        return []
+    df = pd.DataFrame(rows)
+    result = []
+    for _, row in df.iterrows():
+        result.append({{
+            'date': row['date'],
+            'value': float(row.get('{returns_value}', 0))
+        }})
+    return result
+'''
+    upsert_feature_function(conn, {
+        "name": name,
+        "version": "1.0",
+        "language": "python",
+        "function_body": function_body,
+        "status": "active",
+        "enabled": True,
+    })
+
+
 def load_feature_function_from_json(conn, json_path: str) -> None:
     """
     Load a feature function from a JSON file into the feature_functions table.
