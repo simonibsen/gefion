@@ -98,27 +98,32 @@ class PluginOrchestrator:
 
             plugins: Dict[str, Callable] = {}
 
-            with self.conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT name, language, function_body, version
-                    FROM feature_functions
-                    WHERE called_by = %s
-                    AND enabled = TRUE
-                    AND status = 'active'
-                    ORDER BY name
-                    """,
-                    (self.meta_function_name,),
-                )
-                rows = cur.fetchall()
+            # Try to load plugins from database, fall back gracefully if table doesn't exist
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT name, language, function_body, version
+                        FROM feature_functions
+                        WHERE called_by = %s
+                        AND enabled = TRUE
+                        AND status = 'active'
+                        ORDER BY name
+                        """,
+                        (self.meta_function_name,),
+                    )
+                    rows = cur.fetchall()
 
-            for name, language, body, version in rows:
-                if language == 'python':
-                    try:
-                        plugin_func = self._load_python_function(body, name)
-                        plugins[name] = plugin_func
-                    except Exception as e:
-                        warnings.warn(f"Failed to load plugin '{name}': {e}")
+                for name, language, body, version in rows:
+                    if language == 'python':
+                        try:
+                            plugin_func = self._load_python_function(body, name)
+                            plugins[name] = plugin_func
+                        except Exception as e:
+                            warnings.warn(f"Failed to load plugin '{name}': {e}")
+            except psycopg.errors.UndefinedTable:
+                # feature_functions table doesn't exist - this is OK, just no plugins available
+                pass
 
             # Cache the discovered plugins
             self._PLUGIN_CACHE[self.meta_function_name] = plugins
