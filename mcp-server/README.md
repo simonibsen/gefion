@@ -48,6 +48,7 @@ Claude: [Queries database and shows predictions]
   * Infrastructure health (PostgreSQL, Tempo, Docker)
   * Data freshness analysis (days since last update)
   * Missing components detection (features, data)
+  * Feature/function registration detection (files on disk not in DB)
   * Prioritized issues (critical/high/medium/low)
   * Actionable suggestions with exact commands
   * Ordered next steps workflow
@@ -62,7 +63,7 @@ The `system_status` tool provides comprehensive analysis with actionable suggest
 ```json
 {
   "status": "needs_attention",
-  "summary": "2 issue(s) found",
+  "summary": "3 issue(s) found",
   "infrastructure": {
     "docker": {"running": true},
     "postgres": {"running": true},
@@ -81,6 +82,12 @@ The `system_status` tool provides comprehensive analysis with actionable suggest
       "description": "Price data is 358 days old (last: 2024-01-01)",
       "priority": "high",
       "command": "g2 data-update --exchange NASDAQ --limit 10"
+    },
+    {
+      "type": "unregistered_feature_definitions",
+      "description": "18 feature definition(s) on disk not imported to database",
+      "priority": "medium",
+      "command": "g2 feat-def-import --directory feature-definitions"
     },
     {
       "type": "no_features",

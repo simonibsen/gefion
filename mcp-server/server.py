@@ -1556,6 +1556,88 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as e:
             status_result["data"]["error"] = f"Failed to query database: {str(e)}"
 
+        # Check for unregistered features/functions
+        try:
+            # Count feature definitions on disk
+            feature_def_dir = Path("feature-definitions")
+            feat_def_files_count = 0
+            if feature_def_dir.exists():
+                feat_def_files_count = len(list(feature_def_dir.glob("*.json")))
+
+            # Count feature definitions in DB
+            feat_def_db_result = subprocess.run(
+                ['g2', 'query-database', '--sql',
+                 "SELECT COUNT(*) FROM feature_definitions",
+                 '--json'],
+                capture_output=True,
+                text=True,
+                env={**os.environ, **executor.env},
+                timeout=10
+            )
+
+            if feat_def_db_result.returncode == 0:
+                try:
+                    feat_def_data = json.loads(feat_def_db_result.stdout)
+                    if feat_def_data.get('success') and feat_def_data.get('rows'):
+                        feat_def_db_count = int(feat_def_data['rows'][0][0]) if feat_def_data['rows'][0][0] else 0
+
+                        status_result["data"]["feature_definitions_on_disk"] = feat_def_files_count
+                        status_result["data"]["feature_definitions_in_db"] = feat_def_db_count
+
+                        if feat_def_files_count > feat_def_db_count:
+                            unregistered = feat_def_files_count - feat_def_db_count
+                            status_result["issues"].append({
+                                "type": "unregistered_feature_definitions",
+                                "description": f"{unregistered} feature definition(s) on disk not imported to database",
+                                "priority": "medium",
+                                "command": "g2 feat-def-import --directory feature-definitions"
+                            })
+
+                except (json.JSONDecodeError, IndexError, ValueError) as e:
+                    pass  # Silently skip if query fails
+
+            # Count feature functions on disk
+            feature_fx_dir = Path("feature-functions")
+            feat_fx_files_count = 0
+            if feature_fx_dir.exists():
+                feat_fx_files_count = len(list(feature_fx_dir.glob("*.json")))
+
+            # Count feature functions in DB
+            feat_fx_db_result = subprocess.run(
+                ['g2', 'query-database', '--sql',
+                 "SELECT COUNT(*) FROM feature_functions",
+                 '--json'],
+                capture_output=True,
+                text=True,
+                env={**os.environ, **executor.env},
+                timeout=10
+            )
+
+            if feat_fx_db_result.returncode == 0:
+                try:
+                    feat_fx_data = json.loads(feat_fx_db_result.stdout)
+                    if feat_fx_data.get('success') and feat_fx_data.get('rows'):
+                        feat_fx_db_count = int(feat_fx_data['rows'][0][0]) if feat_fx_data['rows'][0][0] else 0
+
+                        status_result["data"]["feature_functions_on_disk"] = feat_fx_files_count
+                        status_result["data"]["feature_functions_in_db"] = feat_fx_db_count
+
+                        if feat_fx_files_count > feat_fx_db_count:
+                            unregistered = feat_fx_files_count - feat_fx_db_count
+                            status_result["issues"].append({
+                                "type": "unregistered_feature_functions",
+                                "description": f"{unregistered} feature function(s) on disk not imported to database",
+                                "priority": "medium",
+                                "command": "g2 feat-fx-import --directory feature-functions"
+                            })
+
+                except (json.JSONDecodeError, IndexError, ValueError) as e:
+                    pass  # Silently skip if query fails
+
+        except Exception as e:
+            # Don't fail system_status if feature checking fails
+            pass
+
     # 3. Generate Prioritized Suggestions
     # Sort issues by priority
     priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}

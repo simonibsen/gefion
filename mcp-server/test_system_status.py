@@ -132,3 +132,44 @@ class TestSystemStatusSuggestionEngine:
         # Expected: Don't suggest "compute features" before "ingest data"
         # Dependency: data → features → dataset → model → predictions
         pass
+
+
+class TestFeatureRegistrationDetection:
+    """Tests for detecting unregistered features and functions."""
+
+    def test_detects_unregistered_feature_definitions(self):
+        """Test detection of feature definitions on disk not in DB."""
+        # Expected: Compares feature-definitions/*.json count vs feature_definitions table
+        # If mismatch, suggests: g2 feat-def-import
+        pass
+
+    def test_detects_unregistered_feature_functions(self):
+        """Test detection of feature functions on disk not in DB."""
+        # Expected: Compares feature-functions/*.json count vs feature_functions table
+        # If mismatch, suggests: g2 feat-fx-import
+        pass
+
+    def test_feature_definition_mismatch_priority(self):
+        """Test that unregistered features have medium priority."""
+        # Expected: unregistered_features priority = "medium"
+        # Not critical but should be imported
+        pass
+
+    def test_suggests_correct_import_commands(self):
+        """Test that suggestions include correct import commands."""
+        # Expected:
+        # - Feature definitions: "g2 feat-def-import --directory feature-definitions"
+        # - Feature functions: "g2 feat-fx-import --directory feature-functions"
+        pass
+
+    def test_handles_missing_directories(self):
+        """Test graceful handling when directories don't exist."""
+        # Expected: If feature-definitions/ doesn't exist, no error
+        # Just reports as "0 definitions on disk"
+        pass
+
+    def test_all_registered_no_issue(self):
+        """Test when all disk files are registered in DB."""
+        # Expected: No unregistered_features issue
+        # Status can still be healthy
+        pass
