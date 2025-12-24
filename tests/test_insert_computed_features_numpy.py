@@ -36,11 +36,16 @@ def test_insert_computed_features_accepts_numpy_int():
     schema.create_stocks_table(conn)
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
+    # Create test stock
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO stocks (id, symbol) VALUES (1, 'TEST')")
     defs = [
         {
             "name": "indicator_adx_14",
             "function_name": "indicator",
             "params": {"indicator": "adx"},
+            "source_table": "stock_ohlcv",
+            "source_column": "close",
             "store_table": "computed_features",
             "store_column": "value",
             "store_type": "double precision",
