@@ -106,11 +106,12 @@ def test_stock_ohlcv_unique_per_stock_and_date(conn):
         )
         stock_id = cur.fetchone()[0]
         cur.execute(
-            """
-            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-01');
-            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-02');
-            """,
-            (stock_id, stock_id),
+            "INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-01')",
+            (stock_id,),
+        )
+        cur.execute(
+            "INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, '2023-01-02')",
+            (stock_id,),
         )
 
         with pytest.raises(psycopg.errors.UniqueViolation):
