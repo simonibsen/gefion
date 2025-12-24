@@ -15,7 +15,8 @@ import pytest
 
 from g2.db import schema, pool
 from g2.db.ingest import upsert_stock
-from g2.features.dispatcher import compute_features, register_compute_function
+from g2.features.dispatcher import compute_features
+from g2.cli_helpers import upsert_feature_function
 
 
 @pytest.fixture
@@ -52,6 +53,20 @@ def setup_db(db_conn):
                 (stock_id, base_date + timedelta(days=i), 100.0, 102.0, 99.0, 101.0, 101.0, 1000000)
             )
 
+    # Register test compute function in feature_functions table
+    test_function_body = '''
+def compute(rows, specs):
+    return [{"date": row["date"], "test_indicator": row["close"]} for row in rows]
+'''
+    upsert_feature_function(db_conn, {
+        "name": "test_compute",
+        "version": "1.0",
+        "language": "python",
+        "function_body": test_function_body,
+        "status": "active",
+        "enabled": True,
+    })
+
     # Register test feature
     with db_conn.cursor() as cur:
         cur.execute(
@@ -71,6 +86,7 @@ def setup_db(db_conn):
         cur.execute("DELETE FROM computed_features WHERE data_id = %s", (stock_id,))
         cur.execute("DELETE FROM stock_ohlcv WHERE data_id = %s", (stock_id,))
         cur.execute("DELETE FROM feature_definitions WHERE name = %s", ("test_indicator",))
+        cur.execute("DELETE FROM feature_functions WHERE name = %s", ("test_compute",))
         cur.execute("DELETE FROM stocks WHERE symbol = %s", ("TEST",))
 
 
@@ -92,12 +108,6 @@ def test_writer_threads_use_separate_connections(db_conn, setup_db):
 
     # Track whether we saw the main connection being used from another thread
     thread_safety_violation = {"detected": False, "details": ""}
-
-    # Register a test compute function that returns data
-    def test_compute(rows, specs):
-        return [{"date": row["date"], "test_indicator": row["close"]} for row in rows]
-
-    register_compute_function("test_compute", test_compute)
 
     # Initialize connection pool
     url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
@@ -170,20 +180,28 @@ def test_writer_threads_can_write_concurrently(db_conn, setup_db):
     """
     stock_id = setup_db
 
-    # Register a test compute function that returns lots of data
-    def test_compute_multi(rows, specs):
-        result = []
-        for row in rows:
-            for spec in specs:
-                column_name = spec.get("column", spec["name"])
-                multiplier = spec.get("multiplier", 1.0)
-                result.append({
-                    "date": row["date"],
-                    column_name: float(row["close"]) * multiplier
-                })
-        return result
-
-    register_compute_function("test_compute_multi", test_compute_multi)
+    # Register test compute function in feature_functions table
+    test_function_body = '''
+def compute(rows, specs):
+    result = []
+    for row in rows:
+        for spec in specs:
+            column_name = spec.get("column", spec["name"])
+            multiplier = spec.get("multiplier", 1.0)
+            result.append({
+                "date": row["date"],
+                column_name: float(row["close"]) * multiplier
+            })
+    return result
+'''
+    upsert_feature_function(db_conn, {
+        "name": "test_compute_multi",
+        "version": "1.0",
+        "language": "python",
+        "function_body": test_function_body,
+        "status": "active",
+        "enabled": True,
+    })
 
     # Register multiple features to generate more work
     with db_conn.cursor() as cur:
@@ -243,3 +261,5 @@ def test_writer_threads_can_write_concurrently(db_conn, setup_db):
             # Now delete feature definitions
             for i in range(5):
                 cur.execute("DELETE FROM feature_definitions WHERE name = %s", (f"test_multi_{i}",))
+            # Delete feature function
+            cur.execute("DELETE FROM feature_functions WHERE name = %s", ("test_compute_multi",))
