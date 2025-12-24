@@ -41,22 +41,12 @@ def test_trim_stock_ohlcv_date_and_symbol():
     s2 = upsert_stock(conn, "BBB")
     with conn.cursor() as cur:
         cur.execute(
-            """
-            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, %s), (%s, %s), (%s, %s);
-            INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, %s), (%s, %s);
-            """,
-            (
-                s1,
-                date(2023, 1, 1),
-                s1,
-                date(2023, 6, 1),
-                s1,
-                date(2024, 1, 1),
-                s2,
-                date(2023, 1, 1),
-                s2,
-                date(2024, 1, 1),
-            ),
+            "INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, %s), (%s, %s), (%s, %s)",
+            (s1, date(2023, 1, 1), s1, date(2023, 6, 1), s1, date(2024, 1, 1)),
+        )
+        cur.execute(
+            "INSERT INTO stock_ohlcv (data_id, date) VALUES (%s, %s), (%s, %s)",
+            (s2, date(2023, 1, 1), s2, date(2024, 1, 1)),
         )
     deleted = trim_stock_ohlcv(conn, before=date(2023, 6, 1), after=date(2023, 12, 31), symbols=["AAA"])
     # Should delete AAA before 2023-06-01 and after 2023-12-31 (two rows), BBB untouched
