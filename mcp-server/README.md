@@ -43,6 +43,54 @@ Claude: [Queries database and shows predictions]
 - `trace_detail` - Get detailed trace information for a specific trace ID
 - `trace_compare` - Compare two traces to quantify performance improvements
 
+## Service Health Checks
+
+The MCP server automatically checks required services before executing tools and provides helpful error messages if services are down.
+
+### Intelligent Error Messages
+
+If a required service is not running, you'll get actionable suggestions:
+
+**PostgreSQL not running:**
+```
+❌ POSTGRES is not available
+
+Status: PostgreSQL is not running
+
+Start PostgreSQL:
+  docker compose up -d postgres
+
+Check status:
+  docker compose ps postgres
+```
+
+**Tempo not running:**
+```
+❌ TEMPO is not available
+
+Status: Tempo is not running or not accessible
+
+Start Tempo (for tracing):
+  cd docker/tempo
+  docker compose -f docker-compose.tempo.yml up -d
+
+Or disable tracing:
+  export OTEL_ENABLED=false
+```
+
+### Health Check Performance
+
+- **Caching**: Health status cached for 60 seconds (minimal overhead)
+- **Lazy checking**: Only checks required services for each tool
+- **Fast failure**: Immediate helpful error if service down (~50ms vs 5-30s timeout)
+- **Overhead**: <0.2% of typical operation time when cached
+
+### Service Dependencies
+
+- **PostgreSQL required**: All ML tools, data_update, query tools
+- **Tempo required**: Observability tools (span_check, trace_*)
+- **Docker recommended**: For managing PostgreSQL and Tempo containers
+
 ## Installation
 
 ### Quick Setup (Recommended)

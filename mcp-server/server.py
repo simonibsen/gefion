@@ -16,12 +16,25 @@ import asyncio
 import json
 import subprocess
 import os
-from typing import Any, Dict, List, Optional
+import sys
+import time
+from typing import Any, Dict, List, Optional, Callable
 from datetime import datetime, timedelta
+from pathlib import Path
+
+# Add parent directory to path to import g2 modules
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
+
+# Import g2 health check module
+try:
+    from g2 import health
+except ImportError:
+    # Fallback if g2 module not in path
+    health = None
 
 
 class G2Executor:
@@ -79,9 +92,124 @@ class G2Executor:
             }
 
 
-# Initialize server
+# ============================================================================
+# Health Check Integration
+# ============================================================================
+
+class HealthCheckCache:
+    """
+    Cache health check results with TTL to minimize overhead.
+
+    Caches service health status for a configurable time period to avoid
+    repeated health checks on every MCP tool invocation.
+    """
+
+    def __init__(self, ttl_seconds: int = 60):
+        """
+        Initialize health check cache.
+
+        Args:
+            ttl_seconds: Time-to-live for cached results in seconds
+        """
+        self.ttl_seconds = ttl_seconds
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._timestamps: Dict[str, float] = {}
+
+    def get_or_check(self, service: str, check_func: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Get cached health status or perform check if cache is stale.
+
+        Args:
+            service: Service name (postgres, tempo, docker)
+            check_func: Function to call if cache miss or stale
+
+        Returns:
+            Health status dict
+        """
+        now = time.time()
+
+        # Check if we have a cached result within TTL
+        if service in self._cache and service in self._timestamps:
+            age = now - self._timestamps[service]
+            if age < self.ttl_seconds:
+                return self._cache[service]
+
+        # Cache miss or stale - perform health check
+        result = check_func()
+        self._cache[service] = result
+        self._timestamps[service] = now
+        return result
+
+    def invalidate(self, service: str) -> None:
+        """Invalidate cached health status for a service."""
+        self._cache.pop(service, None)
+        self._timestamps.pop(service, None)
+
+
+def check_service_health(service: str) -> Dict[str, Any]:
+    """
+    Check health of a specific service.
+
+    Args:
+        service: Service name (postgres, tempo, docker)
+
+    Returns:
+        Health status dict with running, message, and optionally suggestion
+    """
+    if health is None:
+        return {
+            "running": True,
+            "message": f"{service} health check unavailable (g2.health module not found)",
+            "warning": "Health checks disabled"
+        }
+
+    if service == "postgres":
+        return health.check_postgres_health()
+    elif service == "tempo":
+        return health.check_tempo_health()
+    elif service == "docker":
+        return health.check_docker_services()
+    else:
+        return {
+            "running": False,
+            "message": f"Unknown service: {service}",
+            "error_type": "unknown_service"
+        }
+
+
+def format_service_error(service: str, health_status: Dict[str, Any]) -> str:
+    """
+    Format a helpful error message when a service is down.
+
+    Args:
+        service: Service name
+        health_status: Health status dict from check_service_health
+
+    Returns:
+        Formatted error message with suggestions
+    """
+    message = f"❌ {service.upper()} is not available\n\n"
+    message += f"Status: {health_status.get('message', 'Unknown error')}\n"
+
+    if "suggestion" in health_status:
+        message += f"\n{health_status['suggestion']}"
+    elif service == "postgres":
+        message += "\nStart PostgreSQL:\n  docker compose up -d postgres\n"
+        message += "\nCheck status:\n  docker compose ps postgres"
+    elif service == "tempo":
+        message += "\nStart Tempo (for tracing):\n"
+        message += "  cd docker/tempo\n"
+        message += "  docker compose -f docker-compose.tempo.yml up -d\n"
+        message += "\nOr disable tracing:\n"
+        message += "  export OTEL_ENABLED=false"
+
+    return message
+
+
+# Initialize server and health cache
 app = Server("g2-mcp-server")
 executor = G2Executor()
+health_cache = HealthCheckCache(ttl_seconds=60)
 
 
 # ============================================================================
@@ -475,29 +603,68 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
 # Tool Implementations
 # ============================================================================
 
+async def _execute_with_health_check(
+    required_services: List[str],
+    executor_func: Callable[[], Any]
+) -> Dict[str, Any]:
+    """
+    Execute a function after checking required services are healthy.
+
+    Args:
+        required_services: List of service names to check (postgres, tempo, docker)
+        executor_func: Async function to execute if services are healthy
+
+    Returns:
+        Result from executor_func or error dict if services are down
+    """
+    for service in required_services:
+        # Use cached health check (60 second TTL)
+        status = health_cache.get_or_check(
+            service,
+            lambda s=service: check_service_health(s)
+        )
+
+        if not status.get("running", True):
+            # Service is down - return helpful error
+            error_msg = format_service_error(service, status)
+            return {
+                "success": False,
+                "error": error_msg,
+                "service_down": service,
+                "health_status": status
+            }
+
+    # All services healthy - execute the function
+    return await executor_func()
+
+
 async def _ml_dataset_build(args: Dict[str, Any]) -> Dict[str, Any]:
     """Build ML dataset."""
-    cmd = ['ml', 'dataset-build', '--name', args['name'], '--version', args['version']]
+    async def _build():
+        cmd = ['ml', 'dataset-build', '--name', args['name'], '--version', args['version']]
 
-    if args.get('symbols'):
-        cmd.extend(['--symbols', args['symbols']])
-    elif args.get('exchange'):
-        cmd.extend(['--exchange', args['exchange']])
-        if args.get('limit'):
-            cmd.extend(['--limit', str(args['limit'])])
+        if args.get('symbols'):
+            cmd.extend(['--symbols', args['symbols']])
+        elif args.get('exchange'):
+            cmd.extend(['--exchange', args['exchange']])
+            if args.get('limit'):
+                cmd.extend(['--limit', str(args['limit'])])
 
-    if args.get('horizons'):
-        cmd.extend(['--horizons', args['horizons']])
-    if args.get('weak_thresholds'):
-        cmd.extend(['--weak-thresholds', args['weak_thresholds']])
-    if args.get('strong_thresholds'):
-        cmd.extend(['--strong-thresholds', args['strong_thresholds']])
-    if args.get('out_dir'):
-        cmd.extend(['--out-dir', args['out_dir']])
-    if args.get('export', True):
-        cmd.append('--export')
+        if args.get('horizons'):
+            cmd.extend(['--horizons', args['horizons']])
+        if args.get('weak_thresholds'):
+            cmd.extend(['--weak-thresholds', args['weak_thresholds']])
+        if args.get('strong_thresholds'):
+            cmd.extend(['--strong-thresholds', args['strong_thresholds']])
+        if args.get('out_dir'):
+            cmd.extend(['--out-dir', args['out_dir']])
+        if args.get('export', True):
+            cmd.append('--export')
 
-    return await executor.run(*cmd)
+        return await executor.run(*cmd)
+
+    # ML operations require PostgreSQL
+    return await _execute_with_health_check(['postgres'], _build)
 
 
 async def _ml_train(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -851,26 +1018,30 @@ async def _query_database(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _span_check(args: Dict[str, Any]) -> Dict[str, Any]:
     """Check recent traces using g2 span-check command (backend-agnostic)."""
-    cmd = ['span-check']
+    async def _check():
+        cmd = ['span-check']
 
-    if args.get('limit'):
-        cmd.extend(['--limit', str(args['limit'])])
-    if args.get('trace_id'):
-        cmd.extend(['--trace-id', args['trace_id']])
-    if args.get('service_name'):
-        cmd.extend(['--service-name', args['service_name']])
-    if args.get('backend'):
-        cmd.extend(['--backend', args['backend']])
-    if args.get('backend_url'):
-        # Map backend_url to the appropriate CLI flag based on backend
-        backend = args.get('backend', 'tempo')
-        if backend == 'tempo':
-            cmd.extend(['--tempo-url', args['backend_url']])
-        # Future backends can be added here
-    if args.get('show_spans') is False:
-        cmd.append('--no-show-spans')
+        if args.get('limit'):
+            cmd.extend(['--limit', str(args['limit'])])
+        if args.get('trace_id'):
+            cmd.extend(['--trace-id', args['trace_id']])
+        if args.get('service_name'):
+            cmd.extend(['--service-name', args['service_name']])
+        if args.get('backend'):
+            cmd.extend(['--backend', args['backend']])
+        if args.get('backend_url'):
+            # Map backend_url to the appropriate CLI flag based on backend
+            backend = args.get('backend', 'tempo')
+            if backend == 'tempo':
+                cmd.extend(['--tempo-url', args['backend_url']])
+            # Future backends can be added here
+        if args.get('show_spans') is False:
+            cmd.append('--no-show-spans')
 
-    return await executor.run(*cmd)
+        return await executor.run(*cmd)
+
+    # Span checking requires Tempo tracing backend
+    return await _execute_with_health_check(['tempo'], _check)
 
 
 async def _trace_search(args: Dict[str, Any]) -> Dict[str, Any]:
