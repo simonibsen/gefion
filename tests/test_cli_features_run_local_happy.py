@@ -85,7 +85,7 @@ def test_features_run_local_succeeds(monkeypatch, tmp_path):
     res = runner.invoke(
         cli.app,
         [
-            "features-run",
+            "feat-compute",
             "--features",
             "indicator_adx_14",
             "--listings-file",

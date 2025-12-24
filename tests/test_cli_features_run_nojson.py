@@ -40,7 +40,7 @@ def test_features_run_no_symbols_errors_plaintext(monkeypatch):
             pass
 
     monkeypatch.setattr(cli, "AlphaVantageClient", DummyClient)
-    res = runner.invoke(cli.app, ["features-run"])
+    res = runner.invoke(cli.app, ["feat-compute"])
     assert res.exit_code != 0
     assert "Missing option '--features'" in res.stdout
 
@@ -86,6 +86,6 @@ def test_features_run_infers_symbols_plaintext(monkeypatch):
     monkeypatch.setattr(cli, "AlphaVantageClient", DummyClient)
     monkeypatch.setattr(cli, "ingest_indicators_for_symbols", dummy_ingest)
 
-    res = runner.invoke(cli.app, ["features-run", "--features", "indicator_rsi_14"])
+    res = runner.invoke(cli.app, ["feat-compute", "--features", "indicator_rsi_14"])
     assert res.exit_code == 0
     assert set(called["symbols"]) == {"AAA", "BBB"}
