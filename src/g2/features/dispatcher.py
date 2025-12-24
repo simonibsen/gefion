@@ -87,37 +87,43 @@ class PluginOrchestrator:
         Returns:
             Dict mapping plugin name -> plugin function
         """
-        # Check cache first
-        if self.meta_function_name in self._PLUGIN_CACHE:
-            return self._PLUGIN_CACHE[self.meta_function_name]
+        with create_span(
+            "plugin.discover",
+            meta_function=self.meta_function_name,
+            cached=self.meta_function_name in self._PLUGIN_CACHE
+        ):
+            # Check cache first
+            if self.meta_function_name in self._PLUGIN_CACHE:
+                return self._PLUGIN_CACHE[self.meta_function_name]
 
-        plugins: Dict[str, Callable] = {}
+            plugins: Dict[str, Callable] = {}
 
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT name, language, function_body, version
-                FROM feature_functions
-                WHERE called_by = %s
-                AND enabled = TRUE
-                AND status = 'active'
-                ORDER BY name
-                """,
-                (self.meta_function_name,),
-            )
-            rows = cur.fetchall()
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT name, language, function_body, version
+                    FROM feature_functions
+                    WHERE called_by = %s
+                    AND enabled = TRUE
+                    AND status = 'active'
+                    ORDER BY name
+                    """,
+                    (self.meta_function_name,),
+                )
+                rows = cur.fetchall()
 
-        for name, language, body, version in rows:
-            if language == 'python':
-                try:
-                    plugin_func = self._load_python_function(body, name)
-                    plugins[name] = plugin_func
-                except Exception as e:
-                    warnings.warn(f"Failed to load plugin '{name}': {e}")
+            for name, language, body, version in rows:
+                if language == 'python':
+                    try:
+                        plugin_func = self._load_python_function(body, name)
+                        plugins[name] = plugin_func
+                    except Exception as e:
+                        warnings.warn(f"Failed to load plugin '{name}': {e}")
 
-        # Cache the discovered plugins
-        self._PLUGIN_CACHE[self.meta_function_name] = plugins
-        return plugins
+            # Cache the discovered plugins
+            self._PLUGIN_CACHE[self.meta_function_name] = plugins
+            set_attributes(get_current_span(), plugin_count=len(plugins))
+            return plugins
 
     def _load_python_function(self, function_body: str, function_name: str) -> Callable:
         """
@@ -185,25 +191,30 @@ class PluginOrchestrator:
             plugin_name = self._find_plugin_for_spec(spec)
 
             if plugin_name and plugin_name in self.plugins:
-                try:
-                    # Execute plugin
-                    plugin_result = self.plugins[plugin_name](df, spec, cache)
+                with create_span(
+                    "plugin.execute",
+                    plugin_name=plugin_name,
+                    feature_name=feature_name
+                ):
+                    try:
+                        # Execute plugin
+                        plugin_result = self.plugins[plugin_name](df, spec, cache)
 
-                    # Merge result into output DataFrame
-                    if isinstance(plugin_result, pd.DataFrame):
-                        # Merge on date
-                        result_df = result_df.merge(
-                            plugin_result,
-                            on='date',
-                            how='left'
-                        )
-                    elif isinstance(plugin_result, dict):
-                        # Add scalar result to all rows
-                        for key, value in plugin_result.items():
-                            result_df[key] = value
+                        # Merge result into output DataFrame
+                        if isinstance(plugin_result, pd.DataFrame):
+                            # Merge on date
+                            result_df = result_df.merge(
+                                plugin_result,
+                                on='date',
+                                how='left'
+                            )
+                        elif isinstance(plugin_result, dict):
+                            # Add scalar result to all rows
+                            for key, value in plugin_result.items():
+                                result_df[key] = value
 
-                except Exception as e:
-                    warnings.warn(f"Plugin '{plugin_name}' failed for spec '{feature_name}': {e}")
+                    except Exception as e:
+                        warnings.warn(f"Plugin '{plugin_name}' failed for spec '{feature_name}': {e}")
 
         return result_df
 
@@ -807,98 +818,105 @@ def _compute_features_impl(
     # This ensures writers hit the optimistic insert fast path (no chunk creation)
     # and eliminates the deadlock condition from concurrent chunk creation
     if write_queue is not None and not write_queue.empty():
-        def precreate_chunks_for_queued_data():
-            """Scan write queue and pre-create all needed chunks before writers drain it."""
-            if write_queue.empty():
-                return
+        with create_span("chunk.precreate", queue_size=write_queue.qsize()):
+            def precreate_chunks_for_queued_data():
+                """Scan write queue and pre-create all needed chunks before writers drain it."""
+                if write_queue.empty():
+                    return
 
-            # Scan queue to find min/max dates (non-destructive peek)
-            items = []
-            try:
-                while True:
-                    item = write_queue.get_nowait()
-                    if item is stop_token:
-                        write_queue.put(item)
-                        break
-                    items.append(item)
-                    # Must call task_done() for each get_nowait() to keep task counter balanced
-                    # when we put() items back below
-                    write_queue.task_done()
-            except queue.Empty:
-                pass
-
-            # Put items back in queue
-            for item in items:
-                write_queue.put(item)
-
-            if not items:
-                return
-
-            # Calculate date range across ALL queued work
-            min_date = None
-            max_date = None
-            for item in items:
-                rows = item.get("rows", [])
-                for row in rows:
-                    dt = row.get("date")
-                    if dt:
-                        if min_date is None or dt < min_date:
-                            min_date = dt
-                        if max_date is None or dt > max_date:
-                            max_date = dt
-
-            if min_date and max_date:
-                from g2.utils.timescale import ensure_chunks_for_date_range
-
-                buffer = timedelta(days=1)
-
-                # Use SEPARATE connection (not autocommit) to avoid lock contention
-                # Note: data_id is from parent scope (compute_features function)
+                # Scan queue to find min/max dates (non-destructive peek)
+                items = []
                 try:
-                    with psycopg.connect(conn.info.dsn) as chunk_conn:
-                        chunk_conn.autocommit = False
-                        try:
-                            ensure_chunks_for_date_range(
-                                chunk_conn,
-                                "computed_features",
-                                min_date - buffer,
-                                max_date + buffer,
-                                chunk_interval_days=30
-                            )
-                        except Exception:
-                            # Log but don't fail - optimistic fallback will handle it
-                            pass
-                except Exception:
-                    # If we can't create separate connection, just skip pre-creation
-                    # Optimistic fallback will handle chunk creation on-demand
+                    while True:
+                        item = write_queue.get_nowait()
+                        if item is stop_token:
+                            write_queue.put(item)
+                            break
+                        items.append(item)
+                        # Must call task_done() for each get_nowait() to keep task counter balanced
+                        # when we put() items back below
+                        write_queue.task_done()
+                except queue.Empty:
                     pass
 
-        # Pre-create chunks after compute completes, before draining queue
-        precreate_chunks_for_queued_data()
+                # Put items back in queue
+                for item in items:
+                    write_queue.put(item)
+
+                if not items:
+                    return
+
+                # Calculate date range across ALL queued work
+                min_date = None
+                max_date = None
+                for item in items:
+                    rows = item.get("rows", [])
+                    for row in rows:
+                        dt = row.get("date")
+                        if dt:
+                            if min_date is None or dt < min_date:
+                                min_date = dt
+                            if max_date is None or dt > max_date:
+                                max_date = dt
+
+                if min_date and max_date:
+                    from g2.utils.timescale import ensure_chunks_for_date_range
+
+                    buffer = timedelta(days=1)
+
+                    # Use SEPARATE connection (not autocommit) to avoid lock contention
+                    # Note: data_id is from parent scope (compute_features function)
+                    try:
+                        with psycopg.connect(conn.info.dsn) as chunk_conn:
+                            chunk_conn.autocommit = False
+                            try:
+                                ensure_chunks_for_date_range(
+                                    chunk_conn,
+                                    "computed_features",
+                                    min_date - buffer,
+                                    max_date + buffer,
+                                    chunk_interval_days=30
+                                )
+                                set_attributes(get_current_span(),
+                                              date_range_days=(max_date - min_date).days,
+                                              min_date=str(min_date),
+                                              max_date=str(max_date))
+                            except Exception:
+                                # Log but don't fail - optimistic fallback will handle it
+                                pass
+                    except Exception:
+                        # If we can't create separate connection, just skip pre-creation
+                        # Optimistic fallback will handle chunk creation on-demand
+                        pass
+
+            # Pre-create chunks after compute completes, before draining queue
+            precreate_chunks_for_queued_data()
 
     # Drain writer queue
     if write_queue is not None:
-        wait_start = time.monotonic()
-        for _ in writer_threads:
-            write_queue.put(stop_token)
-        write_queue.join()
-        for evt in writer_events:
-            evt.wait()
-        for t in writer_threads:
-            t.join(timeout=5)
-        if timings is not None and timings_lock is not None:
-            elapsed = time.monotonic() - wait_start
-            with timings_lock:
-                timings["writer_wait"] += elapsed
+        with create_span("writer.drain", thread_count=len(writer_threads)):
+            wait_start = time.monotonic()
+            for _ in writer_threads:
+                write_queue.put(stop_token)
+            write_queue.join()
+            for evt in writer_events:
+                evt.wait()
+            for t in writer_threads:
+                t.join(timeout=5)
+            if timings is not None and timings_lock is not None:
+                elapsed = time.monotonic() - wait_start
+                with timings_lock:
+                    timings["writer_wait"] += elapsed
 
-        # Writer errors are fatal - we can't trust the results if writers failed
-        if writer_errors:
-            error_messages = [str(e) for e in writer_errors]
-            raise RuntimeError(
-                f"Writer thread errors occurred during feature computation: "
-                f"{len(writer_errors)} error(s): {'; '.join(error_messages[:3])}"
-                + (f" (and {len(error_messages) - 3} more)" if len(error_messages) > 3 else "")
-            )
+            # Writer errors are fatal - we can't trust the results if writers failed
+            if writer_errors:
+                error_messages = [str(e) for e in writer_errors]
+                set_attributes(get_current_span(), error_count=len(writer_errors))
+                raise RuntimeError(
+                    f"Writer thread errors occurred during feature computation: "
+                    f"{len(writer_errors)} error(s): {'; '.join(error_messages[:3])}"
+                    + (f" (and {len(error_messages) - 3} more)" if len(error_messages) > 3 else "")
+                )
 
     # Summary
     results['summary'] = {
@@ -1103,13 +1121,21 @@ def _process_function_group_impl(
                 start_date = min(dates) if dates else None
             # Fetch source data
             fetch_start = time.monotonic()
-            source_rows = _fetch_source_data(
-                conn,
-                data_id,
-                source_key,
-                source_features,
-                start_date=start_date,
-            )
+            with create_span(
+                "fetch.source_data",
+                source_table=source_key[0],
+                source_column=source_key[1],
+                data_id=data_id,
+                incremental=start_date is not None
+            ):
+                source_rows = _fetch_source_data(
+                    conn,
+                    data_id,
+                    source_key,
+                    source_features,
+                    start_date=start_date,
+                )
+                set_attributes(get_current_span(), row_count=len(source_rows))
             if timings is not None and timings_lock is not None:
                 elapsed = time.monotonic() - fetch_start
                 with timings_lock:
@@ -1132,25 +1158,32 @@ def _process_function_group_impl(
             try:
                 compute_start = time.monotonic()
 
-                # Inspect function signature to determine what parameters to pass
-                sig = inspect.signature(compute_func)
-                params_to_pass = {}
+                with create_span(
+                    "compute.execute",
+                    function_name=function_name,
+                    spec_count=len(compute_specs),
+                    data_id=data_id
+                ):
+                    # Inspect function signature to determine what parameters to pass
+                    sig = inspect.signature(compute_func)
+                    params_to_pass = {}
 
-                # Always pass source_rows and compute_specs
-                # (passed as positional args, not in params_to_pass)
+                    # Always pass source_rows and compute_specs
+                    # (passed as positional args, not in params_to_pass)
 
-                # Optional: cache and cache_lock
-                if 'cache' in sig.parameters and cache is not None:
-                    params_to_pass['cache'] = cache
-                if 'cache_lock' in sig.parameters and cache_lock is not None:
-                    params_to_pass['cache_lock'] = cache_lock
+                    # Optional: cache and cache_lock
+                    if 'cache' in sig.parameters and cache is not None:
+                        params_to_pass['cache'] = cache
+                    if 'cache_lock' in sig.parameters and cache_lock is not None:
+                        params_to_pass['cache_lock'] = cache_lock
 
-                # Optional: db_conn (for meta-functions using plugins)
-                if 'db_conn' in sig.parameters:
-                    params_to_pass['db_conn'] = conn
+                    # Optional: db_conn (for meta-functions using plugins)
+                    if 'db_conn' in sig.parameters:
+                        params_to_pass['db_conn'] = conn
 
-                # Call function with appropriate parameters
-                computed_rows = compute_func(source_rows, compute_specs, **params_to_pass)
+                    # Call function with appropriate parameters
+                    computed_rows = compute_func(source_rows, compute_specs, **params_to_pass)
+                    set_attributes(get_current_span(), result_count=len(computed_rows) if computed_rows else 0)
 
                 if timings is not None and timings_lock is not None:
                     elapsed = time.monotonic() - compute_start
@@ -1163,33 +1196,45 @@ def _process_function_group_impl(
                 # Build feature_map for insert
                 # Map output column names to feature IDs
                 # Use params.column if specified, otherwise use feature name
-                feature_map = {}
-                for f in source_features:
-                    feature_id = f[0]
-                    feature_name = f[1]
-                    params = f[3]  # params dict
-                    # Use column name from params, or fall back to feature name
-                    column_name = params.get('column', feature_name)
-                    feature_map[column_name] = feature_id
+                with create_span("transform.build_feature_map", feature_count=len(source_features)):
+                    feature_map = {}
+                    for f in source_features:
+                        feature_id = f[0]
+                        feature_name = f[1]
+                        params = f[3]  # params dict
+                        # Use column name from params, or fall back to feature name
+                        column_name = params.get('column', feature_name)
+                        feature_map[column_name] = feature_id
 
                 # Insert results (pipelined if writer provided)
                 if writer:
                     write_start = time.monotonic()
-                    inserted = writer(computed_rows, feature_map)
+                    with create_span(
+                        "insert.enqueue",
+                        row_count=len(computed_rows),
+                        feature_count=len(feature_map)
+                    ):
+                        inserted = writer(computed_rows, feature_map)
                     if timings is not None and timings_lock is not None:
                         elapsed = time.monotonic() - write_start
                         with timings_lock:
                             timings["write"] += elapsed
                 else:
                     write_start = time.monotonic()
-                    inserted = insert_computed_features(
-                        conn,
-                        data_id=data_id,
-                        rows=computed_rows,
-                        feature_map=feature_map,
-                        update_existing=update_existing,
-                        batch_size=feature_batch_size,
-                    )
+                    with create_span(
+                        "insert.direct",
+                        row_count=len(computed_rows),
+                        feature_count=len(feature_map),
+                        data_id=data_id
+                    ):
+                        inserted = insert_computed_features(
+                            conn,
+                            data_id=data_id,
+                            rows=computed_rows,
+                            feature_map=feature_map,
+                            update_existing=update_existing,
+                            batch_size=feature_batch_size,
+                        )
                     if timings is not None and timings_lock is not None:
                         elapsed = time.monotonic() - write_start
                         with timings_lock:
