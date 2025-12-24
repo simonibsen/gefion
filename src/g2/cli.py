@@ -3225,6 +3225,11 @@ def _features_compute_impl(
     except Exception as exc:
         emit_error(f"Computation failed: {exc}", json_output=json_output)
     finally:
+        # Flush telemetry to ensure root span is sent before exit
+        # This prevents "root span not yet received" in large traces
+        from g2.observability import flush_telemetry
+        flush_telemetry()
+
         # Only close pool if we initialized it (don't close pools managed by caller)
         if pool_needed:
             db_pool.close_pool()

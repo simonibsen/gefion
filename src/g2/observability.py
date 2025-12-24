@@ -250,6 +250,41 @@ def is_enabled() -> bool:
     return OTEL_ENABLED
 
 
+def flush_telemetry(timeout_ms: int = 5000) -> bool:
+    """
+    Force flush all pending spans to the exporter without shutting down.
+
+    This ensures all spans (especially root spans) are sent before the process exits
+    or before a critical checkpoint. Useful for CLI commands where the root span
+    might not be exported before the process terminates.
+
+    Args:
+        timeout_ms: Maximum time to wait for flush in milliseconds (default: 5000)
+
+    Returns:
+        True if flush succeeded, False otherwise
+    """
+    if not OTEL_ENABLED or not trace:
+        return True  # No-op if OTEL disabled
+
+    try:
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, 'force_flush'):
+            logger.debug(f"Flushing OpenTelemetry spans (timeout={timeout_ms}ms)...")
+            success = provider.force_flush(timeout_ms)
+            if success:
+                logger.debug("OpenTelemetry spans flushed successfully")
+            else:
+                logger.warning("OpenTelemetry flush timed out")
+            return success
+        else:
+            logger.warning("TracerProvider does not support force_flush")
+            return False
+    except Exception as e:
+        logger.warning(f"Failed to flush OpenTelemetry spans: {e}")
+        return False
+
+
 def shutdown():
     """Shutdown OpenTelemetry and flush remaining spans."""
     global _otel_shutdown_called
