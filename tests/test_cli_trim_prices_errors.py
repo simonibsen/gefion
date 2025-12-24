@@ -9,7 +9,7 @@ runner = CliRunner()
 def test_trim_prices_missing_dates_plaintext():
     res = runner.invoke(cli.app, ["prices-trim"])
     assert res.exit_code != 0
-    assert "Missing option" in res.stdout and "--before" in res.stdout
+    assert "Missing option" in res.output and "--before" in res.output
 
 
 def test_trim_prices_missing_dates_json():

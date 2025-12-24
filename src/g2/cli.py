@@ -2944,7 +2944,7 @@ def _features_compute_impl(
             # - Scale up when resources are available
             # - Scale down when resources are constrained
             # - Respect user's max_workers as absolute limit (if specified)
-            start_workers = 2  # Always start conservatively
+            start_workers = min(2, max_w)  # Start conservatively but respect max_workers
 
             # Use resource-aware limiter for dynamic scaling based on system resources
             # This will periodically check CPU, memory, and DB connections

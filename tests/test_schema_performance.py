@@ -15,19 +15,28 @@ def create_connection():
         pytest.skip(f"DB not available: {exc}")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def conn():
     connection = create_connection()
     connection.autocommit = True
+    with connection.cursor() as cur:
+        # Drop tables but keep extension intact
+        cur.execute("""
+            DO $$ DECLARE
+                r RECORD;
+            BEGIN
+                FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+                    EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+                END LOOP;
+            END $$;
+        """)
+        # Ensure TimescaleDB extension is available
+        try:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+        except psycopg.errors.DuplicateObject:
+            pass
     yield connection
     connection.close()
-
-
-@pytest.fixture(autouse=True)
-def clean_db(conn):
-    with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-    yield
 
 
 def _index_names(cur, table):
@@ -47,11 +56,11 @@ def test_stock_ohlcv_brin_and_chunk(conn):
     schema.create_stock_ohlcv_table(conn)
     with conn.cursor() as cur:
         names = _index_names(cur, "stock_ohlcv")
-        assert any("BRIN" in idxdef for _, idxdef in names)
+        assert any("BRIN" in idxdef.upper() for _, idxdef in names)
         cur.execute(
             """
-            SELECT chunk_time_interval
-            FROM timescaledb_information.hypertables
+            SELECT time_interval
+            FROM timescaledb_information.dimensions
             WHERE hypertable_name = 'stock_ohlcv';
             """
         )
@@ -60,15 +69,16 @@ def test_stock_ohlcv_brin_and_chunk(conn):
 
 
 def test_computed_features_brin_and_chunk(conn):
+    schema.create_stocks_table(conn)
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
     with conn.cursor() as cur:
         names = _index_names(cur, "computed_features")
-        assert any("BRIN" in idxdef for _, idxdef in names)
+        assert any("BRIN" in idxdef.upper() for _, idxdef in names)
         cur.execute(
             """
-            SELECT chunk_time_interval
-            FROM timescaledb_information.hypertables
+            SELECT time_interval
+            FROM timescaledb_information.dimensions
             WHERE hypertable_name = 'computed_features';
             """
         )

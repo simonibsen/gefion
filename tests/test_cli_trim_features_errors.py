@@ -9,7 +9,7 @@ runner = CliRunner()
 def test_trim_features_missing_dates_plaintext(monkeypatch):
     res = runner.invoke(cli.app, ["feat-trim", "--feature", "indicator_rsi_14"])
     assert res.exit_code != 0
-    assert "Missing option '--before' or '--after'" in res.stdout or "Missing option" in res.stdout
+    assert "Missing option '--before' or '--after'" in res.output or "Missing option" in res.output
 
 
 def test_trim_features_missing_dates_json(monkeypatch):

@@ -57,6 +57,7 @@ class _FakeConn:
 
 def test_export_parquet_format_creates_parquet_files(tmp_path):
     """Test that format='parquet' creates .parquet files instead of .csv files."""
+    pytest.importorskip("pyarrow")  # Skip if pyarrow not available
     manifest = {
         "universe": {"symbols": ["AAPL"]},
         "horizons_days": [],  # Skip labels for simplicity
@@ -77,6 +78,7 @@ def test_export_parquet_format_creates_parquet_files(tmp_path):
 
 def test_export_parquet_contains_correct_data(tmp_path):
     """Test that parquet files contain the correct data and preserve types."""
+    pytest.importorskip("pyarrow")  # Skip if pyarrow not available
     try:
         import pandas as pd
     except ImportError:

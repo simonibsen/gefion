@@ -25,7 +25,21 @@ def clean_db():
     conn = require_db()
     conn.autocommit = True
     with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        # Drop tables but keep extension intact
+        cur.execute("""
+            DO $$ DECLARE
+                r RECORD;
+            BEGIN
+                FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+                    EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+                END LOOP;
+            END $$;
+        """)
+        # Ensure TimescaleDB extension is available
+        try:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+        except psycopg.errors.DuplicateObject:
+            pass
     conn.close()
     yield
 
@@ -34,6 +48,7 @@ def test_store_table_created_and_used():
     conn = require_db()
     conn.autocommit = True
     schema.create_stocks_table(conn)
+    schema.create_feature_definitions_table(conn)
     defs = [
         {
             "name": "custom_feature",

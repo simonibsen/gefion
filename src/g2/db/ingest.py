@@ -834,10 +834,15 @@ def ensure_store_targets(conn: psycopg.Connection, defs: Sequence[Mapping[str, o
                     coltype=sql.SQL(store_type),
                 )
             )
+            # Create index with properly constructed name
+            index_name = f"{table}_date_idx"
             cur.execute(
                 sql.SQL(
-                    "CREATE INDEX IF NOT EXISTS {table}_date_idx ON {table}(date);"
-                ).format(table=sql.Identifier(table))
+                    "CREATE INDEX IF NOT EXISTS {index} ON {table}(date);"
+                ).format(
+                    index=sql.Identifier(index_name),
+                    table=sql.Identifier(table)
+                )
             )
     conn.commit()
 

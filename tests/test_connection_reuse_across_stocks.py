@@ -110,6 +110,7 @@ def test_worker_reuses_same_connection_across_stocks():
 
         try:
             # Run with max_workers=1 to ensure sequential processing
+            # Set writer_workers=0 to avoid writer threads acquiring connections
             features_compute(
                 symbols="AAPL,MSFT,GOOGL",
                 features=None,
@@ -121,7 +122,7 @@ def test_worker_reuses_same_connection_across_stocks():
                 feature_batch_size=2000,
                 profile=False,
                 sync_commit=False,
-                writer_workers=2,
+                writer_workers=0,
                 db_url=None,
                 json_output=True,
                 progress=False,
