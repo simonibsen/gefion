@@ -118,7 +118,7 @@ class TestCheckTempoHealth:
         assert result["message"] == "Tempo is not running or not accessible"
         assert result["error"] == "Connection refused"
         assert result["error_type"] == "not_running"
-        assert "docker compose up -d tempo" in result["suggestion"]
+        assert "docker compose -f docker/tempo/docker-compose.tempo.yml up -d" in result["suggestion"]
         assert "OTEL_ENABLED=false" in result["suggestion"]
 
     def test_tempo_timeout(self):
@@ -131,7 +131,7 @@ class TestCheckTempoHealth:
         assert result["running"] is False
         assert result["message"] == "Tempo connection timed out"
         assert result["error_type"] == "timeout"
-        assert "docker compose ps tempo" in result["suggestion"]
+        assert "docker compose -f docker/tempo/docker-compose.tempo.yml ps" in result["suggestion"]
 
     def test_tempo_unhealthy_status(self):
         """Test Tempo returning non-200 status."""

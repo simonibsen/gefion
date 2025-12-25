@@ -128,7 +128,7 @@ def check_tempo_health(endpoint: str | None = None, timeout: int = 2) -> Dict[st
                 "running": False,
                 "message": f"Tempo returned status {response.status_code}",
                 "error_type": "unhealthy",
-                "suggestion": "Tempo may be running but unhealthy.\nCheck logs:\n  docker compose logs tempo"
+                "suggestion": "Tempo may be running but unhealthy.\nCheck logs:\n  docker compose -f docker/tempo/docker-compose.tempo.yml logs tempo"
             }
 
     except requests.exceptions.ConnectionError:
@@ -137,7 +137,7 @@ def check_tempo_health(endpoint: str | None = None, timeout: int = 2) -> Dict[st
             "message": "Tempo is not running or not accessible",
             "error": "Connection refused",
             "error_type": "not_running",
-            "suggestion": "Tempo is optional for most operations.\n\nTo enable tracing:\n  docker compose up -d tempo\n\nTo disable tracing warnings:\n  export OTEL_ENABLED=false"
+            "suggestion": "Tempo is optional for most operations.\n\nTo enable tracing:\n  docker compose -f docker/tempo/docker-compose.tempo.yml up -d\n\nTo disable tracing warnings:\n  export OTEL_ENABLED=false"
         }
 
     except requests.exceptions.Timeout:
@@ -145,7 +145,7 @@ def check_tempo_health(endpoint: str | None = None, timeout: int = 2) -> Dict[st
             "running": False,
             "message": "Tempo connection timed out",
             "error_type": "timeout",
-            "suggestion": "Tempo may be starting up.\nCheck status:\n  docker compose ps tempo"
+            "suggestion": "Tempo may be starting up.\nCheck status:\n  docker compose -f docker/tempo/docker-compose.tempo.yml ps"
         }
 
     except ImportError:

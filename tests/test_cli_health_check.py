@@ -62,7 +62,7 @@ def test_health_check_postgres_not_running():
             "running": False,
             "message": "Tempo is not running or not accessible",
             "error_type": "not_running",
-            "suggestion": "Tempo is optional for most operations.\n\nTo enable tracing:\n  docker compose up -d tempo\n\nTo disable tracing warnings:\n  export OTEL_ENABLED=false"
+            "suggestion": "Tempo is optional for most operations.\n\nTo enable tracing:\n  docker compose -f docker/tempo/docker-compose.tempo.yml up -d\n\nTo disable tracing warnings:\n  export OTEL_ENABLED=false"
         }
     }
 
