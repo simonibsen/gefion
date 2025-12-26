@@ -38,8 +38,14 @@ def create_stocks_table(conn: Connection) -> None:
             CREATE TABLE IF NOT EXISTS stocks (
                 id SERIAL PRIMARY KEY,
                 symbol TEXT NOT NULL UNIQUE,
-                status TEXT
+                status TEXT,
+                name TEXT,
+                sector TEXT,
+                industry TEXT,
+                updated_at TIMESTAMP
             );
+            CREATE INDEX IF NOT EXISTS stocks_sector_idx ON stocks(sector);
+            CREATE INDEX IF NOT EXISTS stocks_industry_idx ON stocks(industry);
             """
         )
     conn.commit()

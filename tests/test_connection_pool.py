@@ -48,15 +48,11 @@ def setup_pool():
 @pytest.fixture(autouse=True)
 def setup_tables(conn):
     """Setup minimal tables for testing."""
+    from g2.db.schema import create_stocks_table
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
         cur.execute("DROP TABLE IF EXISTS stocks CASCADE;")
-        cur.execute("""
-            CREATE TABLE stocks (
-                id SERIAL PRIMARY KEY,
-                symbol TEXT NOT NULL UNIQUE
-            );
-        """)
+    create_stocks_table(conn)
     yield
 
 

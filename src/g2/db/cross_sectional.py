@@ -23,6 +23,7 @@ def insert_cross_sectional_features(
             - symbol: Stock symbol
             - date: Date string (YYYY-MM-DD)
             - feature_name: Feature name (e.g., "return_vs_market")
+            - comparison_group: Comparison group (default: "market")
             - value: Feature value (float)
             - rank: Rank (int)
             - percentile: Percentile (float 0-1)
@@ -36,6 +37,7 @@ def insert_cross_sectional_features(
                 "symbol": "AAPL",
                 "date": "2024-01-02",
                 "feature_name": "return_vs_market",
+                "comparison_group": "market",
                 "value": 3.67,
                 "rank": 1,
                 "percentile": 1.0,
@@ -73,6 +75,7 @@ def insert_cross_sectional_features(
                     data_id,
                     f["date"],
                     f["feature_name"],
+                    f.get("comparison_group", "market"),
                     f.get("value"),
                     f.get("rank"),
                     f.get("percentile"),
@@ -86,9 +89,9 @@ def insert_cross_sectional_features(
         cur.executemany(
             """
             INSERT INTO cross_sectional_features
-                (data_id, date, feature_name, value, rank, percentile)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (data_id, date, feature_name)
+                (data_id, date, feature_name, comparison_group, value, rank, percentile)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (data_id, date, feature_name, comparison_group)
             DO UPDATE SET
                 value = EXCLUDED.value,
                 rank = EXCLUDED.rank,

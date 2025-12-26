@@ -12,13 +12,16 @@ from datetime import datetime, timedelta
 
 @pytest.fixture
 def db_conn():
-    """Create test database connection."""
+    """Create test database connection and ensure schema exists."""
     db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
     if not os.getenv("ENABLE_DB_TESTS"):
         pytest.skip("Database tests not enabled (set ENABLE_DB_TESTS=1)")
 
     try:
         with psycopg.connect(db_url) as conn:
+            # Ensure stocks table exists with required columns
+            from g2.db.schema import create_stocks_table
+            create_stocks_table(conn)
             yield conn
     except psycopg.OperationalError:
         pytest.skip("Database not available")
