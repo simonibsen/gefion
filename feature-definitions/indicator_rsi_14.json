@@ -1,8 +1,7 @@
 {
   "name": "indicator_rsi_14",
-  "function_name": "indicator",
+  "function_name": "indicator_rsi",
   "params": {
-    "indicator": "rsi",
     "period": 14
   },
   "source_table": "stock_ohlcv",

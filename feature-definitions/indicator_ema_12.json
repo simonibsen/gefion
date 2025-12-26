@@ -1,8 +1,7 @@
 {
   "name": "indicator_ema_12",
-  "function_name": "indicator",
+  "function_name": "indicator_ema",
   "params": {
-    "indicator": "ema12",
     "period": 12
   },
   "source_table": "stock_ohlcv",

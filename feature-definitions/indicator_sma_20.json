@@ -1,8 +1,7 @@
 {
   "name": "indicator_sma_20",
-  "function_name": "indicator",
+  "function_name": "indicator_sma",
   "params": {
-    "indicator": "sma20",
     "period": 20
   },
   "source_table": "stock_ohlcv",

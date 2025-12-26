@@ -1,8 +1,8 @@
 {
   "name": "indicator_stoch_d",
-  "function_name": "indicator",
+  "function_name": "indicator_stoch",
   "params": {
-    "indicator": "stoch"
+    "output": "d"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

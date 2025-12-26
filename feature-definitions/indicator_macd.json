@@ -1,8 +1,8 @@
 {
   "name": "indicator_macd",
-  "function_name": "indicator",
+  "function_name": "indicator_macd",
   "params": {
-    "indicator": "macd"
+    "output": "macd"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

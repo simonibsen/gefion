@@ -34,6 +34,27 @@
 3. Never skip tests to make CI pass
 4. Document why tests are retired if obsolete
 
+## Architecture Principles
+
+### 6. KISS (Keep It Simple, Stupid)
+- Prefer direct, explicit solutions over clever abstractions
+- Don't build for hypothetical future requirements
+- If a feature isn't used, remove it
+- The simplest solution that works is usually the best
+
+### 7. Loose Coupling
+- Functions should be self-contained and independently testable
+- Avoid cross-function dependencies via shared caches or globals
+- Explicit is better than implicit (no magic routing or discovery)
+- Feature definitions map directly to functions by name
+
+### 8. Performance Mindset
+- Keep performance top of mind, but be smart about it
+- Know where the bottlenecks are before optimizing (profile first)
+- I/O (DB writes, API calls) typically dominates compute time
+- Premature optimization is the root of all evil - start simple, measure, then optimize
+- When in doubt, benchmark: `time` commands, tracing spans, `EXPLAIN ANALYZE`
+
 ## Git Hooks
 
 The project uses Git hooks to enforce development rules:
@@ -59,7 +80,9 @@ Both hooks are executable and run automatically.
 - [ ] All tests passing (488+ passing, 0 failed)
 - [ ] Commit message reviewed (no AI tool mentions)
 - [ ] Code follows existing patterns
-- [ ] No unnecessary changes or refactoring
+- [ ] KISS: Is this the simplest solution? Remove unused complexity
+- [ ] Coupling: Are functions self-contained? No implicit dependencies
+- [ ] Performance: Bottlenecks identified? Optimizing the right thing?
 
 ## Quick Commands
 
