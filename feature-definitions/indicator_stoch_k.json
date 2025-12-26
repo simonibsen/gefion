@@ -2,7 +2,8 @@
   "name": "indicator_stoch_k",
   "function_name": "indicator_stoch",
   "params": {
-    "output": "k"
+    "output": "k",
+    "column": "stoch_k"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

@@ -2,7 +2,8 @@
   "name": "indicator_adx_14",
   "function_name": "indicator_adx",
   "params": {
-    "period": 14
+    "period": 14,
+    "column": "adx_14"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

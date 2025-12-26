@@ -2,7 +2,8 @@
   "name": "indicator_bb_upper",
   "function_name": "indicator_bb",
   "params": {
-    "output": "upper"
+    "output": "upper",
+    "column": "bb_upper"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

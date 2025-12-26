@@ -2,7 +2,8 @@
   "name": "indicator_ema_26",
   "function_name": "indicator_ema",
   "params": {
-    "period": 26
+    "period": 26,
+    "column": "ema_26"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

@@ -2,7 +2,8 @@
   "name": "indicator_macd_hist",
   "function_name": "indicator_macd",
   "params": {
-    "output": "hist"
+    "output": "hist",
+    "column": "macd_hist"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

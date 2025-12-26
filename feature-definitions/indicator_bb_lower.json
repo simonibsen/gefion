@@ -2,7 +2,8 @@
   "name": "indicator_bb_lower",
   "function_name": "indicator_bb",
   "params": {
-    "output": "lower"
+    "output": "lower",
+    "column": "bb_lower"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",
