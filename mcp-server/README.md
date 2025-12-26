@@ -36,6 +36,7 @@ Claude: [Queries database and shows predictions]
 ### Data Management Tools
 - `data_update` - Update prices and compute features (time-aware: before 4pm ET = yesterday's data, after 4pm ET = today's data)
 - `features_list` - List all registered technical indicators + cross-sectional features (percentile ranks, z-scores)
+- `cross_sectional_compute` - Compute rankings for a feature across comparison groups (market, sector, industry)
 
 ### Observability Tools
 - `span_check` - Check recent traces for performance monitoring and debugging (backend-agnostic)
@@ -604,6 +605,46 @@ List all registered feature definitions.
 
 **Example prompt:**
 > "List all available features"
+
+### cross_sectional_compute
+
+Compute cross-sectional rankings for a feature across comparison groups.
+
+**Parameters:**
+- `feature_name` (required): Feature to rank (e.g., "indicator_rsi_14")
+- `date`: Target date (YYYY-MM-DD), defaults to latest available
+- `include_market`: Include market-wide rankings (default: true)
+- `include_sectors`: Include sector-relative rankings (default: true)
+- `include_industries`: Include industry-relative rankings (default: false)
+
+**What it does:**
+1. Fetches latest feature values for all stocks
+2. Computes rankings within each comparison group:
+   - `market` - rank vs all stocks
+   - `sector:X` - rank vs same sector peers (e.g., `sector:TECHNOLOGY`)
+   - `industry:X` - rank vs same industry peers
+3. Stores results in `cross_sectional_features` table with rank and percentile
+
+**Example prompts:**
+> "Compute cross-sectional rankings for RSI"
+
+> "Rank stocks by MACD within their sectors"
+
+> "Generate market and industry rankings for all features"
+
+**Output example:**
+```json
+{
+  "success": true,
+  "feature_name": "indicator_rsi_14",
+  "date": "2025-12-24",
+  "stocks_count": 100,
+  "total_rankings": 156,
+  "groups": ["market", "sector:TECHNOLOGY", "sector:HEALTHCARE", "sector:FINANCE"]
+}
+```
+
+**Prerequisite:** Stocks need sector/industry data. Use `fundamentals-update` CLI command to load this data from AlphaVantage.
 
 ### query_database
 

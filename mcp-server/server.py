@@ -430,6 +430,29 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="cross_sectional_compute",
+            description=(
+                "Compute cross-sectional rankings for a feature. "
+                "Cross-sectional features compare stocks to their peers at the same point in time. "
+                "Rankings are computed for different comparison groups: "
+                "market (all stocks), sector:X (same sector), industry:X (same industry). "
+                "Results stored in cross_sectional_features table with rank and percentile. "
+                "Use this after computing features to generate relative rankings."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "feature_name": {"type": "string", "description": "Feature to rank (e.g., indicator_rsi_14)"},
+                    "date": {"type": "string", "description": "Target date (YYYY-MM-DD). Defaults to latest."},
+                    "include_market": {"type": "boolean", "description": "Include market-wide rankings", "default": True},
+                    "include_sectors": {"type": "boolean", "description": "Include sector-relative rankings", "default": True},
+                    "include_industries": {"type": "boolean", "description": "Include industry-relative rankings", "default": False},
+                },
+                "required": ["feature_name"],
+            },
+        ),
+
+        Tool(
             name="query_database",
             description=(
                 "Execute read-only SQL queries for data exploration and analysis. "
@@ -650,6 +673,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _data_update(arguments)
         elif name == "features_list":
             result = await _features_list(arguments)
+        elif name == "cross_sectional_compute":
+            result = await _cross_sectional_compute(arguments)
         elif name == "query_database":
             result = await _query_database(arguments)
         elif name == "span_check":
@@ -1017,6 +1042,26 @@ async def _data_update(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _features_list(args: Dict[str, Any]) -> Dict[str, Any]:
     """List feature definitions."""
     return await executor.run('features-list')
+
+
+async def _cross_sectional_compute(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute cross-sectional rankings for a feature."""
+    feature_name = args.get('feature_name')
+    if not feature_name:
+        return {'success': False, 'error': 'feature_name is required'}
+
+    cmd = ['cross-sectional-compute', '--feature', feature_name, '--json']
+
+    if args.get('date'):
+        cmd.extend(['--date', args['date']])
+    if args.get('include_market') is False:
+        cmd.append('--no-market')
+    if args.get('include_sectors') is False:
+        cmd.append('--no-sectors')
+    if args.get('include_industries') is True:
+        cmd.append('--industries')
+
+    return await executor.run(*cmd)
 
 
 async def _query_database(args: Dict[str, Any]) -> Dict[str, Any]:

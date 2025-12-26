@@ -43,13 +43,7 @@ CREATE INDEX cross_sectional_features_feature_date_group_rank_idx
 CREATE INDEX IF NOT EXISTS cross_sectional_features_comparison_group_idx
     ON cross_sectional_features(comparison_group, date);
 
-\echo ''
-\echo '========================================='
-\echo 'Migration 007: comparison_group Complete'
-\echo '========================================='
-\echo ''
-\echo 'Changes:'
-\echo '  - Added comparison_group column (default: market)'
-\echo '  - Updated primary key to include comparison_group'
-\echo '  - Added index for comparison_group queries'
-\echo ''
+-- Migration complete:
+--   - Added comparison_group column (default: market)
+--   - Updated primary key to include comparison_group
+--   - Added index for comparison_group queries

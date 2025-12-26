@@ -3438,6 +3438,101 @@ def _fundamentals_update_impl(
         emit(f"[bold]Complete:[/bold] {updated} updated, {errors} errors")
 
 
+@app.command("cross-sectional-compute")
+def cross_sectional_compute(
+    feature: str = typer.Option(..., "--feature", "-f", help="Feature name to compute rankings for (e.g., indicator_rsi_14)"),
+    date: Optional[str] = typer.Option(None, "--date", help="Target date (YYYY-MM-DD). Defaults to latest available."),
+    include_market: bool = typer.Option(True, "--market/--no-market", help="Include market-wide rankings"),
+    include_sectors: bool = typer.Option(True, "--sectors/--no-sectors", help="Include sector-relative rankings"),
+    include_industries: bool = typer.Option(False, "--industries", help="Include industry-relative rankings"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Compute cross-sectional rankings for a feature.
+
+    Cross-sectional features compare stocks to their peers at the same point in time.
+    Rankings are computed for different comparison groups:
+    - market: rank vs all stocks
+    - sector:X: rank vs sector peers
+    - industry:X: rank vs industry peers
+
+    Results are stored in the cross_sectional_features table.
+
+    Examples:
+        # Compute RSI rankings (market + sectors)
+        g2 cross-sectional-compute --feature indicator_rsi_14
+
+        # Include industry rankings
+        g2 cross-sectional-compute --feature indicator_rsi_14 --industries
+
+        # Market-only rankings
+        g2 cross-sectional-compute --feature indicator_rsi_14 --no-sectors
+    """
+    with create_span(
+        "cli.cross-sectional-compute",
+        feature=feature,
+        date=date or "latest",
+        include_market=include_market,
+        include_sectors=include_sectors,
+        include_industries=include_industries,
+    ):
+        _cross_sectional_compute_impl(
+            feature, date, include_market, include_sectors, include_industries, db_url, json_output
+        )
+
+
+def _cross_sectional_compute_impl(
+    feature: str,
+    target_date: Optional[str],
+    include_market: bool,
+    include_sectors: bool,
+    include_industries: bool,
+    db_url: Optional[str],
+    json_output: bool,
+) -> None:
+    """Implementation of cross-sectional-compute."""
+    from datetime import datetime
+    from g2.compute.cross_sectional import compute_and_store_rankings
+
+    url = _db_url(db_url)
+
+    # Parse date if provided
+    parsed_date = None
+    if target_date:
+        try:
+            parsed_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except ValueError:
+            emit_error(f"Invalid date format: {target_date}. Use YYYY-MM-DD.", json_output=json_output)
+            return
+
+    try:
+        with db_connection(url) as conn:
+            result = compute_and_store_rankings(
+                conn=conn,
+                feature_name=feature,
+                target_date=parsed_date,
+                include_market=include_market,
+                include_sectors=include_sectors,
+                include_industries=include_industries,
+            )
+
+            if json_output:
+                emit_json(result)
+            elif result.get("success"):
+                emit(f"[bold green]Cross-sectional rankings computed[/bold green]")
+                emit(f"  Feature: {result['feature_name']}")
+                emit(f"  Date: {result['date']}")
+                emit(f"  Stocks: {result['stocks_count']}")
+                emit(f"  Rankings: {result['total_rankings']}")
+                emit(f"  Groups: {', '.join(result['groups'])}")
+            else:
+                emit_error(result.get("error", "Unknown error"), json_output=json_output)
+
+    except Exception as e:
+        emit_error(f"Failed to compute rankings: {e}", json_output=json_output)
+
+
 @app.command("data-update")
 def update_all(
     exchange: Optional[str] = typer.Option(None, help="Exchange filter (e.g., NASDAQ, NYSE). If omitted, infer from stocks table."),
