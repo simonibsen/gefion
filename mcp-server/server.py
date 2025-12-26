@@ -404,15 +404,13 @@ async def list_tools() -> List[Tool]:
                 "Includes time-aware filtering to prevent inserting partial intraday data. "
                 "Before 4pm ET: fetches yesterday's data only. After 4pm ET: includes today's data. "
                 "Features include technical indicators (RSI, MACD, Bollinger Bands) and cross-sectional "
-                "market-relative features (percentile ranks, z-scores). "
-                "Use --local for local computation (faster, no API limits)."
+                "market-relative features (percentile ranks, z-scores)."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "exchange": {"type": "string", "description": "Exchange name (e.g., NASDAQ)", "default": "NASDAQ"},
                     "timeframe": {"type": "string", "description": "Timeframe: auto, compact, or full", "default": "auto"},
-                    "local": {"type": "boolean", "description": "Use local computation for features", "default": True},
                     "limit": {"type": "integer", "description": "Limit number of symbols"},
                 },
             },
@@ -1010,8 +1008,6 @@ async def _data_update(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd.extend(['--exchange', args['exchange']])
     if args.get('timeframe'):
         cmd.extend(['--timeframe', args['timeframe']])
-    if args.get('local', True):
-        cmd.append('--local')
     if args.get('limit'):
         cmd.extend(['--limit', str(args['limit'])])
 
