@@ -3,11 +3,27 @@
 ## Core Principles
 
 ### 1. Test-Driven Development (TDD)
-- Write tests FIRST, then implementation
-- Every bug fix starts with a failing test
+- **True Red/Green TDD**: Tests must actually fail before implementation
+- Write tests FIRST with real assertions (not just `pass` stubs)
+- Run the test and verify it FAILS (red) before writing implementation
+- Implement code until test PASSES (green)
+- Every bug fix starts with a failing test that reproduces the bug
 - Run full test suite before committing
 - New features require tests
 - Bug fixes require regression tests
+
+**Not acceptable:**
+```python
+def test_something():
+    pass  # This is NOT a test
+```
+
+**Required:**
+```python
+def test_something():
+    result = my_function(input)
+    assert result == expected  # Real assertion that can fail
+```
 
 ### 2. Commit Messages
 - NEVER mention AI tools, assistants, or automation

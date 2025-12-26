@@ -1668,6 +1668,75 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
             # Don't fail system_status if feature checking fails
             pass
 
+        # Check for stale/missing fundamentals data (sector, industry)
+        try:
+            fundamentals_result = subprocess.run(
+                ['g2', 'query-database', '--sql',
+                 "SELECT "
+                 "(SELECT COUNT(*) FROM stocks WHERE sector IS NULL) as missing_sector, "
+                 "(SELECT COUNT(*) FROM stocks) as total_stocks, "
+                 "(SELECT MAX(updated_at) FROM stocks) as latest_updated, "
+                 "(SELECT COUNT(*) FROM stocks WHERE updated_at IS NOT NULL) as has_fundamentals",
+                 '--json'],
+                capture_output=True,
+                text=True,
+                env={**os.environ, **executor.env},
+                timeout=10
+            )
+
+            if fundamentals_result.returncode == 0:
+                try:
+                    fund_data = json.loads(fundamentals_result.stdout)
+                    if fund_data.get('success') and fund_data.get('rows'):
+                        row = fund_data['rows'][0]
+                        missing_sector = int(row[0]) if row[0] else 0
+                        total_stocks = int(row[1]) if row[1] else 0
+                        latest_updated_str = row[2]
+                        has_fundamentals = int(row[3]) if row[3] else 0
+
+                        status_result["data"]["stocks_missing_sector"] = missing_sector
+                        status_result["data"]["stocks_with_fundamentals"] = has_fundamentals
+
+                        # Check for missing fundamentals
+                        if total_stocks > 0 and has_fundamentals == 0:
+                            status_result["issues"].append({
+                                "type": "missing_fundamentals",
+                                "description": f"No stocks have fundamentals data (sector/industry)",
+                                "priority": "low",
+                                "command": "g2 fundamentals-update"
+                            })
+                        elif missing_sector > 0 and has_fundamentals > 0:
+                            status_result["issues"].append({
+                                "type": "incomplete_fundamentals",
+                                "description": f"{missing_sector} stocks missing sector/industry data",
+                                "priority": "low",
+                                "command": "g2 fundamentals-update"
+                            })
+
+                        # Check for stale fundamentals (>30 days old)
+                        if latest_updated_str:
+                            try:
+                                latest_updated = datetime.fromisoformat(latest_updated_str.replace(' ', 'T'))
+                                days_old = (datetime.now() - latest_updated).days
+                                status_result["data"]["fundamentals_days_old"] = days_old
+
+                                if days_old > 30:
+                                    status_result["issues"].append({
+                                        "type": "stale_fundamentals",
+                                        "description": f"Fundamentals data is {days_old} days old",
+                                        "priority": "low",
+                                        "command": "g2 fundamentals-update"
+                                    })
+                            except (ValueError, TypeError):
+                                pass
+
+                except (json.JSONDecodeError, IndexError, ValueError) as e:
+                    pass  # Silently skip if query fails
+
+        except Exception as e:
+            # Don't fail system_status if fundamentals checking fails
+            pass
+
     # 3. Generate Prioritized Suggestions
     # Sort issues by priority
     priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}

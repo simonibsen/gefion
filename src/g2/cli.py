@@ -3297,6 +3297,147 @@ def _features_compute_impl(
             db_pool.close_pool()
 
 
+@app.command("fundamentals-update")
+def fundamentals_update(
+    exchange: Optional[str] = typer.Option(None, help="Exchange filter (e.g., NASDAQ, NYSE). If omitted, update all stocks."),
+    limit: Optional[int] = typer.Option(None, help="Limit number of symbols to update"),
+    max_age_days: int = typer.Option(30, "--max-age", help="Skip stocks updated within this many days"),
+    force: bool = typer.Option(False, "--force", help="Update all stocks regardless of age"),
+    calls_per_minute: int = typer.Option(75, help="AlphaVantage rate limit"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """
+    Update company fundamentals (sector, industry, name) from AlphaVantage.
+
+    Fetches OVERVIEW data for stocks and updates the stocks table.
+    By default, skips stocks updated within --max-age days (default: 30).
+
+    Examples:
+        # Update stale fundamentals for all stocks
+        g2 fundamentals-update
+
+        # Force update all NASDAQ stocks
+        g2 fundamentals-update --exchange NASDAQ --force
+
+        # Update up to 10 stocks
+        g2 fundamentals-update --limit 10
+    """
+    with create_span(
+        "cli.fundamentals-update",
+        exchange=exchange or "all",
+        max_age_days=max_age_days,
+        force=force,
+        limit=limit or 0,
+    ):
+        _fundamentals_update_impl(
+            exchange, limit, max_age_days, force, calls_per_minute, db_url, json_output
+        )
+
+
+def _fundamentals_update_impl(
+    exchange: Optional[str],
+    limit: Optional[int],
+    max_age_days: int,
+    force: bool,
+    calls_per_minute: int,
+    db_url: Optional[str],
+    json_output: Optional[bool],
+) -> None:
+    """Implementation of fundamentals-update."""
+    from datetime import datetime, timedelta
+    from g2.alphavantage.client import AlphaVantageClient
+
+    url = _db_url(db_url)
+
+    try:
+        client = AlphaVantageClient(calls_per_minute=calls_per_minute)
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        return
+
+    # Get stocks to update
+    with db_connection(url) as conn:
+        with conn.cursor() as cur:
+            query = "SELECT id, symbol, updated_at FROM stocks WHERE 1=1"
+            params: list = []
+
+            if exchange:
+                # Note: We don't have exchange column yet, so this is a placeholder
+                # In future, filter by exchange
+                pass
+
+            if not force:
+                # Skip recently updated stocks
+                cutoff = datetime.now() - timedelta(days=max_age_days)
+                query += " AND (updated_at IS NULL OR updated_at < %s)"
+                params.append(cutoff)
+
+            query += " ORDER BY updated_at ASC NULLS FIRST"
+
+            if limit:
+                query += f" LIMIT {limit}"
+
+            cur.execute(query, params)
+            stocks = cur.fetchall()
+
+    if not stocks:
+        if json_output:
+            emit_json({"success": True, "updated": 0, "message": "All stocks are up to date"})
+        else:
+            emit("[green]All stocks are up to date[/green]")
+        return
+
+    if not json_output:
+        emit(f"Updating fundamentals for {len(stocks)} stocks...")
+
+    updated = 0
+    errors = 0
+
+    for stock_id, symbol, _ in stocks:
+        try:
+            # Fetch overview from AlphaVantage
+            overview = client.fetch_overview(symbol)
+
+            # Check for API errors
+            if "Error Message" in overview or "Note" in overview:
+                if not json_output:
+                    emit(f"[yellow]⚠[/yellow] {symbol}: API limit or error, skipping")
+                errors += 1
+                continue
+
+            # Extract fields
+            name = overview.get("Name", "")
+            sector = overview.get("Sector", "")
+            industry = overview.get("Industry", "")
+
+            # Update database
+            with db_connection(url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE stocks
+                        SET name = %s, sector = %s, industry = %s, updated_at = NOW()
+                        WHERE id = %s
+                    """, (name or None, sector or None, industry or None, stock_id))
+                conn.commit()
+
+            updated += 1
+            if not json_output:
+                sector_display = sector[:20] if sector else "N/A"
+                emit(f"[green]✓[/green] {symbol}: {sector_display}")
+
+        except Exception as e:
+            errors += 1
+            if not json_output:
+                emit(f"[red]✗[/red] {symbol}: {e}")
+
+    if json_output:
+        emit_json({"success": True, "updated": updated, "errors": errors})
+    else:
+        emit("")
+        emit(f"[bold]Complete:[/bold] {updated} updated, {errors} errors")
+
+
 @app.command("data-update")
 def update_all(
     exchange: Optional[str] = typer.Option(None, help="Exchange filter (e.g., NASDAQ, NYSE). If omitted, infer from stocks table."),

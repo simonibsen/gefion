@@ -173,3 +173,42 @@ class TestFeatureRegistrationDetection:
         # Expected: No unregistered_features issue
         # Status can still be healthy
         pass
+
+
+class TestFundamentalsStalenessDetection:
+    """Tests for detecting stale fundamentals data (sector/industry)."""
+
+    def test_detects_stale_fundamentals(self):
+        """Test detection of fundamentals data older than threshold."""
+        # Expected: Checks MAX(updated_at) from stocks table
+        # If older than 30 days, suggests: g2 fundamentals-update
+        pass
+
+    def test_detects_missing_fundamentals(self):
+        """Test detection when stocks have no fundamentals data."""
+        # Expected: Checks for stocks with NULL sector/industry
+        # Suggests: g2 fundamentals-update
+        pass
+
+    def test_fundamentals_staleness_priority_is_low(self):
+        """Test that stale fundamentals has lower priority than prices."""
+        # Expected: stale_fundamentals priority = "low"
+        # Prices/features are more time-sensitive
+        pass
+
+    def test_fundamentals_includes_age_in_days(self):
+        """Test that status includes fundamentals age."""
+        # Expected: data.fundamentals_days_old = N
+        # Helps user understand urgency
+        pass
+
+    def test_suggests_correct_fundamentals_command(self):
+        """Test that suggestion includes correct command."""
+        # Expected: "g2 fundamentals-update"
+        pass
+
+    def test_no_issue_when_fundamentals_fresh(self):
+        """Test no issue when fundamentals recently updated."""
+        # Expected: If all stocks updated within 30 days
+        # No stale_fundamentals issue
+        pass

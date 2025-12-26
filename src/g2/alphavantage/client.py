@@ -152,3 +152,11 @@ class AlphaVantageClient:
     def fetch_listing_status(self) -> Mapping[str, object]:
         # Listing status is CSV; we request csv and fall back to text parse.
         return self.get("LISTING_STATUS", datatype="csv")
+
+    def fetch_overview(self, symbol: str) -> Mapping[str, object]:
+        """Fetch company overview (fundamentals) for a symbol.
+
+        Returns dict with keys including: Symbol, Name, Sector, Industry,
+        Description, MarketCapitalization, PERatio, etc.
+        """
+        return self.get("OVERVIEW", symbol=symbol)
