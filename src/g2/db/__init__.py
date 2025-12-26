@@ -10,7 +10,7 @@ from .schema import (
     drop_legacy_stock_indicators,
     test_db_url,
 )
-from .ingest import upsert_stock, insert_stock_ohlcv, decide_outputsize
+from .ingest import upsert_stock, insert_stock_ohlcv, decide_outputsize, get_stocks_missing_fundamentals
 
 __all__ = [
     "create_stocks_table",
@@ -24,4 +24,5 @@ __all__ = [
     "upsert_stock",
     "insert_stock_ohlcv",
     "decide_outputsize",
+    "get_stocks_missing_fundamentals",
 ]
