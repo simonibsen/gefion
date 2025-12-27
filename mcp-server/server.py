@@ -645,6 +645,64 @@ async def list_tools() -> List[Tool]:
                 },
             },
         ),
+
+        # Strategy Management Tools
+        Tool(
+            name="strategy_list",
+            description=(
+                "List all registered trading strategies. "
+                "Returns strategy name, description, tags, and default parameters. "
+                "Strategies are Python implementations registered in the database."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+
+        Tool(
+            name="strategy_configs",
+            description=(
+                "List all active strategy configurations. "
+                "Configs are parameterized instances of strategies with custom parameters. "
+                "Returns config name, strategy reference, merged parameters, and description."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+
+        Tool(
+            name="strategy_create_config",
+            description=(
+                "Create a new strategy configuration. "
+                "A config is a named instance of a strategy with custom parameters. "
+                "Parameters are merged with strategy defaults (config overrides defaults)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique name for the config (e.g., momentum_aggressive)"
+                    },
+                    "strategy": {
+                        "type": "string",
+                        "description": "Strategy name from registry (e.g., momentum, breakout)"
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Parameters to override defaults (e.g., {lookback_days: 10})"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description of this config"
+                    },
+                },
+                "required": ["name", "strategy"],
+            },
+        ),
     ]
 
 
@@ -693,6 +751,12 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _docker_status(arguments)
         elif name == "dev_status":
             result = await _dev_status(arguments)
+        elif name == "strategy_list":
+            result = await _strategy_list(arguments)
+        elif name == "strategy_configs":
+            result = await _strategy_configs(arguments)
+        elif name == "strategy_create_config":
+            result = await _strategy_create_config(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -2119,6 +2183,45 @@ async def _docker_status(args: Dict[str, Any]) -> Dict[str, Any]:
             'success': False,
             'error': str(e)
         }
+
+
+# ============================================================================
+# Strategy Management Tools
+# ============================================================================
+
+async def _strategy_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List all registered trading strategies."""
+    async def _list():
+        return await executor.run('strategy', 'list')
+
+    return await _execute_with_health_check(['postgres'], _list)
+
+
+async def _strategy_configs(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List all active strategy configurations."""
+    async def _list():
+        return await executor.run('strategy', 'configs')
+
+    return await _execute_with_health_check(['postgres'], _list)
+
+
+async def _strategy_create_config(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new strategy configuration."""
+    async def _create():
+        cmd = [
+            'strategy', 'create-config',
+            '--name', args['name'],
+            '--strategy', args['strategy'],
+        ]
+
+        if args.get('params'):
+            cmd.extend(['--params', json.dumps(args['params'])])
+        if args.get('description'):
+            cmd.extend(['--description', args['description']])
+
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _create)
 
 
 # ============================================================================

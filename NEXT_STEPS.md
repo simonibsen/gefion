@@ -1396,13 +1396,86 @@ feature_definitions → dispatcher → compute_features() → plugins
 
 ---
 
+### 26. Data Visualization & Charting
+
+**Status**: Planned
+**Priority**: Medium (complements trading & ML workflows)
+**Effort**: 3-5 days
+**Path**: A (Trading-First)
+
+**Overview**: Add interactive Plotly-based charts to g2 via CLI commands. HTML output that auto-opens in browser. Enables visual analysis of predictions, strategy performance, and market data.
+
+**CLI Commands**:
+```bash
+g2 chart price AAPL                    # Candlestick + volume + indicators
+g2 chart predictions AAPL              # Price with q10/q50/q90 bands
+g2 chart rankings --feature rsi_14     # Cross-sectional distribution
+g2 chart model-perf trend_v1           # Model accuracy over time
+```
+
+**Module Structure**:
+```
+src/g2/charts/
+  __init__.py          # Package exports
+  queries.py           # SQL query functions (~200 lines)
+  renderers.py         # Plotly chart builders (~400 lines)
+  output.py            # File saving, browser opening (~80 lines)
+
+tests/
+  test_chart_queries.py    # DB integration tests
+  test_chart_renderers.py  # Unit tests (no DB)
+  test_chart_cli.py        # CLI integration tests
+```
+
+**Dependencies**:
+Add to `pyproject.toml`:
+```toml
+[project.optional-dependencies]
+charts = ["plotly>=5.18"]
+```
+
+**TDD Implementation Order**:
+
+1. **Phase 1: Query Layer** (DB tests)
+   - `test_chart_queries.py::test_fetch_ohlcv_returns_expected_structure`
+   - `queries.py::fetch_ohlcv_for_chart()`
+   - Repeat for: `fetch_features_for_overlay`, `fetch_predictions_for_symbol`, etc.
+
+2. **Phase 2: Renderer Layer** (Unit tests, no DB)
+   - `test_chart_renderers.py::test_create_candlestick_chart_returns_figure`
+   - `renderers.py::create_candlestick_chart()`
+   - Repeat for: prediction bands, ranking distribution, model performance
+
+3. **Phase 3: Output Layer** (Unit tests)
+   - `test_chart_output.py::test_get_chart_output_dir_creates_directory`
+   - `output.py::get_chart_output_dir()`, `save_chart_html()`
+
+4. **Phase 4: CLI Integration**
+   - `test_chart_cli.py::test_chart_price_requires_symbol`
+   - Add `chart_app` subgroup to `cli.py`
+
+**Output Behavior**:
+- Default dir: `~/.g2/charts/` (env: `G2_CHART_DIR`)
+- Filename: `{symbol}_{chart_type}_{timestamp}.html`
+- Auto-opens in browser (disable with `--no-open`)
+- `--json` returns `{"status": "ok", "path": "/path/to/chart.html"}`
+
+**Success Criteria**:
+- [ ] All 4 chart commands work (price, predictions, rankings, model-perf)
+- [ ] Charts render correctly in browser
+- [ ] MCP integration via JSON output
+- [ ] Tests pass without database for renderer tests
+
+---
+
 ## Implementation Recommendations
 
 ### For Path A (Trading-First):
 1. Start with Item #11 (validation) - 1 week
 2. Implement 2-3 strategies from #12 - 2 weeks
 3. Add strategy comparison #13 - 1 week
-4. **Milestone**: Working multi-strategy platform
+4. Add data visualization #26 - 3-5 days (optional, improves analysis)
+5. **Milestone**: Working multi-strategy platform with visual analysis
 
 ### For Path B (ML-First):
 1. Add Parquet support #15 - 1 week

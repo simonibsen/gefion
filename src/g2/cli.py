@@ -78,6 +78,9 @@ app.add_typer(ml_app, name="ml", cls=SortedGroup)
 backtest_app = typer.Typer(help="Backtesting commands (run/compare/analyze)")
 app.add_typer(backtest_app, name="backtest", cls=SortedGroup)
 
+strategy_app = typer.Typer(help="Strategy management commands (list/configs/create)")
+app.add_typer(strategy_app, name="strategy", cls=SortedGroup)
+
 
 def emit(
     message: str,
@@ -4320,6 +4323,214 @@ def backtest_run(
         raise typer.Exit(1)
 
 
+@backtest_app.command("compare")
+def backtest_compare(
+    strategies: Optional[str] = typer.Option(
+        None,
+        "--strategies",
+        help="Comma-separated strategy names to compare (e.g., momentum,mean_reversion,breakout)"
+    ),
+    all_strategies: bool = typer.Option(
+        False,
+        "--all",
+        help="Compare all available strategies"
+    ),
+    symbols: Optional[str] = typer.Option(
+        None,
+        "--symbols",
+        help="Comma-separated symbols to backtest (e.g., AAPL,MSFT,GOOGL)"
+    ),
+    exchange: Optional[str] = typer.Option(
+        None,
+        "--exchange",
+        help="Exchange name (alternative to --symbols, e.g., NASDAQ)"
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        help="Limit number of symbols from exchange (for testing)"
+    ),
+    start_date: str = typer.Option(
+        ...,
+        "--start-date",
+        help="Backtest start date (YYYY-MM-DD)"
+    ),
+    end_date: str = typer.Option(
+        ...,
+        "--end-date",
+        help="Backtest end date (YYYY-MM-DD)"
+    ),
+    initial_cash: float = typer.Option(
+        100000.0,
+        "--initial-cash",
+        help="Initial portfolio cash amount"
+    ),
+    rank_by: str = typer.Option(
+        "sharpe_ratio",
+        "--rank-by",
+        help="Metric to rank strategies by (sharpe_ratio, total_return, calmar_ratio, sortino_ratio)"
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output results as JSON"
+    ),
+) -> None:
+    """
+    Compare multiple trading strategies side-by-side.
+
+    Examples:
+        # Compare momentum vs mean reversion on tech stocks
+        g2 backtest compare --strategies momentum,mean_reversion \\
+          --symbols AAPL,MSFT,GOOGL,NVDA,TSLA \\
+          --start-date 2024-01-01 --end-date 2024-12-01
+
+        # Compare all strategies on NASDAQ stocks
+        g2 backtest compare --all --exchange NASDAQ --limit 50 \\
+          --start-date 2024-01-01 --end-date 2024-12-01
+
+        # Compare strategies and rank by Calmar ratio
+        g2 backtest compare --strategies momentum,breakout,ma_crossover \\
+          --symbols AAPL,MSFT,GOOGL --start-date 2024-01-01 --end-date 2024-12-01 \\
+          --rank-by calmar_ratio
+    """
+    from g2.backtest.data_loader import load_price_data_for_backtest
+    from g2.backtest.comparison import compare_strategies, rank_strategies, AVAILABLE_STRATEGIES
+
+    try:
+        # Validate strategies
+        if all_strategies:
+            strategy_list = list(AVAILABLE_STRATEGIES.keys())
+        elif strategies:
+            strategy_list = [s.strip() for s in strategies.split(",")]
+            # Validate all strategy names
+            for s in strategy_list:
+                if s not in AVAILABLE_STRATEGIES:
+                    emit_error(
+                        f"Unknown strategy: '{s}'. Available: {list(AVAILABLE_STRATEGIES.keys())}",
+                        json_output=json_output,
+                    )
+                    raise typer.Exit(1)
+        else:
+            emit_error(
+                "Must specify --strategies or --all",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        # Validate symbols/exchange
+        if not symbols and not exchange:
+            emit_error(
+                "Must specify --symbols or --exchange",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        # Parse symbols
+        symbol_list = None
+        if symbols:
+            symbol_list = [s.strip() for s in symbols.split(",")]
+
+        # Load price data
+        emit(f"Loading price data...", json_output=json_output)
+
+        price_data = load_price_data_for_backtest(
+            symbols=symbol_list,
+            exchange=exchange,
+            limit=limit,
+            start_date=date.fromisoformat(start_date),
+            end_date=date.fromisoformat(end_date),
+        )
+
+        if not price_data:
+            emit_error(
+                "No price data found for specified symbols/date range",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        symbols_found = list(set(row["symbol"] for row in price_data))
+        emit(f"Loaded {len(price_data)} price records for {len(symbols_found)} symbols", json_output=json_output)
+
+        # Compare strategies
+        emit(f"Comparing {len(strategy_list)} strategies...", json_output=json_output)
+
+        comparison = compare_strategies(
+            strategies=strategy_list,
+            price_data=price_data,
+            initial_capital=initial_cash,
+        )
+
+        # Rank strategies
+        ranking = rank_strategies(comparison, metric=rank_by)
+
+        # Output results
+        if json_output:
+            emit(
+                "Comparison complete",
+                data={
+                    "comparison": comparison,
+                    "ranking": [
+                        {"strategy": name, rank_by: value}
+                        for name, value in ranking
+                    ],
+                    "date_range": {
+                        "start": start_date,
+                        "end": end_date,
+                    },
+                    "symbols_tested": len(symbols_found),
+                    "initial_cash": initial_cash,
+                },
+                json_output=json_output,
+            )
+        else:
+            # Print rich table
+            from rich.table import Table
+
+            console = Console()
+            console.print("\n[bold green]Strategy Comparison Results[/bold green]")
+            console.print(f"Period: {start_date} to {end_date}")
+            console.print(f"Symbols: {len(symbols_found)}")
+            console.print(f"Initial Capital: ${initial_cash:,.2f}\n")
+
+            table = Table(title="Strategy Performance")
+            table.add_column("Rank", justify="center")
+            table.add_column("Strategy", justify="left")
+            table.add_column("Return %", justify="right")
+            table.add_column("Sharpe", justify="right")
+            table.add_column("Sortino", justify="right")
+            table.add_column("Calmar", justify="right")
+            table.add_column("Max DD", justify="right")
+            table.add_column("Win Rate", justify="right")
+            table.add_column("Trades", justify="right")
+
+            for idx, (strategy_name, _) in enumerate(ranking, 1):
+                metrics = comparison[strategy_name]
+                table.add_row(
+                    str(idx),
+                    strategy_name,
+                    f"{metrics.get('total_return', 0) * 100:.1f}%",
+                    f"{metrics.get('sharpe_ratio', 0):.2f}",
+                    f"{metrics.get('sortino_ratio', 0):.2f}",
+                    f"{metrics.get('calmar_ratio', 0):.2f}",
+                    f"{metrics.get('max_drawdown', 0) * 100:.1f}%",
+                    f"{metrics.get('win_rate', 0) * 100:.0f}%",
+                    str(metrics.get('total_trades', 0)),
+                )
+
+            console.print(table)
+            console.print(f"\n[dim]Ranked by: {rank_by}[/dim]")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        emit_error(
+            f"Comparison failed: {e}",
+            json_output=json_output
+        )
+        raise typer.Exit(1)
+
+
 @app.command("mcp-setup")
 def mcp_setup(
     db_url: Optional[str] = typer.Option(None, help="Database URL (default: from environment or postgresql://g2:g2pass@localhost:5432/g2)"),
@@ -4527,6 +4738,114 @@ def mcp_setup(
         traceback.print_exc()
         emit_error(f"Setup failed: {exc}", json_output=json_output)
         raise typer.Exit(1)
+
+
+# =============================================================================
+# Strategy Commands
+# =============================================================================
+
+
+@strategy_app.command("list")
+def strategy_list(
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """List all registered strategies."""
+    from g2.strategies.dispatcher import get_strategy_registry
+
+    url = _db_url(db_url)
+    with psycopg.connect(url) as conn:
+        strategies = get_strategy_registry(conn)
+
+    if json_output:
+        emit_json({"strategies": strategies})
+    else:
+        console = Console()
+        table = Table(title="Registered Strategies")
+        table.add_column("Name", style="cyan")
+        table.add_column("Description")
+        table.add_column("Tags", style="dim")
+        table.add_column("Default Params", style="dim")
+
+        for s in strategies:
+            tags = ", ".join(s.get("tags", []))
+            params = json.dumps(s.get("default_params", {}))
+            table.add_row(s["name"], s.get("description", ""), tags, params)
+
+        console.print(table)
+
+
+@strategy_app.command("configs")
+def strategy_configs(
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """List all active strategy configurations."""
+    from g2.strategies.dispatcher import get_strategy_configs
+
+    url = _db_url(db_url)
+    with psycopg.connect(url) as conn:
+        configs = get_strategy_configs(conn)
+
+    if json_output:
+        emit_json({"configs": configs})
+    else:
+        console = Console()
+        table = Table(title="Strategy Configurations")
+        table.add_column("Name", style="cyan")
+        table.add_column("Strategy", style="green")
+        table.add_column("Params", style="dim")
+        table.add_column("Description")
+
+        for c in configs:
+            params = json.dumps(c.get("params", {}))
+            table.add_row(
+                c["name"],
+                c["strategy_name"],
+                params,
+                c.get("description", ""),
+            )
+
+        console.print(table)
+
+
+@strategy_app.command("create-config")
+def strategy_create_config(
+    name: str = typer.Option(..., "--name", help="Unique name for the config"),
+    strategy: str = typer.Option(..., "--strategy", help="Strategy name from registry"),
+    params: Optional[str] = typer.Option(None, "--params", help="JSON params to override defaults"),
+    description: Optional[str] = typer.Option(None, "--description", help="Config description"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Create a new strategy configuration."""
+    from g2.strategies.dispatcher import create_strategy_config
+
+    # Parse params JSON
+    parsed_params = {}
+    if params:
+        try:
+            parsed_params = json.loads(params)
+        except json.JSONDecodeError as e:
+            emit_error(f"Invalid JSON in --params: {e}", json_output=json_output)
+
+    url = _db_url(db_url)
+    try:
+        with psycopg.connect(url) as conn:
+            config_id = create_strategy_config(
+                conn,
+                name=name,
+                strategy_name=strategy,
+                params=parsed_params,
+                description=description,
+            )
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+
+    if json_output:
+        emit_json({"id": config_id, "name": name, "strategy": strategy})
+    else:
+        emit(f"Created config '{name}' (id={config_id})")
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
