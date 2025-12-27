@@ -1017,7 +1017,7 @@ def ml_eval(
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
-    """Evaluate model performance on historical predictions (MVP placeholder)."""
+    """Evaluate model performance on historical predictions."""
     import pandas as pd
     from datetime import datetime, timedelta
     from decimal import Decimal
