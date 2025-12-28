@@ -7,16 +7,28 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
-from typing import Any, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from g2.backtest.portfolio import Portfolio
+
+if TYPE_CHECKING:
+    from g2.backtest.costs import TransactionCosts
+    from g2.backtest.risk import RiskManager
+    from g2.backtest.sizing import PositionSizer
+    from g2.backtest.slippage import SlippageModel
 
 
 class BacktestEngine:
     """
-    Simple backtesting engine with point-in-time correctness.
+    Backtesting engine with point-in-time correctness.
 
     Ensures strategy only has access to past data (no look-ahead bias).
+
+    Optional features (all backward compatible):
+    - Transaction costs: Commission, spread, market impact
+    - Slippage: Execution price modeling
+    - Risk management: Stop loss, take profit, position limits
+    - Position sizing: Various sizing methods
     """
 
     def __init__(
@@ -26,6 +38,13 @@ class BacktestEngine:
         initial_cash: float,
         start_date: date,
         end_date: date,
+        *,
+        costs: Optional["TransactionCosts"] = None,
+        slippage: Optional["SlippageModel"] = None,
+        risk_manager: Optional["RiskManager"] = None,
+        position_sizer: Optional["PositionSizer"] = None,
+        volume_data: Optional[Dict[str, Dict[date, int]]] = None,
+        volatility_data: Optional[Dict[str, Dict[date, float]]] = None,
     ):
         """
         Initialize backtesting engine.
@@ -37,12 +56,29 @@ class BacktestEngine:
             initial_cash: Starting cash amount
             start_date: Start date for backtest
             end_date: End date for backtest
+            costs: Optional transaction cost model
+            slippage: Optional slippage model
+            risk_manager: Optional risk manager for position/portfolio limits
+            position_sizer: Optional position sizing strategy
+            volume_data: Optional dict {symbol: {date: volume}} for slippage/costs
+            volatility_data: Optional dict {symbol: {date: volatility}} for sizing
         """
         self.price_data = price_data
         self.strategy = strategy
         self.initial_cash = initial_cash
         self.start_date = start_date
         self.end_date = end_date
+
+        # Optional advanced features
+        self.costs = costs
+        self.slippage = slippage
+        self.risk_manager = risk_manager
+        self.position_sizer = position_sizer
+        self.volume_data = volume_data or {}
+        self.volatility_data = volatility_data or {}
+
+        # Track peak equity for drawdown calculations
+        self._peak_equity = initial_cash
 
         # Pre-process price data into efficient lookups
         self._prices_by_date = self._index_prices_by_date()
@@ -91,6 +127,14 @@ class BacktestEngine:
         """
         Run backtest and return results.
 
+        Execution order:
+        1. Generate risk exit signals (stop loss, take profit)
+        2. Get strategy signals
+        3. Filter strategy signals through risk manager
+        4. Apply position sizing (if configured)
+        5. Apply slippage to get execution price
+        6. Execute with transaction costs
+
         Returns:
             Dict with:
                 - trades: List of executed trades
@@ -105,55 +149,47 @@ class BacktestEngine:
             # Get current prices for this date
             current_prices = self._prices_by_date.get(current_date, {})
 
+            # Update peak equity for drawdown tracking
+            equity = portfolio.calculate_equity(current_prices)
+            if equity > self._peak_equity:
+                self._peak_equity = equity
+
             # Get historical data (point-in-time correct)
             historical_prices = self._get_historical_prices(current_date)
 
-            # Call strategy to get signals
-            signals = self.strategy(current_date, portfolio, historical_prices)
+            # 1. Generate risk exit signals first (stop loss, take profit)
+            exit_signals: List[Dict[str, Any]] = []
+            if self.risk_manager:
+                exit_signals = self.risk_manager.generate_exit_signals(
+                    portfolio, current_prices
+                )
 
-            # Execute signals
-            for signal in signals:
-                action = signal["action"]
-                symbol = signal["symbol"]
-                shares = signal["shares"]
+            # Execute exit signals first
+            for signal in exit_signals:
+                executed_trade = self._execute_signal(
+                    signal, portfolio, current_prices, current_date
+                )
+                if executed_trade:
+                    trades.append(executed_trade)
 
-                # Get price for this symbol on current date
-                if symbol not in current_prices:
-                    # Skip if no price data available
-                    continue
+            # 2. Get strategy signals
+            strategy_signals = self.strategy(
+                current_date, portfolio, historical_prices
+            )
 
-                price = current_prices[symbol]
+            # 3. Filter strategy signals through risk manager
+            if self.risk_manager:
+                strategy_signals = self.risk_manager.filter_signals(
+                    strategy_signals, portfolio, current_prices
+                )
 
-                try:
-                    if action == "buy":
-                        portfolio.buy(
-                            symbol=symbol, shares=shares, price=price, date=current_date
-                        )
-                        trades.append(
-                            {
-                                "date": current_date,
-                                "action": "buy",
-                                "symbol": symbol,
-                                "shares": shares,
-                                "price": price,
-                            }
-                        )
-                    elif action == "sell":
-                        portfolio.sell(
-                            symbol=symbol, shares=shares, price=price, date=current_date
-                        )
-                        trades.append(
-                            {
-                                "date": current_date,
-                                "action": "sell",
-                                "symbol": symbol,
-                                "shares": shares,
-                                "price": price,
-                            }
-                        )
-                except ValueError as e:
-                    # Log but don't fail - insufficient cash/shares is expected
-                    pass
+            # Execute strategy signals
+            for signal in strategy_signals:
+                executed_trade = self._execute_signal(
+                    signal, portfolio, current_prices, current_date
+                )
+                if executed_trade:
+                    trades.append(executed_trade)
 
             # Record equity for this date
             equity = portfolio.calculate_equity(current_prices)
@@ -165,3 +201,114 @@ class BacktestEngine:
         metrics = calculate_metrics(equity_curve, initial_capital=self.initial_cash)
 
         return {"trades": trades, "equity_curve": equity_curve, "metrics": metrics}
+
+    def _execute_signal(
+        self,
+        signal: Dict[str, Any],
+        portfolio: Portfolio,
+        current_prices: Dict[str, float],
+        current_date: date,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Execute a single trading signal with costs, slippage, and sizing.
+
+        Args:
+            signal: Signal dict with action, symbol, shares
+            portfolio: Current portfolio
+            current_prices: Current market prices
+            current_date: Current date
+
+        Returns:
+            Trade dict if executed, None if skipped
+        """
+        action = signal.get("action")
+        symbol = signal.get("symbol")
+        shares = signal.get("shares", 0)
+
+        if symbol not in current_prices:
+            return None
+
+        price = current_prices[symbol]
+
+        # Get volume and volatility if available
+        daily_volume = self.volume_data.get(symbol, {}).get(current_date)
+        volatility = self.volatility_data.get(symbol, {}).get(current_date)
+
+        # 4. Apply position sizing for buy orders
+        if action == "buy" and self.position_sizer:
+            portfolio_value = portfolio.calculate_equity(current_prices)
+            shares = self.position_sizer.calculate_shares(
+                portfolio_value=portfolio_value,
+                price=price,
+                symbol=symbol,
+                volatility=volatility,
+            )
+            if shares <= 0:
+                return None
+
+        # 5. Apply slippage to get execution price
+        execution_price = price
+        if self.slippage:
+            slipped_price = self.slippage.calculate_execution_price(
+                order_price=price,
+                shares=shares,
+                action=action,
+                daily_volume=daily_volume,
+                volatility=volatility,
+            )
+            if slipped_price is None:
+                # Limit order didn't fill
+                return None
+            execution_price = slipped_price
+
+        # 6. Execute with transaction costs
+        try:
+            if action == "buy":
+                portfolio.buy(
+                    symbol=symbol,
+                    shares=shares,
+                    price=execution_price,
+                    date=current_date,
+                    costs=self.costs,
+                    daily_volume=daily_volume,
+                )
+            elif action == "sell":
+                # For sells, ensure we don't sell more than we have
+                position = portfolio.get_position(symbol)
+                shares = min(shares, int(position.get("shares", 0)))
+                if shares <= 0:
+                    return None
+
+                portfolio.sell(
+                    symbol=symbol,
+                    shares=shares,
+                    price=execution_price,
+                    date=current_date,
+                    costs=self.costs,
+                    daily_volume=daily_volume,
+                )
+            else:
+                return None
+
+            # Build trade record
+            trade = {
+                "date": current_date,
+                "action": action,
+                "symbol": symbol,
+                "shares": shares,
+                "price": execution_price,
+            }
+            if signal.get("reason"):
+                trade["reason"] = signal["reason"]
+            if self.slippage and execution_price != price:
+                trade["slippage"] = execution_price - price
+            if self.costs:
+                trade["cost"] = self.costs.calculate_cost(
+                    shares, execution_price, action, daily_volume
+                )
+
+            return trade
+
+        except ValueError:
+            # Insufficient cash/shares
+            return None

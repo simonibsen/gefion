@@ -6,7 +6,10 @@ Tracks positions, cash, and equity over time.
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from g2.backtest.costs import TransactionCosts
 
 
 class Portfolio:
@@ -45,7 +48,15 @@ class Portfolio:
         )
         return self.cash + position_value
 
-    def buy(self, symbol: str, shares: int, price: float, date: date) -> None:
+    def buy(
+        self,
+        symbol: str,
+        shares: int,
+        price: float,
+        date: date,
+        costs: Optional["TransactionCosts"] = None,
+        daily_volume: Optional[int] = None,
+    ) -> None:
         """
         Buy shares of a stock.
 
@@ -54,27 +65,36 @@ class Portfolio:
             shares: Number of shares to buy
             price: Price per share
             date: Transaction date
+            costs: Optional transaction cost model
+            daily_volume: Optional daily volume for market impact calculation
 
         Raises:
             ValueError: If insufficient cash
         """
-        cost = shares * price
+        base_cost = shares * price
 
-        if cost > self.cash:
+        # Calculate transaction costs if provided
+        tx_cost = 0.0
+        if costs is not None:
+            tx_cost = costs.calculate_cost(shares, price, "buy", daily_volume)
+
+        total_cost = base_cost + tx_cost
+
+        if total_cost > self.cash:
             raise ValueError(
-                f"Insufficient cash. Need {cost:.2f}, have {self.cash:.2f}"
+                f"Insufficient cash. Need {total_cost:.2f}, have {self.cash:.2f}"
             )
 
-        # Deduct cash
-        self.cash -= cost
+        # Deduct cash (base cost + transaction costs)
+        self.cash -= total_cost
 
         # Update or create position
         if symbol in self.positions:
             # Update average price for existing position
             existing = self.positions[symbol]
             total_shares = existing["shares"] + shares
-            total_cost = (existing["shares"] * existing["avg_price"]) + cost
-            avg_price = total_cost / total_shares
+            position_cost = (existing["shares"] * existing["avg_price"]) + base_cost
+            avg_price = position_cost / total_shares
 
             self.positions[symbol] = {"shares": total_shares, "avg_price": avg_price}
         else:
@@ -82,18 +102,27 @@ class Portfolio:
             self.positions[symbol] = {"shares": shares, "avg_price": price}
 
         # Log transaction
-        self.transactions.append(
-            {
-                "action": "buy",
-                "symbol": symbol,
-                "shares": shares,
-                "price": price,
-                "date": date,
-                "value": cost,
-            }
-        )
+        tx_record = {
+            "action": "buy",
+            "symbol": symbol,
+            "shares": shares,
+            "price": price,
+            "date": date,
+            "value": base_cost,
+        }
+        if tx_cost > 0:
+            tx_record["cost"] = tx_cost
+        self.transactions.append(tx_record)
 
-    def sell(self, symbol: str, shares: int, price: float, date: date) -> None:
+    def sell(
+        self,
+        symbol: str,
+        shares: int,
+        price: float,
+        date: date,
+        costs: Optional["TransactionCosts"] = None,
+        daily_volume: Optional[int] = None,
+    ) -> None:
         """
         Sell shares of a stock.
 
@@ -102,6 +131,8 @@ class Portfolio:
             shares: Number of shares to sell
             price: Price per share
             date: Transaction date
+            costs: Optional transaction cost model
+            daily_volume: Optional daily volume for market impact calculation
 
         Raises:
             ValueError: If insufficient shares
@@ -115,9 +146,20 @@ class Portfolio:
                 f"Insufficient shares. Want to sell {shares}, have {position['shares']}"
             )
 
-        # Add cash from sale
-        proceeds = shares * price
-        self.cash += proceeds
+        # Calculate proceeds and transaction costs
+        gross_proceeds = shares * price
+
+        tx_cost = 0.0
+        if costs is not None:
+            tx_cost = costs.calculate_cost(shares, price, "sell", daily_volume)
+
+        net_proceeds = gross_proceeds - tx_cost
+
+        # Add net proceeds to cash
+        self.cash += net_proceeds
+
+        # Store avg_price before updating position
+        avg_price = position["avg_price"]
 
         # Update position
         position["shares"] -= shares
@@ -127,17 +169,18 @@ class Portfolio:
             del self.positions[symbol]
 
         # Log transaction
-        self.transactions.append(
-            {
-                "action": "sell",
-                "symbol": symbol,
-                "shares": shares,
-                "price": price,
-                "date": date,
-                "value": proceeds,
-                "realized_pnl": proceeds - (shares * position["avg_price"]),
-            }
-        )
+        tx_record = {
+            "action": "sell",
+            "symbol": symbol,
+            "shares": shares,
+            "price": price,
+            "date": date,
+            "value": gross_proceeds,
+            "realized_pnl": gross_proceeds - (shares * avg_price),
+        }
+        if tx_cost > 0:
+            tx_record["cost"] = tx_cost
+        self.transactions.append(tx_record)
 
     def calculate_equity(self, current_prices: Dict[str, float]) -> float:
         """

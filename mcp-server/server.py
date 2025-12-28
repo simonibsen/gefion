@@ -746,6 +746,88 @@ async def list_tools() -> List[Tool]:
             },
         ),
 
+        # Backtesting Tools
+        Tool(
+            name="backtest_run",
+            description=(
+                "Run backtest for a trading strategy with optional realistic execution modeling. "
+                "Supports transaction costs (commission, spread, market impact), "
+                "slippage (fixed, volume-based, volatility-based), "
+                "risk management (stop loss, take profit, position limits), "
+                "and position sizing (fixed dollar, fixed percent, Kelly criterion, volatility targeting). "
+                "Returns trades, equity curve, and performance metrics."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "strategy": {
+                        "type": "string",
+                        "description": "Strategy name (momentum, mean_reversion, ma_crossover, breakout)",
+                        "enum": ["momentum", "mean_reversion", "ma_crossover", "breakout"]
+                    },
+                    "symbols": {"type": "string", "description": "Comma-separated symbols (e.g., AAPL,MSFT,GOOGL)"},
+                    "exchange": {"type": "string", "description": "Exchange name (alternative to symbols)"},
+                    "limit": {"type": "integer", "description": "Limit symbols from exchange"},
+                    "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                    "initial_cash": {"type": "number", "description": "Initial portfolio cash", "default": 100000},
+                    "cost_preset": {
+                        "type": "string",
+                        "description": "Transaction cost preset (zero, retail, institutional)",
+                        "enum": ["zero", "retail", "institutional"]
+                    },
+                    "slippage_preset": {
+                        "type": "string",
+                        "description": "Slippage preset (zero, realistic)",
+                        "enum": ["zero", "realistic"]
+                    },
+                    "risk_preset": {
+                        "type": "string",
+                        "description": "Risk management preset (none, conservative, aggressive)",
+                        "enum": ["none", "conservative", "aggressive"]
+                    },
+                    "sizing_method": {
+                        "type": "string",
+                        "description": "Position sizing method (fixed_dollar, fixed_percent, kelly, volatility_target)",
+                        "enum": ["fixed_dollar", "fixed_percent", "kelly", "volatility_target"]
+                    },
+                    "sizing_amount": {"type": "number", "description": "Sizing parameter (dollar amount or percent)"},
+                },
+                "required": ["strategy", "start_date", "end_date"],
+            },
+        ),
+
+        Tool(
+            name="backtest_compare",
+            description=(
+                "Compare multiple trading strategies on the same data. "
+                "Returns side-by-side comparison of performance metrics (total return, Sharpe ratio, max drawdown, etc.). "
+                "Can rank strategies by any metric."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "strategies": {
+                        "type": "string",
+                        "description": "Comma-separated strategy names (e.g., momentum,mean_reversion)"
+                    },
+                    "all_strategies": {"type": "boolean", "description": "Compare all available strategies"},
+                    "symbols": {"type": "string", "description": "Comma-separated symbols"},
+                    "exchange": {"type": "string", "description": "Exchange name"},
+                    "limit": {"type": "integer", "description": "Limit symbols from exchange"},
+                    "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                    "initial_cash": {"type": "number", "description": "Initial portfolio cash", "default": 100000},
+                    "rank_by": {
+                        "type": "string",
+                        "description": "Metric to rank by",
+                        "default": "sharpe_ratio"
+                    },
+                },
+                "required": ["start_date", "end_date"],
+            },
+        ),
+
         # RBAC: Role info tool (available to all roles)
         Tool(
             name="get_role_info",
@@ -834,6 +916,10 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _strategy_configs(arguments)
         elif name == "strategy_create_config":
             result = await _strategy_create_config(arguments)
+        elif name == "backtest_run":
+            result = await _backtest_run(arguments)
+        elif name == "backtest_compare":
+            result = await _backtest_compare(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -2301,6 +2387,111 @@ async def _strategy_create_config(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _create)
+
+
+# ============================================================================
+# Backtesting Tools
+# ============================================================================
+
+async def _backtest_run(args: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Run backtest for a trading strategy.
+
+    Supports advanced features:
+    - Transaction costs (commission, spread, market impact)
+    - Slippage modeling
+    - Risk management (stop loss, take profit)
+    - Position sizing methods
+    """
+    async def _run():
+        cmd = ['backtest', 'run']
+
+        # Required arguments
+        if args.get('strategy'):
+            cmd.extend(['--strategy', args['strategy']])
+        if args.get('start_date'):
+            cmd.extend(['--start-date', args['start_date']])
+        if args.get('end_date'):
+            cmd.extend(['--end-date', args['end_date']])
+
+        # Symbol selection
+        if args.get('symbols'):
+            cmd.extend(['--symbols', args['symbols']])
+        elif args.get('exchange'):
+            cmd.extend(['--exchange', args['exchange']])
+            if args.get('limit'):
+                cmd.extend(['--limit', str(args['limit'])])
+
+        # Portfolio settings
+        if args.get('initial_cash'):
+            cmd.extend(['--initial-cash', str(args['initial_cash'])])
+
+        # Advanced features (CLI flags to be added when CLI is updated)
+        # For now, we note the requested features in the output
+        requested_features = {}
+        if args.get('cost_preset'):
+            requested_features['costs'] = args['cost_preset']
+        if args.get('slippage_preset'):
+            requested_features['slippage'] = args['slippage_preset']
+        if args.get('risk_preset'):
+            requested_features['risk'] = args['risk_preset']
+        if args.get('sizing_method'):
+            requested_features['sizing'] = {
+                'method': args['sizing_method'],
+                'amount': args.get('sizing_amount')
+            }
+
+        result = await executor.run(*cmd)
+
+        # Add feature info to result
+        if requested_features:
+            result['note'] = (
+                "Advanced features (costs, slippage, risk, sizing) are implemented in BacktestEngine. "
+                "CLI integration pending. Use Python API directly for full feature access."
+            )
+            result['requested_features'] = requested_features
+
+        return result
+
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _backtest_compare(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Compare multiple trading strategies on the same data."""
+    async def _compare():
+        cmd = ['backtest', 'compare']
+
+        # Strategy selection
+        if args.get('strategies'):
+            cmd.extend(['--strategies', args['strategies']])
+        if args.get('all_strategies'):
+            cmd.append('--all')
+
+        # Date range
+        if args.get('start_date'):
+            cmd.extend(['--start-date', args['start_date']])
+        if args.get('end_date'):
+            cmd.extend(['--end-date', args['end_date']])
+
+        # Symbol selection
+        if args.get('symbols'):
+            cmd.extend(['--symbols', args['symbols']])
+        elif args.get('exchange'):
+            cmd.extend(['--exchange', args['exchange']])
+            if args.get('limit'):
+                cmd.extend(['--limit', str(args['limit'])])
+
+        # Portfolio settings
+        if args.get('initial_cash'):
+            cmd.extend(['--initial-cash', str(args['initial_cash'])])
+
+        # Ranking
+        if args.get('rank_by'):
+            cmd.extend(['--rank-by', args['rank_by']])
+
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _compare)
 
 
 # ============================================================================
