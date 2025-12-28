@@ -1817,6 +1817,225 @@ def ml_train_ensemble(
     )
 
 
+@ml_app.command("predict-ensemble")
+def ml_predict_ensemble(
+    model_name: str = typer.Option(..., help="Ensemble model name"),
+    model_version: str = typer.Option(..., help="Model version"),
+    prediction_date: str = typer.Option(..., help="Date to generate predictions for (YYYY-MM-DD)"),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
+    exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
+    limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Generate predictions using a trained ensemble model.
+
+    Examples:
+        # Generate predictions for specific symbols
+        g2 ml predict-ensemble --model-name tech_ensemble --model-version v1 \\
+            --prediction-date 2025-01-15 --symbols AAPL,MSFT,GOOGL
+
+        # Generate predictions for NASDAQ universe
+        g2 ml predict-ensemble --model-name nasdaq_ensemble --model-version v1 \\
+            --prediction-date 2025-01-15 --exchange NASDAQ --limit 50
+    """
+    import pandas as pd
+    from g2.ml.ensemble import load_ensemble, predict_ensemble
+    from g2.ml.store import get_ml_dataset
+
+    sym_list = parse_comma_separated(symbols) or []
+    if not sym_list and not exchange:
+        emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
+        return
+
+    with db_connection(db_url) as conn:
+        # Fetch model metadata
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, dataset_id, artifact_uri, algorithm, hyperparams
+                FROM ml_models
+                WHERE name = %s AND version = %s;
+                """,
+                (model_name, model_version),
+            )
+            row = cur.fetchone()
+            if not row:
+                emit_error(f"Model not found: {model_name} {model_version}", json_output=json_output)
+                return
+
+            model_id, dataset_id, artifact_uri, algorithm, hyperparams = row[0], row[1], row[2], row[3], row[4]
+
+        if algorithm != "ensemble":
+            emit_error(f"Model is not an ensemble (algorithm={algorithm}). Use 'ml predict' instead.", json_output=json_output)
+            return
+
+        # Get dataset to know which features and horizons to use
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT name, version, feature_names, horizons_days
+                FROM ml_datasets
+                WHERE id = %s;
+                """,
+                (dataset_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                emit_error(f"Dataset not found for model (id={dataset_id})", json_output=json_output)
+                return
+            dataset_name, dataset_version, feature_names, horizons = row[0], row[1], row[2], row[3]
+
+        # Build universe of symbols
+        if exchange:
+            with conn.cursor() as cur:
+                limit_clause = f"LIMIT {limit}" if limit else ""
+                cur.execute(
+                    f"""
+                    SELECT DISTINCT s.id, s.symbol
+                    FROM stocks s
+                    WHERE s.exchange = %s
+                    {limit_clause};
+                    """,
+                    (exchange,),
+                )
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
+        else:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, symbol FROM stocks WHERE symbol = ANY(%s);
+                    """,
+                    (sym_list,),
+                )
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
+
+        if not universe:
+            emit_error("No symbols found in universe", json_output=json_output)
+            return
+
+        emit(f"Generating ensemble predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
+
+        # Fetch features for all symbols on prediction_date
+        data_ids = [u[0] for u in universe]
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT cf.data_id, fd.name, cf.value
+                FROM computed_features cf
+                JOIN feature_definitions fd ON cf.feature_id = fd.id
+                WHERE cf.data_id = ANY(%s)
+                  AND cf.date = %s
+                  AND fd.name = ANY(%s);
+                """,
+                (data_ids, prediction_date, feature_names),
+            )
+            features_data = cur.fetchall()
+
+        if not features_data:
+            emit_error(f"No features found for {prediction_date}", json_output=json_output)
+            return
+
+        # Convert to DataFrame and pivot to wide format
+        features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
+        features_wide = features_df.pivot_table(
+            index="data_id",
+            columns="feature_name",
+            values="value",
+            aggfunc="first"
+        )
+
+        emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
+
+        # Generate predictions for each horizon
+        from psycopg.types.json import Json
+        from decimal import Decimal
+
+        # Create run record
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
+                VALUES ('predict_ensemble', 'running', %s, %s, NOW())
+                RETURNING id;
+                """,
+                (
+                    dataset_id,
+                    Json(
+                        {
+                            "model_name": model_name,
+                            "model_version": model_version,
+                            "prediction_date": prediction_date,
+                            "universe": {"symbols": sym_list} if sym_list else {"exchange": exchange},
+                        }
+                    ),
+                ),
+            )
+            run_id = int(cur.fetchone()[0])
+
+        total_predictions = 0
+        for horizon in horizons:
+            emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
+
+            # Load ensemble for this horizon
+            horizon_ensemble_path = Path(artifact_uri) / f"_h{horizon}"
+            try:
+                ensemble = load_ensemble(horizon_ensemble_path)
+            except FileNotFoundError:
+                emit(f"  Warning: Ensemble not found at {horizon_ensemble_path}, skipping", json_output=json_output)
+                continue
+
+            # Generate predictions
+            predictions = predict_ensemble(ensemble, features_wide)
+
+            # Insert predictions into database
+            with conn.cursor() as cur:
+                for data_id in predictions.index:
+                    q10 = Decimal(str(predictions.loc[data_id, "q10"]))
+                    q50 = Decimal(str(predictions.loc[data_id, "q50"]))
+                    q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+
+                    cur.execute(
+                        """
+                        INSERT INTO quantile_predictions
+                          (model_id, data_id, prediction_date, horizon_days, q10, q50, q90,
+                           model_version, run_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
+                        DO UPDATE SET
+                          q10 = EXCLUDED.q10,
+                          q50 = EXCLUDED.q50,
+                          q90 = EXCLUDED.q90,
+                          model_version = EXCLUDED.model_version,
+                          run_id = EXCLUDED.run_id,
+                          created_at = NOW();
+                        """,
+                        (model_id, int(data_id), prediction_date, horizon, q10, q50, q90, model_version, run_id),
+                    )
+                    total_predictions += 1
+
+            emit(f"  Stored {len(predictions)} predictions for {horizon}-day horizon", json_output=json_output)
+
+        # Mark run as complete
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE ml_runs SET status = 'completed', finished_at = NOW()
+                WHERE id = %s;
+                """,
+                (run_id,),
+            )
+
+        conn.commit()
+
+    emit(
+        f"Ensemble predictions generated: {model_name} {model_version} for {prediction_date}",
+        data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizons": horizons},
+        json_output=json_output,
+    )
+
+
 @app.command("prices-ingest")
 def ingest_prices(
     symbol: str = typer.Option(..., help="Ticker symbol to ingest"),

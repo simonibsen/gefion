@@ -327,5 +327,45 @@ def trained_ensemble(synthetic_data, tmp_path):
     return result["ensemble"], tmp_path
 
 
+# Tests for CLI predict-ensemble command
+class TestPredictEnsembleCLI:
+    """Tests for predict-ensemble CLI command."""
+
+    def test_predict_ensemble_generates_predictions(self, trained_ensemble, synthetic_data):
+        """Test that predict_ensemble generates valid predictions."""
+        from g2.ml.ensemble import predict_ensemble
+
+        ensemble, _ = trained_ensemble
+        X, _ = synthetic_data
+
+        # Generate predictions
+        predictions = predict_ensemble(ensemble, X)
+
+        assert len(predictions) == len(X)
+        assert "q10" in predictions.columns
+        assert "q50" in predictions.columns
+        assert "q90" in predictions.columns
+
+        # Verify quantile ordering
+        assert (predictions["q10"] <= predictions["q50"]).all()
+        assert (predictions["q50"] <= predictions["q90"]).all()
+
+    def test_predict_ensemble_with_loaded_ensemble(self, trained_ensemble, synthetic_data):
+        """Test predictions work after loading ensemble from disk."""
+        from g2.ml.ensemble import load_ensemble, predict_ensemble
+
+        _, tmp_path = trained_ensemble
+        X, _ = synthetic_data
+
+        # Load ensemble from disk
+        ensemble = load_ensemble(tmp_path / "ensemble")
+
+        # Generate predictions
+        predictions = predict_ensemble(ensemble, X[:5])
+
+        assert len(predictions) == 5
+        assert all(col in predictions.columns for col in ["q10", "q50", "q90"])
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
