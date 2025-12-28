@@ -104,6 +104,37 @@ def run_backtest(config):
 - Database operations (bulk inserts, complex queries)
 - External API calls (AlphaVantage, etc.)
 
+**Span Parenting:**
+Ensure child spans are properly nested under parent spans. Orphaned spans create disconnected traces that are hard to follow in Tempo/Jaeger.
+
+```python
+# GOOD: Child span is nested under parent
+def process_batch(items):
+    with create_span("process_batch", count=len(items)):
+        for item in items:
+            process_item(item)  # If this creates a span, it's a child
+
+def process_item(item):
+    with create_span("process_item", item_id=item.id):  # Automatically a child
+        ...
+
+# BAD: Orphaned spans in threads without context propagation
+def process_parallel(items):
+    with create_span("process_parallel"):
+        with ThreadPoolExecutor() as pool:
+            pool.map(process_item, items)  # Spans here are ORPHANED!
+
+# GOOD: Propagate context to threads
+from g2.ingest.universe import propagate_context
+
+@propagate_context
+def process_item_with_context(item):
+    with create_span("process_item"):  # Now properly parented
+        ...
+```
+
+Use `propagate_context` decorator (from `g2.ingest.universe`) when spawning work in thread pools to maintain trace hierarchy.
+
 ## Git Hooks
 
 The project uses Git hooks to enforce development rules:
@@ -136,6 +167,7 @@ All hooks are executable and run automatically.
 - [ ] Commit message reviewed (no AI tool mentions)
 - [ ] Code follows existing patterns
 - [ ] **Observability**: New modules have tracing/logging?
+- [ ] **Span Parenting**: Child spans nested under parents? Thread context propagated?
 - [ ] KISS: Is this the simplest solution? Remove unused complexity
 - [ ] Coupling: Are functions self-contained? No implicit dependencies
 - [ ] Performance: Bottlenecks identified? Optimizing the right thing?
