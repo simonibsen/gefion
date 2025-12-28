@@ -34,6 +34,7 @@ ml_extended = [
     "lightgbm>=4.0",
     "pyarrow>=14.0",
     "shap>=0.44",
+    "optuna>=3.5",
 ]
 gpu = [
     "torch>=2.0",

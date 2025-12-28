@@ -340,13 +340,31 @@ g2 ml feature-importance \
 
 ### 5.4 Hyperparameter Tuning
 
+**Status**: ✅ Complete (2025-12-28)
+
 **Goal**: Automatically find best model hyperparameters.
 
 **Implementation**:
-- Grid search or random search
-- Bayesian optimization
-- Cross-validation on time-series data
-- Save best parameters to model metadata
+- Bayesian optimization via Optuna
+- Time-series cross-validation (prevents data leakage)
+- Supports XGBoost, LightGBM, sklearn algorithms
+- CLI command: `g2 ml tune`
+- MCP tool: `ml_tune`
+- Saves best parameters to JSON
+
+**Usage**:
+```bash
+# Tune XGBoost quantile model with 50 trials
+g2 ml tune --dataset-name mvp --dataset-version v1 \
+  --algorithm xgboost --n-trials 50
+
+# Tune classifier with LightGBM
+g2 ml tune --dataset-name mvp --dataset-version v1 \
+  --algorithm lightgbm --model-type classifier
+
+# Quick tuning with timeout
+g2 ml tune --dataset-name mvp --dataset-version v1 --timeout 300
+```
 
 ### 5.5 Online Prediction API
 
@@ -380,14 +398,12 @@ curl -X POST http://localhost:8000/predict \
 - ✅ 4.1 Trading strategies - 7 implemented (2025-12-17)
 - ✅ 4.2 Backtesting engine MVP (2025-12-17)
 - ✅ 5.3 Feature importance analysis (2025-12-28)
-
-### Next Up
-1. **5.4 Hyperparameter tuning** - Grid/random search, time-series CV
+- ✅ 5.4 Hyperparameter tuning with Optuna (2025-12-28)
 
 ### Future
-3. 5.1 Warm-start retraining - Incremental learning for monthly updates
-4. 5.2 Model ensembles - Combine multiple algorithms
-5. 5.5 Online prediction API - Lower priority, defer
+1. 5.1 Warm-start retraining - Incremental learning for monthly updates
+2. 5.2 Model ensembles - Combine multiple algorithms
+3. 5.5 Online prediction API - Lower priority, defer
 
 ## Contributing
 

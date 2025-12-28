@@ -1287,6 +1287,164 @@ def ml_feature_importance(
         emit_error(f"Failed to compute importance: {e}", json_output=json_output)
 
 
+@ml_app.command("tune")
+def ml_tune(
+    dataset_name: str = typer.Option(..., help="Dataset name to use for tuning"),
+    dataset_version: str = typer.Option(..., help="Dataset version"),
+    algorithm: str = typer.Option("xgboost", help="Algorithm: xgboost, lightgbm, or sklearn"),
+    model_type: str = typer.Option("quantile", help="Model type: quantile or classifier"),
+    horizon: int = typer.Option(7, help="Horizon in days for quantile models"),
+    quantile: float = typer.Option(0.5, help="Quantile to optimize (0.1, 0.5, 0.9)"),
+    n_trials: int = typer.Option(50, help="Number of optimization trials"),
+    cv_splits: int = typer.Option(5, help="Number of time-series CV splits"),
+    timeout: Optional[int] = typer.Option(None, help="Timeout in seconds"),
+    out_dir: Path = typer.Option(Path("models"), help="Output directory for results"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """
+    Tune hyperparameters using Optuna with time-series cross-validation.
+
+    Uses Bayesian optimization to find optimal hyperparameters while
+    preventing data leakage through time-series CV splits.
+
+    Examples:
+        # Tune XGBoost quantile model with 50 trials
+        g2 ml tune --dataset-name mvp --dataset-version v1 \\
+          --algorithm xgboost --n-trials 50
+
+        # Tune classifier with LightGBM
+        g2 ml tune --dataset-name mvp --dataset-version v1 \\
+          --algorithm lightgbm --model-type classifier --n-trials 100
+
+        # Quick tuning with timeout
+        g2 ml tune --dataset-name mvp --dataset-version v1 --timeout 300
+    """
+    from g2.ml.tuning import (
+        tune_quantile_model,
+        tune_classifier,
+        save_tuning_results,
+    )
+
+    # Load dataset
+    datasets_dir = Path("datasets")
+    manifest_path = datasets_dir / dataset_name / dataset_version / "manifest.json"
+
+    if not manifest_path.exists():
+        emit_error(
+            f"Dataset not found: {manifest_path}\n"
+            f"Build dataset first with: g2 ml dataset-build --name {dataset_name} --version {dataset_version}",
+            json_output=json_output
+        )
+        return
+
+    emit(f"Loading dataset {dataset_name}/{dataset_version}...", json_output=json_output)
+
+    try:
+        import pandas as pd
+        import json as json_module
+
+        # Load manifest
+        with open(manifest_path) as f:
+            manifest = json_module.load(f)
+
+        # Load features
+        features_path = datasets_dir / dataset_name / dataset_version / "features.csv"
+        if not features_path.exists():
+            features_path = datasets_dir / dataset_name / dataset_version / "features.parquet"
+
+        if features_path.suffix == ".parquet":
+            features_df = pd.read_parquet(features_path)
+        else:
+            features_df = pd.read_csv(features_path)
+
+        # Load labels
+        labels_path = datasets_dir / dataset_name / dataset_version / "labels.csv"
+        if not labels_path.exists():
+            labels_path = datasets_dir / dataset_name / dataset_version / "labels.parquet"
+
+        if labels_path.suffix == ".parquet":
+            labels_df = pd.read_parquet(labels_path)
+        else:
+            labels_df = pd.read_csv(labels_path)
+
+        # Pivot features to wide format
+        X = features_df.pivot_table(
+            index=['symbol', 'date'],
+            columns='feature_name',
+            values='value',
+            aggfunc='first'
+        ).reset_index()
+
+        # Filter labels by horizon
+        if model_type == "quantile":
+            labels_filtered = labels_df[labels_df['horizon_days'] == horizon].copy()
+            y = labels_filtered.set_index(['symbol', 'date'])['forward_return']
+        else:
+            labels_filtered = labels_df[labels_df['horizon_days'] == horizon].copy()
+            y = labels_filtered.set_index(['symbol', 'date'])['label']
+
+        # Align X and y
+        X = X.set_index(['symbol', 'date'])
+        common_idx = X.index.intersection(y.index)
+        X = X.loc[common_idx]
+        y = y.loc[common_idx]
+
+        if len(X) < 50:
+            emit_error(
+                f"Insufficient data for tuning: {len(X)} samples (need >= 50)",
+                json_output=json_output
+            )
+            return
+
+        emit(f"Tuning {algorithm} {model_type} model with {len(X)} samples...", json_output=json_output)
+        emit(f"Running {n_trials} trials with {cv_splits}-fold time-series CV...", json_output=json_output)
+
+        # Run tuning
+        if model_type == "quantile":
+            result = tune_quantile_model(
+                X=X,
+                y=y,
+                algorithm=algorithm,
+                quantile=quantile,
+                n_trials=n_trials,
+                cv_splits=cv_splits,
+                timeout=timeout,
+            )
+        else:
+            result = tune_classifier(
+                X=X,
+                y=y,
+                algorithm=algorithm,
+                n_trials=n_trials,
+                cv_splits=cv_splits,
+                timeout=timeout,
+            )
+
+        # Save results
+        out_dir.mkdir(parents=True, exist_ok=True)
+        results_path = out_dir / f"tuning_{dataset_name}_{dataset_version}_{algorithm}.json"
+        save_tuning_results(result, results_path)
+
+        if json_output:
+            emit("Tuning complete", data=result, json_output=json_output)
+        else:
+            emit("\n" + "=" * 50)
+            emit("TUNING RESULTS")
+            emit("=" * 50)
+            emit(f"Algorithm: {result['algorithm']}")
+            emit(f"Best score: {result['best_score']:.6f}")
+            emit(f"Trials completed: {result['n_trials']}")
+            emit(f"\nBest parameters:")
+            for k, v in result['best_params'].items():
+                emit(f"  {k}: {v}")
+            emit(f"\nResults saved to: {results_path}")
+
+    except ImportError as e:
+        emit_error(f"Missing dependency: {e}", json_output=json_output)
+    except Exception as e:
+        emit_error(f"Tuning failed: {e}", json_output=json_output)
+
+
 @ml_app.command("train-classifier")
 def ml_train_classifier(
     dataset_name: str = typer.Option(..., help="Dataset name to train on"),

@@ -376,6 +376,40 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="ml_tune",
+            description=(
+                "Tune model hyperparameters using Optuna with time-series cross-validation. "
+                "Uses Bayesian optimization to find optimal parameters while preventing data leakage. "
+                "Supports XGBoost, LightGBM, and sklearn algorithms for both quantile and classifier models."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset_name": {"type": "string", "description": "Dataset name to use for tuning"},
+                    "dataset_version": {"type": "string", "description": "Dataset version"},
+                    "algorithm": {
+                        "type": "string",
+                        "description": "Algorithm: xgboost, lightgbm, or sklearn",
+                        "default": "xgboost",
+                        "enum": ["xgboost", "lightgbm", "sklearn"]
+                    },
+                    "model_type": {
+                        "type": "string",
+                        "description": "Model type: quantile or classifier",
+                        "default": "quantile",
+                        "enum": ["quantile", "classifier"]
+                    },
+                    "horizon": {"type": "integer", "description": "Horizon in days for quantile models", "default": 7},
+                    "quantile": {"type": "number", "description": "Quantile to optimize (0.1, 0.5, 0.9)", "default": 0.5},
+                    "n_trials": {"type": "integer", "description": "Number of optimization trials", "default": 50},
+                    "cv_splits": {"type": "integer", "description": "Number of time-series CV splits", "default": 5},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds (optional)"},
+                },
+                "required": ["dataset_name", "dataset_version"],
+            },
+        ),
+
+        Tool(
             name="ml_train_classifier",
             description=(
                 "Train multi-class trend classifier (5-class: strong_down, weak_down, flat, weak_up, strong_up). "
@@ -901,6 +935,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _ml_eval(arguments)
         elif name == "ml_feature_importance":
             result = await _ml_feature_importance(arguments)
+        elif name == "ml_tune":
+            result = await _ml_tune(arguments)
         elif name == "ml_train_classifier":
             result = await _ml_train_classifier(arguments)
         elif name == "ml_predict_classifier":
@@ -1098,6 +1134,33 @@ async def _ml_feature_importance(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd.extend(['--top-k', str(args['top_k'])])
     if args.get('out_dir'):
         cmd.extend(['--out-dir', args['out_dir']])
+
+    return await executor.run(*cmd)
+
+
+async def _ml_tune(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Tune hyperparameters using Optuna."""
+    cmd = [
+        'ml', 'tune',
+        '--dataset-name', args['dataset_name'],
+        '--dataset-version', args['dataset_version'],
+        '--json',
+    ]
+
+    if args.get('algorithm'):
+        cmd.extend(['--algorithm', args['algorithm']])
+    if args.get('model_type'):
+        cmd.extend(['--model-type', args['model_type']])
+    if args.get('horizon'):
+        cmd.extend(['--horizon', str(args['horizon'])])
+    if args.get('quantile'):
+        cmd.extend(['--quantile', str(args['quantile'])])
+    if args.get('n_trials'):
+        cmd.extend(['--n-trials', str(args['n_trials'])])
+    if args.get('cv_splits'):
+        cmd.extend(['--cv-splits', str(args['cv_splits'])])
+    if args.get('timeout'):
+        cmd.extend(['--timeout', str(args['timeout'])])
 
     return await executor.run(*cmd)
 
