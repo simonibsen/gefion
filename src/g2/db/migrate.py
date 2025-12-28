@@ -242,7 +242,12 @@ def scan_migration_files(migrations_dir) -> list[dict]:
         return []
 
     migrations = []
-    pattern = re.compile(r'^(\d+)_(.+)\.sql$')
+    # Pattern to extract version and name from migration files
+    # Supports both:
+    #   - Simple: 001_name.sql -> version="001", name="name"
+    #   - Full: 20251226_000001_name.sql -> version="20251226_000001", name="name"
+    pattern = re.compile(r'^(\d+_\d+)_(.+)\.sql$')  # YYYYMMDD_NNNNNN format
+    simple_pattern = re.compile(r'^(\d+)_(.+)\.sql$')  # Simple NNN format
 
     for file_path in migrations_path.glob("*.sql"):
         match = pattern.match(file_path.name)
@@ -253,6 +258,16 @@ def scan_migration_files(migrations_dir) -> list[dict]:
                 "name": name,
                 "path": file_path
             })
+        else:
+            # Try simple pattern for legacy migrations
+            match = simple_pattern.match(file_path.name)
+            if match:
+                version, name = match.groups()
+                migrations.append({
+                    "version": version,
+                    "name": name,
+                    "path": file_path
+                })
 
     # Sort by version number
     migrations.sort(key=lambda m: m["version"])
@@ -415,3 +430,231 @@ def run_migrations(
         })
 
     return results
+
+
+# =============================================================================
+# Migration Verification & Repair (#28)
+# =============================================================================
+
+import re
+
+
+def parse_migration_schema_changes(sql: str) -> list[dict]:
+    """
+    Parse SQL migration file for schema changes.
+
+    Extracts CREATE TABLE, ALTER TABLE ADD COLUMN, and CREATE INDEX statements.
+
+    Args:
+        sql: SQL content of migration file
+
+    Returns:
+        List of expected schema objects:
+        [
+            {"type": "table", "name": "users"},
+            {"type": "column", "table": "stocks", "name": "sector"},
+            {"type": "index", "name": "idx_stocks_symbol"},
+        ]
+    """
+    changes = []
+
+    # Strip SQL comments before parsing
+    # Remove single-line comments (-- ...)
+    sql_no_comments = re.sub(r'--[^\n]*', '', sql)
+    # Remove multi-line comments (/* ... */)
+    sql_no_comments = re.sub(r'/\*.*?\*/', '', sql_no_comments, flags=re.DOTALL)
+
+    # CREATE TABLE [IF NOT EXISTS] table_name
+    table_pattern = re.compile(
+        r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)',
+        re.IGNORECASE
+    )
+    for match in table_pattern.finditer(sql_no_comments):
+        changes.append({"type": "table", "name": match.group(1).lower()})
+
+    # ALTER TABLE table ADD [COLUMN] [IF NOT EXISTS] column_name
+    # Note: Must NOT match ADD CONSTRAINT, ADD PRIMARY KEY, etc.
+    column_pattern = re.compile(
+        r'ALTER\s+TABLE\s+(\w+)\s+ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(\w+)',
+        re.IGNORECASE
+    )
+    excluded_keywords = {'constraint', 'primary', 'foreign', 'unique', 'check', 'index'}
+    for match in column_pattern.finditer(sql_no_comments):
+        col_name = match.group(2).lower()
+        if col_name not in excluded_keywords:
+            changes.append({
+                "type": "column",
+                "table": match.group(1).lower(),
+                "name": col_name
+            })
+
+    # CREATE [UNIQUE] INDEX [IF NOT EXISTS] index_name
+    index_pattern = re.compile(
+        r'CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)',
+        re.IGNORECASE
+    )
+    for match in index_pattern.finditer(sql_no_comments):
+        changes.append({"type": "index", "name": match.group(1).lower()})
+
+    return changes
+
+
+def verify_schema_objects(conn: Connection, changes: list[dict]) -> list[dict]:
+    """
+    Verify that expected schema objects exist in the database.
+
+    Args:
+        conn: Database connection
+        changes: List of expected schema objects from parse_migration_schema_changes
+
+    Returns:
+        List of missing objects (empty if all exist)
+    """
+    missing = []
+
+    for obj in changes:
+        exists = False
+
+        if obj["type"] == "table":
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                        AND table_name = %s
+                    );
+                """, (obj["name"],))
+                exists = cur.fetchone()[0]
+
+        elif obj["type"] == "column":
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                        AND table_name = %s
+                        AND column_name = %s
+                    );
+                """, (obj["table"], obj["name"]))
+                exists = cur.fetchone()[0]
+
+        elif obj["type"] == "index":
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM pg_indexes
+                        WHERE schemaname = 'public'
+                        AND indexname = %s
+                    );
+                """, (obj["name"],))
+                exists = cur.fetchone()[0]
+
+        if not exists:
+            missing.append(obj)
+
+    return missing
+
+
+def get_migration_status(conn: Connection, migrations_dir) -> dict:
+    """
+    Get comprehensive migration status.
+
+    Args:
+        conn: Database connection
+        migrations_dir: Path to migrations directory
+
+    Returns:
+        Dict with status info:
+        {
+            "total": 10,
+            "applied_count": 8,
+            "pending_count": 2,
+            "applied": [{version, name, applied_at}, ...],
+            "pending": [{version, name}, ...]
+        }
+    """
+    ensure_migrations_table(conn)
+
+    # Get all migrations from files
+    all_migrations = scan_migration_files(migrations_dir)
+
+    # Get applied migrations with timestamps
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT version, name, applied_at
+            FROM schema_migrations
+            ORDER BY version;
+        """)
+        applied_records = {row[0]: {"version": row[0], "name": row[1], "applied_at": row[2]}
+                          for row in cur.fetchall()}
+
+    applied = []
+    pending = []
+
+    for m in all_migrations:
+        if m["version"] in applied_records:
+            applied.append(applied_records[m["version"]])
+        else:
+            pending.append({"version": m["version"], "name": m["name"]})
+
+    return {
+        "total": len(all_migrations),
+        "applied_count": len(applied),
+        "pending_count": len(pending),
+        "applied": applied,
+        "pending": pending,
+    }
+
+
+def repair_migration(conn: Connection, version: str, migrations_dir) -> dict:
+    """
+    Repair a migration by removing from tracking and re-applying.
+
+    Args:
+        conn: Database connection
+        version: Migration version to repair
+        migrations_dir: Path to migrations directory
+
+    Returns:
+        Dict with result:
+        {"success": True/False, "version": "...", "error": "..." (if failed)}
+    """
+    ensure_migrations_table(conn)
+
+    # Find the migration file
+    all_migrations = scan_migration_files(migrations_dir)
+    migration = None
+    for m in all_migrations:
+        if m["version"] == version:
+            migration = m
+            break
+
+    if migration is None:
+        return {
+            "success": False,
+            "version": version,
+            "error": f"Migration file not found for version {version}"
+        }
+
+    # Remove from tracking table (if exists)
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM schema_migrations WHERE version = %s;",
+            (version,)
+        )
+    conn.commit()
+
+    # Re-apply the migration
+    try:
+        apply_migration(conn, migration)
+        return {
+            "success": True,
+            "version": version,
+            "name": migration["name"],
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "version": version,
+            "error": str(e)
+        }

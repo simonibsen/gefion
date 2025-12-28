@@ -1552,7 +1552,7 @@ Update this section as items are completed:
 
 **In Progress**: None
 
-**Next Up**: #14 Advanced Backtesting Features, #26 Data Visualization, or #28 Migration System Improvements
+**Next Up**: #14 Advanced Backtesting Features, #26 Data Visualization
 
 ---
 
@@ -1646,7 +1646,7 @@ Update this section as items are completed:
 
 ### 28. Migration System Improvements
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-28)
 **Priority**: Medium (operational reliability)
 **Effort**: 3-5 days
 **Path**: C (Scale-First)
@@ -1659,52 +1659,41 @@ Update this section as items are completed:
 - No command to re-run a failed migration
 - Silent partial failures leave database in inconsistent state
 
-**Action Items**:
-- [ ] **Add verification command**:
-  ```bash
-  g2 db-migrate --verify
-  ```
-  - Parse each migration for expected schema changes (CREATE TABLE, ALTER TABLE ADD COLUMN, etc.)
-  - Check if those objects actually exist in database
-  - Report mismatches: "Migration X recorded but column Y missing"
+**Implementation** (2025-12-28):
 
-- [ ] **Add repair command**:
-  ```bash
-  g2 db-migrate --repair VERSION
-  # or
-  g2 db-migrate --force VERSION
-  ```
-  - Remove migration from `schema_migrations` table
-  - Re-apply the migration SQL
-  - Re-record if successful
+Added three new CLI flags to `g2 db-migrate`:
 
-- [ ] **Add status command**:
-  ```bash
-  g2 db-migrate --status
-  ```
-  - Show all migrations: pending, applied, verified
-  - Show verification status (schema matches expected)
-  - Highlight any mismatches
+1. **`--status`**: Shows comprehensive migration status
+   ```bash
+   g2 db-migrate --status
+   # Shows applied and pending migrations with timestamps
+   ```
 
-- [ ] **Improve error handling in apply_migration()**:
-  - Wrap SQL execution in explicit transaction
-  - Only record migration AFTER commit succeeds
-  - Capture and log detailed error messages
-  - Consider running each statement separately for better error isolation
+2. **`--verify`**: Verifies schema objects exist
+   ```bash
+   g2 db-migrate --verify
+   # Parses SQL for CREATE TABLE, ALTER TABLE ADD COLUMN, CREATE INDEX
+   # Checks objects exist in database, reports missing items
+   ```
 
-- [ ] **Add migration checksums**:
-  - Store SHA256 of migration file content (already in schema, not fully used)
-  - Warn if migration file changed after being applied
-  - Useful for detecting accidental modifications
+3. **`--repair VERSION`**: Re-applies a failed migration
+   ```bash
+   g2 db-migrate --repair 20251226_000001
+   # Removes from tracking, re-runs migration SQL, re-records
+   ```
 
-**Files to modify**:
-- `src/g2/db/migrate.py` (add verify, repair, status functions)
-- `src/g2/cli.py` (add new flags to db-migrate command)
-- `tests/test_migrate.py` (add tests for new functionality)
+All commands support `--json` output for scripting.
 
-**Success Criteria**:
-- Can detect when a recorded migration didn't actually apply
-- Can repair a failed migration without manual SQL
-- Clear status output showing migration health
-- Better error messages when migrations fail
+**Core functions added** (`src/g2/db/migrate.py`):
+- `parse_migration_schema_changes()` - Parses SQL for expected schema objects
+- `verify_schema_objects()` - Checks objects exist in database
+- `get_migration_status()` - Returns comprehensive status
+- `repair_migration()` - Removes tracking and re-applies migration
+
+**Migration version format updated** to `YYYYMMDD_NNNNNN` to support multiple migrations per day.
+
+**Files modified**:
+- `src/g2/db/migrate.py` (~200 lines added)
+- `src/g2/cli.py` (~100 lines added)
+- `tests/test_db_migrate.py` (17 new tests)
 

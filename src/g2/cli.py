@@ -2093,6 +2093,9 @@ def db_migrate(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     migrations_dir: Optional[Path] = typer.Option(None, help="Migrations directory (default: sql/migrations)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show pending migrations without applying"),
+    status: bool = typer.Option(False, "--status", help="Show migration status"),
+    verify: bool = typer.Option(False, "--verify", help="Verify applied migrations created expected schema objects"),
+    repair: Optional[str] = typer.Option(None, "--repair", help="Repair a specific migration version (e.g., 20251227_000001)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
@@ -2109,19 +2112,36 @@ def db_migrate(
         # Show pending migrations without applying
         g2 db-migrate --dry-run
 
+        # Show migration status
+        g2 db-migrate --status
+
+        # Verify applied migrations created expected schema
+        g2 db-migrate --verify
+
+        # Repair a failed migration
+        g2 db-migrate --repair 20251227_000001
+
         # Run migrations on specific database
         g2 db-migrate --db-url postgresql://user:pass@host:5432/db
 
         # Use custom migrations directory
         g2 db-migrate --migrations-dir /path/to/migrations
     """
-    with create_span("cli.db-migrate", dry_run=dry_run):
-        _db_migrate_impl(db_url, migrations_dir, dry_run, json_output)
+    with create_span("cli.db-migrate", dry_run=dry_run, status=status, verify=verify, repair=repair):
+        _db_migrate_impl(db_url, migrations_dir, dry_run, status, verify, repair, json_output)
 
 
-def _db_migrate_impl(db_url, migrations_dir, dry_run, json_output):
+def _db_migrate_impl(db_url, migrations_dir, dry_run, status, verify, repair, json_output):
     """Implementation of db-migrate (separated for tracing)."""
-    from g2.db.migrate import run_migrations
+    from g2.db.migrate import (
+        run_migrations,
+        get_migration_status,
+        scan_migration_files,
+        parse_migration_schema_changes,
+        verify_schema_objects,
+        repair_migration,
+        get_applied_migrations,
+    )
     from pathlib import Path as PathLib
     import g2
 
@@ -2143,6 +2163,124 @@ def _db_migrate_impl(db_url, migrations_dir, dry_run, json_output):
         with psycopg.connect(url) as conn:
             conn.autocommit = True
 
+            # Handle --status flag
+            if status:
+                result = get_migration_status(conn, migrations_dir)
+
+                if json_output:
+                    emit(
+                        "Migration status retrieved",
+                        data=result,
+                        json_output=json_output
+                    )
+                else:
+                    emit(f"Migration Status ({result['total']} total)")
+                    emit("=" * 40)
+                    emit("")
+                    if result['applied']:
+                        emit(f"Applied ({result['applied_count']}):")
+                        for m in result['applied']:
+                            applied_at = m.get('applied_at', 'unknown')
+                            if hasattr(applied_at, 'strftime'):
+                                applied_at = applied_at.strftime('%Y-%m-%d %H:%M:%S')
+                            emit(f"  ✓ {m['version']}_{m['name']}  [applied {applied_at}]")
+                    emit("")
+                    if result['pending']:
+                        emit(f"Pending ({result['pending_count']}):")
+                        for m in result['pending']:
+                            emit(f"  ○ {m['version']}_{m['name']}  [not applied]")
+                        emit("")
+                        emit("Run `g2 db-migrate` to apply pending migrations.")
+                    else:
+                        emit("No pending migrations.")
+                    emit("")
+                    emit("Run `g2 db-migrate --verify` to check applied migrations.")
+                return
+
+            # Handle --verify flag
+            if verify:
+                all_migrations = scan_migration_files(migrations_dir)
+                applied = get_applied_migrations(conn)
+
+                applied_migrations = [m for m in all_migrations if m['version'] in applied]
+                issues = []
+
+                if not json_output:
+                    emit(f"Verifying {len(applied_migrations)} applied migrations...")
+                    emit("")
+
+                for m in applied_migrations:
+                    sql = m['path'].read_text()
+                    expected = parse_migration_schema_changes(sql)
+                    missing = verify_schema_objects(conn, expected)
+
+                    if missing:
+                        issues.append({
+                            'version': m['version'],
+                            'name': m['name'],
+                            'missing': missing
+                        })
+                        if not json_output:
+                            emit(f"  ✗ {m['version']}_{m['name']}  [FAILED]")
+                            for obj in missing:
+                                if obj['type'] == 'column':
+                                    emit(f"    - Missing column: {obj['table']}.{obj['name']}")
+                                else:
+                                    emit(f"    - Missing {obj['type']}: {obj['name']}")
+                    else:
+                        if not json_output:
+                            emit(f"  ✓ {m['version']}_{m['name']}  [OK]")
+
+                if json_output:
+                    emit(
+                        f"Verified {len(applied_migrations)} migrations",
+                        data={
+                            'verified': len(applied_migrations),
+                            'issues_count': len(issues),
+                            'issues': issues,
+                        },
+                        json_output=json_output
+                    )
+                else:
+                    emit("")
+                    if issues:
+                        emit(f"{len(issues)} migration(s) have issues. Run:")
+                        for issue in issues:
+                            emit(f"  g2 db-migrate --repair {issue['version']}")
+                    else:
+                        emit("All migrations verified successfully.")
+                return
+
+            # Handle --repair flag
+            if repair:
+                if not json_output:
+                    emit(f"Repairing migration {repair}...")
+
+                result = repair_migration(conn, repair, migrations_dir)
+
+                if result['success']:
+                    if json_output:
+                        emit(
+                            "Migration repaired successfully",
+                            data=result,
+                            json_output=json_output
+                        )
+                    else:
+                        emit(f"  - Removed from schema_migrations")
+                        emit(f"  - Re-applying migration...")
+                        emit(f"  ✓ Migration applied successfully")
+                else:
+                    if json_output:
+                        emit_error(
+                            f"Repair failed: {result.get('error', 'Unknown error')}",
+                            json_output=json_output
+                        )
+                    else:
+                        emit_error(f"  ✗ Repair failed: {result.get('error', 'Unknown error')}")
+                    raise typer.Exit(code=1)
+                return
+
+            # Default: run migrations
             if not json_output:
                 if dry_run:
                     emit("Checking for pending migrations...")
