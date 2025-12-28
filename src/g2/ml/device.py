@@ -89,22 +89,18 @@ def get_xgboost_device_params(device: str) -> Dict:
     """
     Get XGBoost parameters for specified device.
 
+    XGBoost 2.0+: use device="cuda" with tree_method="hist" (gpu_hist is deprecated).
+
     Args:
         device: 'cpu' or 'cuda'
 
     Returns:
         Dict of XGBoost parameters for the device
     """
-    if device == "cuda":
-        return {
-            "tree_method": "gpu_hist",
-            "device": "cuda",
-        }
-    else:
-        return {
-            "tree_method": "hist",
-            "device": "cpu",
-        }
+    return {
+        "tree_method": "hist",
+        "device": "cuda" if device == "cuda" else "cpu",
+    }
 
 
 def get_lightgbm_device_params(device: str) -> Dict:

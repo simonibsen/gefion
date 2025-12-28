@@ -220,12 +220,8 @@ def _train_xgboost_classifier(
     random_state = hyperparams.get("random_state", 42)
 
     # Configure device-specific parameters
-    if device == "cuda":
-        tree_method = "gpu_hist"
-        device_param = "cuda"
-    else:
-        tree_method = "hist"
-        device_param = "cpu"
+    # XGBoost 2.0+: use device="cuda" with tree_method="hist" (gpu_hist is deprecated)
+    device_param = "cuda" if device == "cuda" else "cpu"
 
     pipeline = Pipeline(
         [
@@ -236,7 +232,7 @@ def _train_xgboost_classifier(
                     n_estimators=n_estimators,
                     max_depth=max_depth,
                     learning_rate=learning_rate,
-                    tree_method=tree_method,
+                    tree_method="hist",
                     device=device_param,
                     random_state=random_state,
                     n_jobs=-1,

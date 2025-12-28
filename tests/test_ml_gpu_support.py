@@ -73,7 +73,8 @@ class TestXGBoostGPU:
             # Verify GPU params were passed
             if mock_xgb.called:
                 call_kwargs = mock_xgb.call_args[1]
-                assert call_kwargs.get("tree_method") == "gpu_hist"
+                # XGBoost 2.0+: uses tree_method="hist" with device="cuda"
+                assert call_kwargs.get("tree_method") == "hist"
                 assert call_kwargs.get("device") == "cuda"
 
     def test_xgboost_uses_cpu_when_device_cpu(self):
@@ -179,7 +180,8 @@ class TestClassifierGPU:
 
             if mock_xgb.called:
                 call_kwargs = mock_xgb.call_args[1]
-                assert call_kwargs.get("tree_method") == "gpu_hist"
+                # XGBoost 2.0+: uses tree_method="hist" with device="cuda"
+                assert call_kwargs.get("tree_method") == "hist"
                 assert call_kwargs.get("device") == "cuda"
 
 
