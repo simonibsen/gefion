@@ -1,9 +1,9 @@
 {
   "name": "indicator_sma_50",
-  "function_name": "indicator",
+  "function_name": "indicator_sma",
   "params": {
-    "indicator": "sma50",
-    "period": 50
+    "period": 50,
+    "column": "sma_50"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

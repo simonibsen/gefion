@@ -30,7 +30,7 @@ def conn():
     connection.close()
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def clean_migrations_table(conn):
     """Clean up schema_migrations table before each test."""
     with conn.cursor() as cur:
@@ -80,7 +80,7 @@ def test_schema_migrations_table_structure(conn):
     assert 'checksum' in columns
 
 
-def test_get_applied_migrations_empty(conn):
+def test_get_applied_migrations_empty(conn, clean_migrations_table):
     """Test getting applied migrations when none exist."""
     from g2.db.migrate import ensure_migrations_table, get_applied_migrations
 
@@ -152,7 +152,7 @@ def test_scan_migration_files_sorted(tmp_path):
     assert versions == ["001", "002", "003"]
 
 
-def test_get_pending_migrations(conn, tmp_path):
+def test_get_pending_migrations(conn, tmp_path, clean_migrations_table):
     """Test identifying which migrations haven't been applied yet."""
     from g2.db.migrate import (
         ensure_migrations_table,
@@ -247,7 +247,7 @@ def test_apply_migration_with_error(conn, tmp_path):
     assert "999" not in applied
 
 
-def test_run_migrations_all_pending(conn, tmp_path):
+def test_run_migrations_all_pending(conn, tmp_path, clean_migrations_table):
     """Test running all pending migrations."""
     from g2.db.migrate import ensure_migrations_table, run_migrations
 
@@ -277,7 +277,7 @@ def test_run_migrations_all_pending(conn, tmp_path):
             assert exists, f"{table} should exist"
 
 
-def test_run_migrations_some_already_applied(conn, tmp_path):
+def test_run_migrations_some_already_applied(conn, tmp_path, clean_migrations_table):
     """Test running migrations when some are already applied."""
     from g2.db.migrate import ensure_migrations_table, record_migration, run_migrations
 
@@ -308,7 +308,7 @@ def test_run_migrations_some_already_applied(conn, tmp_path):
             assert exists, f"{table} should exist"
 
 
-def test_run_migrations_idempotent(conn, tmp_path):
+def test_run_migrations_idempotent(conn, tmp_path, clean_migrations_table):
     """Test that running migrations twice doesn't cause errors."""
     from g2.db.migrate import ensure_migrations_table, run_migrations
 
@@ -327,7 +327,7 @@ def test_run_migrations_idempotent(conn, tmp_path):
     assert result2["skipped"] == 2
 
 
-def test_run_migrations_stops_on_error(conn, tmp_path):
+def test_run_migrations_stops_on_error(conn, tmp_path, clean_migrations_table):
     """Test that migration runner stops on first error."""
     from g2.db.migrate import ensure_migrations_table, run_migrations, get_applied_migrations
 
@@ -346,3 +346,300 @@ def test_run_migrations_stops_on_error(conn, tmp_path):
     assert "001" in applied
     assert "002" not in applied
     assert "003" not in applied
+
+
+# ============================================================================
+# TDD Tests for Migration Improvements (#28)
+# ============================================================================
+
+
+class TestParseSchemaChanges:
+    """Test SQL parsing for schema changes."""
+
+    def test_parse_create_table(self):
+        """Parse CREATE TABLE statements."""
+        from g2.db.migrate import parse_migration_schema_changes
+
+        sql = "CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT);"
+        changes = parse_migration_schema_changes(sql)
+
+        assert {"type": "table", "name": "users"} in changes
+
+    def test_parse_create_table_if_not_exists(self):
+        """Parse CREATE TABLE IF NOT EXISTS."""
+        from g2.db.migrate import parse_migration_schema_changes
+
+        sql = "CREATE TABLE IF NOT EXISTS stocks (id SERIAL);"
+        changes = parse_migration_schema_changes(sql)
+
+        assert {"type": "table", "name": "stocks"} in changes
+
+    def test_parse_alter_table_add_column(self):
+        """Parse ALTER TABLE ADD COLUMN."""
+        from g2.db.migrate import parse_migration_schema_changes
+
+        sql = "ALTER TABLE stocks ADD COLUMN sector TEXT;"
+        changes = parse_migration_schema_changes(sql)
+
+        assert {"type": "column", "table": "stocks", "name": "sector"} in changes
+
+    def test_parse_alter_table_add_column_if_not_exists(self):
+        """Parse ALTER TABLE ADD COLUMN IF NOT EXISTS."""
+        from g2.db.migrate import parse_migration_schema_changes
+
+        sql = "ALTER TABLE stocks ADD COLUMN IF NOT EXISTS industry TEXT;"
+        changes = parse_migration_schema_changes(sql)
+
+        assert {"type": "column", "table": "stocks", "name": "industry"} in changes
+
+    def test_parse_create_index(self):
+        """Parse CREATE INDEX."""
+        from g2.db.migrate import parse_migration_schema_changes
+
+        sql = "CREATE INDEX idx_stocks_symbol ON stocks(symbol);"
+        changes = parse_migration_schema_changes(sql)
+
+        assert {"type": "index", "name": "idx_stocks_symbol"} in changes
+
+    def test_parse_create_unique_index(self):
+        """Parse CREATE UNIQUE INDEX."""
+        from g2.db.migrate import parse_migration_schema_changes
+
+        sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique ON users(email);"
+        changes = parse_migration_schema_changes(sql)
+
+        assert {"type": "index", "name": "idx_unique"} in changes
+
+    def test_parse_multiple_statements(self):
+        """Parse SQL with multiple statements."""
+        from g2.db.migrate import parse_migration_schema_changes
+
+        sql = """
+        CREATE TABLE orders (id SERIAL);
+        ALTER TABLE orders ADD COLUMN user_id INTEGER;
+        CREATE INDEX idx_orders_user ON orders(user_id);
+        """
+        changes = parse_migration_schema_changes(sql)
+
+        assert len(changes) == 3
+        assert {"type": "table", "name": "orders"} in changes
+        assert {"type": "column", "table": "orders", "name": "user_id"} in changes
+        assert {"type": "index", "name": "idx_orders_user"} in changes
+
+
+class TestVerifySchemaObjects:
+    """Test schema verification against database."""
+
+    def test_verify_existing_table(self, conn):
+        """Verify a table that exists."""
+        from g2.db.migrate import verify_schema_objects
+
+        # Create a test table
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS test_verify_table (id SERIAL);")
+
+        changes = [{"type": "table", "name": "test_verify_table"}]
+        missing = verify_schema_objects(conn, changes)
+
+        assert len(missing) == 0
+
+        # Cleanup
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS test_verify_table;")
+
+    def test_verify_missing_table(self, conn):
+        """Verify a table that doesn't exist."""
+        from g2.db.migrate import verify_schema_objects
+
+        changes = [{"type": "table", "name": "nonexistent_table_xyz"}]
+        missing = verify_schema_objects(conn, changes)
+
+        assert len(missing) == 1
+        assert missing[0]["type"] == "table"
+        assert missing[0]["name"] == "nonexistent_table_xyz"
+
+    def test_verify_existing_column(self, conn):
+        """Verify a column that exists."""
+        from g2.db.migrate import verify_schema_objects
+
+        # Create table with column
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS test_col_table (id SERIAL, name TEXT);")
+
+        changes = [{"type": "column", "table": "test_col_table", "name": "name"}]
+        missing = verify_schema_objects(conn, changes)
+
+        assert len(missing) == 0
+
+        # Cleanup
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS test_col_table;")
+
+    def test_verify_missing_column(self, conn):
+        """Verify a column that doesn't exist."""
+        from g2.db.migrate import verify_schema_objects
+
+        # Create table without the column
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS test_col_missing (id SERIAL);")
+
+        changes = [{"type": "column", "table": "test_col_missing", "name": "missing_col"}]
+        missing = verify_schema_objects(conn, changes)
+
+        assert len(missing) == 1
+        assert missing[0]["type"] == "column"
+        assert missing[0]["name"] == "missing_col"
+
+        # Cleanup
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS test_col_missing;")
+
+    def test_verify_existing_index(self, conn):
+        """Verify an index that exists."""
+        from g2.db.migrate import verify_schema_objects
+
+        # Create table with index
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS test_idx_table (id SERIAL);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_test_verify ON test_idx_table(id);")
+
+        changes = [{"type": "index", "name": "idx_test_verify"}]
+        missing = verify_schema_objects(conn, changes)
+
+        assert len(missing) == 0
+
+        # Cleanup
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS test_idx_table;")
+
+    def test_verify_missing_index(self, conn):
+        """Verify an index that doesn't exist."""
+        from g2.db.migrate import verify_schema_objects
+
+        changes = [{"type": "index", "name": "idx_nonexistent_xyz"}]
+        missing = verify_schema_objects(conn, changes)
+
+        assert len(missing) == 1
+        assert missing[0]["type"] == "index"
+
+
+class TestGetMigrationStatus:
+    """Test getting full migration status."""
+
+    def test_get_status_with_applied_and_pending(self, conn, tmp_path, clean_migrations_table):
+        """Get status with some applied and some pending."""
+        from g2.db.migrate import (
+            ensure_migrations_table,
+            record_migration,
+            get_migration_status,
+        )
+
+        ensure_migrations_table(conn)
+
+        # Create migration files
+        (tmp_path / "001_first.sql").write_text("CREATE TABLE first (id SERIAL);")
+        (tmp_path / "002_second.sql").write_text("CREATE TABLE second (id SERIAL);")
+
+        # Record first as applied
+        record_migration(conn, "001", "first", "abc123")
+
+        status = get_migration_status(conn, tmp_path)
+
+        assert status["total"] == 2
+        assert status["applied_count"] == 1
+        assert status["pending_count"] == 1
+        assert len(status["applied"]) == 1
+        assert len(status["pending"]) == 1
+        assert status["applied"][0]["version"] == "001"
+        assert status["pending"][0]["version"] == "002"
+
+
+class TestRepairMigration:
+    """Test repairing a failed migration."""
+
+    def test_repair_removes_and_reapplies(self, conn, tmp_path, clean_migrations_table):
+        """Repair should remove record and re-apply migration."""
+        from g2.db.migrate import (
+            ensure_migrations_table,
+            record_migration,
+            get_applied_migrations,
+            repair_migration,
+        )
+
+        ensure_migrations_table(conn)
+
+        # Create migration file that creates a table
+        (tmp_path / "001_test.sql").write_text(
+            "CREATE TABLE IF NOT EXISTS repair_test (id SERIAL);"
+        )
+
+        # Record as applied (simulating a failed migration that was recorded)
+        record_migration(conn, "001", "test", "old_checksum")
+
+        # Verify it's recorded
+        applied = get_applied_migrations(conn)
+        assert "001" in applied
+
+        # Repair it
+        result = repair_migration(conn, "001", tmp_path)
+
+        assert result["success"] is True
+        assert result["version"] == "001"
+
+        # Verify it's still in applied (re-applied)
+        applied = get_applied_migrations(conn)
+        assert "001" in applied
+
+        # Verify the table was actually created
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'repair_test'
+                );
+            """)
+            exists = cur.fetchone()[0]
+        assert exists, "repair_test table should exist after repair"
+
+        # Cleanup
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS repair_test;")
+
+    def test_repair_nonexistent_version(self, conn, tmp_path, clean_migrations_table):
+        """Repair should fail for nonexistent version."""
+        from g2.db.migrate import ensure_migrations_table, repair_migration
+
+        ensure_migrations_table(conn)
+
+        result = repair_migration(conn, "999", tmp_path)
+
+        assert result["success"] is False
+        assert "not found" in result["error"].lower()
+
+    def test_repair_not_in_tracking_table(self, conn, tmp_path, clean_migrations_table):
+        """Repair a migration that exists as file but not in tracking table."""
+        from g2.db.migrate import (
+            ensure_migrations_table,
+            get_applied_migrations,
+            repair_migration,
+        )
+
+        ensure_migrations_table(conn)
+
+        # Create migration file
+        (tmp_path / "001_new.sql").write_text(
+            "CREATE TABLE IF NOT EXISTS repair_new (id SERIAL);"
+        )
+
+        # Don't record it - repair should still work (just applies it)
+        result = repair_migration(conn, "001", tmp_path)
+
+        assert result["success"] is True
+
+        # Verify it's now applied
+        applied = get_applied_migrations(conn)
+        assert "001" in applied
+
+        # Cleanup
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS repair_new;")

@@ -265,6 +265,60 @@ g2 data-update --exchange NASDAQ --timeframe auto --refresh-existing --local
 - Show one: `g2 features-show --feature indicator_rsi_14 --json`
 - Run features (indicators): `g2 features-run --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing`
 
+### Fundamentals (sector, industry, company name)
+Update company fundamentals from AlphaVantage OVERVIEW endpoint:
+```bash
+# Update stale fundamentals (skips stocks updated within 30 days)
+g2 fundamentals-update
+
+# Force update all stocks
+g2 fundamentals-update --force
+
+# Update specific number of stocks
+g2 fundamentals-update --limit 50
+```
+- Stores `sector`, `industry`, `name` in the `stocks` table
+- Tracks staleness with `updated_at` timestamp
+- Required for cross-sectional sector/industry rankings
+
+### Cross-sectional features (market-relative rankings)
+Cross-sectional features compare stocks to their peers at the same point in time, as opposed to time-series features which compare a stock to its own history.
+
+Compute rankings for a feature:
+```bash
+# Compute RSI rankings (market + sector rankings)
+g2 cross-sectional-compute --feature indicator_rsi_14
+
+# Include industry rankings
+g2 cross-sectional-compute --feature indicator_rsi_14 --industries
+
+# Market-only rankings (no sector/industry)
+g2 cross-sectional-compute --feature indicator_rsi_14 --no-sectors
+
+# JSON output
+g2 cross-sectional-compute --feature indicator_rsi_14 --json
+```
+
+**Comparison groups:**
+- `market` - Rank vs all stocks in the universe
+- `sector:X` - Rank vs stocks in the same sector (e.g., `sector:TECHNOLOGY`)
+- `industry:X` - Rank vs stocks in the same industry
+
+**Output stored in `cross_sectional_features` table:**
+| Column | Description |
+|--------|-------------|
+| `data_id` | Foreign key to stocks.id |
+| `date` | Date the ranking was computed |
+| `feature_name` | Underlying feature (e.g., `indicator_rsi_14`) |
+| `comparison_group` | Peer group (`market`, `sector:X`, `industry:X`) |
+| `value` | Original feature value |
+| `rank` | Position among peers (1 = highest) |
+| `percentile` | Position as 0-1 (1.0 = top, 0.0 = bottom) |
+
+**Example interpretation:**
+- AAPL with RSI 72, rank 3, percentile 0.85 in `sector:TECHNOLOGY`
+- Means: AAPL's RSI is 3rd highest among tech stocks, in the top 15%
+
 ## Tips and Behaviors
 - Prices/indicators skip symbols already current (latest date = today).
 - Price ingest is weekend-aware: running on Sat/Sun treats the previous weekday as “current”.

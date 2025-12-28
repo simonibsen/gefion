@@ -16,9 +16,11 @@ from sklearn.pipeline import Pipeline
 logger = logging.getLogger(__name__)
 
 
-def load_dataset_from_csv(artifact_uri: Path, horizon_days: int) -> Tuple[pd.DataFrame, pd.Series]:
+def load_dataset(artifact_uri: Path, horizon_days: int) -> Tuple[pd.DataFrame, pd.Series]:
     """
-    Load features and labels from CSV files for a specific horizon.
+    Load features and labels from CSV or Parquet files for a specific horizon.
+
+    Supports both CSV and Parquet formats. Parquet is preferred if both exist.
 
     Args:
         artifact_uri: Path to dataset manifest JSON file
@@ -28,23 +30,37 @@ def load_dataset_from_csv(artifact_uri: Path, horizon_days: int) -> Tuple[pd.Dat
         (X_features, y_labels): Features DataFrame and labels Series
 
     Raises:
-        FileNotFoundError: If CSV files don't exist
+        FileNotFoundError: If neither CSV nor Parquet files exist
         ValueError: If no labels found for horizon
     """
-    # Dataset CSVs are in the same directory as manifest
+    # Dataset files are in the same directory as manifest
     dataset_dir = Path(artifact_uri).parent
 
-    features_path = dataset_dir / "features.csv"
-    labels_path = dataset_dir / "labels.csv"
+    # Check for both CSV and Parquet formats (prefer Parquet)
+    features_csv = dataset_dir / "features.csv"
+    features_parquet = dataset_dir / "features.parquet"
+    labels_csv = dataset_dir / "labels.csv"
+    labels_parquet = dataset_dir / "labels.parquet"
 
-    if not features_path.exists():
-        raise FileNotFoundError(f"features.csv not found at {features_path}")
-    if not labels_path.exists():
-        raise FileNotFoundError(f"labels.csv not found at {labels_path}")
+    # Load features (prefer Parquet for performance)
+    if features_parquet.exists():
+        logger.info(f"Loading features from {features_parquet}")
+        features_df = pd.read_parquet(features_parquet)
+    elif features_csv.exists():
+        logger.info(f"Loading features from {features_csv}")
+        features_df = pd.read_csv(features_csv)
+    else:
+        raise FileNotFoundError(f"features file not found at {dataset_dir} (tried .parquet and .csv)")
 
-    # Load features (long format: symbol, date, feature_name, value)
-    logger.info(f"Loading features from {features_path}")
-    features_df = pd.read_csv(features_path)
+    # Load labels (prefer Parquet for performance)
+    if labels_parquet.exists():
+        logger.info(f"Loading labels from {labels_parquet}")
+        labels_df = pd.read_parquet(labels_parquet)
+    elif labels_csv.exists():
+        logger.info(f"Loading labels from {labels_csv}")
+        labels_df = pd.read_csv(labels_csv)
+    else:
+        raise FileNotFoundError(f"labels file not found at {dataset_dir} (tried .parquet and .csv)")
 
     # Pivot to wide format for sklearn
     logger.info("Pivoting features to wide format")
@@ -54,10 +70,6 @@ def load_dataset_from_csv(artifact_uri: Path, horizon_days: int) -> Tuple[pd.Dat
         values="value",
         aggfunc="first"  # Take first if duplicates
     ).reset_index()
-
-    # Load labels (symbol, date, horizon_days, forward_return, label)
-    logger.info(f"Loading labels from {labels_path}")
-    labels_df = pd.read_csv(labels_path)
 
     # Filter to specific horizon
     labels_horizon = labels_df[labels_df["horizon_days"] == horizon_days].copy()
@@ -93,7 +105,8 @@ def train_quantile_model(
     y: pd.Series,
     algorithm: str = "quantile_regression",
     hyperparams: Dict[str, Any] = None,
-    quantiles: List[float] = None
+    quantiles: List[float] = None,
+    device: str = "cpu",
 ) -> Dict[str, Any]:
     """
     Train quantile regression models for multiple quantiles.
@@ -104,6 +117,7 @@ def train_quantile_model(
         algorithm: Algorithm choice ("quantile_regression", "xgboost", "lightgbm")
         hyperparams: Optional hyperparameter overrides
         quantiles: Quantiles to predict (default: [0.1, 0.5, 0.9])
+        device: Compute device ("cpu" or "cuda" for GPU training)
 
     Returns:
         Dict containing:
@@ -123,6 +137,7 @@ def train_quantile_model(
 
     logger.info(f"Training {algorithm} model for quantiles {quantiles}")
     logger.info(f"Training data: {X.shape[0]} samples, {X.shape[1]} features")
+    logger.info(f"Training device: {device}")
 
     # Check for missing values
     missing_pct = X.isna().sum() / len(X) * 100
@@ -139,9 +154,9 @@ def train_quantile_model(
         if algorithm == "quantile_regression":
             model = _train_sklearn_quantile(X, y, quantile, hyperparams)
         elif algorithm == "xgboost":
-            model = _train_xgboost_quantile(X, y, quantile, hyperparams)
+            model = _train_xgboost_quantile(X, y, quantile, hyperparams, device)
         elif algorithm == "lightgbm":
-            model = _train_lightgbm_quantile(X, y, quantile, hyperparams)
+            model = _train_lightgbm_quantile(X, y, quantile, hyperparams, device)
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}. "
                            f"Choose from: quantile_regression, xgboost, lightgbm")
@@ -204,7 +219,8 @@ def _train_xgboost_quantile(
     X: pd.DataFrame,
     y: pd.Series,
     quantile: float,
-    hyperparams: Dict[str, Any]
+    hyperparams: Dict[str, Any],
+    device: str = "cpu",
 ) -> Pipeline:
     """Train XGBoost quantile regressor."""
     try:
@@ -220,12 +236,18 @@ def _train_xgboost_quantile(
     imputer = SimpleImputer(strategy='median')
     X_imputed = imputer.fit_transform(X)
 
+    # Configure device-specific parameters
+    # XGBoost 2.0+: use device="cuda" with tree_method="hist" (gpu_hist is deprecated)
+    device_param = "cuda" if device == "cuda" else "cpu"
+
     model = xgb.XGBRegressor(
         objective='reg:quantileerror',
         quantile_alpha=quantile,
         n_estimators=n_estimators,
         max_depth=max_depth,
         learning_rate=learning_rate,
+        tree_method="hist",
+        device=device_param,
         random_state=42
     )
 
@@ -249,7 +271,8 @@ def _train_lightgbm_quantile(
     X: pd.DataFrame,
     y: pd.Series,
     quantile: float,
-    hyperparams: Dict[str, Any]
+    hyperparams: Dict[str, Any],
+    device: str = "cpu",
 ) -> Pipeline:
     """Train LightGBM quantile regressor."""
     try:
@@ -264,12 +287,17 @@ def _train_lightgbm_quantile(
     imputer = SimpleImputer(strategy='median')
     X_imputed = imputer.fit_transform(X)
 
+    # Configure device-specific parameters
+    # LightGBM uses "gpu" (not "cuda") for GPU device
+    device_param = "gpu" if device == "cuda" else "cpu"
+
     model = lgb.LGBMRegressor(
         objective='quantile',
         alpha=quantile,
         n_estimators=n_estimators,
         max_depth=max_depth,
         learning_rate=learning_rate,
+        device=device_param,
         random_state=42,
         verbose=-1
     )

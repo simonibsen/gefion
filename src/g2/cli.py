@@ -31,6 +31,7 @@ from g2.db import schema
 from psycopg.types.json import Json
 from g2.observability import create_span, set_attributes, add_event, get_current_span, shutdown as otel_shutdown
 from g2.db import migrate
+from g2 import health
 from g2.db.ingest import (
     insert_stock_ohlcv,
     upsert_stock,
@@ -76,6 +77,9 @@ app.add_typer(ml_app, name="ml", cls=SortedGroup)
 
 backtest_app = typer.Typer(help="Backtesting commands (run/compare/analyze)")
 app.add_typer(backtest_app, name="backtest", cls=SortedGroup)
+
+strategy_app = typer.Typer(help="Strategy management commands (list/configs/create)")
+app.add_typer(strategy_app, name="strategy", cls=SortedGroup)
 
 
 def emit(
@@ -662,6 +666,7 @@ def ml_train(
     model_name: str = typer.Option(..., help="Model name (identifier)"),
     model_version: str = typer.Option(..., help="Model version (e.g., date tag)"),
     algorithm: str = typer.Option("quantile_regression", help="Algorithm: quantile_regression, xgboost, lightgbm"),
+    device: str = typer.Option("auto", help="Compute device: auto, cpu, cuda (GPU)"),
     out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
@@ -683,7 +688,14 @@ def ml_train(
             --model-name custom_model --model-version v1 --out-dir ./my_models
     """
     from g2.ml.store import get_ml_dataset
-    from g2.ml.models import load_dataset_from_csv, train_quantile_model, save_model_artifact
+    from g2.ml.models import load_dataset, train_quantile_model, save_model_artifact
+    from g2.ml.device import detect_device
+
+    # Resolve device (auto-detect if "auto")
+    if device == "auto":
+        resolved_device = detect_device()
+    else:
+        resolved_device = device
 
     with db_connection(db_url) as conn:
         # Fetch dataset manifest
@@ -697,17 +709,17 @@ def ml_train(
         horizons = dataset["horizons_days"]
         all_train_metrics = {}
 
-        emit(f"Training {algorithm} models for horizons: {horizons}", json_output=json_output)
+        emit(f"Training {algorithm} models on {resolved_device} for horizons: {horizons}", json_output=json_output)
 
         for horizon in horizons:
             emit(f"Training model for {horizon}-day horizon...", json_output=json_output)
 
             # Load features and labels for this horizon
-            X, y = load_dataset_from_csv(artifact_uri, horizon)
+            X, y = load_dataset(artifact_uri, horizon)
             emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
 
             # Train quantile models (q10, q50, q90)
-            model_data = train_quantile_model(X, y, algorithm=algorithm)
+            model_data = train_quantile_model(X, y, algorithm=algorithm, device=resolved_device)
             emit(f"  Trained {len(model_data['models'])} quantile models", json_output=json_output)
 
             # Save model artifact
@@ -1013,7 +1025,7 @@ def ml_eval(
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
-    """Evaluate model performance on historical predictions (MVP placeholder)."""
+    """Evaluate model performance on historical predictions."""
     import pandas as pd
     from datetime import datetime, timedelta
     from decimal import Decimal
@@ -1218,6 +1230,7 @@ def ml_train_classifier(
     model_name: str = typer.Option(..., help="Model name (identifier)"),
     model_version: str = typer.Option(..., help="Model version (e.g., date tag)"),
     algorithm: str = typer.Option("sklearn", help="Algorithm: sklearn, xgboost, lightgbm"),
+    device: str = typer.Option("auto", help="Compute device: auto, cpu, cuda (GPU)"),
     horizon: int = typer.Option(..., help="Horizon in days for classification"),
     out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
@@ -1227,6 +1240,13 @@ def ml_train_classifier(
     import joblib
     from g2.ml.store import get_ml_dataset
     from g2.ml.classifier import load_dataset_for_classifier, train_classifier, evaluate_classifier
+    from g2.ml.device import detect_device
+
+    # Resolve device (auto-detect if "auto")
+    if device == "auto":
+        resolved_device = detect_device()
+    else:
+        resolved_device = device
 
     with db_connection(db_url) as conn:
         # Fetch dataset manifest
@@ -1235,7 +1255,7 @@ def ml_train_classifier(
             emit_error(f"Dataset not found: {dataset_name} {dataset_version}", json_output=json_output)
             return
 
-        emit(f"Training {algorithm} classifier for {horizon}-day horizon...", json_output=json_output)
+        emit(f"Training {algorithm} classifier on {resolved_device} for {horizon}-day horizon...", json_output=json_output)
 
         # Load features and labels for this horizon
         artifact_uri = Path(dataset["artifact_uri"])
@@ -1244,7 +1264,7 @@ def ml_train_classifier(
         emit(f"  Label distribution: {y.value_counts().to_dict()}", json_output=json_output)
 
         # Train classifier
-        model_artifacts = train_classifier(X, y, algorithm=algorithm)
+        model_artifacts = train_classifier(X, y, algorithm=algorithm, device=resolved_device)
         emit(f"  Training accuracy: {model_artifacts['train_metrics']['train_accuracy']:.4f}", json_output=json_output)
 
         # Evaluate
@@ -1928,7 +1948,68 @@ def span_check(
     _span_check_impl(backend, tempo_url, service_name, limit, trace_id, show_spans, json_output)
 
 
+@app.command("health")
+def health_check(
+    service: Optional[str] = typer.Option(None, help="Check specific service (postgres, tempo, docker)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Check health of g2 infrastructure services.
 
+    Checks PostgreSQL, Tempo, and Docker availability with helpful error messages
+    and suggestions for fixing issues.
+
+    Examples:
+        # Check all services
+        g2 health
+
+        # Check specific service
+        g2 health --service postgres
+
+        # JSON output
+        g2 health --json
+    """
+    if service:
+        # Check specific service
+        service_lower = service.lower()
+        if service_lower == "postgres":
+            status = health.check_postgres_health()
+        elif service_lower == "tempo":
+            status = health.check_tempo_health()
+        elif service_lower == "docker":
+            status = health.check_docker_services()
+        else:
+            emit_error(f"Unknown service: {service}. Valid options: postgres, tempo, docker", json_output=json_output)
+            return
+
+        if json_output:
+            emit_json({
+                "status": "ok" if status["running"] else "error",
+                "service": service_lower,
+                **status
+            })
+        else:
+            console = Console()
+            status_icon = "✅" if status["running"] else "❌"
+            console.print(f"\n{status_icon} {service_lower.upper()}: {status['message']}\n", style="bold")
+
+            if not status["running"] and "suggestion" in status:
+                console.print(f"   → {status['suggestion']}\n")
+            elif status["running"] and "version" in status:
+                console.print(f"   Version: {status['version']}\n")
+    else:
+        # Check all services
+        all_status = health.check_all_services()
+
+        if json_output:
+            emit_json({
+                "status": "ok",
+                "services": all_status
+            })
+        else:
+            report = health.format_health_report(all_status)
+            console = Console()
+            console.print(report)
 
 
 @app.command("db-init")
@@ -2003,6 +2084,29 @@ def _db_init_impl(db_url, json_output):
             json_output=json_output
         )
 
+        # Seed feature functions and definitions from JSON files
+        fx_dir = package_dir / "feature-functions"
+        def_dir = package_dir / "feature-definitions"
+
+        fx_count = 0
+        def_count = 0
+
+        if fx_dir.exists():
+            with db_connection(url) as conn:
+                init_schema_tables(conn, ["feature_functions"])
+                fx_count = import_functions_from_directory(conn, fx_dir, None)
+
+        if def_dir.exists():
+            with db_connection(url) as conn:
+                init_schema_tables(conn, ["feature_definitions", "computed_features"])
+                def_count = import_definitions_from_directory(conn, def_dir, None)
+
+        if fx_count > 0 or def_count > 0:
+            emit(
+                f"Seeded {fx_count} feature function(s) and {def_count} feature definition(s)",
+                json_output=json_output
+            )
+
     except Exception as exc:
         emit_error(f"Initialization failed: {exc}", json_output=json_output)
 
@@ -2012,6 +2116,9 @@ def db_migrate(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     migrations_dir: Optional[Path] = typer.Option(None, help="Migrations directory (default: sql/migrations)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show pending migrations without applying"),
+    status: bool = typer.Option(False, "--status", help="Show migration status"),
+    verify: bool = typer.Option(False, "--verify", help="Verify applied migrations created expected schema objects"),
+    repair: Optional[str] = typer.Option(None, "--repair", help="Repair a specific migration version (e.g., 20251227_000001)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
@@ -2028,19 +2135,36 @@ def db_migrate(
         # Show pending migrations without applying
         g2 db-migrate --dry-run
 
+        # Show migration status
+        g2 db-migrate --status
+
+        # Verify applied migrations created expected schema
+        g2 db-migrate --verify
+
+        # Repair a failed migration
+        g2 db-migrate --repair 20251227_000001
+
         # Run migrations on specific database
         g2 db-migrate --db-url postgresql://user:pass@host:5432/db
 
         # Use custom migrations directory
         g2 db-migrate --migrations-dir /path/to/migrations
     """
-    with create_span("cli.db-migrate", dry_run=dry_run):
-        _db_migrate_impl(db_url, migrations_dir, dry_run, json_output)
+    with create_span("cli.db-migrate", dry_run=dry_run, status=status, verify=verify, repair=repair):
+        _db_migrate_impl(db_url, migrations_dir, dry_run, status, verify, repair, json_output)
 
 
-def _db_migrate_impl(db_url, migrations_dir, dry_run, json_output):
+def _db_migrate_impl(db_url, migrations_dir, dry_run, status, verify, repair, json_output):
     """Implementation of db-migrate (separated for tracing)."""
-    from g2.db.migrate import run_migrations
+    from g2.db.migrate import (
+        run_migrations,
+        get_migration_status,
+        scan_migration_files,
+        parse_migration_schema_changes,
+        verify_schema_objects,
+        repair_migration,
+        get_applied_migrations,
+    )
     from pathlib import Path as PathLib
     import g2
 
@@ -2062,6 +2186,124 @@ def _db_migrate_impl(db_url, migrations_dir, dry_run, json_output):
         with psycopg.connect(url) as conn:
             conn.autocommit = True
 
+            # Handle --status flag
+            if status:
+                result = get_migration_status(conn, migrations_dir)
+
+                if json_output:
+                    emit(
+                        "Migration status retrieved",
+                        data=result,
+                        json_output=json_output
+                    )
+                else:
+                    emit(f"Migration Status ({result['total']} total)")
+                    emit("=" * 40)
+                    emit("")
+                    if result['applied']:
+                        emit(f"Applied ({result['applied_count']}):")
+                        for m in result['applied']:
+                            applied_at = m.get('applied_at', 'unknown')
+                            if hasattr(applied_at, 'strftime'):
+                                applied_at = applied_at.strftime('%Y-%m-%d %H:%M:%S')
+                            emit(f"  ✓ {m['version']}_{m['name']}  [applied {applied_at}]")
+                    emit("")
+                    if result['pending']:
+                        emit(f"Pending ({result['pending_count']}):")
+                        for m in result['pending']:
+                            emit(f"  ○ {m['version']}_{m['name']}  [not applied]")
+                        emit("")
+                        emit("Run `g2 db-migrate` to apply pending migrations.")
+                    else:
+                        emit("No pending migrations.")
+                    emit("")
+                    emit("Run `g2 db-migrate --verify` to check applied migrations.")
+                return
+
+            # Handle --verify flag
+            if verify:
+                all_migrations = scan_migration_files(migrations_dir)
+                applied = get_applied_migrations(conn)
+
+                applied_migrations = [m for m in all_migrations if m['version'] in applied]
+                issues = []
+
+                if not json_output:
+                    emit(f"Verifying {len(applied_migrations)} applied migrations...")
+                    emit("")
+
+                for m in applied_migrations:
+                    sql = m['path'].read_text()
+                    expected = parse_migration_schema_changes(sql)
+                    missing = verify_schema_objects(conn, expected)
+
+                    if missing:
+                        issues.append({
+                            'version': m['version'],
+                            'name': m['name'],
+                            'missing': missing
+                        })
+                        if not json_output:
+                            emit(f"  ✗ {m['version']}_{m['name']}  [FAILED]")
+                            for obj in missing:
+                                if obj['type'] == 'column':
+                                    emit(f"    - Missing column: {obj['table']}.{obj['name']}")
+                                else:
+                                    emit(f"    - Missing {obj['type']}: {obj['name']}")
+                    else:
+                        if not json_output:
+                            emit(f"  ✓ {m['version']}_{m['name']}  [OK]")
+
+                if json_output:
+                    emit(
+                        f"Verified {len(applied_migrations)} migrations",
+                        data={
+                            'verified': len(applied_migrations),
+                            'issues_count': len(issues),
+                            'issues': issues,
+                        },
+                        json_output=json_output
+                    )
+                else:
+                    emit("")
+                    if issues:
+                        emit(f"{len(issues)} migration(s) have issues. Run:")
+                        for issue in issues:
+                            emit(f"  g2 db-migrate --repair {issue['version']}")
+                    else:
+                        emit("All migrations verified successfully.")
+                return
+
+            # Handle --repair flag
+            if repair:
+                if not json_output:
+                    emit(f"Repairing migration {repair}...")
+
+                result = repair_migration(conn, repair, migrations_dir)
+
+                if result['success']:
+                    if json_output:
+                        emit(
+                            "Migration repaired successfully",
+                            data=result,
+                            json_output=json_output
+                        )
+                    else:
+                        emit(f"  - Removed from schema_migrations")
+                        emit(f"  - Re-applying migration...")
+                        emit(f"  ✓ Migration applied successfully")
+                else:
+                    if json_output:
+                        emit_error(
+                            f"Repair failed: {result.get('error', 'Unknown error')}",
+                            json_output=json_output
+                        )
+                    else:
+                        emit_error(f"  ✗ Repair failed: {result.get('error', 'Unknown error')}")
+                    raise typer.Exit(code=1)
+                return
+
+            # Default: run migrations
             if not json_output:
                 if dry_run:
                     emit("Checking for pending migrations...")
@@ -3235,6 +3477,242 @@ def _features_compute_impl(
             db_pool.close_pool()
 
 
+@app.command("fundamentals-update")
+def fundamentals_update(
+    exchange: Optional[str] = typer.Option(None, help="Exchange filter (e.g., NASDAQ, NYSE). If omitted, update all stocks."),
+    limit: Optional[int] = typer.Option(None, help="Limit number of symbols to update"),
+    max_age_days: int = typer.Option(30, "--max-age", help="Skip stocks updated within this many days"),
+    force: bool = typer.Option(False, "--force", help="Update all stocks regardless of age"),
+    calls_per_minute: int = typer.Option(75, help="AlphaVantage rate limit"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """
+    Update company fundamentals (sector, industry, name) from AlphaVantage.
+
+    Fetches OVERVIEW data for stocks and updates the stocks table.
+    By default, skips stocks updated within --max-age days (default: 30).
+
+    Examples:
+        # Update stale fundamentals for all stocks
+        g2 fundamentals-update
+
+        # Force update all NASDAQ stocks
+        g2 fundamentals-update --exchange NASDAQ --force
+
+        # Update up to 10 stocks
+        g2 fundamentals-update --limit 10
+    """
+    with create_span(
+        "cli.fundamentals-update",
+        exchange=exchange or "all",
+        max_age_days=max_age_days,
+        force=force,
+        limit=limit or 0,
+    ):
+        _fundamentals_update_impl(
+            exchange, limit, max_age_days, force, calls_per_minute, db_url, json_output
+        )
+
+
+def _fundamentals_update_impl(
+    exchange: Optional[str],
+    limit: Optional[int],
+    max_age_days: int,
+    force: bool,
+    calls_per_minute: int,
+    db_url: Optional[str],
+    json_output: Optional[bool],
+) -> None:
+    """Implementation of fundamentals-update."""
+    from datetime import datetime, timedelta
+    from g2.alphavantage.client import AlphaVantageClient
+
+    url = _db_url(db_url)
+
+    try:
+        client = AlphaVantageClient(calls_per_minute=calls_per_minute)
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        return
+
+    # Get stocks to update
+    with db_connection(url) as conn:
+        with conn.cursor() as cur:
+            query = "SELECT id, symbol, updated_at FROM stocks WHERE 1=1"
+            params: list = []
+
+            if exchange:
+                # Note: We don't have exchange column yet, so this is a placeholder
+                # In future, filter by exchange
+                pass
+
+            if not force:
+                # Skip recently updated stocks
+                cutoff = datetime.now() - timedelta(days=max_age_days)
+                query += " AND (updated_at IS NULL OR updated_at < %s)"
+                params.append(cutoff)
+
+            query += " ORDER BY updated_at ASC NULLS FIRST"
+
+            if limit:
+                query += f" LIMIT {limit}"
+
+            cur.execute(query, params)
+            stocks = cur.fetchall()
+
+    if not stocks:
+        if json_output:
+            emit_json({"success": True, "updated": 0, "message": "All stocks are up to date"})
+        else:
+            emit("[green]All stocks are up to date[/green]")
+        return
+
+    if not json_output:
+        emit(f"Updating fundamentals for {len(stocks)} stocks...")
+
+    updated = 0
+    errors = 0
+
+    for stock_id, symbol, _ in stocks:
+        try:
+            # Fetch overview from AlphaVantage
+            overview = client.fetch_overview(symbol)
+
+            # Check for API errors
+            if "Error Message" in overview or "Note" in overview:
+                if not json_output:
+                    emit(f"[yellow]⚠[/yellow] {symbol}: API limit or error, skipping")
+                errors += 1
+                continue
+
+            # Extract fields
+            name = overview.get("Name", "")
+            sector = overview.get("Sector", "")
+            industry = overview.get("Industry", "")
+
+            # Update database
+            with db_connection(url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE stocks
+                        SET name = %s, sector = %s, industry = %s, updated_at = NOW()
+                        WHERE id = %s
+                    """, (name or None, sector or None, industry or None, stock_id))
+                conn.commit()
+
+            updated += 1
+            if not json_output:
+                sector_display = sector[:20] if sector else "N/A"
+                emit(f"[green]✓[/green] {symbol}: {sector_display}")
+
+        except Exception as e:
+            errors += 1
+            if not json_output:
+                emit(f"[red]✗[/red] {symbol}: {e}")
+
+    if json_output:
+        emit_json({"success": True, "updated": updated, "errors": errors})
+    else:
+        emit("")
+        emit(f"[bold]Complete:[/bold] {updated} updated, {errors} errors")
+
+
+@app.command("cross-sectional-compute")
+def cross_sectional_compute(
+    feature: str = typer.Option(..., "--feature", "-f", help="Feature name to compute rankings for (e.g., indicator_rsi_14)"),
+    date: Optional[str] = typer.Option(None, "--date", help="Target date (YYYY-MM-DD). Defaults to latest available."),
+    include_market: bool = typer.Option(True, "--market/--no-market", help="Include market-wide rankings"),
+    include_sectors: bool = typer.Option(True, "--sectors/--no-sectors", help="Include sector-relative rankings"),
+    include_industries: bool = typer.Option(False, "--industries", help="Include industry-relative rankings"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Compute cross-sectional rankings for a feature.
+
+    Cross-sectional features compare stocks to their peers at the same point in time.
+    Rankings are computed for different comparison groups:
+    - market: rank vs all stocks
+    - sector:X: rank vs sector peers
+    - industry:X: rank vs industry peers
+
+    Results are stored in the cross_sectional_features table.
+
+    Examples:
+        # Compute RSI rankings (market + sectors)
+        g2 cross-sectional-compute --feature indicator_rsi_14
+
+        # Include industry rankings
+        g2 cross-sectional-compute --feature indicator_rsi_14 --industries
+
+        # Market-only rankings
+        g2 cross-sectional-compute --feature indicator_rsi_14 --no-sectors
+    """
+    with create_span(
+        "cli.cross-sectional-compute",
+        feature=feature,
+        date=date or "latest",
+        include_market=include_market,
+        include_sectors=include_sectors,
+        include_industries=include_industries,
+    ):
+        _cross_sectional_compute_impl(
+            feature, date, include_market, include_sectors, include_industries, db_url, json_output
+        )
+
+
+def _cross_sectional_compute_impl(
+    feature: str,
+    target_date: Optional[str],
+    include_market: bool,
+    include_sectors: bool,
+    include_industries: bool,
+    db_url: Optional[str],
+    json_output: bool,
+) -> None:
+    """Implementation of cross-sectional-compute."""
+    from datetime import datetime
+    from g2.compute.cross_sectional import compute_and_store_rankings
+
+    url = _db_url(db_url)
+
+    # Parse date if provided
+    parsed_date = None
+    if target_date:
+        try:
+            parsed_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except ValueError:
+            emit_error(f"Invalid date format: {target_date}. Use YYYY-MM-DD.", json_output=json_output)
+            return
+
+    try:
+        with db_connection(url) as conn:
+            result = compute_and_store_rankings(
+                conn=conn,
+                feature_name=feature,
+                target_date=parsed_date,
+                include_market=include_market,
+                include_sectors=include_sectors,
+                include_industries=include_industries,
+            )
+
+            if json_output:
+                emit_json(result)
+            elif result.get("success"):
+                emit(f"[bold green]Cross-sectional rankings computed[/bold green]")
+                emit(f"  Feature: {result['feature_name']}")
+                emit(f"  Date: {result['date']}")
+                emit(f"  Stocks: {result['stocks_count']}")
+                emit(f"  Rankings: {result['total_rankings']}")
+                emit(f"  Groups: {', '.join(result['groups'])}")
+            else:
+                emit_error(result.get("error", "Unknown error"), json_output=json_output)
+
+    except Exception as e:
+        emit_error(f"Failed to compute rankings: {e}", json_output=json_output)
+
+
 @app.command("data-update")
 def update_all(
     exchange: Optional[str] = typer.Option(None, help="Exchange filter (e.g., NASDAQ, NYSE). If omitted, infer from stocks table."),
@@ -4022,6 +4500,214 @@ def backtest_run(
         raise typer.Exit(1)
 
 
+@backtest_app.command("compare")
+def backtest_compare(
+    strategies: Optional[str] = typer.Option(
+        None,
+        "--strategies",
+        help="Comma-separated strategy names to compare (e.g., momentum,mean_reversion,breakout)"
+    ),
+    all_strategies: bool = typer.Option(
+        False,
+        "--all",
+        help="Compare all available strategies"
+    ),
+    symbols: Optional[str] = typer.Option(
+        None,
+        "--symbols",
+        help="Comma-separated symbols to backtest (e.g., AAPL,MSFT,GOOGL)"
+    ),
+    exchange: Optional[str] = typer.Option(
+        None,
+        "--exchange",
+        help="Exchange name (alternative to --symbols, e.g., NASDAQ)"
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        help="Limit number of symbols from exchange (for testing)"
+    ),
+    start_date: str = typer.Option(
+        ...,
+        "--start-date",
+        help="Backtest start date (YYYY-MM-DD)"
+    ),
+    end_date: str = typer.Option(
+        ...,
+        "--end-date",
+        help="Backtest end date (YYYY-MM-DD)"
+    ),
+    initial_cash: float = typer.Option(
+        100000.0,
+        "--initial-cash",
+        help="Initial portfolio cash amount"
+    ),
+    rank_by: str = typer.Option(
+        "sharpe_ratio",
+        "--rank-by",
+        help="Metric to rank strategies by (sharpe_ratio, total_return, calmar_ratio, sortino_ratio)"
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output results as JSON"
+    ),
+) -> None:
+    """
+    Compare multiple trading strategies side-by-side.
+
+    Examples:
+        # Compare momentum vs mean reversion on tech stocks
+        g2 backtest compare --strategies momentum,mean_reversion \\
+          --symbols AAPL,MSFT,GOOGL,NVDA,TSLA \\
+          --start-date 2024-01-01 --end-date 2024-12-01
+
+        # Compare all strategies on NASDAQ stocks
+        g2 backtest compare --all --exchange NASDAQ --limit 50 \\
+          --start-date 2024-01-01 --end-date 2024-12-01
+
+        # Compare strategies and rank by Calmar ratio
+        g2 backtest compare --strategies momentum,breakout,ma_crossover \\
+          --symbols AAPL,MSFT,GOOGL --start-date 2024-01-01 --end-date 2024-12-01 \\
+          --rank-by calmar_ratio
+    """
+    from g2.backtest.data_loader import load_price_data_for_backtest
+    from g2.backtest.comparison import compare_strategies, rank_strategies, AVAILABLE_STRATEGIES
+
+    try:
+        # Validate strategies
+        if all_strategies:
+            strategy_list = list(AVAILABLE_STRATEGIES.keys())
+        elif strategies:
+            strategy_list = [s.strip() for s in strategies.split(",")]
+            # Validate all strategy names
+            for s in strategy_list:
+                if s not in AVAILABLE_STRATEGIES:
+                    emit_error(
+                        f"Unknown strategy: '{s}'. Available: {list(AVAILABLE_STRATEGIES.keys())}",
+                        json_output=json_output,
+                    )
+                    raise typer.Exit(1)
+        else:
+            emit_error(
+                "Must specify --strategies or --all",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        # Validate symbols/exchange
+        if not symbols and not exchange:
+            emit_error(
+                "Must specify --symbols or --exchange",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        # Parse symbols
+        symbol_list = None
+        if symbols:
+            symbol_list = [s.strip() for s in symbols.split(",")]
+
+        # Load price data
+        emit(f"Loading price data...", json_output=json_output)
+
+        price_data = load_price_data_for_backtest(
+            symbols=symbol_list,
+            exchange=exchange,
+            limit=limit,
+            start_date=date.fromisoformat(start_date),
+            end_date=date.fromisoformat(end_date),
+        )
+
+        if not price_data:
+            emit_error(
+                "No price data found for specified symbols/date range",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        symbols_found = list(set(row["symbol"] for row in price_data))
+        emit(f"Loaded {len(price_data)} price records for {len(symbols_found)} symbols", json_output=json_output)
+
+        # Compare strategies
+        emit(f"Comparing {len(strategy_list)} strategies...", json_output=json_output)
+
+        comparison = compare_strategies(
+            strategies=strategy_list,
+            price_data=price_data,
+            initial_capital=initial_cash,
+        )
+
+        # Rank strategies
+        ranking = rank_strategies(comparison, metric=rank_by)
+
+        # Output results
+        if json_output:
+            emit(
+                "Comparison complete",
+                data={
+                    "comparison": comparison,
+                    "ranking": [
+                        {"strategy": name, rank_by: value}
+                        for name, value in ranking
+                    ],
+                    "date_range": {
+                        "start": start_date,
+                        "end": end_date,
+                    },
+                    "symbols_tested": len(symbols_found),
+                    "initial_cash": initial_cash,
+                },
+                json_output=json_output,
+            )
+        else:
+            # Print rich table
+            from rich.table import Table
+
+            console = Console()
+            console.print("\n[bold green]Strategy Comparison Results[/bold green]")
+            console.print(f"Period: {start_date} to {end_date}")
+            console.print(f"Symbols: {len(symbols_found)}")
+            console.print(f"Initial Capital: ${initial_cash:,.2f}\n")
+
+            table = Table(title="Strategy Performance")
+            table.add_column("Rank", justify="center")
+            table.add_column("Strategy", justify="left")
+            table.add_column("Return %", justify="right")
+            table.add_column("Sharpe", justify="right")
+            table.add_column("Sortino", justify="right")
+            table.add_column("Calmar", justify="right")
+            table.add_column("Max DD", justify="right")
+            table.add_column("Win Rate", justify="right")
+            table.add_column("Trades", justify="right")
+
+            for idx, (strategy_name, _) in enumerate(ranking, 1):
+                metrics = comparison[strategy_name]
+                table.add_row(
+                    str(idx),
+                    strategy_name,
+                    f"{metrics.get('total_return', 0) * 100:.1f}%",
+                    f"{metrics.get('sharpe_ratio', 0):.2f}",
+                    f"{metrics.get('sortino_ratio', 0):.2f}",
+                    f"{metrics.get('calmar_ratio', 0):.2f}",
+                    f"{metrics.get('max_drawdown', 0) * 100:.1f}%",
+                    f"{metrics.get('win_rate', 0) * 100:.0f}%",
+                    str(metrics.get('total_trades', 0)),
+                )
+
+            console.print(table)
+            console.print(f"\n[dim]Ranked by: {rank_by}[/dim]")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        emit_error(
+            f"Comparison failed: {e}",
+            json_output=json_output
+        )
+        raise typer.Exit(1)
+
+
 @app.command("mcp-setup")
 def mcp_setup(
     db_url: Optional[str] = typer.Option(None, help="Database URL (default: from environment or postgresql://g2:g2pass@localhost:5432/g2)"),
@@ -4229,6 +4915,114 @@ def mcp_setup(
         traceback.print_exc()
         emit_error(f"Setup failed: {exc}", json_output=json_output)
         raise typer.Exit(1)
+
+
+# =============================================================================
+# Strategy Commands
+# =============================================================================
+
+
+@strategy_app.command("list")
+def strategy_list(
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """List all registered strategies."""
+    from g2.strategies.dispatcher import get_strategy_registry
+
+    url = _db_url(db_url)
+    with psycopg.connect(url) as conn:
+        strategies = get_strategy_registry(conn)
+
+    if json_output:
+        emit_json({"strategies": strategies})
+    else:
+        console = Console()
+        table = Table(title="Registered Strategies")
+        table.add_column("Name", style="cyan")
+        table.add_column("Description")
+        table.add_column("Tags", style="dim")
+        table.add_column("Default Params", style="dim")
+
+        for s in strategies:
+            tags = ", ".join(s.get("tags", []))
+            params = json.dumps(s.get("default_params", {}))
+            table.add_row(s["name"], s.get("description", ""), tags, params)
+
+        console.print(table)
+
+
+@strategy_app.command("configs")
+def strategy_configs(
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """List all active strategy configurations."""
+    from g2.strategies.dispatcher import get_strategy_configs
+
+    url = _db_url(db_url)
+    with psycopg.connect(url) as conn:
+        configs = get_strategy_configs(conn)
+
+    if json_output:
+        emit_json({"configs": configs})
+    else:
+        console = Console()
+        table = Table(title="Strategy Configurations")
+        table.add_column("Name", style="cyan")
+        table.add_column("Strategy", style="green")
+        table.add_column("Params", style="dim")
+        table.add_column("Description")
+
+        for c in configs:
+            params = json.dumps(c.get("params", {}))
+            table.add_row(
+                c["name"],
+                c["strategy_name"],
+                params,
+                c.get("description", ""),
+            )
+
+        console.print(table)
+
+
+@strategy_app.command("create-config")
+def strategy_create_config(
+    name: str = typer.Option(..., "--name", help="Unique name for the config"),
+    strategy: str = typer.Option(..., "--strategy", help="Strategy name from registry"),
+    params: Optional[str] = typer.Option(None, "--params", help="JSON params to override defaults"),
+    description: Optional[str] = typer.Option(None, "--description", help="Config description"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Create a new strategy configuration."""
+    from g2.strategies.dispatcher import create_strategy_config
+
+    # Parse params JSON
+    parsed_params = {}
+    if params:
+        try:
+            parsed_params = json.loads(params)
+        except json.JSONDecodeError as e:
+            emit_error(f"Invalid JSON in --params: {e}", json_output=json_output)
+
+    url = _db_url(db_url)
+    try:
+        with psycopg.connect(url) as conn:
+            config_id = create_strategy_config(
+                conn,
+                name=name,
+                strategy_name=strategy,
+                params=parsed_params,
+                description=description,
+            )
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+
+    if json_output:
+        emit_json({"id": config_id, "name": name, "strategy": strategy})
+    else:
+        emit(f"Created config '{name}' (id={config_id})")
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper

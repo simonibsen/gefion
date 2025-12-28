@@ -1,8 +1,8 @@
 {
   "name": "indicator_psar",
-  "function_name": "indicator",
+  "function_name": "indicator_psar",
   "params": {
-    "indicator": "psar"
+    "column": "psar"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

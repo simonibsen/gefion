@@ -1,0 +1,27 @@
+#!/bin/bash
+#
+# Prepare-commit-msg hook: Remind AI assistant about development rules
+#
+# This hook outputs reminders that appear in git command output,
+# prompting the AI to check instructions before committing.
+#
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "📋 AI Development Rules Reminder:"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+echo "Before committing, verify compliance with:"
+echo ""
+echo "  1. TDD: Were tests written FIRST?"
+echo "  2. Commit message: No AI tool mentions?"
+echo "  3. Code quality: Fixing code, not tests?"
+echo "  4. Anti-drift: Actions aligned with instructions?"
+echo "  5. KISS: Simplest solution? Remove unused complexity?"
+echo "  6. Coupling: Functions self-contained? No implicit dependencies?"
+echo "  7. Performance: Optimizing the right bottleneck?"
+echo ""
+echo "Reference: DEVELOPMENT.md and AI_INSTRUCTIONS.md"
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo ""

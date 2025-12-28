@@ -285,6 +285,54 @@ def flush_telemetry(timeout_ms: int = 5000) -> bool:
         return False
 
 
+def traced(name: str = None, **static_attributes):
+    """
+    Decorator to automatically trace a function.
+
+    Zero overhead when OTEL_ENABLED=false.
+
+    Usage:
+        @traced("backtest.run")
+        def run_backtest(symbols, start_date, end_date):
+            ...
+
+        @traced()  # Uses function name as span name
+        def calculate_metrics(equity_curve):
+            ...
+
+        @traced("risk.check", component="risk_manager")
+        def check_position(symbol, entry_price, current_price):
+            ...
+
+    Args:
+        name: Span name (defaults to function.__name__)
+        **static_attributes: Attributes to add to every span
+    """
+    def decorator(func):
+        span_name = name or func.__name__
+
+        if not OTEL_ENABLED:
+            # Zero overhead when disabled
+            return func
+
+        from functools import wraps
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with create_span(span_name, **static_attributes) as span:
+                # Add function args as attributes (first 5 for safety)
+                for i, arg in enumerate(args[:5]):
+                    if isinstance(arg, (str, int, float, bool)):
+                        span.set_attribute(f"arg_{i}", arg)
+                for key, value in list(kwargs.items())[:5]:
+                    if isinstance(value, (str, int, float, bool)):
+                        span.set_attribute(key, value)
+                return func(*args, **kwargs)
+
+        return wrapper
+    return decorator
+
+
 def shutdown():
     """Shutdown OpenTelemetry and flush remaining spans."""
     global _otel_shutdown_called

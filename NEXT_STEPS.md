@@ -591,19 +591,18 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ### 13. Strategy Comparison Framework
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-27)
 **Priority**: Medium (enables evaluation)
 **Effort**: 1-2 weeks
 
 **Context**: Enable side-by-side comparison of strategy performance to identify best performers for given conditions.
 
 **Action Items**:
-- [ ] Implement comparison metrics:
-  - Risk-adjusted returns (Sharpe, Sortino, Calmar ratios)
-  - Drawdown analysis (max, average, recovery time)
-  - Trade statistics (win rate, profit factor, avg win/loss)
-  - Consistency metrics (monthly returns, rolling Sharpe)
-- [ ] Create comparison CLI command:
+- [x] Implement comparison metrics:
+  - Risk-adjusted returns (Sharpe, Sortino, Calmar ratios) ✓
+  - Drawdown analysis (max drawdown) ✓
+  - Trade statistics (win rate, profit factor, avg win/loss) ✓
+- [x] Create comparison CLI command:
   ```bash
   g2 backtest compare \
     --strategies momentum,mean_reversion,breakout \
@@ -611,66 +610,94 @@ With the foundation in place, choose your strategic direction based on goals:
     --start-date 2024-01-01 \
     --end-date 2024-12-31
   ```
-- [ ] Generate comparison report:
-  - Table of key metrics by strategy
-  - Equity curve plots (matplotlib/plotly)
-  - Monthly return heatmaps
-  - Export to JSON/CSV for further analysis
-- [ ] Add statistical significance testing:
+- [x] Generate comparison report:
+  - Table of key metrics by strategy ✓
+  - Export to JSON for further analysis ✓
+- [ ] Add statistical significance testing (deferred):
   - Bootstrap confidence intervals
   - Paired t-tests for return differences
-- [ ] Document best practices for strategy selection:
+- [ ] Document best practices for strategy selection (deferred):
   - Market regime considerations
   - Portfolio allocation across strategies
-  - Parameter sensitivity analysis
 
-**Files to create/modify**:
-- `src/g2/backtest/comparison.py`
-- `src/g2/backtest/metrics.py` (expand existing)
-- `src/g2/backtest/reporting.py`
-- `src/g2/cli.py` (add compare command)
-- `tests/test_comparison.py`
-- `docs/STRATEGY_COMPARISON.md`
+**Files created/modified**:
+- `src/g2/backtest/comparison.py` ✓
+- `src/g2/backtest/metrics.py` (extended with Sortino, Calmar, trade metrics) ✓
+- `src/g2/cli.py` (added compare command) ✓
+- `tests/test_comparison.py` ✓
+- `tests/test_backtest_compare_cli.py` ✓
+- `tests/test_backtest_metrics_extended.py` ✓
+
+**Tests**: 31 tests passing
 
 ---
 
 ### 14. Advanced Backtesting Features
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-28)
 **Priority**: Medium (realism)
 **Effort**: 2-3 weeks
 
 **Context**: Add features for more realistic backtesting (costs, slippage, position sizing).
 
 **Action Items**:
-- [ ] Transaction cost modeling:
-  - Configurable commission per trade
-  - Bid-ask spread simulation
-  - Market impact for larger orders
-- [ ] Slippage modeling:
-  - Slippage as function of volume
-  - Limit vs. market order simulation
-- [ ] Position sizing strategies:
+- [x] Transaction cost modeling:
+  - Configurable commission per trade/share with min/max caps
+  - Bid-ask spread as percentage of trade value
+  - Market impact scaling with sqrt of participation
+  - Presets: ZERO_COSTS, RETAIL_COSTS, INSTITUTIONAL_COSTS
+- [x] Slippage modeling:
+  - Fixed percentage slippage
+  - Volume-based slippage (larger orders = more slippage)
+  - Volatility-based slippage
+  - Limit order support with fill/no-fill logic
+  - Presets: ZERO_SLIPPAGE, REALISTIC_SLIPPAGE
+- [x] Position sizing strategies:
   - Fixed dollar amount
-  - Kelly criterion
+  - Fixed percentage of portfolio
+  - Kelly criterion with fractional Kelly
+  - Volatility targeting
   - Risk parity
-  - Volatility-based sizing
-- [ ] Risk management:
-  - Stop loss orders
-  - Take profit targets
-  - Maximum position size limits
-  - Portfolio-level risk constraints
-- [ ] Walk-forward optimization:
-  - Rolling train/test windows
-  - Parameter stability analysis
-  - Out-of-sample performance validation
+- [x] Risk management:
+  - Stop loss and take profit triggers
+  - Maximum position size limits (% of portfolio)
+  - Maximum number of positions
+  - Portfolio drawdown monitoring
+  - Signal filtering and exit signal generation
+  - Presets: CONSERVATIVE_RISK, AGGRESSIVE_RISK
+- [x] Walk-forward optimization:
+  - Rolling train/test window generation
+  - Parameter grid search
+  - Overfitting detection (in-sample vs out-of-sample comparison)
+  - Aggregate metrics calculation
+- [x] BacktestEngine integration:
+  - All features optional with None defaults (backward compatible)
+  - Execution order: risk exits → strategy signals → filter → size → slip → execute
+  - Trade records include slippage and cost details
+- [x] MCP integration:
+  - backtest_run tool with cost/slippage/risk/sizing presets
+  - backtest_compare tool for strategy comparison
 
-**Files to create/modify**:
-- `src/g2/backtest/costs.py`
-- `src/g2/backtest/position_sizing.py`
-- `src/g2/backtest/risk_management.py`
-- `src/g2/backtest/optimization.py`
-- Update `BacktestEngine` to use these components
+**Files created**:
+- `src/g2/backtest/costs.py` (TransactionCosts, presets)
+- `src/g2/backtest/slippage.py` (SlippageModel, OrderType, presets)
+- `src/g2/backtest/risk.py` (RiskLimits, RiskManager, RiskAction, presets)
+- `src/g2/backtest/sizing.py` (PositionSizer, SizingMethod)
+- `src/g2/backtest/optimization.py` (WalkForwardOptimizer, overfitting detection)
+- `tests/test_backtest_costs.py` (18 tests)
+- `tests/test_backtest_slippage.py` (12 tests)
+- `tests/test_backtest_risk.py` (21 tests)
+- `tests/test_backtest_sizing.py` (15 tests)
+- `tests/test_backtest_optimization.py` (13 tests)
+
+**Files modified**:
+- `src/g2/backtest/engine.py` (integrated all features)
+- `src/g2/backtest/portfolio.py` (added costs parameter to buy/sell)
+- `src/g2/backtest/__init__.py` (package exports)
+- `tests/test_backtest_engine.py` (integration tests)
+- `mcp-server/server.py` (added backtest_run, backtest_compare tools)
+
+**Tests**: 113 tests passing (69 new tests for advanced features)
 
 ---
 
@@ -1039,7 +1066,72 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ---
 
-### 24. Generic Feature Architecture (Foundation Refactoring) ✅ COMPLETE
+### 24. MCP Developer Experience
+
+**Status**: Planned
+**Priority**: Medium (developer productivity)
+**Effort**: 1-2 weeks
+
+**Context**: MCP server currently requires external client (Claude Desktop, Claude Code). No standalone mode or CLI integration. Discovered when manually assembling system status instead of using existing `system_status` MCP tool.
+
+**Problem**:
+- MCP tools not accessible during CLI-based development
+- No way to test MCP tools without configuring external client
+- Duplication: both CLI commands and MCP tools for same functionality
+- Poor developer experience: need to switch between CLI and MCP client
+
+**Action Items**:
+- [ ] **MCP Server Management**:
+  - Add `g2 mcp-server start` command (background process)
+  - Add `g2 mcp-server stop` command
+  - Add `g2 mcp-server status` command (show running status, PID)
+  - Add `g2 mcp-server logs` command (tail server logs)
+- [ ] **CLI Integration with MCP**:
+  - Add `g2 mcp-call <tool> [args]` for direct MCP tool invocation
+  - Example: `g2 mcp-call system_status`
+  - Example: `g2 mcp-call dev_status --path A`
+- [ ] **Hybrid CLI Commands**:
+  - Add `g2 system-status` CLI command (uses MCP if available, falls back to direct)
+  - Add `g2 dev-status` CLI command (uses MCP if available)
+  - Auto-detect MCP server availability
+- [ ] **MCP Tool Discovery**:
+  - Add `g2 mcp-tools list` (show all available MCP tools)
+  - Add `g2 mcp-tools info <tool>` (show tool schema and description)
+  - Add `g2 mcp-tools test <tool>` (test tool execution)
+- [ ] **Development Workflow Integration**:
+  - Add MCP server setup to DEVELOPMENT.md
+  - Add optional post-checkout hook (remind to start MCP server)
+  - Add `g2 health` check for MCP server status
+- [ ] **Built-in MCP Client**:
+  - Create `src/g2/mcp_client.py` (stdio-based MCP client)
+  - Handle server lifecycle (start/stop/restart)
+  - Connection management and error handling
+
+**Files to create/modify**:
+- `src/g2/cli.py` (add mcp-server, mcp-call, system-status, dev-status commands)
+- `src/g2/mcp_client.py` (new - built-in MCP client)
+- `src/g2/mcp_server_manager.py` (new - server process management)
+- `DEVELOPMENT.md` (add MCP server to workflow)
+- `docs/MCP_DEVELOPER_GUIDE.md` (new - comprehensive MCP development guide)
+- `.git/hooks/post-checkout` (optional - MCP reminder)
+
+**Success Criteria**:
+- Can start/stop MCP server via CLI
+- Can call MCP tools without external client
+- MCP tools accessible during development
+- Clear error messages when MCP unavailable
+- Documentation for MCP development workflow
+
+**Benefits**:
+- Improved developer productivity
+- Easier MCP tool testing and debugging
+- Unified interface (CLI + MCP)
+- Better error handling and diagnostics
+- Self-service MCP setup
+
+---
+
+### 25. Generic Feature Architecture (Foundation Refactoring) ✅ COMPLETE
 
 **Status**: Complete (2025-12-21)
 **Priority**: Critical (architectural foundation)
@@ -1331,13 +1423,86 @@ feature_definitions → dispatcher → compute_features() → plugins
 
 ---
 
+### 26. Data Visualization & Charting
+
+**Status**: Planned
+**Priority**: Medium (complements trading & ML workflows)
+**Effort**: 3-5 days
+**Path**: A (Trading-First)
+
+**Overview**: Add interactive Plotly-based charts to g2 via CLI commands. HTML output that auto-opens in browser. Enables visual analysis of predictions, strategy performance, and market data.
+
+**CLI Commands**:
+```bash
+g2 chart price AAPL                    # Candlestick + volume + indicators
+g2 chart predictions AAPL              # Price with q10/q50/q90 bands
+g2 chart rankings --feature rsi_14     # Cross-sectional distribution
+g2 chart model-perf trend_v1           # Model accuracy over time
+```
+
+**Module Structure**:
+```
+src/g2/charts/
+  __init__.py          # Package exports
+  queries.py           # SQL query functions (~200 lines)
+  renderers.py         # Plotly chart builders (~400 lines)
+  output.py            # File saving, browser opening (~80 lines)
+
+tests/
+  test_chart_queries.py    # DB integration tests
+  test_chart_renderers.py  # Unit tests (no DB)
+  test_chart_cli.py        # CLI integration tests
+```
+
+**Dependencies**:
+Add to `pyproject.toml`:
+```toml
+[project.optional-dependencies]
+charts = ["plotly>=5.18"]
+```
+
+**TDD Implementation Order**:
+
+1. **Phase 1: Query Layer** (DB tests)
+   - `test_chart_queries.py::test_fetch_ohlcv_returns_expected_structure`
+   - `queries.py::fetch_ohlcv_for_chart()`
+   - Repeat for: `fetch_features_for_overlay`, `fetch_predictions_for_symbol`, etc.
+
+2. **Phase 2: Renderer Layer** (Unit tests, no DB)
+   - `test_chart_renderers.py::test_create_candlestick_chart_returns_figure`
+   - `renderers.py::create_candlestick_chart()`
+   - Repeat for: prediction bands, ranking distribution, model performance
+
+3. **Phase 3: Output Layer** (Unit tests)
+   - `test_chart_output.py::test_get_chart_output_dir_creates_directory`
+   - `output.py::get_chart_output_dir()`, `save_chart_html()`
+
+4. **Phase 4: CLI Integration**
+   - `test_chart_cli.py::test_chart_price_requires_symbol`
+   - Add `chart_app` subgroup to `cli.py`
+
+**Output Behavior**:
+- Default dir: `~/.g2/charts/` (env: `G2_CHART_DIR`)
+- Filename: `{symbol}_{chart_type}_{timestamp}.html`
+- Auto-opens in browser (disable with `--no-open`)
+- `--json` returns `{"status": "ok", "path": "/path/to/chart.html"}`
+
+**Success Criteria**:
+- [ ] All 4 chart commands work (price, predictions, rankings, model-perf)
+- [ ] Charts render correctly in browser
+- [ ] MCP integration via JSON output
+- [ ] Tests pass without database for renderer tests
+
+---
+
 ## Implementation Recommendations
 
 ### For Path A (Trading-First):
 1. Start with Item #11 (validation) - 1 week
 2. Implement 2-3 strategies from #12 - 2 weeks
 3. Add strategy comparison #13 - 1 week
-4. **Milestone**: Working multi-strategy platform
+4. Add data visualization #26 - 3-5 days (optional, improves analysis)
+5. **Milestone**: Working multi-strategy platform with visual analysis
 
 ### For Path B (ML-First):
 1. Add Parquet support #15 - 1 week
@@ -1351,7 +1516,9 @@ feature_definitions → dispatcher → compute_features() → plugins
 2. Optimize performance #20 - 2 weeks
 3. Set up CI/CD #21 - 1 week
 4. Write documentation #22 - 2 weeks
-5. **Milestone**: Production-ready infrastructure
+5. Testing & QA #23 - 2-3 weeks
+6. MCP developer experience #24 - 1-2 weeks (optional, improves DX)
+7. **Milestone**: Production-ready infrastructure
 
 ### Recommended Sequence:
 If uncertain, follow this order:
@@ -1376,14 +1543,197 @@ Update this section as items are completed:
 - ✅ Error messages & CLI help
 
 **Completed** (2025-12-21):
-- ✅ Generic Feature Architecture (#24) - All 5 phases complete
+- ✅ Generic Feature Architecture (#25) - All 5 phases complete
   - Schema migration for plural source columns
   - Generic meta-function implementation
   - Plugin migration
   - Deleted 681 lines of type-specific code
   - 13 new tests, all passing
 
+**Completed** (2025-12-24):
+- ✅ Development roadmap tool (dev_status MCP tool)
+  - Parses DEVELOPMENT.md, NEXT_STEPS.md, PROGRESS.md
+  - Provides intelligent next-step suggestions
+  - Filters by path (A/B/C), status, priority
+  - Identifies quick wins
+- ✅ MCP Developer Experience (#24) added to roadmap
+  - Identified gap: MCP tools not accessible during CLI development
+  - Proposed CLI integration and standalone MCP client
+
+**Completed** (2025-12-27):
+- ✅ Strategy Comparison Framework (#13)
+  - Extended metrics (Sortino, Calmar, win rate, profit factor)
+  - `g2 backtest compare` CLI command
+  - Strategy ranking by metric
+  - 31 tests passing
+- ✅ Parquet loading support (load_dataset renamed)
+  - Auto-detects Parquet vs CSV format
+  - Prefers Parquet when both exist
+- ✅ GPU training support for XGBoost/LightGBM
+  - `--device` flag for ml train commands
+  - Auto-detection via `g2 ml device`
+- ✅ MCP Role-Based Access Control (#27)
+  - `G2_MCP_ROLE` env var (default: operator)
+  - `dev_status` blocked for operator
+  - `get_role_info` tool with LLM guidelines
+  - `docs/MCP_PRODUCTION.md` deployment guide
+  - 12 TDD tests passing
+
+**Completed** (2025-12-28):
+- ✅ Advanced Backtesting Features (#14)
+  - Transaction costs (commission, spread, market impact)
+  - Slippage modeling (fixed, volume-based, volatility-based)
+  - Risk management (stop loss, take profit, position limits)
+  - Position sizing (fixed, percent, Kelly, volatility target)
+  - Walk-forward optimization (overfitting detection)
+  - BacktestEngine integration (backward compatible)
+  - MCP integration (backtest_run, backtest_compare tools)
+  - 69 new tests (113 total backtest tests passing)
+
 **In Progress**: None
 
-**Next Up**: Choose strategic path (A: Trading-First, B: ML-First, or C: Scale-First)
+**Next Up**: #26 Data Visualization
+
+---
+
+### 27. MCP Role-Based Access Control
+
+**Status**: ✅ Complete (2025-12-27)
+**Priority**: High (security for production deployment)
+**Effort**: 2-3 days
+**Path**: C (Scale-First)
+
+**Context**: MCP server will run on production for data operations. Need to prevent it from accessing source code, internal docs, or performing developer-only operations. Two distinct user profiles: developer (full access) and operator (data operations only).
+
+**Problem**:
+- Current MCP server exposes all tools regardless of deployment context
+- `query_database` allows arbitrary SQL (schema exposure, potential data modification)
+- `dev_status` exposes internal roadmap and planning docs
+- No way to restrict tools based on deployment role
+- Production MCP should not have access to source code or dev artifacts
+
+**Roles**:
+
+| Tool | Developer | Operator |
+|------|-----------|----------|
+| `data_update` | ✅ | ✅ |
+| `ml_train`, `ml_predict`, `ml_eval` | ✅ | ✅ |
+| `ml_train_classifier`, `ml_predict_classifier` | ✅ | ✅ |
+| `query_predictions`, `query_model_performance` | ✅ | ✅ |
+| `system_status`, `health_check`, `docker_status` | ✅ | ✅ |
+| `features_list` | ✅ | ✅ |
+| `cross_sectional_compute` | ✅ | ✅ |
+| `strategy_list`, `strategy_configs` | ✅ | ✅ |
+| `strategy_create_config` | ✅ | ❌ (read-only) |
+| `query_database` | ✅ | ✅ (SELECT only) |
+| `dev_status` | ✅ | ❌ (internal docs) |
+| `span_check`, `trace_*` | ✅ | ❌ (debugging) |
+| `ml_dataset_build` | ✅ | ❓ (review) |
+
+**Design Principle**: Operator role can read anything via `query_database` (SELECT only), but all write operations must go through explicit MCP tools (`data_update`, `strategy_create_config`, etc.). This gives query flexibility while maintaining controlled write paths.
+
+**Action Items**:
+- [ ] **Add role configuration**:
+  ```bash
+  # Environment variable
+  G2_MCP_ROLE=operator  # or "developer" (default)
+  ```
+
+- [ ] **Filter tools by role**:
+  - Modify MCP server initialization to check role
+  - Only register tools allowed for current role
+  - Log which tools are available at startup
+
+- [ ] **Enforce SELECT-only for operator `query_database`**:
+  - Parse SQL and reject if not SELECT
+  - Block DDL (CREATE, ALTER, DROP) and DML (INSERT, UPDATE, DELETE)
+  - Allow CTEs, JOINs, subqueries (read operations)
+
+- [ ] **Document role separation**:
+  - Which tools in each role
+  - How to configure for production
+  - Security considerations
+
+- [ ] **Consider filesystem isolation**:
+  - Operator role should not need file access
+  - If MCP runs in restricted dir, can't read source
+  - Document deployment best practices
+
+**Files to modify**:
+- `src/g2/mcp_server.py` (add role filtering)
+- `docs/MCP_PRODUCTION.md` (new - deployment guide)
+
+**Success Criteria**:
+- Operator role cannot run arbitrary SQL
+- Operator role cannot access dev docs/roadmap
+- Clear documentation for production deployment
+- Role logged at MCP server startup
+
+**Implementation Summary**:
+- Added `G2_MCP_ROLE` env var (default: `operator` for safety)
+- `dev_status` blocked for operator role
+- `query_database` already enforces SELECT-only (existing safety)
+- Added `get_role_info` tool with behavioral guidelines for LLMs
+- Created `docs/MCP_PRODUCTION.md` deployment guide
+- 12 TDD tests passing
+
+**Files created/modified**:
+- `mcp-server/server.py` (~60 lines added)
+- `mcp-server/test_rbac.py` (new, 12 tests)
+- `docs/MCP_PRODUCTION.md` (new)
+
+---
+
+### 28. Migration System Improvements
+
+**Status**: ✅ Complete (2025-12-28)
+**Priority**: Medium (operational reliability)
+**Effort**: 3-5 days
+**Path**: C (Scale-First)
+
+**Context**: Migration system records migrations as "applied" without verifying the SQL actually succeeded. If a migration partially fails or is recorded but not applied, there's no way to detect or repair this state. Discovered when `20251226_000002_stocks_fundamentals.sql` was marked as applied but the ALTER TABLE had silently failed.
+
+**Problem**:
+- `g2 db-migrate` trusts `schema_migrations` table blindly
+- No verification that recorded migrations actually created expected schema changes
+- No command to re-run a failed migration
+- Silent partial failures leave database in inconsistent state
+
+**Implementation** (2025-12-28):
+
+Added three new CLI flags to `g2 db-migrate`:
+
+1. **`--status`**: Shows comprehensive migration status
+   ```bash
+   g2 db-migrate --status
+   # Shows applied and pending migrations with timestamps
+   ```
+
+2. **`--verify`**: Verifies schema objects exist
+   ```bash
+   g2 db-migrate --verify
+   # Parses SQL for CREATE TABLE, ALTER TABLE ADD COLUMN, CREATE INDEX
+   # Checks objects exist in database, reports missing items
+   ```
+
+3. **`--repair VERSION`**: Re-applies a failed migration
+   ```bash
+   g2 db-migrate --repair 20251226_000001
+   # Removes from tracking, re-runs migration SQL, re-records
+   ```
+
+All commands support `--json` output for scripting.
+
+**Core functions added** (`src/g2/db/migrate.py`):
+- `parse_migration_schema_changes()` - Parses SQL for expected schema objects
+- `verify_schema_objects()` - Checks objects exist in database
+- `get_migration_status()` - Returns comprehensive status
+- `repair_migration()` - Removes tracking and re-applies migration
+
+**Migration version format updated** to `YYYYMMDD_NNNNNN` to support multiple migrations per day.
+
+**Files modified**:
+- `src/g2/db/migrate.py` (~200 lines added)
+- `src/g2/cli.py` (~100 lines added)
+- `tests/test_db_migrate.py` (17 new tests)
 

@@ -375,6 +375,85 @@ Check cross-sectional features for today:
 - Check for any stocks with extreme z-scores (> 3 std devs)
 ```
 
+### Computing Cross-Sectional Rankings
+
+**Goal:** Generate relative rankings for stocks within comparison groups.
+
+**Step 1: Ensure fundamentals are loaded**
+
+First, stocks need sector/industry data for sector-relative rankings:
+```
+Check if stocks have sector data. Show me how many stocks are missing sector information.
+```
+
+If needed:
+```sql
+SELECT COUNT(*) as total, COUNT(sector) as with_sector
+FROM stocks WHERE status = 'Active'
+```
+
+**Step 2: Compute rankings for a feature**
+
+**Prompt:**
+```
+Compute cross-sectional rankings for indicator_rsi_14.
+Include both market and sector rankings.
+```
+
+**MCP Tool Used:** `cross_sectional_compute`
+
+**What happens:**
+1. Fetches latest RSI values for all stocks
+2. Computes market-wide rankings (all stocks)
+3. Computes sector-relative rankings (e.g., tech vs tech, finance vs finance)
+4. Stores results in `cross_sectional_features` table
+
+**Output example:**
+```json
+{
+  "success": true,
+  "feature_name": "indicator_rsi_14",
+  "date": "2025-12-24",
+  "stocks_count": 100,
+  "total_rankings": 156,
+  "groups": ["market", "sector:TECHNOLOGY", "sector:HEALTHCARE", "sector:FINANCE"]
+}
+```
+
+**Step 3: Query ranking results**
+
+**Prompt:**
+```
+Show me the top 5 stocks by RSI percentile within their sector.
+I want to see which stocks are overbought relative to sector peers.
+```
+
+**SQL (via query_database):**
+```sql
+SELECT
+    s.symbol,
+    s.sector,
+    csf.value as rsi,
+    csf.rank as sector_rank,
+    csf.percentile as sector_percentile
+FROM cross_sectional_features csf
+JOIN stocks s ON csf.data_id = s.id
+WHERE csf.feature_name = 'indicator_rsi_14'
+  AND csf.comparison_group LIKE 'sector:%'
+  AND csf.percentile > 0.90
+ORDER BY csf.percentile DESC
+LIMIT 10
+```
+
+**Use case: Find relative strength leaders**
+
+**Prompt:**
+```
+Find stocks that rank in the top 20% within their sector for RSI
+but are not overbought in absolute terms (RSI < 70).
+These are sector momentum leaders with room to run.
+```
+
 ---
 
 ## Production Deployment Patterns

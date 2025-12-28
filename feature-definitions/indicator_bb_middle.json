@@ -1,8 +1,9 @@
 {
   "name": "indicator_bb_middle",
-  "function_name": "indicator",
+  "function_name": "indicator_bb",
   "params": {
-    "indicator": "bbands"
+    "output": "middle",
+    "column": "bb_middle"
   },
   "source_table": "stock_ohlcv",
   "source_column": "close",

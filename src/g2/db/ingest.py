@@ -51,6 +51,26 @@ def upsert_stock(conn: psycopg.Connection, symbol: str, status: Optional[str] = 
             return cur.fetchone()[0]
 
 
+def get_stocks_missing_fundamentals(conn: psycopg.Connection, limit: Optional[int] = None) -> List[Tuple[int, str]]:
+    """
+    Get stocks that are missing fundamentals data (sector is NULL).
+
+    Args:
+        conn: Database connection
+        limit: Optional limit on number of results
+
+    Returns:
+        List of (id, symbol) tuples for stocks missing fundamentals
+    """
+    query = "SELECT id, symbol FROM stocks WHERE sector IS NULL ORDER BY id"
+    if limit:
+        query += f" LIMIT {limit}"
+
+    with conn.cursor() as cur:
+        cur.execute(query)
+        return cur.fetchall()
+
+
 def latest_price_date(conn: psycopg.Connection, data_id: int) -> Optional[date]:
     with conn.cursor() as cur:
         cur.execute("SELECT MAX(date) FROM stock_ohlcv WHERE data_id = %s;", (data_id,))

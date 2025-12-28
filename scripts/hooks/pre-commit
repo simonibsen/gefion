@@ -1,0 +1,86 @@
+#!/bin/bash
+#
+# pre-commit hook: TDD enforcement + observability checks
+#
+
+# =============================================================================
+# TDD ENFORCEMENT: Block src/ changes without corresponding tests/ changes
+# =============================================================================
+
+SRC_CHANGED=$(git diff --cached --name-only | grep -E '^src/' | grep -v '__pycache__' | head -1)
+TESTS_CHANGED=$(git diff --cached --name-only | grep -E '^tests/' | head -1)
+
+if [ -n "$SRC_CHANGED" ] && [ -z "$TESTS_CHANGED" ]; then
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo "❌ TDD VIOLATION: src/ modified without tests/"
+    echo "═══════════════════════════════════════════════════════════════"
+    echo ""
+    echo "You are modifying source code without test changes:"
+    echo ""
+    git diff --cached --name-only | grep -E '^src/' | sed 's/^/  /'
+    echo ""
+    echo "TDD requires:"
+    echo "  1. Write a failing test FIRST"
+    echo "  2. Then implement the feature"
+    echo "  3. Commit both together"
+    echo ""
+    echo "To bypass (use sparingly): git commit --no-verify"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    exit 1
+fi
+
+# =============================================================================
+# OBSERVABILITY CHECK: New Python files should have observability imports
+# =============================================================================
+
+# Get list of new Python files being added in src/g2/
+NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '^src/g2/.*\.py$' | grep -v '__init__.py' | grep -v 'test')
+
+if [ -n "$NEW_FILES" ]; then
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo "🔍 Observability Check - New Python Files Detected:"
+    echo "═══════════════════════════════════════════════════════════════"
+    echo ""
+
+    MISSING_OBSERVABILITY=""
+
+    for FILE in $NEW_FILES; do
+        # Check if file imports from g2.observability
+        if ! grep -q "from g2.observability import\|import logging" "$FILE"; then
+            MISSING_OBSERVABILITY="$MISSING_OBSERVABILITY  - $FILE\n"
+        fi
+    done
+
+    if [ -n "$MISSING_OBSERVABILITY" ]; then
+        echo "⚠️  The following new files may be missing observability:"
+        echo ""
+        echo -e "$MISSING_OBSERVABILITY"
+        echo "Consider adding:"
+        echo "  from g2.observability import create_span, traced"
+        echo "  import logging"
+        echo "  logger = logging.getLogger(__name__)"
+        echo ""
+        echo "See DEVELOPMENT.md section '9. Observability by Default'"
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+        # This is a warning, not a rejection
+        # To make it mandatory, uncomment: exit 1
+    else
+        echo "✓ Observability imports detected"
+    fi
+
+    echo ""
+    echo "📋 Span Parenting Reminder:"
+    echo "   - Ensure child spans are nested under parent spans"
+    echo "   - Use @propagate_context for thread pool workers"
+    echo "   - Orphaned spans create disconnected traces in Tempo"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo ""
+fi
+
+exit 0

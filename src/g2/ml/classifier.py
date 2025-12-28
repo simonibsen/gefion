@@ -100,6 +100,7 @@ def train_classifier(
     y: pd.Series,
     algorithm: str = "sklearn",
     hyperparams: Dict[str, Any] = None,
+    device: str = "cpu",
 ) -> Dict[str, Any]:
     """
     Train a multi-class classifier for trend prediction.
@@ -109,6 +110,7 @@ def train_classifier(
         y: Target labels (n_samples,) - categorical trend labels
         algorithm: Algorithm choice ("sklearn", "xgboost", "lightgbm")
         hyperparams: Optional hyperparameter overrides
+        device: Compute device ("cpu" or "cuda" for GPU training)
 
     Returns:
         Dict containing:
@@ -126,6 +128,7 @@ def train_classifier(
 
     logger.info(f"Training {algorithm} classifier")
     logger.info(f"Training data: {X.shape[0]} samples, {X.shape[1]} features")
+    logger.info(f"Training device: {device}")
 
     # Encode labels to integers
     label_encoder = LabelEncoder()
@@ -143,9 +146,9 @@ def train_classifier(
     if algorithm == "sklearn":
         model = _train_sklearn_classifier(X, y_encoded, hyperparams)
     elif algorithm == "xgboost":
-        model = _train_xgboost_classifier(X, y_encoded, hyperparams)
+        model = _train_xgboost_classifier(X, y_encoded, hyperparams, device)
     elif algorithm == "lightgbm":
-        model = _train_lightgbm_classifier(X, y_encoded, hyperparams)
+        model = _train_lightgbm_classifier(X, y_encoded, hyperparams, device)
     else:
         raise ValueError(
             f"Unsupported algorithm: {algorithm}. " f"Choose from: sklearn, xgboost, lightgbm"
@@ -203,7 +206,7 @@ def _train_sklearn_classifier(
 
 
 def _train_xgboost_classifier(
-    X: pd.DataFrame, y: np.ndarray, hyperparams: Dict[str, Any]
+    X: pd.DataFrame, y: np.ndarray, hyperparams: Dict[str, Any], device: str = "cpu"
 ) -> Pipeline:
     """Train XGBoost classifier."""
     try:
@@ -216,6 +219,10 @@ def _train_xgboost_classifier(
     learning_rate = hyperparams.get("learning_rate", 0.1)
     random_state = hyperparams.get("random_state", 42)
 
+    # Configure device-specific parameters
+    # XGBoost 2.0+: use device="cuda" with tree_method="hist" (gpu_hist is deprecated)
+    device_param = "cuda" if device == "cuda" else "cpu"
+
     pipeline = Pipeline(
         [
             ("imputer", SimpleImputer(strategy="median")),
@@ -225,6 +232,8 @@ def _train_xgboost_classifier(
                     n_estimators=n_estimators,
                     max_depth=max_depth,
                     learning_rate=learning_rate,
+                    tree_method="hist",
+                    device=device_param,
                     random_state=random_state,
                     n_jobs=-1,
                     objective="multi:softmax",
@@ -238,7 +247,7 @@ def _train_xgboost_classifier(
 
 
 def _train_lightgbm_classifier(
-    X: pd.DataFrame, y: np.ndarray, hyperparams: Dict[str, Any]
+    X: pd.DataFrame, y: np.ndarray, hyperparams: Dict[str, Any], device: str = "cpu"
 ) -> Pipeline:
     """Train LightGBM classifier."""
     try:
@@ -253,6 +262,10 @@ def _train_lightgbm_classifier(
     learning_rate = hyperparams.get("learning_rate", 0.1)
     random_state = hyperparams.get("random_state", 42)
 
+    # Configure device-specific parameters
+    # LightGBM uses "gpu" (not "cuda") for GPU device
+    device_param = "gpu" if device == "cuda" else "cpu"
+
     pipeline = Pipeline(
         [
             ("imputer", SimpleImputer(strategy="median")),
@@ -262,6 +275,7 @@ def _train_lightgbm_classifier(
                     n_estimators=n_estimators,
                     max_depth=max_depth,
                     learning_rate=learning_rate,
+                    device=device_param,
                     random_state=random_state,
                     n_jobs=-1,
                     verbose=-1,

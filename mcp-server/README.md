@@ -36,12 +36,213 @@ Claude: [Queries database and shows predictions]
 ### Data Management Tools
 - `data_update` - Update prices and compute features (time-aware: before 4pm ET = yesterday's data, after 4pm ET = today's data)
 - `features_list` - List all registered technical indicators + cross-sectional features (percentile ranks, z-scores)
+- `cross_sectional_compute` - Compute rankings for a feature across comparison groups (market, sector, industry)
 
 ### Observability Tools
 - `span_check` - Check recent traces for performance monitoring and debugging (backend-agnostic)
 - `trace_search` - Search for traces by criteria (tags, duration, service name)
 - `trace_detail` - Get detailed trace information for a specific trace ID
 - `trace_compare` - Compare two traces to quantify performance improvements
+
+### Infrastructure Tools
+- **`system_status`** - **Comprehensive system status with intelligent suggestions** (use this first!)
+  * Infrastructure health (PostgreSQL, Tempo, Docker)
+  * Data freshness analysis (days since last update)
+  * Missing components detection (features, data)
+  * Feature/function registration detection (files on disk not in DB)
+  * Prioritized issues (critical/high/medium/low)
+  * Actionable suggestions with exact commands
+  * Ordered next steps workflow
+- **`dev_status`** - **Development roadmap and next steps guidance**
+  * Parses DEVELOPMENT.md, NEXT_STEPS.md, PROGRESS.md
+  * Current development phase identification
+  * Completed/in-progress/planned items tracking
+  * Strategic path options (Trading-First/ML-First/Scale-First)
+  * Ready-to-start tasks with prerequisites met
+  * Development rules reminders (TDD, commit format)
+  * Quick wins identification (high priority, low effort)
+- `health_check` - Quick infrastructure health check only (use system_status for full picture)
+- `docker_status` - Docker-specific status check (use system_status for full picture)
+
+## Intelligent System Status
+
+The `system_status` tool provides comprehensive analysis with actionable suggestions:
+
+**Example Output:**
+```json
+{
+  "status": "needs_attention",
+  "summary": "3 issue(s) found",
+  "infrastructure": {
+    "docker": {"running": true},
+    "postgres": {"running": true},
+    "tempo": {"running": true}
+  },
+  "data": {
+    "stocks": 2,
+    "ohlcv_rows": 3,
+    "latest_date": "2024-01-01",
+    "days_since_update": 358,
+    "feature_rows": 0
+  },
+  "issues": [
+    {
+      "type": "stale_data",
+      "description": "Price data is 358 days old (last: 2024-01-01)",
+      "priority": "high",
+      "command": "g2 data-update --exchange NASDAQ --limit 10"
+    },
+    {
+      "type": "unregistered_feature_definitions",
+      "description": "18 feature definition(s) on disk not imported to database",
+      "priority": "medium",
+      "command": "g2 feat-def-import --directory feature-definitions"
+    },
+    {
+      "type": "no_features",
+      "description": "Features not computed (0 rows)",
+      "priority": "medium",
+      "command": "g2 feat-compute --symbols AAPL,MSFT --all-features"
+    }
+  ],
+  "next_steps": [
+    "1. Update price data: g2 data-update",
+    "2. Compute features: g2 feat-compute",
+    "3. Build ML dataset: g2 ml dataset-build",
+    "4. Train model: g2 ml train"
+  ]
+}
+```
+
+**Use Cases:**
+- "What should I do next?" → Shows ordered workflow
+- "Is my data current?" → Analyzes staleness
+- "Why aren't predictions working?" → Identifies missing components
+- "How do I get started?" → Guides through setup
+
+## Development Roadmap Guidance
+
+The `dev_status` tool analyzes development documentation to provide roadmap guidance:
+
+**Example Output:**
+```json
+{
+  "success": true,
+  "current_phase": "Strategic Direction Choice (Path A/B/C)",
+  "development_rules": {
+    "tdd_required": true,
+    "commit_format": "conventional commits",
+    "test_minimum": 488,
+    "no_ai_attribution": true
+  },
+  "completed_items": [
+    {
+      "number": 1,
+      "title": "Fix Trim Command Behavior",
+      "status": "completed",
+      "priority": "high",
+      "effort": "2-3 days"
+    }
+  ],
+  "in_progress_items": [],
+  "planned_items": [
+    {
+      "number": 13,
+      "title": "Strategy Comparison Framework",
+      "status": "planned",
+      "priority": "medium",
+      "effort": "1-2 weeks",
+      "path": "A"
+    }
+  ],
+  "strategic_paths": {
+    "A": {
+      "name": "Trading-First (Production Trading Platform)",
+      "goal": "Ship a complete, production-ready trading platform",
+      "timeline": "6-8 weeks",
+      "best_for": "Users who want to make real trading decisions"
+    }
+  },
+  "recommended_next_steps": [
+    {
+      "item": "#13",
+      "title": "Strategy Comparison Framework",
+      "priority": "medium",
+      "effort": "1-2 weeks",
+      "path": "A"
+    }
+  ],
+  "quick_wins": [
+    {
+      "number": 15,
+      "title": "Parquet Dataset Format",
+      "priority": "high",
+      "effort": "1 week"
+    }
+  ]
+}
+```
+
+**Use Cases:**
+- "What should I work on next?" → Shows prioritized tasks
+- "Am I ready for Item #13?" → Check prerequisites (implicit via status)
+- "Show high-priority tasks" → Filter by priority
+- "What's left in Path A?" → Filter by strategic path
+- "What are quick wins?" → High priority, low effort items
+- "What are the TDD requirements?" → Development rules reminder
+
+**Filters Available:**
+- `path`: A (Trading), B (ML), C (Scale)
+- `status`: completed, in_progress, planned
+- `priority`: high, medium, low
+
+## Service Health Checks
+
+The MCP server automatically checks required services before executing tools and provides helpful error messages if services are down.
+
+### Intelligent Error Messages
+
+If a required service is not running, you'll get actionable suggestions:
+
+**PostgreSQL not running:**
+```
+❌ POSTGRES is not available
+
+Status: PostgreSQL is not running
+
+Start PostgreSQL:
+  docker compose up -d postgres
+
+Check status:
+  docker compose ps postgres
+```
+
+**Tempo not running:**
+```
+❌ TEMPO is not available
+
+Status: Tempo is not running or not accessible
+
+Start Tempo (for tracing):
+  cd docker/tempo
+  docker compose -f docker-compose.tempo.yml up -d
+
+Or disable tracing:
+  export OTEL_ENABLED=false
+```
+
+### Health Check Performance
+
+- **Caching**: Health status cached for 60 seconds (minimal overhead)
+- **Lazy checking**: Only checks required services for each tool
+- **Fast failure**: Immediate helpful error if service down (~50ms vs 5-30s timeout)
+- **Overhead**: <0.2% of typical operation time when cached
+
+### Service Dependencies
+
+- **PostgreSQL required**: All ML tools, data_update, query tools
+- **Tempo required**: Observability tools (span_check, trace_*)
+- **Docker recommended**: For managing PostgreSQL and Tempo containers
 
 ## Installation
 
@@ -404,6 +605,46 @@ List all registered feature definitions.
 
 **Example prompt:**
 > "List all available features"
+
+### cross_sectional_compute
+
+Compute cross-sectional rankings for a feature across comparison groups.
+
+**Parameters:**
+- `feature_name` (required): Feature to rank (e.g., "indicator_rsi_14")
+- `date`: Target date (YYYY-MM-DD), defaults to latest available
+- `include_market`: Include market-wide rankings (default: true)
+- `include_sectors`: Include sector-relative rankings (default: true)
+- `include_industries`: Include industry-relative rankings (default: false)
+
+**What it does:**
+1. Fetches latest feature values for all stocks
+2. Computes rankings within each comparison group:
+   - `market` - rank vs all stocks
+   - `sector:X` - rank vs same sector peers (e.g., `sector:TECHNOLOGY`)
+   - `industry:X` - rank vs same industry peers
+3. Stores results in `cross_sectional_features` table with rank and percentile
+
+**Example prompts:**
+> "Compute cross-sectional rankings for RSI"
+
+> "Rank stocks by MACD within their sectors"
+
+> "Generate market and industry rankings for all features"
+
+**Output example:**
+```json
+{
+  "success": true,
+  "feature_name": "indicator_rsi_14",
+  "date": "2025-12-24",
+  "stocks_count": 100,
+  "total_rankings": 156,
+  "groups": ["market", "sector:TECHNOLOGY", "sector:HEALTHCARE", "sector:FINANCE"]
+}
+```
+
+**Prerequisite:** Stocks need sector/industry data. Use `fundamentals-update` CLI command to load this data from AlphaVantage.
 
 ### query_database
 

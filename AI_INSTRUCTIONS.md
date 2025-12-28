@@ -2,7 +2,25 @@
 
 ## CRITICAL RULES (Always Follow)
 
-### 1. NEVER Mention AI Tools
+### 1. TDD IS MANDATORY - NO EXCEPTIONS
+
+**HARD RULE: Before ANY edit to `src/`, you MUST first create or update a test file in `tests/`.**
+
+**Workflow:**
+1. When given a coding task, FIRST write a failing test in `tests/`
+2. Run the test - verify it FAILS (red)
+3. THEN implement the feature in `src/`
+4. Run the test - verify it PASSES (green)
+5. Only then commit both test and implementation together
+
+**This is not optional.** The pre-commit hook will reject commits that modify `src/` without corresponding `tests/` changes.
+
+**If you catch yourself editing `src/` without a test:**
+- STOP immediately
+- Write the test first
+- Then continue with implementation
+
+### 2. NEVER Mention AI Tools
 **Forbidden in:**
 - Commit messages
 - Code comments (unless specifically requested by user)
@@ -17,13 +35,6 @@
 
 **Write commits as if the human developer wrote everything.**
 
-### 2. Test-Driven Development (TDD)
-- **Always write tests BEFORE implementation**
-- Every bug fix starts with a failing test
-- Run full test suite after any changes
-- Never skip tests to make things pass
-- If tests fail, investigate the CODE first
-
 ### 3. When Tests Fail
 **Priority order:**
 1. Check if the production code has a bug → Fix the code
@@ -33,7 +44,7 @@
 
 **Never skip tests without clear documentation of why they're obsolete.**
 
-### 4. Code Quality Standards
+### 4. Code Quality Standards (KISS)
 - Fix root causes, not symptoms
 - No unnecessary refactoring
 - Follow existing code patterns

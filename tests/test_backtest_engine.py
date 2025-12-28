@@ -206,3 +206,141 @@ def test_portfolio_transaction_log():
     assert portfolio.transactions[1]["symbol"] == "AAPL"
     assert portfolio.transactions[1]["shares"] == 50
     assert portfolio.transactions[1]["price"] == 160.0
+
+
+class TestBacktestEngineIntegration:
+    """Integration tests for BacktestEngine with advanced features."""
+
+    def test_engine_with_costs_and_slippage(self):
+        """Engine applies costs and slippage to trades."""
+        from g2.backtest.engine import BacktestEngine
+        from g2.backtest.costs import TransactionCosts
+        from g2.backtest.slippage import SlippageModel
+
+        price_data = [
+            {"date": date(2024, 1, 1), "symbol": "AAPL", "close": 100.0},
+            {"date": date(2024, 1, 2), "symbol": "AAPL", "close": 105.0},
+            {"date": date(2024, 1, 3), "symbol": "AAPL", "close": 110.0},
+        ]
+
+        # Strategy that buys on day 1
+        def strategy(current_date, portfolio, historical_prices):
+            if current_date == date(2024, 1, 1):
+                return [{"action": "buy", "symbol": "AAPL", "shares": 10}]
+            return []
+
+        costs = TransactionCosts(commission_per_trade=10.0)
+        slippage = SlippageModel(fixed_slippage_pct=0.001)
+
+        engine = BacktestEngine(
+            price_data=price_data,
+            strategy=strategy,
+            initial_cash=10000.0,
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 1, 3),
+            costs=costs,
+            slippage=slippage,
+        )
+        results = engine.run()
+
+        # Verify trade executed with slippage
+        assert len(results["trades"]) == 1
+        trade = results["trades"][0]
+        assert trade["price"] > 100.0  # Slippage increased buy price
+        assert trade["cost"] == 10.0  # Commission applied
+
+    def test_engine_with_risk_manager(self):
+        """Engine applies risk management to positions."""
+        from g2.backtest.engine import BacktestEngine
+        from g2.backtest.risk import RiskManager, RiskLimits
+
+        price_data = [
+            {"date": date(2024, 1, 1), "symbol": "AAPL", "close": 100.0},
+            {"date": date(2024, 1, 2), "symbol": "AAPL", "close": 92.0},  # 8% drop
+            {"date": date(2024, 1, 3), "symbol": "AAPL", "close": 90.0},
+        ]
+
+        def strategy(current_date, portfolio, historical_prices):
+            if current_date == date(2024, 1, 1):
+                return [{"action": "buy", "symbol": "AAPL", "shares": 10}]
+            return []
+
+        risk_manager = RiskManager(RiskLimits(stop_loss_pct=0.05))
+
+        engine = BacktestEngine(
+            price_data=price_data,
+            strategy=strategy,
+            initial_cash=10000.0,
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 1, 3),
+            risk_manager=risk_manager,
+        )
+        results = engine.run()
+
+        # Should have buy on day 1 and stop loss exit on day 2
+        assert len(results["trades"]) == 2
+        assert results["trades"][0]["action"] == "buy"
+        assert results["trades"][1]["action"] == "sell"
+        assert results["trades"][1]["reason"] == "stop_loss"
+
+    def test_engine_with_position_sizer(self):
+        """Engine uses position sizer for trade sizing."""
+        from g2.backtest.engine import BacktestEngine
+        from g2.backtest.sizing import PositionSizer, SizingMethod
+
+        price_data = [
+            {"date": date(2024, 1, 1), "symbol": "AAPL", "close": 100.0},
+            {"date": date(2024, 1, 2), "symbol": "AAPL", "close": 105.0},
+        ]
+
+        def strategy(current_date, portfolio, historical_prices):
+            if current_date == date(2024, 1, 1):
+                # Strategy requests arbitrary shares, sizer will override
+                return [{"action": "buy", "symbol": "AAPL", "shares": 999}]
+            return []
+
+        sizer = PositionSizer(
+            method=SizingMethod.FIXED_PERCENT,
+            fixed_percent=0.10,  # 10% of portfolio
+        )
+
+        engine = BacktestEngine(
+            price_data=price_data,
+            strategy=strategy,
+            initial_cash=10000.0,
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 1, 2),
+            position_sizer=sizer,
+        )
+        results = engine.run()
+
+        # Position sizer should size to 10% of portfolio = $1000 = 10 shares
+        assert len(results["trades"]) == 1
+        assert results["trades"][0]["shares"] == 10  # 10000 * 0.10 / 100
+
+    def test_engine_backward_compatible(self):
+        """Engine works without optional features (backward compatible)."""
+        from g2.backtest.engine import BacktestEngine
+
+        price_data = [
+            {"date": date(2024, 1, 1), "symbol": "AAPL", "close": 100.0},
+            {"date": date(2024, 1, 2), "symbol": "AAPL", "close": 105.0},
+        ]
+
+        def strategy(current_date, portfolio, historical_prices):
+            if current_date == date(2024, 1, 1):
+                return [{"action": "buy", "symbol": "AAPL", "shares": 10}]
+            return []
+
+        # No optional params - should work exactly as before
+        engine = BacktestEngine(
+            price_data=price_data,
+            strategy=strategy,
+            initial_cash=10000.0,
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 1, 2),
+        )
+        results = engine.run()
+
+        assert len(results["trades"]) == 1
+        assert results["trades"][0]["price"] == 100.0  # No slippage

@@ -116,6 +116,36 @@ SELECT create_hypertable('computed_features', 'date', if_not_exists => TRUE);
 SELECT set_chunk_time_interval('computed_features', INTERVAL '30 days');
 
 -- =============================================================================
+-- STRATEGY MANAGEMENT
+-- =============================================================================
+
+-- Strategy registry - maps strategy names to Python implementations
+CREATE TABLE IF NOT EXISTS strategy_registry (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    module_path TEXT NOT NULL,
+    class_name TEXT NOT NULL,
+    default_params JSONB DEFAULT '{}',
+    param_schema JSONB,
+    description TEXT,
+    tags TEXT[],
+    enabled BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Strategy configurations - parameterized instances of strategies
+CREATE TABLE IF NOT EXISTS strategy_configs (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    strategy_name TEXT NOT NULL REFERENCES strategy_registry(name) ON DELETE CASCADE,
+    params JSONB NOT NULL DEFAULT '{}',
+    description TEXT,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================================================
 -- INDEXES
 -- =============================================================================
 
@@ -148,6 +178,15 @@ CREATE INDEX IF NOT EXISTS idx_feature_definitions_active_function
     ON feature_definitions(active, function_name)
     WHERE active = TRUE;
 
+-- Strategy registry indexes
+CREATE INDEX IF NOT EXISTS idx_strategy_registry_enabled
+    ON strategy_registry(enabled, name)
+    WHERE enabled = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_strategy_configs_active
+    ON strategy_configs(active, strategy_name)
+    WHERE active = TRUE;
+
 -- =============================================================================
 -- SUMMARY
 -- =============================================================================
@@ -162,6 +201,8 @@ CREATE INDEX IF NOT EXISTS idx_feature_definitions_active_function
 \echo '  - stock_ohlcv (hypertable)'
 \echo '  - feature_definitions'
 \echo '  - computed_features (hypertable)'
+\echo '  - strategy_registry'
+\echo '  - strategy_configs'
 \echo ''
 
 -- Display table counts
@@ -184,4 +225,14 @@ SELECT
     'computed_features',
     COUNT(*)
 FROM computed_features
+UNION ALL
+SELECT
+    'strategy_registry',
+    COUNT(*)
+FROM strategy_registry
+UNION ALL
+SELECT
+    'strategy_configs',
+    COUNT(*)
+FROM strategy_configs
 ORDER BY table_name;

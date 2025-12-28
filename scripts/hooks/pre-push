@@ -1,0 +1,23 @@
+#!/bin/bash
+
+echo "Running test suite before push..."
+echo ""
+
+# Run the test suite
+ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest tests/ -q
+
+# Check exit code
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Tests failed! Push aborted."
+    echo ""
+    echo "Fix the failing tests before pushing."
+    echo "Run tests manually:"
+    echo "  ENABLE_DB_TESTS=1 DATABASE_URL=\"postgresql://g2:g2pass@localhost:6432/g2\" OTEL_ENABLED=false .venv/bin/python -m pytest tests/ -v"
+    echo ""
+    exit 1
+fi
+
+echo ""
+echo "✅ All tests passed! Proceeding with push..."
+echo ""
