@@ -92,9 +92,11 @@ def test_train_classifier_with_xgboost():
     """Test training classifier with XGBoost."""
     try:
         import pandas as pd
-        import xgboost
-    except ImportError:
-        pytest.skip("pandas or xgboost not installed")
+        import xgboost as xgb
+        # Test that XGBoost actually works (not just importable)
+        xgb.XGBClassifier(n_estimators=1)
+    except (ImportError, Exception) as e:
+        pytest.skip(f"XGBoost not available: {e}")
 
     from g2.ml.classifier import train_classifier
 
