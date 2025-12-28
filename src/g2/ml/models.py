@@ -93,7 +93,8 @@ def train_quantile_model(
     y: pd.Series,
     algorithm: str = "quantile_regression",
     hyperparams: Dict[str, Any] = None,
-    quantiles: List[float] = None
+    quantiles: List[float] = None,
+    device: str = "cpu",
 ) -> Dict[str, Any]:
     """
     Train quantile regression models for multiple quantiles.
@@ -104,6 +105,7 @@ def train_quantile_model(
         algorithm: Algorithm choice ("quantile_regression", "xgboost", "lightgbm")
         hyperparams: Optional hyperparameter overrides
         quantiles: Quantiles to predict (default: [0.1, 0.5, 0.9])
+        device: Compute device ("cpu" or "cuda" for GPU training)
 
     Returns:
         Dict containing:
@@ -123,6 +125,7 @@ def train_quantile_model(
 
     logger.info(f"Training {algorithm} model for quantiles {quantiles}")
     logger.info(f"Training data: {X.shape[0]} samples, {X.shape[1]} features")
+    logger.info(f"Training device: {device}")
 
     # Check for missing values
     missing_pct = X.isna().sum() / len(X) * 100
@@ -139,9 +142,9 @@ def train_quantile_model(
         if algorithm == "quantile_regression":
             model = _train_sklearn_quantile(X, y, quantile, hyperparams)
         elif algorithm == "xgboost":
-            model = _train_xgboost_quantile(X, y, quantile, hyperparams)
+            model = _train_xgboost_quantile(X, y, quantile, hyperparams, device)
         elif algorithm == "lightgbm":
-            model = _train_lightgbm_quantile(X, y, quantile, hyperparams)
+            model = _train_lightgbm_quantile(X, y, quantile, hyperparams, device)
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}. "
                            f"Choose from: quantile_regression, xgboost, lightgbm")
@@ -204,7 +207,8 @@ def _train_xgboost_quantile(
     X: pd.DataFrame,
     y: pd.Series,
     quantile: float,
-    hyperparams: Dict[str, Any]
+    hyperparams: Dict[str, Any],
+    device: str = "cpu",
 ) -> Pipeline:
     """Train XGBoost quantile regressor."""
     try:
@@ -220,12 +224,22 @@ def _train_xgboost_quantile(
     imputer = SimpleImputer(strategy='median')
     X_imputed = imputer.fit_transform(X)
 
+    # Configure device-specific parameters
+    if device == "cuda":
+        tree_method = "gpu_hist"
+        device_param = "cuda"
+    else:
+        tree_method = "hist"
+        device_param = "cpu"
+
     model = xgb.XGBRegressor(
         objective='reg:quantileerror',
         quantile_alpha=quantile,
         n_estimators=n_estimators,
         max_depth=max_depth,
         learning_rate=learning_rate,
+        tree_method=tree_method,
+        device=device_param,
         random_state=42
     )
 
@@ -249,7 +263,8 @@ def _train_lightgbm_quantile(
     X: pd.DataFrame,
     y: pd.Series,
     quantile: float,
-    hyperparams: Dict[str, Any]
+    hyperparams: Dict[str, Any],
+    device: str = "cpu",
 ) -> Pipeline:
     """Train LightGBM quantile regressor."""
     try:
@@ -264,12 +279,17 @@ def _train_lightgbm_quantile(
     imputer = SimpleImputer(strategy='median')
     X_imputed = imputer.fit_transform(X)
 
+    # Configure device-specific parameters
+    # LightGBM uses "gpu" (not "cuda") for GPU device
+    device_param = "gpu" if device == "cuda" else "cpu"
+
     model = lgb.LGBMRegressor(
         objective='quantile',
         alpha=quantile,
         n_estimators=n_estimators,
         max_depth=max_depth,
         learning_rate=learning_rate,
+        device=device_param,
         random_state=42,
         verbose=-1
     )

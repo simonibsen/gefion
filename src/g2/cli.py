@@ -666,6 +666,7 @@ def ml_train(
     model_name: str = typer.Option(..., help="Model name (identifier)"),
     model_version: str = typer.Option(..., help="Model version (e.g., date tag)"),
     algorithm: str = typer.Option("quantile_regression", help="Algorithm: quantile_regression, xgboost, lightgbm"),
+    device: str = typer.Option("auto", help="Compute device: auto, cpu, cuda (GPU)"),
     out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
@@ -688,6 +689,13 @@ def ml_train(
     """
     from g2.ml.store import get_ml_dataset
     from g2.ml.models import load_dataset_from_csv, train_quantile_model, save_model_artifact
+    from g2.ml.device import detect_device
+
+    # Resolve device (auto-detect if "auto")
+    if device == "auto":
+        resolved_device = detect_device()
+    else:
+        resolved_device = device
 
     with db_connection(db_url) as conn:
         # Fetch dataset manifest
@@ -701,7 +709,7 @@ def ml_train(
         horizons = dataset["horizons_days"]
         all_train_metrics = {}
 
-        emit(f"Training {algorithm} models for horizons: {horizons}", json_output=json_output)
+        emit(f"Training {algorithm} models on {resolved_device} for horizons: {horizons}", json_output=json_output)
 
         for horizon in horizons:
             emit(f"Training model for {horizon}-day horizon...", json_output=json_output)
@@ -711,7 +719,7 @@ def ml_train(
             emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
 
             # Train quantile models (q10, q50, q90)
-            model_data = train_quantile_model(X, y, algorithm=algorithm)
+            model_data = train_quantile_model(X, y, algorithm=algorithm, device=resolved_device)
             emit(f"  Trained {len(model_data['models'])} quantile models", json_output=json_output)
 
             # Save model artifact
@@ -1222,6 +1230,7 @@ def ml_train_classifier(
     model_name: str = typer.Option(..., help="Model name (identifier)"),
     model_version: str = typer.Option(..., help="Model version (e.g., date tag)"),
     algorithm: str = typer.Option("sklearn", help="Algorithm: sklearn, xgboost, lightgbm"),
+    device: str = typer.Option("auto", help="Compute device: auto, cpu, cuda (GPU)"),
     horizon: int = typer.Option(..., help="Horizon in days for classification"),
     out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
@@ -1231,6 +1240,13 @@ def ml_train_classifier(
     import joblib
     from g2.ml.store import get_ml_dataset
     from g2.ml.classifier import load_dataset_for_classifier, train_classifier, evaluate_classifier
+    from g2.ml.device import detect_device
+
+    # Resolve device (auto-detect if "auto")
+    if device == "auto":
+        resolved_device = detect_device()
+    else:
+        resolved_device = device
 
     with db_connection(db_url) as conn:
         # Fetch dataset manifest
@@ -1239,7 +1255,7 @@ def ml_train_classifier(
             emit_error(f"Dataset not found: {dataset_name} {dataset_version}", json_output=json_output)
             return
 
-        emit(f"Training {algorithm} classifier for {horizon}-day horizon...", json_output=json_output)
+        emit(f"Training {algorithm} classifier on {resolved_device} for {horizon}-day horizon...", json_output=json_output)
 
         # Load features and labels for this horizon
         artifact_uri = Path(dataset["artifact_uri"])
@@ -1248,7 +1264,7 @@ def ml_train_classifier(
         emit(f"  Label distribution: {y.value_counts().to_dict()}", json_output=json_output)
 
         # Train classifier
-        model_artifacts = train_classifier(X, y, algorithm=algorithm)
+        model_artifacts = train_classifier(X, y, algorithm=algorithm, device=resolved_device)
         emit(f"  Training accuracy: {model_artifacts['train_metrics']['train_accuracy']:.4f}", json_output=json_output)
 
         # Evaluate
