@@ -59,7 +59,7 @@ g2 ml dataset-build --name filtered --version v1 \
 
 ### 1.3 Parquet Export Format
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-28)
 
 **Goal**: Support Parquet format for dataset exports alongside CSV.
 
@@ -374,6 +374,7 @@ curl -X POST http://localhost:8000/predict \
 ### Completed
 - ✅ 1.1 Move indicators to database (2025-12-28)
 - ✅ 1.2 Feature selection during dataset build (2025-12-17)
+- ✅ 1.3 Parquet export format (2025-12-28)
 - ✅ 2.1 Trend classification model (2025-12-17)
 - ✅ 3.1 Cross-sectional features (2025-12-17)
 - ✅ 4.1 Trading strategies - 7 implemented (2025-12-17)
@@ -381,13 +382,12 @@ curl -X POST http://localhost:8000/predict \
 - ✅ 5.3 Feature importance analysis (2025-12-28)
 
 ### Next Up
-1. **1.3 Parquet export format** - Quick win, pyarrow already in dependencies
-2. **5.4 Hyperparameter tuning** - Grid/random search, time-series CV
-3. **5.5 Online prediction API** - FastAPI server for real-time predictions
+1. **5.4 Hyperparameter tuning** - Grid/random search, time-series CV
 
 ### Future
-4. 5.1 Warm-start retraining - Incremental learning for monthly updates
-5. 5.2 Model ensembles - Combine multiple algorithms
+3. 5.1 Warm-start retraining - Incremental learning for monthly updates
+4. 5.2 Model ensembles - Combine multiple algorithms
+5. 5.5 Online prediction API - Lower priority, defer
 
 ## Contributing
 
