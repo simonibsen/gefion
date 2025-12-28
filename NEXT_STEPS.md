@@ -634,41 +634,70 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ### 14. Advanced Backtesting Features
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-28)
 **Priority**: Medium (realism)
 **Effort**: 2-3 weeks
 
 **Context**: Add features for more realistic backtesting (costs, slippage, position sizing).
 
 **Action Items**:
-- [ ] Transaction cost modeling:
-  - Configurable commission per trade
-  - Bid-ask spread simulation
-  - Market impact for larger orders
-- [ ] Slippage modeling:
-  - Slippage as function of volume
-  - Limit vs. market order simulation
-- [ ] Position sizing strategies:
+- [x] Transaction cost modeling:
+  - Configurable commission per trade/share with min/max caps
+  - Bid-ask spread as percentage of trade value
+  - Market impact scaling with sqrt of participation
+  - Presets: ZERO_COSTS, RETAIL_COSTS, INSTITUTIONAL_COSTS
+- [x] Slippage modeling:
+  - Fixed percentage slippage
+  - Volume-based slippage (larger orders = more slippage)
+  - Volatility-based slippage
+  - Limit order support with fill/no-fill logic
+  - Presets: ZERO_SLIPPAGE, REALISTIC_SLIPPAGE
+- [x] Position sizing strategies:
   - Fixed dollar amount
-  - Kelly criterion
+  - Fixed percentage of portfolio
+  - Kelly criterion with fractional Kelly
+  - Volatility targeting
   - Risk parity
-  - Volatility-based sizing
-- [ ] Risk management:
-  - Stop loss orders
-  - Take profit targets
-  - Maximum position size limits
-  - Portfolio-level risk constraints
-- [ ] Walk-forward optimization:
-  - Rolling train/test windows
-  - Parameter stability analysis
-  - Out-of-sample performance validation
+- [x] Risk management:
+  - Stop loss and take profit triggers
+  - Maximum position size limits (% of portfolio)
+  - Maximum number of positions
+  - Portfolio drawdown monitoring
+  - Signal filtering and exit signal generation
+  - Presets: CONSERVATIVE_RISK, AGGRESSIVE_RISK
+- [x] Walk-forward optimization:
+  - Rolling train/test window generation
+  - Parameter grid search
+  - Overfitting detection (in-sample vs out-of-sample comparison)
+  - Aggregate metrics calculation
+- [x] BacktestEngine integration:
+  - All features optional with None defaults (backward compatible)
+  - Execution order: risk exits → strategy signals → filter → size → slip → execute
+  - Trade records include slippage and cost details
+- [x] MCP integration:
+  - backtest_run tool with cost/slippage/risk/sizing presets
+  - backtest_compare tool for strategy comparison
 
-**Files to create/modify**:
-- `src/g2/backtest/costs.py`
-- `src/g2/backtest/position_sizing.py`
-- `src/g2/backtest/risk_management.py`
-- `src/g2/backtest/optimization.py`
-- Update `BacktestEngine` to use these components
+**Files created**:
+- `src/g2/backtest/costs.py` (TransactionCosts, presets)
+- `src/g2/backtest/slippage.py` (SlippageModel, OrderType, presets)
+- `src/g2/backtest/risk.py` (RiskLimits, RiskManager, RiskAction, presets)
+- `src/g2/backtest/sizing.py` (PositionSizer, SizingMethod)
+- `src/g2/backtest/optimization.py` (WalkForwardOptimizer, overfitting detection)
+- `tests/test_backtest_costs.py` (18 tests)
+- `tests/test_backtest_slippage.py` (12 tests)
+- `tests/test_backtest_risk.py` (21 tests)
+- `tests/test_backtest_sizing.py` (15 tests)
+- `tests/test_backtest_optimization.py` (13 tests)
+
+**Files modified**:
+- `src/g2/backtest/engine.py` (integrated all features)
+- `src/g2/backtest/portfolio.py` (added costs parameter to buy/sell)
+- `src/g2/backtest/__init__.py` (package exports)
+- `tests/test_backtest_engine.py` (integration tests)
+- `mcp-server/server.py` (added backtest_run, backtest_compare tools)
+
+**Tests**: 113 tests passing (69 new tests for advanced features)
 
 ---
 
@@ -1550,9 +1579,20 @@ Update this section as items are completed:
   - `docs/MCP_PRODUCTION.md` deployment guide
   - 12 TDD tests passing
 
+**Completed** (2025-12-28):
+- ✅ Advanced Backtesting Features (#14)
+  - Transaction costs (commission, spread, market impact)
+  - Slippage modeling (fixed, volume-based, volatility-based)
+  - Risk management (stop loss, take profit, position limits)
+  - Position sizing (fixed, percent, Kelly, volatility target)
+  - Walk-forward optimization (overfitting detection)
+  - BacktestEngine integration (backward compatible)
+  - MCP integration (backtest_run, backtest_compare tools)
+  - 69 new tests (113 total backtest tests passing)
+
 **In Progress**: None
 
-**Next Up**: #14 Advanced Backtesting Features, #26 Data Visualization
+**Next Up**: #26 Data Visualization
 
 ---
 
