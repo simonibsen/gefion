@@ -2084,6 +2084,29 @@ def _db_init_impl(db_url, json_output):
             json_output=json_output
         )
 
+        # Seed feature functions and definitions from JSON files
+        fx_dir = package_dir / "feature-functions"
+        def_dir = package_dir / "feature-definitions"
+
+        fx_count = 0
+        def_count = 0
+
+        if fx_dir.exists():
+            with db_connection(url) as conn:
+                init_schema_tables(conn, ["feature_functions"])
+                fx_count = import_functions_from_directory(conn, fx_dir, None)
+
+        if def_dir.exists():
+            with db_connection(url) as conn:
+                init_schema_tables(conn, ["feature_definitions", "computed_features"])
+                def_count = import_definitions_from_directory(conn, def_dir, None)
+
+        if fx_count > 0 or def_count > 0:
+            emit(
+                f"Seeded {fx_count} feature function(s) and {def_count} feature definition(s)",
+                json_output=json_output
+            )
+
     except Exception as exc:
         emit_error(f"Initialization failed: {exc}", json_output=json_output)
 

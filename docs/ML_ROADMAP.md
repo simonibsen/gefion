@@ -15,22 +15,22 @@ g2 aims to provide a comprehensive ML-driven quantitative analysis platform with
 
 ### 1.1 Move Built-in Indicators to Database
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-26)
 
 **Goal**: Achieve true DB-first architecture by storing all feature functions in the database.
 
-**Current State**: Built-in technical indicators (RSI, MACD, Bollinger Bands, etc.) are implemented in Python code.
+**Implementation**:
+- 9 indicator functions in `feature-functions/` (RSI, MACD, Bollinger Bands, SMA, EMA, ADX, Stochastic, PSAR, price_change)
+- 18 feature definitions in `feature-definitions/` (specific configurations like indicator_rsi_14, indicator_sma_20, etc.)
+- `db-init` automatically seeds feature functions and definitions
+- `feat-fx-import` / `feat-def-import` commands for manual import
+- `feat-fx-export` / `feat-def-export` commands for exporting to JSON
 
 **Benefits**:
 - Users can modify indicator parameters without code changes
 - Consistent versioning and export/import workflow
 - Easier to add new indicators via JSON files
 - Better isolation and sandboxing
-
-**Implementation**:
-- Migrate indicator functions from `src/g2/compute/indicators.py` to JSON files in `feature-functions/`
-- Update seeding process to import from JSON instead of hardcoded Python
-- Maintain backward compatibility during migration
 
 ### 1.2 Feature Selection During Dataset Build
 
