@@ -355,6 +355,27 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="ml_feature_importance",
+            description=(
+                "Compute SHAP-based feature importance for a trained model. "
+                "Shows which features contribute most to predictions. "
+                "Works with XGBoost, LightGBM (fast TreeSHAP) and sklearn models (permutation importance)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Model name"},
+                    "model_version": {"type": "string", "description": "Model version"},
+                    "horizon": {"type": "integer", "description": "Horizon in days (e.g., 7, 30, 90)"},
+                    "quantile": {"type": "string", "description": "Quantile to analyze (q10, q50, q90)", "default": "q50"},
+                    "top_k": {"type": "integer", "description": "Number of top features to return", "default": 20},
+                    "out_dir": {"type": "string", "description": "Model artifacts directory", "default": "models"},
+                },
+                "required": ["model_name", "model_version", "horizon"],
+            },
+        ),
+
+        Tool(
             name="ml_train_classifier",
             description=(
                 "Train multi-class trend classifier (5-class: strong_down, weak_down, flat, weak_up, strong_up). "
@@ -878,6 +899,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _ml_predict(arguments)
         elif name == "ml_eval":
             result = await _ml_eval(arguments)
+        elif name == "ml_feature_importance":
+            result = await _ml_feature_importance(arguments)
         elif name == "ml_train_classifier":
             result = await _ml_train_classifier(arguments)
         elif name == "ml_predict_classifier":
@@ -1055,6 +1078,26 @@ async def _ml_eval(args: Dict[str, Any]) -> Dict[str, Any]:
         '--start-date', args['start_date'],
         '--end-date', args['end_date'],
     ]
+
+    return await executor.run(*cmd)
+
+
+async def _ml_feature_importance(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute feature importance for ML model."""
+    cmd = [
+        'ml', 'feature-importance',
+        '--model-name', args['model_name'],
+        '--model-version', args['model_version'],
+        '--horizon', str(args['horizon']),
+        '--json',
+    ]
+
+    if args.get('quantile'):
+        cmd.extend(['--quantile', args['quantile']])
+    if args.get('top_k'):
+        cmd.extend(['--top-k', str(args['top_k'])])
+    if args.get('out_dir'):
+        cmd.extend(['--out-dir', args['out_dir']])
 
     return await executor.run(*cmd)
 

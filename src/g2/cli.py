@@ -1223,6 +1223,70 @@ def ml_eval(
     )
 
 
+@ml_app.command("feature-importance")
+def ml_feature_importance(
+    model_name: str = typer.Option(..., help="Model name"),
+    model_version: str = typer.Option(..., help="Model version"),
+    horizon: int = typer.Option(..., help="Horizon in days (e.g., 7, 30, 90)"),
+    quantile: str = typer.Option("q50", help="Quantile to analyze (q10, q50, q90)"),
+    top_k: int = typer.Option(20, help="Number of top features to display"),
+    out_dir: Path = typer.Option(Path("models"), help="Directory containing model artifacts"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """
+    Compute SHAP-based feature importance for a trained model.
+
+    Shows which features contribute most to model predictions.
+    Requires the model to be trained with XGBoost or LightGBM for
+    fast TreeSHAP computation. Falls back to permutation importance
+    for sklearn models.
+
+    Examples:
+        # Show top 20 features for 7-day horizon
+        g2 ml feature-importance --model-name mvp --model-version 20251228 --horizon 7
+
+        # Show top 10 features as JSON
+        g2 ml feature-importance --model-name mvp --model-version 20251228 --horizon 7 --top-k 10 --json
+    """
+    from g2.ml.importance import get_feature_importance, format_importance_table
+
+    # Build model artifact path
+    model_dir = out_dir / f"{model_name}_{model_version}_h{horizon}"
+
+    if not model_dir.exists():
+        emit_error(f"Model not found: {model_dir}", json_output=json_output)
+        return
+
+    emit(f"Computing feature importance for {model_name} {model_version} (horizon={horizon})...", json_output=json_output)
+
+    try:
+        result = get_feature_importance(
+            model_path=model_dir,
+            quantile=quantile,
+            top_k=top_k,
+        )
+
+        if json_output:
+            emit(
+                "Feature importance computed",
+                data=result,
+                json_output=json_output,
+            )
+        else:
+            # Pretty print as table
+            table = format_importance_table(result["importance"], top_k=top_k)
+            emit(table)
+            emit(f"\nAlgorithm: {result['algorithm']}")
+            emit(f"Total features: {result['num_features']}")
+
+    except ImportError as e:
+        emit_error(str(e), json_output=json_output)
+    except FileNotFoundError as e:
+        emit_error(str(e), json_output=json_output)
+    except Exception as e:
+        emit_error(f"Failed to compute importance: {e}", json_output=json_output)
+
+
 @ml_app.command("train-classifier")
 def ml_train_classifier(
     dataset_name: str = typer.Option(..., help="Dataset name to train on"),

@@ -315,23 +315,29 @@ g2 backtest run \
 
 ### 5.3 Feature Importance Analysis
 
+**Status**: ✅ Complete (2025-12-28)
+
 **Goal**: Understand which features drive predictions.
 
-**Outputs**:
-- SHAP values for feature attribution
-- Feature importance rankings
-- Partial dependence plots
-- Feature selection recommendations
+**Implementation**:
+- SHAP-based feature importance using TreeSHAP for XGBoost/LightGBM (fast, exact)
+- Permutation importance fallback for sklearn models
+- CLI command: `g2 ml feature-importance`
+- MCP tool: `ml_feature_importance`
+- Automatically adapts to any features in the trained model
 
 **Usage**:
 ```bash
-# Analyze feature importance
+# Show top 20 features for 7-day horizon
 g2 ml feature-importance \
   --model-name mvp_model --model-version 20251217 \
   --horizon 7 \
   --top-k 20
 
-# Output: Ranked features with importance scores
+# Output as JSON for programmatic use
+g2 ml feature-importance \
+  --model-name mvp_model --model-version 20251217 \
+  --horizon 7 --json
 ```
 
 ### 5.4 Hyperparameter Tuning
