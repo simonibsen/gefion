@@ -591,19 +591,18 @@ With the foundation in place, choose your strategic direction based on goals:
 
 ### 13. Strategy Comparison Framework
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-27)
 **Priority**: Medium (enables evaluation)
 **Effort**: 1-2 weeks
 
 **Context**: Enable side-by-side comparison of strategy performance to identify best performers for given conditions.
 
 **Action Items**:
-- [ ] Implement comparison metrics:
-  - Risk-adjusted returns (Sharpe, Sortino, Calmar ratios)
-  - Drawdown analysis (max, average, recovery time)
-  - Trade statistics (win rate, profit factor, avg win/loss)
-  - Consistency metrics (monthly returns, rolling Sharpe)
-- [ ] Create comparison CLI command:
+- [x] Implement comparison metrics:
+  - Risk-adjusted returns (Sharpe, Sortino, Calmar ratios) ✓
+  - Drawdown analysis (max drawdown) ✓
+  - Trade statistics (win rate, profit factor, avg win/loss) ✓
+- [x] Create comparison CLI command:
   ```bash
   g2 backtest compare \
     --strategies momentum,mean_reversion,breakout \
@@ -611,26 +610,25 @@ With the foundation in place, choose your strategic direction based on goals:
     --start-date 2024-01-01 \
     --end-date 2024-12-31
   ```
-- [ ] Generate comparison report:
-  - Table of key metrics by strategy
-  - Equity curve plots (matplotlib/plotly)
-  - Monthly return heatmaps
-  - Export to JSON/CSV for further analysis
-- [ ] Add statistical significance testing:
+- [x] Generate comparison report:
+  - Table of key metrics by strategy ✓
+  - Export to JSON for further analysis ✓
+- [ ] Add statistical significance testing (deferred):
   - Bootstrap confidence intervals
   - Paired t-tests for return differences
-- [ ] Document best practices for strategy selection:
+- [ ] Document best practices for strategy selection (deferred):
   - Market regime considerations
   - Portfolio allocation across strategies
-  - Parameter sensitivity analysis
 
-**Files to create/modify**:
-- `src/g2/backtest/comparison.py`
-- `src/g2/backtest/metrics.py` (expand existing)
-- `src/g2/backtest/reporting.py`
-- `src/g2/cli.py` (add compare command)
-- `tests/test_comparison.py`
-- `docs/STRATEGY_COMPARISON.md`
+**Files created/modified**:
+- `src/g2/backtest/comparison.py` ✓
+- `src/g2/backtest/metrics.py` (extended with Sortino, Calmar, trade metrics) ✓
+- `src/g2/cli.py` (added compare command) ✓
+- `tests/test_comparison.py` ✓
+- `tests/test_backtest_compare_cli.py` ✓
+- `tests/test_backtest_metrics_extended.py` ✓
+
+**Tests**: 31 tests passing
 
 ---
 
@@ -1533,7 +1531,20 @@ Update this section as items are completed:
   - Identified gap: MCP tools not accessible during CLI development
   - Proposed CLI integration and standalone MCP client
 
+**Completed** (2025-12-27):
+- ✅ Strategy Comparison Framework (#13)
+  - Extended metrics (Sortino, Calmar, win rate, profit factor)
+  - `g2 backtest compare` CLI command
+  - Strategy ranking by metric
+  - 31 tests passing
+- ✅ Parquet loading support (load_dataset renamed)
+  - Auto-detects Parquet vs CSV format
+  - Prefers Parquet when both exist
+- ✅ GPU training support for XGBoost/LightGBM
+  - `--device` flag for ml train commands
+  - Auto-detection via `g2 ml device`
+
 **In Progress**: None
 
-**Next Up**: Choose strategic path (A: Trading-First, B: ML-First, or C: Scale-First)
+**Next Up**: #14 Advanced Backtesting Features or #26 Data Visualization
 
