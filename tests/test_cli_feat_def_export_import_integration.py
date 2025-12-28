@@ -1,5 +1,7 @@
 """
 Integration tests for feat-def-export and feat-def-import CLI commands.
+
+These tests require a running database with ENABLE_DB_TESTS=1.
 """
 import json
 import os
@@ -10,6 +12,13 @@ from typer.testing import CliRunner
 from g2 import cli
 from g2.db import schema
 from g2.db.ingest import ensure_feature_definitions, ensure_store_targets
+
+
+# Skip all tests in this module if ENABLE_DB_TESTS is not set
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
 
 
 runner = CliRunner(env={"DATABASE_URL": "postgresql://g2:g2pass@localhost:6432/g2"})

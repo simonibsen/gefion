@@ -5,6 +5,8 @@ The bug: Writer thread errors are appended to a list but don't cause the operati
 Users think writes succeeded when they partially failed.
 
 The fix: Raise an exception if writer_errors is non-empty after draining the queue.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 from datetime import date, timedelta
@@ -18,6 +20,12 @@ from g2.db import schema, pool
 from g2.db.ingest import upsert_stock
 from g2.features.dispatcher import compute_features
 from g2.cli_helpers import upsert_feature_function
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
 
 
 @pytest.fixture

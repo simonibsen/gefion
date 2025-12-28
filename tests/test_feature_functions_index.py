@@ -5,12 +5,20 @@ The issue: Queries filtering on (enabled, status, name) are slow without an inde
 The query: WHERE enabled = TRUE AND status = 'active' AND name = %s
 
 The fix: Add composite index on (enabled, status, name) to optimize this lookup.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 import psycopg
 import pytest
 
 from g2.db import schema
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
 
 
 @pytest.fixture

@@ -5,6 +5,8 @@ The bug: SET LOCAL synchronous_commit only works inside a transaction block.
 When autocommit=True, there's no transaction, so SET LOCAL has no effect.
 
 The fix: Use SET (session-level) instead of SET LOCAL when in autocommit mode.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 from datetime import date, timedelta
@@ -15,6 +17,12 @@ import pytest
 
 from g2.db import schema, pool
 from g2.db.ingest import upsert_stock, insert_computed_features
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
 
 
 @pytest.fixture

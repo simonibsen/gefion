@@ -4,6 +4,8 @@ Test that writer threads use separate connections, not a shared connection.
 This test verifies that each writer thread gets its own database connection
 from the pool, rather than sharing a single connection from the main thread,
 which would violate psycopg's thread-safety requirements.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 import threading
@@ -17,6 +19,12 @@ from g2.db import schema, pool
 from g2.db.ingest import upsert_stock
 from g2.features.dispatcher import compute_features
 from g2.cli_helpers import upsert_feature_function
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
 
 
 @pytest.fixture

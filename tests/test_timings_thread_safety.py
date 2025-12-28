@@ -8,6 +8,8 @@ The bug: Multiple threads update the shared timings dict without synchronization
 The += operator on dict values is NOT atomic and can lead to lost updates.
 
 The fix: Use threading.Lock() to protect timings dict updates.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 import threading
@@ -22,6 +24,12 @@ from g2.db import schema, pool
 from g2.db.ingest import upsert_stock
 from g2.features.dispatcher import compute_features
 from g2.cli_helpers import upsert_feature_function
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
 
 
 @pytest.fixture

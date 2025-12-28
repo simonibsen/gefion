@@ -5,6 +5,8 @@ The bug: exec(body, {}, local_env) allows unrestricted access to built-ins,
 enabling file I/O, imports, and other dangerous operations.
 
 The fix: Use a restricted globals environment that blocks dangerous built-ins.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 from datetime import date
@@ -17,6 +19,12 @@ from psycopg.types.json import Json
 from g2.db import schema
 from g2.db.ingest import upsert_stock
 from g2.features.dispatcher import _load_db_function
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
 
 
 @pytest.fixture
