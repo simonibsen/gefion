@@ -137,28 +137,36 @@ Use `propagate_context` decorator (from `g2.ingest.universe`) when spawning work
 
 ## Git Hooks
 
-The project uses Git hooks to enforce development rules:
+The project uses Git hooks to enforce development rules.
+
+### Installation
+
+```bash
+./scripts/hooks/install.sh
+```
+
+This installs all hooks from `scripts/hooks/` to `.git/hooks/`.
 
 ### commit-msg Hook
-Located at `.git/hooks/commit-msg`, this hook enforces:
 - Rejects commits with "Claude" in author name
 - Rejects commits with anthropic.com email addresses
 - Rejects commits with "Co-Authored-By: Claude" in messages
-
-This prevents AI attribution from appearing in the git history.
+- Displays development rules reminder
 
 ### pre-commit Hook
-Located at `.git/hooks/pre-commit`, this hook:
 - Checks new Python files in `src/g2/` for observability imports
 - Warns if files are missing `from g2.observability import` or `import logging`
+- Reminds about span parenting for thread context propagation
 - Currently a warning only (does not block commit)
 
 ### pre-push Hook
-Located at `.git/hooks/pre-push`, this hook:
 - Runs full test suite before push
 - Aborts push if any tests fail
 
-All hooks are executable and run automatically.
+### prepare-commit-msg Hook
+- Displays development rules reminder before commit
+
+All hooks are stored in `scripts/hooks/` and installed to `.git/hooks/`.
 
 ## Pre-Commit Checklist
 

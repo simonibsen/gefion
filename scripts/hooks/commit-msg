@@ -1,0 +1,62 @@
+#!/bin/bash
+#
+# commit-msg hook: Enforce development rules and reject AI attribution
+#
+
+# Display TDD and development rules reminder
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "📋 AI Development Rules Reminder:"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+echo "Before committing, verify compliance with:"
+echo ""
+echo "  1. TDD: Were tests written FIRST?"
+echo "     - Real tests with assertions (not just 'pass' stubs)"
+echo "     - Tests must FAIL before implementation (red)"
+echo "     - Then implement until tests PASS (green)"
+echo "  2. Commit message: No AI tool mentions?"
+echo "  3. Code quality: Fixing code, not tests?"
+echo "  4. Anti-drift: Actions aligned with instructions?"
+echo "  5. KISS: Simplest solution? Remove unused complexity?"
+echo "  6. Coupling: Functions self-contained? No implicit dependencies?"
+echo "  7. Performance: Optimizing the right bottleneck?"
+echo ""
+echo "Reference: DEVELOPMENT.md and AI_INSTRUCTIONS.md"
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
+# Check git author name
+AUTHOR_NAME=$(git config user.name)
+AUTHOR_EMAIL=$(git config user.email)
+
+if [[ "$AUTHOR_NAME" == *"Claude"* ]]; then
+    echo "❌ Commit rejected: Author name contains 'Claude'"
+    echo "Current git author: $AUTHOR_NAME <$AUTHOR_EMAIL>"
+    echo ""
+    echo "Fix with:"
+    echo "  git config user.name \"Your Name\""
+    echo "  git config user.email \"your.email@example.com\""
+    exit 1
+fi
+
+if [[ "$AUTHOR_EMAIL" == *"anthropic.com"* ]]; then
+    echo "❌ Commit rejected: Author email is from anthropic.com"
+    echo "Current git author: $AUTHOR_NAME <$AUTHOR_EMAIL>"
+    echo ""
+    echo "Fix with:"
+    echo "  git config user.email \"your.email@example.com\""
+    exit 1
+fi
+
+# Check commit message for Co-Authored-By: Claude
+COMMIT_MSG_FILE="$1"
+if grep -qi "Co-Authored-By:.*Claude" "$COMMIT_MSG_FILE"; then
+    echo "❌ Commit rejected: Commit message contains 'Co-Authored-By: Claude'"
+    echo ""
+    echo "Remove the Co-Authored-By line with Claude from your commit message"
+    exit 1
+fi
+
+exit 0
