@@ -107,6 +107,7 @@ def train_quantile_model(
     hyperparams: Dict[str, Any] = None,
     quantiles: List[float] = None,
     device: str = "cpu",
+    base_model_path: Path = None,
 ) -> Dict[str, Any]:
     """
     Train quantile regression models for multiple quantiles.
@@ -118,6 +119,9 @@ def train_quantile_model(
         hyperparams: Optional hyperparameter overrides
         quantiles: Quantiles to predict (default: [0.1, 0.5, 0.9])
         device: Compute device ("cpu" or "cuda" for GPU training)
+        base_model_path: Optional path to base model for warm-start training.
+                        Continues training from this model instead of starting fresh.
+                        Only supported for xgboost and lightgbm.
 
     Returns:
         Dict containing:
@@ -125,6 +129,8 @@ def train_quantile_model(
             - imputer: SimpleImputer - Fitted imputer
             - feature_names: List[str] - Feature column names
             - train_metrics: Dict - Training metrics
+            - warm_start: bool - Whether warm-start was used
+            - base_model_path: str - Path to base model (if warm-start)
 
     Raises:
         ValueError: If algorithm not supported
@@ -145,23 +151,59 @@ def train_quantile_model(
     if len(high_missing) > 0:
         logger.warning(f"Features with >20% missing values: {dict(high_missing)}")
 
+    # Load base model for warm-start if provided
+    base_models = None
+    warm_start_used = False
+    if base_model_path is not None:
+        base_model_path = Path(base_model_path)
+        if base_model_path.exists():
+            try:
+                base_artifact = load_model_artifact(base_model_path)
+                base_models = base_artifact.get("models", {})
+                base_algorithm = base_artifact.get("algorithm", "")
+
+                # Validate algorithm match
+                if base_algorithm and base_algorithm != algorithm:
+                    logger.warning(
+                        f"Algorithm mismatch: base model is {base_algorithm}, "
+                        f"requested {algorithm}. Falling back to fresh training."
+                    )
+                    base_models = None
+                elif algorithm == "quantile_regression":
+                    logger.warning(
+                        "sklearn QuantileRegressor does not support warm-start. "
+                        "Falling back to fresh training."
+                    )
+                    base_models = None
+                else:
+                    logger.info(f"Loaded base model from {base_model_path} for warm-start")
+                    warm_start_used = True
+            except Exception as e:
+                logger.warning(f"Failed to load base model: {e}. Training from scratch.")
+                base_models = None
+        else:
+            logger.warning(f"Base model path not found: {base_model_path}. Training from scratch.")
+
     # Train separate model for each quantile
     models = {}
 
     for quantile in quantiles:
-        logger.info(f"Training model for quantile {quantile}")
+        quantile_key = f"q{int(quantile * 100)}"
+        base_model = base_models.get(quantile_key) if base_models else None
+
+        logger.info(f"Training model for quantile {quantile}" +
+                   (" (warm-start)" if base_model else ""))
 
         if algorithm == "quantile_regression":
             model = _train_sklearn_quantile(X, y, quantile, hyperparams)
         elif algorithm == "xgboost":
-            model = _train_xgboost_quantile(X, y, quantile, hyperparams, device)
+            model = _train_xgboost_quantile(X, y, quantile, hyperparams, device, base_model)
         elif algorithm == "lightgbm":
-            model = _train_lightgbm_quantile(X, y, quantile, hyperparams, device)
+            model = _train_lightgbm_quantile(X, y, quantile, hyperparams, device, base_model)
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}. "
                            f"Choose from: quantile_regression, xgboost, lightgbm")
 
-        quantile_key = f"q{int(quantile * 100)}"
         models[quantile_key] = model
 
     # Calculate training metrics
@@ -182,14 +224,20 @@ def train_quantile_model(
     first_model = list(models.values())[0]
     imputer = first_model.named_steps['imputer']
 
-    return {
+    result = {
         "models": models,
         "imputer": imputer,
         "feature_names": list(X.columns),
         "train_metrics": train_metrics,
         "quantiles": quantiles,
-        "algorithm": algorithm
+        "algorithm": algorithm,
+        "warm_start": warm_start_used,
     }
+
+    if warm_start_used and base_model_path is not None:
+        result["base_model_path"] = str(base_model_path)
+
+    return result
 
 
 def _train_sklearn_quantile(
@@ -221,8 +269,21 @@ def _train_xgboost_quantile(
     quantile: float,
     hyperparams: Dict[str, Any],
     device: str = "cpu",
-) -> Pipeline:
-    """Train XGBoost quantile regressor."""
+    base_model: Any = None,
+) -> "XGBPipeline":
+    """Train XGBoost quantile regressor.
+
+    Args:
+        X: Feature matrix
+        y: Target values
+        quantile: Quantile to predict (e.g., 0.5 for median)
+        hyperparams: Hyperparameter overrides
+        device: Compute device ("cpu" or "cuda")
+        base_model: Optional base model for warm-start training
+
+    Returns:
+        XGBPipeline with trained model
+    """
     try:
         import xgboost as xgb
     except ImportError:
@@ -251,7 +312,14 @@ def _train_xgboost_quantile(
         random_state=42
     )
 
-    model.fit(X_imputed, y)
+    # Warm-start: continue training from base model
+    if base_model is not None and hasattr(base_model, 'model'):
+        # Extract the underlying XGBoost model from the pipeline wrapper
+        xgb_base = base_model.model
+        logger.info(f"Warm-starting XGBoost from base model with {xgb_base.n_estimators} trees")
+        model.fit(X_imputed, y, xgb_model=xgb_base)
+    else:
+        model.fit(X_imputed, y)
 
     # Wrap in pipeline for consistency
     class XGBPipeline:
@@ -273,8 +341,21 @@ def _train_lightgbm_quantile(
     quantile: float,
     hyperparams: Dict[str, Any],
     device: str = "cpu",
-) -> Pipeline:
-    """Train LightGBM quantile regressor."""
+    base_model: Any = None,
+) -> "LGBPipeline":
+    """Train LightGBM quantile regressor.
+
+    Args:
+        X: Feature matrix
+        y: Target values
+        quantile: Quantile to predict (e.g., 0.5 for median)
+        hyperparams: Hyperparameter overrides
+        device: Compute device ("cpu" or "cuda")
+        base_model: Optional base model for warm-start training
+
+    Returns:
+        LGBPipeline with trained model
+    """
     try:
         import lightgbm as lgb
     except ImportError:
@@ -302,7 +383,14 @@ def _train_lightgbm_quantile(
         verbose=-1
     )
 
-    model.fit(X_imputed, y)
+    # Warm-start: continue training from base model
+    if base_model is not None and hasattr(base_model, 'model'):
+        # Extract the underlying LightGBM model from the pipeline wrapper
+        lgb_base = base_model.model
+        logger.info(f"Warm-starting LightGBM from base model")
+        model.fit(X_imputed, y, init_model=lgb_base)
+    else:
+        model.fit(X_imputed, y)
 
     # Wrap in pipeline
     class LGBPipeline:

@@ -289,6 +289,8 @@ g2 backtest run \
 
 ### 5.1 Warm-Start Retraining
 
+**Status**: ✅ Complete (2025-12-28)
+
 **Goal**: Efficiently update models monthly without retraining from scratch.
 
 **Benefits**:
@@ -298,9 +300,27 @@ g2 backtest run \
 - Suitable for production deployment
 
 **Implementation**:
-- Save model state after training
-- Load existing model and continue training on new data
-- Supported by XGBoost and LightGBM (not basic quantile regression)
+- `base_model_path` parameter in `train_quantile_model()`
+- XGBoost warm-start via `xgb_model` parameter
+- LightGBM warm-start via `init_model` parameter
+- CLI options: `--warm-start` and `--base-model`
+- MCP tool: `ml_train` with `warm_start` and `base_model` params
+
+**Usage**:
+```bash
+# Initial training
+g2 ml train --dataset-name mvp --dataset-version v1 \
+  --model-name my_model --model-version v1 \
+  --algorithm xgboost
+
+# Monthly retrain with warm-start (10-100x faster)
+g2 ml train --dataset-name mvp --dataset-version v2 \
+  --model-name my_model --model-version v2 \
+  --algorithm xgboost \
+  --warm-start --base-model models/my_model_v1_h7
+```
+
+**Note**: Only supported for XGBoost and LightGBM (sklearn QuantileRegressor does not support warm-start)
 
 ### 5.2 Model Ensembles
 
@@ -397,13 +417,13 @@ curl -X POST http://localhost:8000/predict \
 - ✅ 3.1 Cross-sectional features (2025-12-17)
 - ✅ 4.1 Trading strategies - 7 implemented (2025-12-17)
 - ✅ 4.2 Backtesting engine MVP (2025-12-17)
+- ✅ 5.1 Warm-start retraining (2025-12-28)
 - ✅ 5.3 Feature importance analysis (2025-12-28)
 - ✅ 5.4 Hyperparameter tuning with Optuna (2025-12-28)
 
 ### Future
-1. 5.1 Warm-start retraining - Incremental learning for monthly updates
-2. 5.2 Model ensembles - Combine multiple algorithms
-3. 5.5 Online prediction API - Lower priority, defer
+1. 5.2 Model ensembles - Combine multiple algorithms
+2. 5.5 Online prediction API - Lower priority, defer
 
 ## Contributing
 

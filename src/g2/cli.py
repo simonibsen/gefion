@@ -668,6 +668,8 @@ def ml_train(
     algorithm: str = typer.Option("quantile_regression", help="Algorithm: quantile_regression, xgboost, lightgbm"),
     device: str = typer.Option("auto", help="Compute device: auto, cpu, cuda (GPU)"),
     out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
+    warm_start: bool = typer.Option(False, "--warm-start", help="Continue training from base model (10-100x faster)"),
+    base_model: Optional[Path] = typer.Option(None, "--base-model", help="Path to base model for warm-start (required if --warm-start)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
@@ -683,6 +685,11 @@ def ml_train(
         g2 ml train --dataset-name nasdaq_50 --dataset-version 2025-01 \\
             --model-name nasdaq_xgb --model-version v1 --algorithm xgboost
 
+        # Warm-start from existing model (XGBoost/LightGBM only)
+        g2 ml train --dataset-name nasdaq_50 --dataset-version 2025-02 \\
+            --model-name nasdaq_xgb --model-version v2 --algorithm xgboost \\
+            --warm-start --base-model models/nasdaq_xgb_v1_h7
+
         # Train with custom output directory
         g2 ml train --dataset-name custom --dataset-version v1 \\
             --model-name custom_model --model-version v1 --out-dir ./my_models
@@ -697,6 +704,14 @@ def ml_train(
     else:
         resolved_device = device
 
+    # Validate warm-start options
+    if warm_start and not base_model:
+        emit_error("--warm-start requires --base-model path", json_output=json_output)
+        return
+    if warm_start and algorithm == "quantile_regression":
+        emit_error("--warm-start not supported for quantile_regression (use xgboost or lightgbm)", json_output=json_output)
+        return
+
     with db_connection(db_url) as conn:
         # Fetch dataset manifest
         dataset = get_ml_dataset(conn, name=dataset_name, version=dataset_version)
@@ -709,6 +724,8 @@ def ml_train(
         horizons = dataset["horizons_days"]
         all_train_metrics = {}
 
+        if warm_start:
+            emit(f"Warm-start training {algorithm} models from {base_model}", json_output=json_output)
         emit(f"Training {algorithm} models on {resolved_device} for horizons: {horizons}", json_output=json_output)
 
         for horizon in horizons:
@@ -718,9 +735,24 @@ def ml_train(
             X, y = load_dataset(artifact_uri, horizon)
             emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
 
+            # Determine base model path for this horizon
+            base_model_path = None
+            if warm_start and base_model:
+                # Try horizon-specific path first, then generic
+                horizon_specific = base_model.parent / f"{base_model.name}_h{horizon}"
+                if horizon_specific.exists():
+                    base_model_path = horizon_specific
+                elif base_model.exists():
+                    base_model_path = base_model
+                else:
+                    emit(f"  Warning: Base model not found at {base_model}, training from scratch", json_output=json_output)
+
             # Train quantile models (q10, q50, q90)
-            model_data = train_quantile_model(X, y, algorithm=algorithm, device=resolved_device)
-            emit(f"  Trained {len(model_data['models'])} quantile models", json_output=json_output)
+            model_data = train_quantile_model(X, y, algorithm=algorithm, device=resolved_device, base_model_path=base_model_path)
+            if model_data.get("warm_start"):
+                emit(f"  Warm-started {len(model_data['models'])} quantile models", json_output=json_output)
+            else:
+                emit(f"  Trained {len(model_data['models'])} quantile models", json_output=json_output)
 
             # Save model artifact
             out_dir.mkdir(parents=True, exist_ok=True)

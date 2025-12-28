@@ -293,7 +293,8 @@ async def list_tools() -> List[Tool]:
             description=(
                 "Train quantile regression models for multi-horizon prediction. "
                 "Trains q10/q50/q90 models for each horizon. "
-                "Saves model artifacts to out_dir/{model_name}_{model_version}_hN/"
+                "Saves model artifacts to out_dir/{model_name}_{model_version}_hN/. "
+                "Supports warm-start for XGBoost/LightGBM (10-100x faster retraining)."
             ),
             inputSchema={
                 "type": "object",
@@ -309,6 +310,15 @@ async def list_tools() -> List[Tool]:
                         "enum": ["quantile_regression", "xgboost", "lightgbm"]
                     },
                     "out_dir": {"type": "string", "description": "Output directory for model artifacts", "default": "models"},
+                    "warm_start": {
+                        "type": "boolean",
+                        "description": "Continue training from base model (10-100x faster). Requires base_model path.",
+                        "default": False
+                    },
+                    "base_model": {
+                        "type": "string",
+                        "description": "Path to base model for warm-start (e.g., models/my_model_v1_h7). Required if warm_start=true."
+                    },
                 },
                 "required": ["dataset_name", "dataset_version", "model_name", "model_version"],
             },
@@ -1082,6 +1092,10 @@ async def _ml_train(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd.extend(['--algorithm', args['algorithm']])
     if args.get('out_dir'):
         cmd.extend(['--out-dir', args['out_dir']])
+    if args.get('warm_start'):
+        cmd.append('--warm-start')
+    if args.get('base_model'):
+        cmd.extend(['--base-model', args['base_model']])
 
     return await executor.run(*cmd)
 
