@@ -5,11 +5,15 @@ Provides point-in-time correct backtesting with no look-ahead bias.
 """
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import date
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from g2.backtest.portfolio import Portfolio
+from g2.observability import create_span, set_attributes
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from g2.backtest.costs import TransactionCosts
@@ -141,6 +145,21 @@ class BacktestEngine:
                 - equity_curve: List of {date, equity} points
                 - metrics: Performance metrics
         """
+        with create_span(
+            "backtest.run",
+            initial_cash=self.initial_cash,
+            start_date=str(self.start_date),
+            end_date=str(self.end_date),
+            trading_days=len(self._trading_dates),
+            has_costs=self.costs is not None,
+            has_slippage=self.slippage is not None,
+            has_risk_manager=self.risk_manager is not None,
+            has_position_sizer=self.position_sizer is not None,
+        ) as span:
+            return self._run_impl(span)
+
+    def _run_impl(self, span) -> Dict[str, Any]:
+        """Internal implementation of backtest run."""
         portfolio = Portfolio(initial_cash=self.initial_cash)
         trades = []
         equity_curve = []
@@ -199,6 +218,21 @@ class BacktestEngine:
         from g2.backtest.metrics import calculate_metrics
 
         metrics = calculate_metrics(equity_curve, initial_capital=self.initial_cash)
+
+        # Add results to span
+        set_attributes(
+            span,
+            trade_count=len(trades),
+            total_return=metrics.get("total_return", 0),
+            sharpe_ratio=metrics.get("sharpe_ratio", 0),
+            max_drawdown=metrics.get("max_drawdown", 0),
+        )
+
+        logger.info(
+            f"Backtest complete: {len(trades)} trades, "
+            f"return={metrics.get('total_return', 0):.2%}, "
+            f"sharpe={metrics.get('sharpe_ratio', 0):.2f}"
+        )
 
         return {"trades": trades, "equity_curve": equity_curve, "metrics": metrics}
 

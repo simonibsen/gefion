@@ -71,6 +71,39 @@ def test_something():
 - Premature optimization is the root of all evil - start simple, measure, then optimize
 - When in doubt, benchmark: `time` commands, tracing spans, `EXPLAIN ANALYZE`
 
+### 9. Observability by Default
+Every new module should include observability from the start:
+
+- **Tracing**: Use `create_span()` or `@traced` decorator for key functions
+- **Logging**: Add `logger = logging.getLogger(__name__)` and log important events
+- **Attributes**: Include relevant context (symbols, counts, durations) in spans
+
+**Example:**
+```python
+from g2.observability import create_span, traced
+import logging
+
+logger = logging.getLogger(__name__)
+
+@traced("mymodule.process")
+def process_data(symbols):
+    logger.info(f"Processing {len(symbols)} symbols")
+    ...
+
+# Or with context manager for more control:
+def run_backtest(config):
+    with create_span("backtest.run", initial_cash=config.cash) as span:
+        result = _do_backtest(config)
+        span.set_attribute("trade_count", len(result.trades))
+        return result
+```
+
+**When to add observability:**
+- Entry points (CLI commands, API handlers)
+- Long-running operations (backtests, data ingestion, ML training)
+- Database operations (bulk inserts, complex queries)
+- External API calls (AlphaVantage, etc.)
+
 ## Git Hooks
 
 The project uses Git hooks to enforce development rules:
@@ -83,12 +116,18 @@ Located at `.git/hooks/commit-msg`, this hook enforces:
 
 This prevents AI attribution from appearing in the git history.
 
+### pre-commit Hook
+Located at `.git/hooks/pre-commit`, this hook:
+- Checks new Python files in `src/g2/` for observability imports
+- Warns if files are missing `from g2.observability import` or `import logging`
+- Currently a warning only (does not block commit)
+
 ### pre-push Hook
 Located at `.git/hooks/pre-push`, this hook:
 - Runs full test suite before push
 - Aborts push if any tests fail
 
-Both hooks are executable and run automatically.
+All hooks are executable and run automatically.
 
 ## Pre-Commit Checklist
 
@@ -96,6 +135,7 @@ Both hooks are executable and run automatically.
 - [ ] All tests passing (488+ passing, 0 failed)
 - [ ] Commit message reviewed (no AI tool mentions)
 - [ ] Code follows existing patterns
+- [ ] **Observability**: New modules have tracing/logging?
 - [ ] KISS: Is this the simplest solution? Remove unused complexity
 - [ ] Coupling: Are functions self-contained? No implicit dependencies
 - [ ] Performance: Bottlenecks identified? Optimizing the right thing?
