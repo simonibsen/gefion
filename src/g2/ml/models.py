@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 logger = logging.getLogger(__name__)
 
 
-def load_dataset_from_csv(artifact_uri: Path, horizon_days: int) -> Tuple[pd.DataFrame, pd.Series]:
+def load_dataset(artifact_uri: Path, horizon_days: int) -> Tuple[pd.DataFrame, pd.Series]:
     """
     Load features and labels from CSV or Parquet files for a specific horizon.
 

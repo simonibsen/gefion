@@ -1,7 +1,7 @@
 """
 TDD tests for Parquet loading support in ML models.
 
-Tests that load_dataset_from_csv (misnamed) can load both CSV and Parquet formats.
+Tests that load_dataset can load both CSV and Parquet formats.
 """
 import json
 from pathlib import Path
@@ -53,7 +53,7 @@ class TestLoadDatasetParquet:
     def test_load_prefers_parquet_over_csv(self, tmp_path, sample_features_df, sample_labels_df, sample_manifest):
         """When both CSV and Parquet exist, Parquet should be preferred."""
         pytest.importorskip("pyarrow")
-        from g2.ml.models import load_dataset_from_csv
+        from g2.ml.models import load_dataset
 
         # Create both CSV and Parquet files
         sample_features_df.to_csv(tmp_path / "features.csv", index=False)
@@ -70,7 +70,7 @@ class TestLoadDatasetParquet:
         manifest_path.write_text(json.dumps(sample_manifest))
 
         # Load dataset
-        X, y = load_dataset_from_csv(manifest_path, horizon_days=7)
+        X, y = load_dataset(manifest_path, horizon_days=7)
 
         # Should use Parquet (doubled values)
         assert X["rsi_14"].iloc[0] == 100.0  # 50.0 * 2
@@ -78,7 +78,7 @@ class TestLoadDatasetParquet:
     def test_load_from_parquet_only(self, tmp_path, sample_features_df, sample_labels_df, sample_manifest):
         """Load from Parquet when only Parquet files exist."""
         pytest.importorskip("pyarrow")
-        from g2.ml.models import load_dataset_from_csv
+        from g2.ml.models import load_dataset
 
         # Create only Parquet files
         sample_features_df.to_parquet(tmp_path / "features.parquet", index=False)
@@ -89,7 +89,7 @@ class TestLoadDatasetParquet:
         manifest_path.write_text(json.dumps(sample_manifest))
 
         # Load dataset
-        X, y = load_dataset_from_csv(manifest_path, horizon_days=7)
+        X, y = load_dataset(manifest_path, horizon_days=7)
 
         # Verify correct shape and data
         assert X.shape == (4, 2)  # 4 samples, 2 features (rsi_14, macd)
@@ -99,7 +99,7 @@ class TestLoadDatasetParquet:
 
     def test_load_from_csv_fallback(self, tmp_path, sample_features_df, sample_labels_df, sample_manifest):
         """Load from CSV when only CSV files exist (backward compatibility)."""
-        from g2.ml.models import load_dataset_from_csv
+        from g2.ml.models import load_dataset
 
         # Create only CSV files
         sample_features_df.to_csv(tmp_path / "features.csv", index=False)
@@ -110,7 +110,7 @@ class TestLoadDatasetParquet:
         manifest_path.write_text(json.dumps(sample_manifest))
 
         # Load dataset
-        X, y = load_dataset_from_csv(manifest_path, horizon_days=7)
+        X, y = load_dataset(manifest_path, horizon_days=7)
 
         # Verify correct shape
         assert X.shape == (4, 2)
@@ -119,7 +119,7 @@ class TestLoadDatasetParquet:
     def test_load_parquet_preserves_types(self, tmp_path, sample_manifest):
         """Parquet loading should preserve numeric types."""
         pytest.importorskip("pyarrow")
-        from g2.ml.models import load_dataset_from_csv
+        from g2.ml.models import load_dataset
 
         # Create features with specific types
         features_df = pd.DataFrame({
@@ -144,26 +144,26 @@ class TestLoadDatasetParquet:
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps(sample_manifest))
 
-        X, y = load_dataset_from_csv(manifest_path, horizon_days=7)
+        X, y = load_dataset(manifest_path, horizon_days=7)
 
         assert X["volume_ratio"].dtype == np.float64
         assert y.dtype == np.float64
 
     def test_load_raises_when_no_files_exist(self, tmp_path, sample_manifest):
         """Should raise FileNotFoundError when no data files exist."""
-        from g2.ml.models import load_dataset_from_csv
+        from g2.ml.models import load_dataset
 
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps(sample_manifest))
 
         with pytest.raises(FileNotFoundError):
-            load_dataset_from_csv(manifest_path, horizon_days=7)
+            load_dataset(manifest_path, horizon_days=7)
 
 
 class TestLoadDatasetFunction:
-    """Tests for the improved load function (renamed from load_dataset_from_csv)."""
+    """Tests for the load_dataset function."""
 
-    def test_function_exists_with_backward_compatible_name(self):
-        """The function should still be importable with old name."""
-        from g2.ml.models import load_dataset_from_csv
-        assert callable(load_dataset_from_csv)
+    def test_function_exists(self):
+        """The function should be importable."""
+        from g2.ml.models import load_dataset
+        assert callable(load_dataset)

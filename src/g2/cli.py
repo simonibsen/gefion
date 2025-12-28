@@ -688,7 +688,7 @@ def ml_train(
             --model-name custom_model --model-version v1 --out-dir ./my_models
     """
     from g2.ml.store import get_ml_dataset
-    from g2.ml.models import load_dataset_from_csv, train_quantile_model, save_model_artifact
+    from g2.ml.models import load_dataset, train_quantile_model, save_model_artifact
     from g2.ml.device import detect_device
 
     # Resolve device (auto-detect if "auto")
@@ -715,7 +715,7 @@ def ml_train(
             emit(f"Training model for {horizon}-day horizon...", json_output=json_output)
 
             # Load features and labels for this horizon
-            X, y = load_dataset_from_csv(artifact_uri, horizon)
+            X, y = load_dataset(artifact_uri, horizon)
             emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
 
             # Train quantile models (q10, q50, q90)
