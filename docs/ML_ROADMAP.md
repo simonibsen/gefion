@@ -386,27 +386,6 @@ g2 ml tune --dataset-name mvp --dataset-version v1 \
 g2 ml tune --dataset-name mvp --dataset-version v1 --timeout 300
 ```
 
-### 5.5 Online Prediction API
-
-**Goal**: Serve predictions via HTTP API for integration with trading systems.
-
-**Features**:
-- REST API with FastAPI
-- Batch predictions
-- Real-time model loading
-- Authentication and rate limiting
-
-**Usage**:
-```bash
-# Start prediction server
-g2 ml serve --model-name mvp_model --model-version 20251217 --port 8000
-
-# Query predictions
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"symbols": ["AAPL", "MSFT"], "date": "2024-12-14"}'
-```
-
 ## Implementation Priority
 
 ### Completed
@@ -423,7 +402,6 @@ curl -X POST http://localhost:8000/predict \
 
 ### Future
 1. 5.2 Model ensembles - Combine multiple algorithms
-2. 5.5 Online prediction API - Lower priority, defer
 
 ## Contributing
 
