@@ -8,6 +8,20 @@ import pandas as pd
 import numpy as np
 from unittest.mock import patch, MagicMock
 
+# Check if XGBoost can be loaded (requires libomp on macOS)
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except Exception:
+    XGBOOST_AVAILABLE = False
+
+# Check if LightGBM can be loaded
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except Exception:
+    LIGHTGBM_AVAILABLE = False
+
 
 class TestDeviceDetection:
     """Tests for ML device detection."""
@@ -41,12 +55,13 @@ class TestDeviceDetection:
         assert device == "cpu"
 
 
+@pytest.mark.skipif(not XGBOOST_AVAILABLE, reason="XGBoost not available (missing libomp?)")
 class TestXGBoostGPU:
     """Tests for XGBoost GPU configuration."""
 
     def test_xgboost_uses_gpu_when_device_cuda(self):
         """XGBoost training uses GPU params when device=cuda."""
-        xgb = pytest.importorskip("xgboost")
+        import xgboost as xgb
         from g2.ml.models import train_quantile_model
 
         # Create minimal test data
@@ -79,7 +94,6 @@ class TestXGBoostGPU:
 
     def test_xgboost_uses_cpu_when_device_cpu(self):
         """XGBoost training uses CPU params when device=cpu."""
-        pytest.importorskip("xgboost")
         from g2.ml.models import train_quantile_model
 
         X = pd.DataFrame({
@@ -99,12 +113,13 @@ class TestXGBoostGPU:
         assert len(result["models"]) == 3  # q10, q50, q90
 
 
+@pytest.mark.skipif(not LIGHTGBM_AVAILABLE, reason="LightGBM not available")
 class TestLightGBMGPU:
     """Tests for LightGBM GPU configuration."""
 
     def test_lightgbm_uses_gpu_when_device_cuda(self):
         """LightGBM training uses GPU params when device=cuda."""
-        lgb = pytest.importorskip("lightgbm")
+        import lightgbm as lgb
         from g2.ml.models import train_quantile_model
 
         X = pd.DataFrame({
@@ -132,7 +147,6 @@ class TestLightGBMGPU:
 
     def test_lightgbm_uses_cpu_when_device_cpu(self):
         """LightGBM training uses CPU when device=cpu."""
-        pytest.importorskip("lightgbm")
         from g2.ml.models import train_quantile_model
 
         X = pd.DataFrame({
@@ -150,12 +164,13 @@ class TestLightGBMGPU:
         assert "models" in result
 
 
+@pytest.mark.skipif(not XGBOOST_AVAILABLE, reason="XGBoost not available (missing libomp?)")
 class TestClassifierGPU:
     """Tests for classifier GPU support."""
 
     def test_classifier_xgboost_uses_gpu(self):
         """XGBoost classifier uses GPU when device=cuda."""
-        xgb = pytest.importorskip("xgboost")
+        import xgboost as xgb
         from g2.ml.classifier import train_classifier
 
         X = pd.DataFrame({

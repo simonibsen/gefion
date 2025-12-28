@@ -15,7 +15,14 @@ from g2.cli_helpers import (
     db_connection,
     init_schema_tables,
 )
+from g2.config import load_settings
 from g2.db import schema
+
+
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
 
 
 class TestParseCommaSeparated:
@@ -85,7 +92,7 @@ class TestParseCommaSeparated:
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         # Clean up before tests
@@ -348,14 +355,14 @@ class TestDBConnection:
 
     def test_connection_with_custom_url(self):
         """Test connection with custom URL."""
-        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        url = get_db_url()
         with db_connection(url) as conn:
             assert conn is not None
             assert not conn.closed
 
     def test_connection_closes_on_exit(self):
         """Test that connection closes when exiting context."""
-        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        url = get_db_url()
         with db_connection(url) as conn:
             assert not conn.closed
         # Connection should be closed after exiting context
@@ -363,7 +370,7 @@ class TestDBConnection:
 
     def test_connection_with_autocommit_disabled(self):
         """Test connection with autocommit disabled."""
-        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        url = get_db_url()
         with db_connection(url, autocommit=False) as conn:
             assert conn.autocommit is False
 
@@ -373,7 +380,7 @@ class TestInitSchemaTables:
 
     def test_init_single_table(self):
         """Test initializing a single table."""
-        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        url = get_db_url()
         with db_connection(url) as conn:
             init_schema_tables(conn, ["stocks"])
             # Verify stocks table exists
@@ -389,7 +396,7 @@ class TestInitSchemaTables:
 
     def test_init_multiple_tables(self):
         """Test initializing multiple tables."""
-        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        url = get_db_url()
         with db_connection(url) as conn:
             init_schema_tables(conn, ["stocks", "feature_functions"])
             # Verify both tables exist
@@ -406,14 +413,14 @@ class TestInitSchemaTables:
 
     def test_init_with_empty_list(self):
         """Test that empty list doesn't cause errors."""
-        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        url = get_db_url()
         with db_connection(url) as conn:
             # Should not raise any errors
             init_schema_tables(conn, [])
 
     def test_init_with_unknown_table_raises_error(self):
         """Test that unknown table name raises appropriate error."""
-        url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        url = get_db_url()
         with db_connection(url) as conn:
             with pytest.raises(ValueError, match="Unknown table"):
                 init_schema_tables(conn, ["nonexistent_table_xyz"])

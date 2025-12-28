@@ -668,6 +668,8 @@ def ml_train(
     algorithm: str = typer.Option("quantile_regression", help="Algorithm: quantile_regression, xgboost, lightgbm"),
     device: str = typer.Option("auto", help="Compute device: auto, cpu, cuda (GPU)"),
     out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
+    warm_start: bool = typer.Option(False, "--warm-start", help="Continue training from base model (10-100x faster)"),
+    base_model: Optional[Path] = typer.Option(None, "--base-model", help="Path to base model for warm-start (required if --warm-start)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
@@ -683,6 +685,11 @@ def ml_train(
         g2 ml train --dataset-name nasdaq_50 --dataset-version 2025-01 \\
             --model-name nasdaq_xgb --model-version v1 --algorithm xgboost
 
+        # Warm-start from existing model (XGBoost/LightGBM only)
+        g2 ml train --dataset-name nasdaq_50 --dataset-version 2025-02 \\
+            --model-name nasdaq_xgb --model-version v2 --algorithm xgboost \\
+            --warm-start --base-model models/nasdaq_xgb_v1_h7
+
         # Train with custom output directory
         g2 ml train --dataset-name custom --dataset-version v1 \\
             --model-name custom_model --model-version v1 --out-dir ./my_models
@@ -697,6 +704,14 @@ def ml_train(
     else:
         resolved_device = device
 
+    # Validate warm-start options
+    if warm_start and not base_model:
+        emit_error("--warm-start requires --base-model path", json_output=json_output)
+        return
+    if warm_start and algorithm == "quantile_regression":
+        emit_error("--warm-start not supported for quantile_regression (use xgboost or lightgbm)", json_output=json_output)
+        return
+
     with db_connection(db_url) as conn:
         # Fetch dataset manifest
         dataset = get_ml_dataset(conn, name=dataset_name, version=dataset_version)
@@ -709,6 +724,8 @@ def ml_train(
         horizons = dataset["horizons_days"]
         all_train_metrics = {}
 
+        if warm_start:
+            emit(f"Warm-start training {algorithm} models from {base_model}", json_output=json_output)
         emit(f"Training {algorithm} models on {resolved_device} for horizons: {horizons}", json_output=json_output)
 
         for horizon in horizons:
@@ -718,9 +735,24 @@ def ml_train(
             X, y = load_dataset(artifact_uri, horizon)
             emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
 
+            # Determine base model path for this horizon
+            base_model_path = None
+            if warm_start and base_model:
+                # Try horizon-specific path first, then generic
+                horizon_specific = base_model.parent / f"{base_model.name}_h{horizon}"
+                if horizon_specific.exists():
+                    base_model_path = horizon_specific
+                elif base_model.exists():
+                    base_model_path = base_model
+                else:
+                    emit(f"  Warning: Base model not found at {base_model}, training from scratch", json_output=json_output)
+
             # Train quantile models (q10, q50, q90)
-            model_data = train_quantile_model(X, y, algorithm=algorithm, device=resolved_device)
-            emit(f"  Trained {len(model_data['models'])} quantile models", json_output=json_output)
+            model_data = train_quantile_model(X, y, algorithm=algorithm, device=resolved_device, base_model_path=base_model_path)
+            if model_data.get("warm_start"):
+                emit(f"  Warm-started {len(model_data['models'])} quantile models", json_output=json_output)
+            else:
+                emit(f"  Trained {len(model_data['models'])} quantile models", json_output=json_output)
 
             # Save model artifact
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -1223,6 +1255,228 @@ def ml_eval(
     )
 
 
+@ml_app.command("feature-importance")
+def ml_feature_importance(
+    model_name: str = typer.Option(..., help="Model name"),
+    model_version: str = typer.Option(..., help="Model version"),
+    horizon: int = typer.Option(..., help="Horizon in days (e.g., 7, 30, 90)"),
+    quantile: str = typer.Option("q50", help="Quantile to analyze (q10, q50, q90)"),
+    top_k: int = typer.Option(20, help="Number of top features to display"),
+    out_dir: Path = typer.Option(Path("models"), help="Directory containing model artifacts"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """
+    Compute SHAP-based feature importance for a trained model.
+
+    Shows which features contribute most to model predictions.
+    Requires the model to be trained with XGBoost or LightGBM for
+    fast TreeSHAP computation. Falls back to permutation importance
+    for sklearn models.
+
+    Examples:
+        # Show top 20 features for 7-day horizon
+        g2 ml feature-importance --model-name mvp --model-version 20251228 --horizon 7
+
+        # Show top 10 features as JSON
+        g2 ml feature-importance --model-name mvp --model-version 20251228 --horizon 7 --top-k 10 --json
+    """
+    from g2.ml.importance import get_feature_importance, format_importance_table
+
+    # Build model artifact path
+    model_dir = out_dir / f"{model_name}_{model_version}_h{horizon}"
+
+    if not model_dir.exists():
+        emit_error(f"Model not found: {model_dir}", json_output=json_output)
+        return
+
+    emit(f"Computing feature importance for {model_name} {model_version} (horizon={horizon})...", json_output=json_output)
+
+    try:
+        result = get_feature_importance(
+            model_path=model_dir,
+            quantile=quantile,
+            top_k=top_k,
+        )
+
+        if json_output:
+            emit(
+                "Feature importance computed",
+                data=result,
+                json_output=json_output,
+            )
+        else:
+            # Pretty print as table
+            table = format_importance_table(result["importance"], top_k=top_k)
+            emit(table)
+            emit(f"\nAlgorithm: {result['algorithm']}")
+            emit(f"Total features: {result['num_features']}")
+
+    except ImportError as e:
+        emit_error(str(e), json_output=json_output)
+    except FileNotFoundError as e:
+        emit_error(str(e), json_output=json_output)
+    except Exception as e:
+        emit_error(f"Failed to compute importance: {e}", json_output=json_output)
+
+
+@ml_app.command("tune")
+def ml_tune(
+    dataset_name: str = typer.Option(..., help="Dataset name to use for tuning"),
+    dataset_version: str = typer.Option(..., help="Dataset version"),
+    algorithm: str = typer.Option("xgboost", help="Algorithm: xgboost, lightgbm, or sklearn"),
+    model_type: str = typer.Option("quantile", help="Model type: quantile or classifier"),
+    horizon: int = typer.Option(7, help="Horizon in days for quantile models"),
+    quantile: float = typer.Option(0.5, help="Quantile to optimize (0.1, 0.5, 0.9)"),
+    n_trials: int = typer.Option(50, help="Number of optimization trials"),
+    cv_splits: int = typer.Option(5, help="Number of time-series CV splits"),
+    timeout: Optional[int] = typer.Option(None, help="Timeout in seconds"),
+    out_dir: Path = typer.Option(Path("models"), help="Output directory for results"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """
+    Tune hyperparameters using Optuna with time-series cross-validation.
+
+    Uses Bayesian optimization to find optimal hyperparameters while
+    preventing data leakage through time-series CV splits.
+
+    Examples:
+        # Tune XGBoost quantile model with 50 trials
+        g2 ml tune --dataset-name mvp --dataset-version v1 \\
+          --algorithm xgboost --n-trials 50
+
+        # Tune classifier with LightGBM
+        g2 ml tune --dataset-name mvp --dataset-version v1 \\
+          --algorithm lightgbm --model-type classifier --n-trials 100
+
+        # Quick tuning with timeout
+        g2 ml tune --dataset-name mvp --dataset-version v1 --timeout 300
+    """
+    from g2.ml.tuning import (
+        tune_quantile_model,
+        tune_classifier,
+        save_tuning_results,
+    )
+
+    # Load dataset
+    datasets_dir = Path("datasets")
+    manifest_path = datasets_dir / dataset_name / dataset_version / "manifest.json"
+
+    if not manifest_path.exists():
+        emit_error(
+            f"Dataset not found: {manifest_path}\n"
+            f"Build dataset first with: g2 ml dataset-build --name {dataset_name} --version {dataset_version}",
+            json_output=json_output
+        )
+        return
+
+    emit(f"Loading dataset {dataset_name}/{dataset_version}...", json_output=json_output)
+
+    try:
+        import pandas as pd
+        import json as json_module
+
+        # Load manifest
+        with open(manifest_path) as f:
+            manifest = json_module.load(f)
+
+        # Load features
+        features_path = datasets_dir / dataset_name / dataset_version / "features.csv"
+        if not features_path.exists():
+            features_path = datasets_dir / dataset_name / dataset_version / "features.parquet"
+
+        if features_path.suffix == ".parquet":
+            features_df = pd.read_parquet(features_path)
+        else:
+            features_df = pd.read_csv(features_path)
+
+        # Load labels
+        labels_path = datasets_dir / dataset_name / dataset_version / "labels.csv"
+        if not labels_path.exists():
+            labels_path = datasets_dir / dataset_name / dataset_version / "labels.parquet"
+
+        if labels_path.suffix == ".parquet":
+            labels_df = pd.read_parquet(labels_path)
+        else:
+            labels_df = pd.read_csv(labels_path)
+
+        # Pivot features to wide format
+        X = features_df.pivot_table(
+            index=['symbol', 'date'],
+            columns='feature_name',
+            values='value',
+            aggfunc='first'
+        ).reset_index()
+
+        # Filter labels by horizon
+        if model_type == "quantile":
+            labels_filtered = labels_df[labels_df['horizon_days'] == horizon].copy()
+            y = labels_filtered.set_index(['symbol', 'date'])['forward_return']
+        else:
+            labels_filtered = labels_df[labels_df['horizon_days'] == horizon].copy()
+            y = labels_filtered.set_index(['symbol', 'date'])['label']
+
+        # Align X and y
+        X = X.set_index(['symbol', 'date'])
+        common_idx = X.index.intersection(y.index)
+        X = X.loc[common_idx]
+        y = y.loc[common_idx]
+
+        if len(X) < 50:
+            emit_error(
+                f"Insufficient data for tuning: {len(X)} samples (need >= 50)",
+                json_output=json_output
+            )
+            return
+
+        emit(f"Tuning {algorithm} {model_type} model with {len(X)} samples...", json_output=json_output)
+        emit(f"Running {n_trials} trials with {cv_splits}-fold time-series CV...", json_output=json_output)
+
+        # Run tuning
+        if model_type == "quantile":
+            result = tune_quantile_model(
+                X=X,
+                y=y,
+                algorithm=algorithm,
+                quantile=quantile,
+                n_trials=n_trials,
+                cv_splits=cv_splits,
+                timeout=timeout,
+            )
+        else:
+            result = tune_classifier(
+                X=X,
+                y=y,
+                algorithm=algorithm,
+                n_trials=n_trials,
+                cv_splits=cv_splits,
+                timeout=timeout,
+            )
+
+        # Save results
+        out_dir.mkdir(parents=True, exist_ok=True)
+        results_path = out_dir / f"tuning_{dataset_name}_{dataset_version}_{algorithm}.json"
+        save_tuning_results(result, results_path)
+
+        if json_output:
+            emit("Tuning complete", data=result, json_output=json_output)
+        else:
+            emit("\n" + "=" * 50)
+            emit("TUNING RESULTS")
+            emit("=" * 50)
+            emit(f"Algorithm: {result['algorithm']}")
+            emit(f"Best score: {result['best_score']:.6f}")
+            emit(f"Trials completed: {result['n_trials']}")
+            emit(f"\nBest parameters:")
+            for k, v in result['best_params'].items():
+                emit(f"  {k}: {v}")
+            emit(f"\nResults saved to: {results_path}")
+
+    except ImportError as e:
+        emit_error(f"Missing dependency: {e}", json_output=json_output)
+    except Exception as e:
+        emit_error(f"Tuning failed: {e}", json_output=json_output)
+
+
 @ml_app.command("train-classifier")
 def ml_train_classifier(
     dataset_name: str = typer.Option(..., help="Dataset name to train on"),
@@ -1386,6 +1640,491 @@ def ml_predict_classifier(
             json_output=json_output
         )
         emit("Note: Full prediction workflow requires feature loading - to be implemented", json_output=json_output)
+
+
+@ml_app.command("train-ensemble")
+def ml_train_ensemble(
+    dataset_name: str = typer.Option(..., help="Dataset name to train on"),
+    dataset_version: str = typer.Option(..., help="Dataset version"),
+    model_name: str = typer.Option(..., help="Ensemble model name (identifier)"),
+    model_version: str = typer.Option(..., help="Model version (e.g., date tag)"),
+    algorithms: str = typer.Option(
+        "quantile_regression,quantile_regression",
+        help="Comma-separated algorithms: quantile_regression, xgboost, lightgbm"
+    ),
+    weights: Optional[str] = typer.Option(None, help="Comma-separated weights (must sum to 1.0). Defaults to equal weights."),
+    out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Train an ensemble of quantile regression models for multi-horizon return prediction.
+
+    Ensembles combine predictions from multiple algorithms for improved accuracy.
+    Supports weighted averaging of predictions.
+
+    Examples:
+        # Train ensemble with two sklearn models (different regularization)
+        g2 ml train-ensemble --dataset-name tech_stocks --dataset-version v1 \\
+            --model-name tech_ensemble --model-version v1 \\
+            --algorithms quantile_regression,quantile_regression
+
+        # Train ensemble with XGBoost and LightGBM
+        g2 ml train-ensemble --dataset-name nasdaq_50 --dataset-version 2025-01 \\
+            --model-name nasdaq_ensemble --model-version v1 \\
+            --algorithms xgboost,lightgbm
+
+        # Train ensemble with custom weights
+        g2 ml train-ensemble --dataset-name custom --dataset-version v1 \\
+            --model-name custom_ensemble --model-version v1 \\
+            --algorithms xgboost,lightgbm,quantile_regression \\
+            --weights 0.5,0.3,0.2
+    """
+    from g2.ml.store import get_ml_dataset
+    from g2.ml.models import load_dataset_from_csv
+    from g2.ml.ensemble import train_ensemble
+
+    # Parse algorithms
+    algo_list = [a.strip() for a in algorithms.split(",")]
+    if not algo_list:
+        emit_error("At least one algorithm must be specified", json_output=json_output)
+        return
+
+    # Parse weights
+    weight_list = None
+    if weights:
+        try:
+            weight_list = [float(w.strip()) for w in weights.split(",")]
+            if len(weight_list) != len(algo_list):
+                emit_error(
+                    f"Number of weights ({len(weight_list)}) must match number of algorithms ({len(algo_list)})",
+                    json_output=json_output
+                )
+                return
+            if not abs(sum(weight_list) - 1.0) < 0.001:
+                emit_error(f"Weights must sum to 1.0, got {sum(weight_list)}", json_output=json_output)
+                return
+        except ValueError:
+            emit_error(f"Invalid weights format: {weights}", json_output=json_output)
+            return
+
+    with db_connection(db_url) as conn:
+        # Fetch dataset manifest
+        dataset = get_ml_dataset(conn, name=dataset_name, version=dataset_version)
+        if not dataset:
+            emit_error(f"Dataset not found: {dataset_name} {dataset_version}", json_output=json_output)
+            return
+
+        # Train ensembles for each horizon
+        artifact_uri = Path(dataset["artifact_uri"])
+        horizons = dataset["horizons_days"]
+        all_train_metrics = {}
+
+        emit(f"Training ensemble ({', '.join(algo_list)}) for horizons: {horizons}", json_output=json_output)
+        if weight_list:
+            emit(f"  Using weights: {weight_list}", json_output=json_output)
+        else:
+            emit(f"  Using equal weights", json_output=json_output)
+
+        for horizon in horizons:
+            emit(f"Training ensemble for {horizon}-day horizon...", json_output=json_output)
+
+            # Load features and labels for this horizon
+            X, y = load_dataset_from_csv(artifact_uri, horizon)
+            emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
+
+            # Train ensemble
+            ensemble_path = out_dir / f"{model_name}_{model_version}_h{horizon}"
+            result = train_ensemble(
+                X=X,
+                y=y,
+                algorithms=algo_list,
+                weights=weight_list,
+                output_dir=ensemble_path,
+            )
+
+            emit(f"  Trained {len(result['base_models'])} base models", json_output=json_output)
+            emit(f"  Saved artifacts to {ensemble_path}", json_output=json_output)
+
+            all_train_metrics[f"h{horizon}"] = result["metrics"]
+
+        # Register model in ml_models
+        from psycopg.types.json import Json
+
+        base_artifact_path = out_dir / f"{model_name}_{model_version}"
+
+        with conn.cursor() as cur:
+            # Create run record
+            cur.execute(
+                """
+                INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
+                VALUES ('train_ensemble', 'running', %s, %s, NOW())
+                RETURNING id;
+                """,
+                (dataset["id"], Json({"algorithms": algo_list, "model_name": model_name, "weights": weight_list})),
+            )
+            run_id = int(cur.fetchone()[0])
+
+            # Register model
+            cur.execute(
+                """
+                INSERT INTO ml_models
+                  (name, version, train_run_id, dataset_id, algorithm, hyperparams, metrics, artifact_uri)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name, version) DO UPDATE SET
+                  train_run_id = EXCLUDED.train_run_id,
+                  dataset_id = EXCLUDED.dataset_id,
+                  algorithm = EXCLUDED.algorithm,
+                  hyperparams = EXCLUDED.hyperparams,
+                  metrics = EXCLUDED.metrics,
+                  artifact_uri = EXCLUDED.artifact_uri
+                RETURNING id;
+                """,
+                (
+                    model_name,
+                    model_version,
+                    run_id,
+                    dataset["id"],
+                    "ensemble",
+                    Json({"algorithms": algo_list, "weights": weight_list or [1.0/len(algo_list)]*len(algo_list)}),
+                    Json(all_train_metrics),
+                    str(base_artifact_path),
+                ),
+            )
+            model_id = int(cur.fetchone()[0])
+
+            # Mark run as complete
+            cur.execute(
+                """
+                UPDATE ml_runs SET status = 'completed', finished_at = NOW()
+                WHERE id = %s;
+                """,
+                (run_id,),
+            )
+
+        conn.commit()
+
+    emit(
+        f"Ensemble trained: {model_name} {model_version}",
+        data={
+            "model_id": model_id,
+            "run_id": run_id,
+            "artifact_uri": str(base_artifact_path),
+            "horizons": horizons,
+            "algorithms": algo_list,
+        },
+        json_output=json_output,
+    )
+
+
+@ml_app.command("predict-ensemble")
+def ml_predict_ensemble(
+    model_name: str = typer.Option(..., help="Ensemble model name"),
+    model_version: str = typer.Option(..., help="Model version"),
+    prediction_date: str = typer.Option(..., help="Date to generate predictions for (YYYY-MM-DD)"),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
+    exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
+    limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Generate predictions using a trained ensemble model.
+
+    Examples:
+        # Generate predictions for specific symbols
+        g2 ml predict-ensemble --model-name tech_ensemble --model-version v1 \\
+            --prediction-date 2025-01-15 --symbols AAPL,MSFT,GOOGL
+
+        # Generate predictions for NASDAQ universe
+        g2 ml predict-ensemble --model-name nasdaq_ensemble --model-version v1 \\
+            --prediction-date 2025-01-15 --exchange NASDAQ --limit 50
+    """
+    import pandas as pd
+    from g2.ml.ensemble import load_ensemble, predict_ensemble
+    from g2.ml.store import get_ml_dataset
+
+    sym_list = parse_comma_separated(symbols) or []
+    if not sym_list and not exchange:
+        emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
+        return
+
+    with db_connection(db_url) as conn:
+        # Fetch model metadata
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, dataset_id, artifact_uri, algorithm, hyperparams
+                FROM ml_models
+                WHERE name = %s AND version = %s;
+                """,
+                (model_name, model_version),
+            )
+            row = cur.fetchone()
+            if not row:
+                emit_error(f"Model not found: {model_name} {model_version}", json_output=json_output)
+                return
+
+            model_id, dataset_id, artifact_uri, algorithm, hyperparams = row[0], row[1], row[2], row[3], row[4]
+
+        if algorithm != "ensemble":
+            emit_error(f"Model is not an ensemble (algorithm={algorithm}). Use 'ml predict' instead.", json_output=json_output)
+            return
+
+        # Get dataset to know which features and horizons to use
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT name, version, feature_names, horizons_days
+                FROM ml_datasets
+                WHERE id = %s;
+                """,
+                (dataset_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                emit_error(f"Dataset not found for model (id={dataset_id})", json_output=json_output)
+                return
+            dataset_name, dataset_version, feature_names, horizons = row[0], row[1], row[2], row[3]
+
+        # Build universe of symbols
+        if exchange:
+            with conn.cursor() as cur:
+                limit_clause = f"LIMIT {limit}" if limit else ""
+                cur.execute(
+                    f"""
+                    SELECT DISTINCT s.id, s.symbol
+                    FROM stocks s
+                    WHERE s.exchange = %s
+                    {limit_clause};
+                    """,
+                    (exchange,),
+                )
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
+        else:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, symbol FROM stocks WHERE symbol = ANY(%s);
+                    """,
+                    (sym_list,),
+                )
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
+
+        if not universe:
+            emit_error("No symbols found in universe", json_output=json_output)
+            return
+
+        emit(f"Generating ensemble predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
+
+        # Fetch features for all symbols on prediction_date
+        data_ids = [u[0] for u in universe]
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT cf.data_id, fd.name, cf.value
+                FROM computed_features cf
+                JOIN feature_definitions fd ON cf.feature_id = fd.id
+                WHERE cf.data_id = ANY(%s)
+                  AND cf.date = %s
+                  AND fd.name = ANY(%s);
+                """,
+                (data_ids, prediction_date, feature_names),
+            )
+            features_data = cur.fetchall()
+
+        if not features_data:
+            emit_error(f"No features found for {prediction_date}", json_output=json_output)
+            return
+
+        # Convert to DataFrame and pivot to wide format
+        features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
+        features_wide = features_df.pivot_table(
+            index="data_id",
+            columns="feature_name",
+            values="value",
+            aggfunc="first"
+        )
+
+        emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
+
+        # Generate predictions for each horizon
+        from psycopg.types.json import Json
+        from decimal import Decimal
+
+        # Create run record
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
+                VALUES ('predict_ensemble', 'running', %s, %s, NOW())
+                RETURNING id;
+                """,
+                (
+                    dataset_id,
+                    Json(
+                        {
+                            "model_name": model_name,
+                            "model_version": model_version,
+                            "prediction_date": prediction_date,
+                            "universe": {"symbols": sym_list} if sym_list else {"exchange": exchange},
+                        }
+                    ),
+                ),
+            )
+            run_id = int(cur.fetchone()[0])
+
+        total_predictions = 0
+        for horizon in horizons:
+            emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
+
+            # Load ensemble for this horizon
+            horizon_ensemble_path = Path(artifact_uri) / f"_h{horizon}"
+            try:
+                ensemble = load_ensemble(horizon_ensemble_path)
+            except FileNotFoundError:
+                emit(f"  Warning: Ensemble not found at {horizon_ensemble_path}, skipping", json_output=json_output)
+                continue
+
+            # Generate predictions
+            predictions = predict_ensemble(ensemble, features_wide)
+
+            # Insert predictions into database
+            with conn.cursor() as cur:
+                for data_id in predictions.index:
+                    q10 = Decimal(str(predictions.loc[data_id, "q10"]))
+                    q50 = Decimal(str(predictions.loc[data_id, "q50"]))
+                    q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+
+                    cur.execute(
+                        """
+                        INSERT INTO quantile_predictions
+                          (model_id, data_id, prediction_date, horizon_days, q10, q50, q90,
+                           model_version, run_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
+                        DO UPDATE SET
+                          q10 = EXCLUDED.q10,
+                          q50 = EXCLUDED.q50,
+                          q90 = EXCLUDED.q90,
+                          model_version = EXCLUDED.model_version,
+                          run_id = EXCLUDED.run_id,
+                          created_at = NOW();
+                        """,
+                        (model_id, int(data_id), prediction_date, horizon, q10, q50, q90, model_version, run_id),
+                    )
+                    total_predictions += 1
+
+            emit(f"  Stored {len(predictions)} predictions for {horizon}-day horizon", json_output=json_output)
+
+        # Mark run as complete
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE ml_runs SET status = 'completed', finished_at = NOW()
+                WHERE id = %s;
+                """,
+                (run_id,),
+            )
+
+        conn.commit()
+
+    emit(
+        f"Ensemble predictions generated: {model_name} {model_version} for {prediction_date}",
+        data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizons": horizons},
+        json_output=json_output,
+    )
+
+
+@ml_app.command("e2e-test")
+def ml_e2e_test(
+    exchange: str = typer.Option("NASDAQ", help="Exchange to test with"),
+    limit: int = typer.Option(10, help="Number of symbols to use (default: 10 for fast testing)"),
+    name: str = typer.Option("e2e_test", help="Test name prefix for artifacts"),
+    skip_data_update: bool = typer.Option(False, "--skip-data-update", help="Skip data update step"),
+    cleanup: bool = typer.Option(False, "--cleanup", help="Remove test artifacts after completion"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """
+    Run end-to-end ML pipeline test.
+
+    This command runs the full ML pipeline to validate system functionality:
+    1. Data Update - Fetch price data from AlphaVantage
+    2. Dataset Build - Create ML dataset with features and labels
+    3. Train Model - Train single XGBoost model
+    4. Train Ensemble - Train ensemble combining XGBoost and LightGBM
+    5. Predict - Generate predictions with single model
+    6. Predict Ensemble - Generate predictions with ensemble
+
+    Examples:
+        # Quick smoke test with defaults (10 NASDAQ symbols)
+        g2 ml e2e-test
+
+        # Test with more symbols
+        g2 ml e2e-test --limit 50
+
+        # Test on NYSE with cleanup
+        g2 ml e2e-test --exchange NYSE --limit 20 --cleanup
+
+        # Skip data update (if data is already fresh)
+        g2 ml e2e-test --skip-data-update
+    """
+    from g2.ml.e2e import run_e2e_test, E2E_STEPS
+
+    emit(f"Starting E2E ML pipeline test", json_output=json_output)
+    emit(f"Exchange: {exchange}, Limit: {limit}, Name: {name}", json_output=json_output)
+    emit("", json_output=json_output)
+
+    # Show steps
+    emit("Pipeline steps:", json_output=json_output)
+    for i, (step_name, step_desc) in enumerate(E2E_STEPS.items(), 1):
+        status = "[SKIP]" if step_name == "data_update" and skip_data_update else ""
+        emit(f"  {i}. {step_desc} {status}", json_output=json_output)
+    emit("", json_output=json_output)
+
+    url = _db_url(db_url)
+    with db_connection(url) as conn:
+        result = run_e2e_test(
+            exchange=exchange,
+            limit=limit,
+            name=name,
+            skip_data_update=skip_data_update,
+            cleanup=cleanup,
+            conn=conn,
+        )
+
+    # Report results
+    if result.success:
+        emit("", json_output=json_output)
+        emit("E2E Test PASSED", json_output=json_output)
+        emit(f"Duration: {result.duration_seconds}s", json_output=json_output)
+        emit(f"Steps completed: {len(result.steps_completed)}/{len(E2E_STEPS)}", json_output=json_output)
+
+        if result.artifacts:
+            emit("", json_output=json_output)
+            emit("Artifacts created:", json_output=json_output)
+            for key, value in result.artifacts.items():
+                emit(f"  {key}: {value}", json_output=json_output)
+
+        if json_output:
+            emit("", data=result.to_dict(), json_output=json_output)
+    else:
+        emit("", json_output=json_output)
+        emit_error("E2E Test FAILED", json_output=json_output)
+        emit(f"Duration: {result.duration_seconds}s", json_output=json_output)
+        emit(f"Steps completed: {result.steps_completed}", json_output=json_output)
+        emit(f"Steps failed: {result.steps_failed}", json_output=json_output)
+
+        if result.errors:
+            emit("", json_output=json_output)
+            emit("Errors:", json_output=json_output)
+            for step, error in result.errors.items():
+                emit(f"  {step}: {error}", json_output=json_output)
+
+        if json_output:
+            emit("", data=result.to_dict(), json_output=json_output)
+        raise typer.Exit(code=1)
 
 
 @app.command("prices-ingest")

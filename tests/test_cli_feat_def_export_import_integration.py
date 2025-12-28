@@ -1,5 +1,7 @@
 """
 Integration tests for feat-def-export and feat-def-import CLI commands.
+
+These tests require a running database with ENABLE_DB_TESTS=1.
 """
 import json
 import os
@@ -8,19 +10,35 @@ import pytest
 from pathlib import Path
 from typer.testing import CliRunner
 from g2 import cli
+from g2.config import load_settings
 from g2.db import schema
 from g2.db.ingest import ensure_feature_definitions, ensure_store_targets
 
 
-runner = CliRunner(env={"DATABASE_URL": "postgresql://g2:g2pass@localhost:6432/g2"})
+# Skip all tests in this module if ENABLE_DB_TESTS is not set
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
+
+
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
+
+
+runner = CliRunner()
 
 
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
+        # Ensure table exists before cleanup
+        schema.create_feature_definitions_table(conn)
         # Clean up before tests
         with conn.cursor() as cur:
             cur.execute("""

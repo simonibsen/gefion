@@ -8,6 +8,8 @@ The bug: Multiple threads update the shared timings dict without synchronization
 The += operator on dict values is NOT atomic and can lead to lost updates.
 
 The fix: Use threading.Lock() to protect timings dict updates.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 import threading
@@ -18,16 +20,29 @@ import psycopg
 from psycopg.types.json import Json
 import pytest
 
+from g2.config import load_settings
 from g2.db import schema, pool
 from g2.db.ingest import upsert_stock
 from g2.features.dispatcher import compute_features
 from g2.cli_helpers import upsert_feature_function
 
 
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
+
+
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
+
+
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         yield conn

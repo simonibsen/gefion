@@ -59,7 +59,7 @@ g2 ml dataset-build --name filtered --version v1 \
 
 ### 1.3 Parquet Export Format
 
-**Status**: Planned
+**Status**: ✅ Complete (2025-12-28)
 
 **Goal**: Support Parquet format for dataset exports alongside CSV.
 
@@ -201,46 +201,44 @@ ORDER BY csf.value DESC;
 
 ## Phase 4: Trading Strategies & Backtesting
 
-### 4.1 Seven Complete Trading Strategies
+### 4.1 Trading Strategies
 
-**Status**: Planned
+**Status**: ✅ 7 Strategies Implemented (2025-12-17)
 
-Implement production-ready strategies with full backtesting:
+Production-ready strategies available via `g2 backtest run --strategy <name>`:
 
-1. **Momentum Following** (aggressive, 7-30d horizons)
-   - Buy stocks with strong_up trend + q50 > 3%
-   - Position size by inverse IQR (q90-q10)
-   - Exit on trend reversal or 30-day horizon
+1. **Momentum** - Buy top-N stocks by momentum, rebalance periodically
+   - Parameters: `--lookback-days`, `--top-n`, `--rebalance-days`
 
-2. **Value with Catalyst** (moderate, 30-90d horizons)
-   - Undervalued stocks (low P/E, low P/B) with positive catalyst events
-   - Use 30-90d quantile predictions for entry timing
-   - Hold until reversion to fair value
+2. **Mean Reversion** - Buy oversold (RSI < threshold), sell overbought
+   - Parameters: `--rsi-oversold`, `--rsi-overbought`, `--rsi-period`
 
-3. **Capital Preservation** (conservative, 30-90d horizons)
-   - Only buy when q10 > 0 (downside protected)
-   - Focus on low-volatility, dividend stocks
-   - Position size: equal weight or risk parity
+3. **MA Crossover** - Buy on fast MA crossing above slow MA
+   - Parameters: `--fast-period`, `--slow-period`, `--max-positions`
 
-4. **Mean Reversion** (aggressive, 7-30d horizons)
-   - Buy oversold stocks (RSI < 30) with positive q50
-   - Sector-relative reversion signals
-   - Quick exits on profit targets
+4. **Breakout** - Buy on price/volume breakout above resistance
+   - Parameters: `--volume-threshold`
 
-5. **Sector Rotation** (moderate, 30-90d horizons)
-   - Identify strongest sectors using cross-sectional features
-   - Buy sector leaders with strong quantile predictions
-   - Rotate monthly based on updated predictions
+5. **Pairs Trading** - Trade spread between correlated pairs
+   - Parameters: `--entry-zscore`, `--exit-zscore`
 
-6. **Volatility Harvesting** (advanced, options-focused)
-   - Identify stocks with IQR mismatch to implied volatility
-   - Sell options when predicted volatility < market IV
-   - Buy options when predicted volatility > market IV
+6. **RSI Divergence** - Detect bullish/bearish RSI divergence
+   - Parameters: `--divergence-lookback`
 
-7. **Risk Parity** (moderate, 30-90d horizons)
-   - Allocate capital based on inverse volatility (q90-q10)
-   - Diversify across sectors and strategies
-   - Rebalance weekly or monthly
+7. **Volatility Contraction** - Trade Bollinger Band squeezes
+   - Parameters: `--bb-period`, `--bb-std-dev`, `--squeeze-threshold`
+
+**Usage**:
+```bash
+# Momentum strategy on tech stocks
+g2 backtest run --symbols AAPL,MSFT,GOOGL,NVDA \
+  --start-date 2024-01-01 --end-date 2024-12-01 \
+  --strategy momentum --top-n 3
+
+# Compare all strategies
+g2 backtest compare --all-strategies \
+  --start-date 2024-01-01 --end-date 2024-12-01
+```
 
 ### 4.2 Backtesting Engine
 
@@ -291,6 +289,8 @@ g2 backtest run \
 
 ### 5.1 Warm-Start Retraining
 
+**Status**: ✅ Complete (2025-12-28)
+
 **Goal**: Efficiently update models monthly without retraining from scratch.
 
 **Benefits**:
@@ -300,89 +300,137 @@ g2 backtest run \
 - Suitable for production deployment
 
 **Implementation**:
-- Save model state after training
-- Load existing model and continue training on new data
-- Supported by XGBoost and LightGBM (not basic quantile regression)
-
-### 5.2 Model Ensembles
-
-**Goal**: Combine multiple model predictions for better accuracy.
-
-**Approaches**:
-- Average predictions from multiple algorithms
-- Weighted ensemble by validation performance
-- Stacking (meta-model on top of base models)
-
-### 5.3 Feature Importance Analysis
-
-**Goal**: Understand which features drive predictions.
-
-**Outputs**:
-- SHAP values for feature attribution
-- Feature importance rankings
-- Partial dependence plots
-- Feature selection recommendations
+- `base_model_path` parameter in `train_quantile_model()`
+- XGBoost warm-start via `xgb_model` parameter
+- LightGBM warm-start via `init_model` parameter
+- CLI options: `--warm-start` and `--base-model`
+- MCP tool: `ml_train` with `warm_start` and `base_model` params
 
 **Usage**:
 ```bash
-# Analyze feature importance
+# Initial training
+g2 ml train --dataset-name mvp --dataset-version v1 \
+  --model-name my_model --model-version v1 \
+  --algorithm xgboost
+
+# Monthly retrain with warm-start (10-100x faster)
+g2 ml train --dataset-name mvp --dataset-version v2 \
+  --model-name my_model --model-version v2 \
+  --algorithm xgboost \
+  --warm-start --base-model models/my_model_v1_h7
+```
+
+**Note**: Only supported for XGBoost and LightGBM (sklearn QuantileRegressor does not support warm-start)
+
+### 5.2 Model Ensembles
+
+**Status**: ✅ Complete (2025-12-28)
+
+**Goal**: Combine multiple model predictions for better accuracy.
+
+**Benefits**:
+- Improved prediction accuracy through weighted averaging
+- Leverage strengths of different algorithms
+- Reduce model variance
+
+**Implementation**:
+- `src/g2/ml/ensemble.py` - Core ensemble functionality with OpenTelemetry tracing
+- `create_ensemble()` - Combine existing trained models
+- `train_ensemble()` - Train and combine models in one step
+- `predict_ensemble()` - Generate weighted average predictions
+- `save_ensemble()` / `load_ensemble()` - Persistence
+
+**Usage**:
+```bash
+# Train ensemble with multiple algorithms
+g2 ml train-ensemble --dataset-name mvp --dataset-version v1 \
+  --model-name my_ensemble --model-version v1 \
+  --algorithms quantile_regression,quantile_regression
+
+# Train with custom weights
+g2 ml train-ensemble --dataset-name mvp --dataset-version v1 \
+  --model-name weighted_ensemble --model-version v1 \
+  --algorithms xgboost,lightgbm \
+  --weights 0.6,0.4
+```
+
+**Approaches Supported**:
+- Weighted averaging of quantile predictions
+- Equal weights (default) or custom weights
+- Support for all algorithms (sklearn, XGBoost, LightGBM)
+
+### 5.3 Feature Importance Analysis
+
+**Status**: ✅ Complete (2025-12-28)
+
+**Goal**: Understand which features drive predictions.
+
+**Implementation**:
+- SHAP-based feature importance using TreeSHAP for XGBoost/LightGBM (fast, exact)
+- Permutation importance fallback for sklearn models
+- CLI command: `g2 ml feature-importance`
+- MCP tool: `ml_feature_importance`
+- Automatically adapts to any features in the trained model
+
+**Usage**:
+```bash
+# Show top 20 features for 7-day horizon
 g2 ml feature-importance \
   --model-name mvp_model --model-version 20251217 \
   --horizon 7 \
   --top-k 20
 
-# Output: Ranked features with importance scores
+# Output as JSON for programmatic use
+g2 ml feature-importance \
+  --model-name mvp_model --model-version 20251217 \
+  --horizon 7 --json
 ```
 
 ### 5.4 Hyperparameter Tuning
 
+**Status**: ✅ Complete (2025-12-28)
+
 **Goal**: Automatically find best model hyperparameters.
 
 **Implementation**:
-- Grid search or random search
-- Bayesian optimization
-- Cross-validation on time-series data
-- Save best parameters to model metadata
-
-### 5.5 Online Prediction API
-
-**Goal**: Serve predictions via HTTP API for integration with trading systems.
-
-**Features**:
-- REST API with FastAPI
-- Batch predictions
-- Real-time model loading
-- Authentication and rate limiting
+- Bayesian optimization via Optuna
+- Time-series cross-validation (prevents data leakage)
+- Supports XGBoost, LightGBM, sklearn algorithms
+- CLI command: `g2 ml tune`
+- MCP tool: `ml_tune`
+- Saves best parameters to JSON
 
 **Usage**:
 ```bash
-# Start prediction server
-g2 ml serve --model-name mvp_model --model-version 20251217 --port 8000
+# Tune XGBoost quantile model with 50 trials
+g2 ml tune --dataset-name mvp --dataset-version v1 \
+  --algorithm xgboost --n-trials 50
 
-# Query predictions
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"symbols": ["AAPL", "MSFT"], "date": "2024-12-14"}'
+# Tune classifier with LightGBM
+g2 ml tune --dataset-name mvp --dataset-version v1 \
+  --algorithm lightgbm --model-type classifier
+
+# Quick tuning with timeout
+g2 ml tune --dataset-name mvp --dataset-version v1 --timeout 300
 ```
 
 ## Implementation Priority
 
-**High Priority** (next 3-6 months):
-1. Move indicators to database
-2. Feature selection during dataset build
-3. Parquet export format
-4. Trend classification model
+### Completed
+- ✅ 1.1 Move indicators to database (2025-12-28)
+- ✅ 1.2 Feature selection during dataset build (2025-12-17)
+- ✅ 1.3 Parquet export format (2025-12-28)
+- ✅ 2.1 Trend classification model (2025-12-17)
+- ✅ 3.1 Cross-sectional features (2025-12-17)
+- ✅ 4.1 Trading strategies - 7 implemented (2025-12-17)
+- ✅ 4.2 Backtesting engine MVP (2025-12-17)
+- ✅ 5.1 Warm-start retraining (2025-12-28)
+- ✅ 5.2 Model ensembles (2025-12-28)
+- ✅ 5.3 Feature importance analysis (2025-12-28)
+- ✅ 5.4 Hyperparameter tuning with Optuna (2025-12-28)
 
-**Medium Priority** (6-12 months):
-5. Cross-sectional features
-6. Backtesting engine
-7. First 3 trading strategies
-
-**Long-term** (12+ months):
-8. Remaining trading strategies
-9. Warm-start retraining
-10. Model ensembles
-11. Online prediction API
+### Future
+All planned ML features have been implemented.
 
 ## Contributing
 

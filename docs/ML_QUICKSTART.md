@@ -31,7 +31,10 @@ This enables:
 - ✅ Quantile regression (q10, q50, q90 predictions)
 - ✅ Multi-horizon forecasts (configurable horizons)
 - ✅ Trend strength labels computed (weak/strong up/down movements)
-- ⏳ Trend classification model (future enhancement - see ML Roadmap)
+- ✅ Trend classification model (XGBoost/LightGBM classifiers)
+- ✅ Model ensembles (combine multiple algorithms for better accuracy)
+- ✅ Hyperparameter tuning (Optuna integration)
+- ✅ Feature importance analysis (SHAP-based)
 
 ## Prerequisites
 
@@ -294,6 +297,71 @@ Lower is better. Measures average prediction error weighted by quantile.
 - Switch to `xgboost` for production after validating the pipeline
 - Use `lightgbm` for very large datasets or when training time matters
 
+## Model Ensembles
+
+Combine predictions from multiple algorithms for improved accuracy. Ensembles reduce variance and leverage the strengths of different approaches.
+
+### Training an Ensemble
+
+```bash
+# Train ensemble with two algorithms
+g2 ml train-ensemble \
+  --dataset-name nasdaq_500 \
+  --dataset-version v1 \
+  --model-name nasdaq_ensemble \
+  --model-version $(date +%Y%m%d) \
+  --algorithms xgboost,lightgbm \
+  --out-dir models
+
+# Train with custom weights (XGBoost weighted higher)
+g2 ml train-ensemble \
+  --dataset-name nasdaq_500 \
+  --dataset-version v1 \
+  --model-name weighted_ensemble \
+  --model-version $(date +%Y%m%d) \
+  --algorithms xgboost,lightgbm \
+  --weights 0.6,0.4 \
+  --out-dir models
+```
+
+**What happens:**
+- Trains each algorithm separately on the same data
+- Creates ensemble metadata linking the base models
+- Stores weights for weighted averaging during prediction
+- Registers as `algorithm=ensemble` in `ml_models` table
+
+### Generating Ensemble Predictions
+
+```bash
+g2 ml predict-ensemble \
+  --model-name nasdaq_ensemble \
+  --model-version $(date +%Y%m%d) \
+  --prediction-date $(date +%Y-%m-%d) \
+  --exchange NASDAQ \
+  --limit 500
+```
+
+**What happens:**
+- Loads each base model for the horizon
+- Generates predictions from each model
+- Computes weighted average: `q50_ensemble = w1*q50_xgb + w2*q50_lgb`
+- Enforces quantile ordering (q10 ≤ q50 ≤ q90)
+- Stores in `quantile_predictions` table
+
+### When to Use Ensembles
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Prototyping | Single model (`quantile_regression`) |
+| Production with moderate data | Single `xgboost` model |
+| Maximum accuracy needed | Ensemble of `xgboost,lightgbm` |
+| Uncertainty about best algorithm | Ensemble with equal weights |
+
+**Benefits:**
+- Reduces prediction variance
+- More robust to outliers
+- Combines linear + non-linear patterns
+
 ## Querying Predictions
 
 ### SQL Examples
@@ -387,15 +455,40 @@ ls -la models/your_model_version_h30/
 4. **Automated retraining** - Set up cron jobs to retrain weekly/monthly
 5. **Signal generation** - Convert predictions into trading signals (e.g., buy when q50 > 2% and q10 > 0%)
 
-## Trend Strength Classification (Future)
+## Trend Classification
 
-Currently, the pipeline computes trend labels (weak/strong up/down) based on forward returns and thresholds, but only trains quantile regression models. A future enhancement will add:
+Train a classifier to predict trend strength categories (strong_up, weak_up, flat, weak_down, strong_down):
 
-- **Trend Classification Model**: Predict categorical trend strength (strong_up, weak_up, neutral, weak_down, strong_down)
-- **Dual System**: Use quantile predictions for risk assessment + trend classification for screening
-- **Combined Strategy**: "Buy stocks with strong_up trend AND q10 > 0% (downside protected)"
+```bash
+# Train trend classifier
+g2 ml train-classifier \
+  --dataset-name nasdaq_500 \
+  --dataset-version v1 \
+  --model-name trend_classifier \
+  --model-version $(date +%Y%m%d) \
+  --algorithm xgboost \
+  --out-dir models
+```
 
-This is documented in the [ML Roadmap](ML_ROADMAP.md).
+**Combined Strategy** - Use both quantile predictions and trend classification:
+
+```sql
+-- Find stocks with strong uptrend AND protected downside
+SELECT s.symbol, qp.q10, qp.q50, qp.q90, tcp.predicted_class, tcp.confidence
+FROM quantile_predictions qp
+JOIN trend_class_predictions tcp ON
+  qp.data_id = tcp.data_id AND
+  qp.prediction_date = tcp.prediction_date AND
+  qp.horizon_days = tcp.horizon_days
+JOIN stocks s ON qp.data_id = s.id
+WHERE qp.prediction_date = CURRENT_DATE
+  AND qp.horizon_days = 7
+  AND tcp.predicted_class = 'strong_up'
+  AND tcp.confidence > 0.7
+  AND qp.q10 > 0  -- Downside protected
+ORDER BY qp.q90 DESC
+LIMIT 20;
+```
 
 ## Parquet Export
 
