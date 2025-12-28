@@ -1,7 +1,39 @@
 #!/bin/bash
 #
-# pre-commit hook: Check for observability in new Python files
+# pre-commit hook: TDD enforcement + observability checks
 #
+
+# =============================================================================
+# TDD ENFORCEMENT: Block src/ changes without corresponding tests/ changes
+# =============================================================================
+
+SRC_CHANGED=$(git diff --cached --name-only | grep -E '^src/' | grep -v '__pycache__' | head -1)
+TESTS_CHANGED=$(git diff --cached --name-only | grep -E '^tests/' | head -1)
+
+if [ -n "$SRC_CHANGED" ] && [ -z "$TESTS_CHANGED" ]; then
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo "❌ TDD VIOLATION: src/ modified without tests/"
+    echo "═══════════════════════════════════════════════════════════════"
+    echo ""
+    echo "You are modifying source code without test changes:"
+    echo ""
+    git diff --cached --name-only | grep -E '^src/' | sed 's/^/  /'
+    echo ""
+    echo "TDD requires:"
+    echo "  1. Write a failing test FIRST"
+    echo "  2. Then implement the feature"
+    echo "  3. Commit both together"
+    echo ""
+    echo "To bypass (use sparingly): git commit --no-verify"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    exit 1
+fi
+
+# =============================================================================
+# OBSERVABILITY CHECK: New Python files should have observability imports
+# =============================================================================
 
 # Get list of new Python files being added in src/g2/
 NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '^src/g2/.*\.py$' | grep -v '__init__.py' | grep -v 'test')
