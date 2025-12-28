@@ -324,12 +324,40 @@ g2 ml train --dataset-name mvp --dataset-version v2 \
 
 ### 5.2 Model Ensembles
 
+**Status**: ✅ Complete (2025-12-28)
+
 **Goal**: Combine multiple model predictions for better accuracy.
 
-**Approaches**:
-- Average predictions from multiple algorithms
-- Weighted ensemble by validation performance
-- Stacking (meta-model on top of base models)
+**Benefits**:
+- Improved prediction accuracy through weighted averaging
+- Leverage strengths of different algorithms
+- Reduce model variance
+
+**Implementation**:
+- `src/g2/ml/ensemble.py` - Core ensemble functionality with OpenTelemetry tracing
+- `create_ensemble()` - Combine existing trained models
+- `train_ensemble()` - Train and combine models in one step
+- `predict_ensemble()` - Generate weighted average predictions
+- `save_ensemble()` / `load_ensemble()` - Persistence
+
+**Usage**:
+```bash
+# Train ensemble with multiple algorithms
+g2 ml train-ensemble --dataset-name mvp --dataset-version v1 \
+  --model-name my_ensemble --model-version v1 \
+  --algorithms quantile_regression,quantile_regression
+
+# Train with custom weights
+g2 ml train-ensemble --dataset-name mvp --dataset-version v1 \
+  --model-name weighted_ensemble --model-version v1 \
+  --algorithms xgboost,lightgbm \
+  --weights 0.6,0.4
+```
+
+**Approaches Supported**:
+- Weighted averaging of quantile predictions
+- Equal weights (default) or custom weights
+- Support for all algorithms (sklearn, XGBoost, LightGBM)
 
 ### 5.3 Feature Importance Analysis
 
@@ -397,11 +425,12 @@ g2 ml tune --dataset-name mvp --dataset-version v1 --timeout 300
 - ✅ 4.1 Trading strategies - 7 implemented (2025-12-17)
 - ✅ 4.2 Backtesting engine MVP (2025-12-17)
 - ✅ 5.1 Warm-start retraining (2025-12-28)
+- ✅ 5.2 Model ensembles (2025-12-28)
 - ✅ 5.3 Feature importance analysis (2025-12-28)
 - ✅ 5.4 Hyperparameter tuning with Optuna (2025-12-28)
 
 ### Future
-1. 5.2 Model ensembles - Combine multiple algorithms
+All planned ML features have been implemented.
 
 ## Contributing
 

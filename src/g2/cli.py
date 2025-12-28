@@ -1642,6 +1642,181 @@ def ml_predict_classifier(
         emit("Note: Full prediction workflow requires feature loading - to be implemented", json_output=json_output)
 
 
+@ml_app.command("train-ensemble")
+def ml_train_ensemble(
+    dataset_name: str = typer.Option(..., help="Dataset name to train on"),
+    dataset_version: str = typer.Option(..., help="Dataset version"),
+    model_name: str = typer.Option(..., help="Ensemble model name (identifier)"),
+    model_version: str = typer.Option(..., help="Model version (e.g., date tag)"),
+    algorithms: str = typer.Option(
+        "quantile_regression,quantile_regression",
+        help="Comma-separated algorithms: quantile_regression, xgboost, lightgbm"
+    ),
+    weights: Optional[str] = typer.Option(None, help="Comma-separated weights (must sum to 1.0). Defaults to equal weights."),
+    out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Train an ensemble of quantile regression models for multi-horizon return prediction.
+
+    Ensembles combine predictions from multiple algorithms for improved accuracy.
+    Supports weighted averaging of predictions.
+
+    Examples:
+        # Train ensemble with two sklearn models (different regularization)
+        g2 ml train-ensemble --dataset-name tech_stocks --dataset-version v1 \\
+            --model-name tech_ensemble --model-version v1 \\
+            --algorithms quantile_regression,quantile_regression
+
+        # Train ensemble with XGBoost and LightGBM
+        g2 ml train-ensemble --dataset-name nasdaq_50 --dataset-version 2025-01 \\
+            --model-name nasdaq_ensemble --model-version v1 \\
+            --algorithms xgboost,lightgbm
+
+        # Train ensemble with custom weights
+        g2 ml train-ensemble --dataset-name custom --dataset-version v1 \\
+            --model-name custom_ensemble --model-version v1 \\
+            --algorithms xgboost,lightgbm,quantile_regression \\
+            --weights 0.5,0.3,0.2
+    """
+    from g2.ml.store import get_ml_dataset
+    from g2.ml.models import load_dataset_from_csv
+    from g2.ml.ensemble import train_ensemble
+
+    # Parse algorithms
+    algo_list = [a.strip() for a in algorithms.split(",")]
+    if not algo_list:
+        emit_error("At least one algorithm must be specified", json_output=json_output)
+        return
+
+    # Parse weights
+    weight_list = None
+    if weights:
+        try:
+            weight_list = [float(w.strip()) for w in weights.split(",")]
+            if len(weight_list) != len(algo_list):
+                emit_error(
+                    f"Number of weights ({len(weight_list)}) must match number of algorithms ({len(algo_list)})",
+                    json_output=json_output
+                )
+                return
+            if not abs(sum(weight_list) - 1.0) < 0.001:
+                emit_error(f"Weights must sum to 1.0, got {sum(weight_list)}", json_output=json_output)
+                return
+        except ValueError:
+            emit_error(f"Invalid weights format: {weights}", json_output=json_output)
+            return
+
+    with db_connection(db_url) as conn:
+        # Fetch dataset manifest
+        dataset = get_ml_dataset(conn, name=dataset_name, version=dataset_version)
+        if not dataset:
+            emit_error(f"Dataset not found: {dataset_name} {dataset_version}", json_output=json_output)
+            return
+
+        # Train ensembles for each horizon
+        artifact_uri = Path(dataset["artifact_uri"])
+        horizons = dataset["horizons_days"]
+        all_train_metrics = {}
+
+        emit(f"Training ensemble ({', '.join(algo_list)}) for horizons: {horizons}", json_output=json_output)
+        if weight_list:
+            emit(f"  Using weights: {weight_list}", json_output=json_output)
+        else:
+            emit(f"  Using equal weights", json_output=json_output)
+
+        for horizon in horizons:
+            emit(f"Training ensemble for {horizon}-day horizon...", json_output=json_output)
+
+            # Load features and labels for this horizon
+            X, y = load_dataset_from_csv(artifact_uri, horizon)
+            emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
+
+            # Train ensemble
+            ensemble_path = out_dir / f"{model_name}_{model_version}_h{horizon}"
+            result = train_ensemble(
+                X=X,
+                y=y,
+                algorithms=algo_list,
+                weights=weight_list,
+                output_dir=ensemble_path,
+            )
+
+            emit(f"  Trained {len(result['base_models'])} base models", json_output=json_output)
+            emit(f"  Saved artifacts to {ensemble_path}", json_output=json_output)
+
+            all_train_metrics[f"h{horizon}"] = result["metrics"]
+
+        # Register model in ml_models
+        from psycopg.types.json import Json
+
+        base_artifact_path = out_dir / f"{model_name}_{model_version}"
+
+        with conn.cursor() as cur:
+            # Create run record
+            cur.execute(
+                """
+                INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
+                VALUES ('train_ensemble', 'running', %s, %s, NOW())
+                RETURNING id;
+                """,
+                (dataset["id"], Json({"algorithms": algo_list, "model_name": model_name, "weights": weight_list})),
+            )
+            run_id = int(cur.fetchone()[0])
+
+            # Register model
+            cur.execute(
+                """
+                INSERT INTO ml_models
+                  (name, version, train_run_id, dataset_id, algorithm, hyperparams, metrics, artifact_uri)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name, version) DO UPDATE SET
+                  train_run_id = EXCLUDED.train_run_id,
+                  dataset_id = EXCLUDED.dataset_id,
+                  algorithm = EXCLUDED.algorithm,
+                  hyperparams = EXCLUDED.hyperparams,
+                  metrics = EXCLUDED.metrics,
+                  artifact_uri = EXCLUDED.artifact_uri
+                RETURNING id;
+                """,
+                (
+                    model_name,
+                    model_version,
+                    run_id,
+                    dataset["id"],
+                    "ensemble",
+                    Json({"algorithms": algo_list, "weights": weight_list or [1.0/len(algo_list)]*len(algo_list)}),
+                    Json(all_train_metrics),
+                    str(base_artifact_path),
+                ),
+            )
+            model_id = int(cur.fetchone()[0])
+
+            # Mark run as complete
+            cur.execute(
+                """
+                UPDATE ml_runs SET status = 'completed', finished_at = NOW()
+                WHERE id = %s;
+                """,
+                (run_id,),
+            )
+
+        conn.commit()
+
+    emit(
+        f"Ensemble trained: {model_name} {model_version}",
+        data={
+            "model_id": model_id,
+            "run_id": run_id,
+            "artifact_uri": str(base_artifact_path),
+            "horizons": horizons,
+            "algorithms": algo_list,
+        },
+        json_output=json_output,
+    )
+
+
 @app.command("prices-ingest")
 def ingest_prices(
     symbol: str = typer.Option(..., help="Ticker symbol to ingest"),
