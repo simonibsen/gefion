@@ -15,6 +15,7 @@ import psycopg
 from psycopg.types.json import Json
 import pytest
 
+from g2.config import load_settings
 from g2.db import schema, pool
 from g2.db.ingest import upsert_stock, insert_computed_features
 
@@ -25,10 +26,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
+
+
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         yield conn
@@ -77,7 +84,7 @@ def test_synchronous_commit_is_actually_disabled_when_requested(db_conn, setup_d
     stock_id, feature_id = setup_db
 
     # Initialize connection pool
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = get_db_url()
     pool.close_pool()
     pool.init_pool(url, min_size=2, max_size=5, prepare_statements=False)
 
@@ -139,7 +146,7 @@ def test_set_local_in_autocommit_has_no_effect():
 
     This is the bug we're fixing.
     """
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = get_db_url()
 
     with psycopg.connect(url) as conn:
         conn.autocommit = True
@@ -190,7 +197,7 @@ def test_insert_computed_features_respects_sync_commit_flag(db_conn, setup_db):
     stock_id, feature_id = setup_db
 
     pool.close_pool()
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = get_db_url()
     pool.init_pool(url, min_size=2, max_size=5, prepare_statements=False)
 
     try:

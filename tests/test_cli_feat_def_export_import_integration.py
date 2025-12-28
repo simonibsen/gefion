@@ -10,6 +10,7 @@ import pytest
 from pathlib import Path
 from typer.testing import CliRunner
 from g2 import cli
+from g2.config import load_settings
 from g2.db import schema
 from g2.db.ingest import ensure_feature_definitions, ensure_store_targets
 
@@ -21,15 +22,23 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-runner = CliRunner(env={"DATABASE_URL": "postgresql://g2:g2pass@localhost:6432/g2"})
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
+
+
+runner = CliRunner()
 
 
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
+        # Ensure table exists before cleanup
+        schema.create_feature_definitions_table(conn)
         # Clean up before tests
         with conn.cursor() as cur:
             cur.execute("""

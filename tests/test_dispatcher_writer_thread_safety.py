@@ -15,6 +15,7 @@ import psycopg
 from psycopg.types.json import Json
 import pytest
 
+from g2.config import load_settings
 from g2.db import schema, pool
 from g2.db.ingest import upsert_stock
 from g2.features.dispatcher import compute_features
@@ -27,10 +28,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
+
+
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         yield conn
@@ -118,7 +125,7 @@ def test_writer_threads_use_separate_connections(db_conn, setup_db):
     thread_safety_violation = {"detected": False, "details": ""}
 
     # Initialize connection pool
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = get_db_url()
     pool.close_pool()
     pool.init_pool(url, min_size=2, max_size=5, prepare_statements=False)
 
@@ -226,7 +233,7 @@ def compute(rows, specs):
 
     try:
         # Initialize connection pool
-        url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+        url = get_db_url()
         pool.close_pool()
         pool.init_pool(url, min_size=3, max_size=10, prepare_statements=False)
 

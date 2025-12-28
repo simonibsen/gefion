@@ -3,6 +3,8 @@ TDD tests for generic feat-def-import CLI command.
 
 Tests that feat-def-import can load ANY feature type (indicators, derivatives, etc.)
 from JSON files without special-case handling.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import json
 import os
@@ -13,7 +15,21 @@ import tempfile
 import shutil
 from typer.testing import CliRunner
 from g2 import cli
+from g2.config import load_settings
 from g2.db import schema
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
+
+
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
+
 
 runner = CliRunner()
 
@@ -58,7 +74,7 @@ def temp_feature_dir():
 @pytest.fixture
 def db_conn():
     """Create test database connection."""
-    db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    db_url = get_db_url()
     try:
         with psycopg.connect(db_url) as conn:
             conn.autocommit = True
@@ -73,7 +89,7 @@ def test_feat_def_import_imports_from_directory(db_conn, temp_feature_dir, monke
     """Test that feat-def-import loads feature definitions from directory."""
     schema.create_stocks_table(db_conn)
     schema.create_feature_definitions_table(db_conn)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    monkeypatch.setenv("DATABASE_URL", get_db_url())
 
     result = runner.invoke(cli.app, ["feat-def-import", "--dir", temp_feature_dir])
 
@@ -91,7 +107,7 @@ def test_feat_def_import_handles_duplicate_definitions(db_conn, temp_feature_dir
     """Test that re-importing updates existing definitions."""
     schema.create_stocks_table(db_conn)
     schema.create_feature_definitions_table(db_conn)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    monkeypatch.setenv("DATABASE_URL", get_db_url())
 
     # Import once
     result1 = runner.invoke(cli.app, ["feat-def-import", "--dir", temp_feature_dir])
@@ -112,7 +128,7 @@ def test_feat_def_import_filters_by_feature_names(db_conn, temp_feature_dir, mon
     """Test that feat-def-import can filter by specific feature names."""
     schema.create_stocks_table(db_conn)
     schema.create_feature_definitions_table(db_conn)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    monkeypatch.setenv("DATABASE_URL", get_db_url())
 
     # Import only indicator
     result = runner.invoke(cli.app, ["feat-def-import", "--dir", temp_feature_dir, "--features", "indicator_rsi_14"])
@@ -131,7 +147,7 @@ def test_feat_def_import_works_for_multiple_feature_types(db_conn, temp_feature_
     """Test that feat-def-import works for ANY feature type without special handling."""
     schema.create_stocks_table(db_conn)
     schema.create_feature_definitions_table(db_conn)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    monkeypatch.setenv("DATABASE_URL", get_db_url())
 
     result = runner.invoke(cli.app, ["feat-def-import", "--dir", temp_feature_dir])
 

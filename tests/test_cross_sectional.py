@@ -3,17 +3,32 @@ TDD tests for cross-sectional features.
 
 These tests will initially fail and drive the implementation of
 cross-sectional (market-relative) feature computation.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 import pytest
 import psycopg
+from g2.config import load_settings
 from g2.db import schema
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
+
+
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
 
 
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         yield conn

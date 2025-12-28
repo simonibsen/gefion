@@ -12,6 +12,7 @@ import os
 import psycopg
 import pytest
 
+from g2.config import load_settings
 from g2.db import schema
 
 
@@ -21,10 +22,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
+
+
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         yield conn

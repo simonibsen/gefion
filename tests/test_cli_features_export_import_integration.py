@@ -1,5 +1,7 @@
 """
 Integration tests for the improved features-fx-export and features-fx-import CLI commands.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import json
 import os
@@ -9,16 +11,29 @@ from pathlib import Path
 from typer.testing import CliRunner
 from g2 import cli
 from g2.cli import _upsert_feature_function
+from g2.config import load_settings
 from g2.db import schema
 
 
-runner = CliRunner(env={"DATABASE_URL": "postgresql://g2:g2pass@localhost:6432/g2"})
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
+
+
+def get_db_url():
+    """Get database URL from environment or settings."""
+    settings = load_settings()
+    return os.environ.get("DATABASE_URL", settings.database_url)
+
+
+runner = CliRunner()
 
 
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         # Ensure table exists before cleanup
