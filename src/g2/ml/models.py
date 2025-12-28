@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 def load_dataset_from_csv(artifact_uri: Path, horizon_days: int) -> Tuple[pd.DataFrame, pd.Series]:
     """
-    Load features and labels from CSV files for a specific horizon.
+    Load features and labels from CSV or Parquet files for a specific horizon.
+
+    Supports both CSV and Parquet formats. Parquet is preferred if both exist.
 
     Args:
         artifact_uri: Path to dataset manifest JSON file
@@ -28,23 +30,37 @@ def load_dataset_from_csv(artifact_uri: Path, horizon_days: int) -> Tuple[pd.Dat
         (X_features, y_labels): Features DataFrame and labels Series
 
     Raises:
-        FileNotFoundError: If CSV files don't exist
+        FileNotFoundError: If neither CSV nor Parquet files exist
         ValueError: If no labels found for horizon
     """
-    # Dataset CSVs are in the same directory as manifest
+    # Dataset files are in the same directory as manifest
     dataset_dir = Path(artifact_uri).parent
 
-    features_path = dataset_dir / "features.csv"
-    labels_path = dataset_dir / "labels.csv"
+    # Check for both CSV and Parquet formats (prefer Parquet)
+    features_csv = dataset_dir / "features.csv"
+    features_parquet = dataset_dir / "features.parquet"
+    labels_csv = dataset_dir / "labels.csv"
+    labels_parquet = dataset_dir / "labels.parquet"
 
-    if not features_path.exists():
-        raise FileNotFoundError(f"features.csv not found at {features_path}")
-    if not labels_path.exists():
-        raise FileNotFoundError(f"labels.csv not found at {labels_path}")
+    # Load features (prefer Parquet for performance)
+    if features_parquet.exists():
+        logger.info(f"Loading features from {features_parquet}")
+        features_df = pd.read_parquet(features_parquet)
+    elif features_csv.exists():
+        logger.info(f"Loading features from {features_csv}")
+        features_df = pd.read_csv(features_csv)
+    else:
+        raise FileNotFoundError(f"features file not found at {dataset_dir} (tried .parquet and .csv)")
 
-    # Load features (long format: symbol, date, feature_name, value)
-    logger.info(f"Loading features from {features_path}")
-    features_df = pd.read_csv(features_path)
+    # Load labels (prefer Parquet for performance)
+    if labels_parquet.exists():
+        logger.info(f"Loading labels from {labels_parquet}")
+        labels_df = pd.read_parquet(labels_parquet)
+    elif labels_csv.exists():
+        logger.info(f"Loading labels from {labels_csv}")
+        labels_df = pd.read_csv(labels_csv)
+    else:
+        raise FileNotFoundError(f"labels file not found at {dataset_dir} (tried .parquet and .csv)")
 
     # Pivot to wide format for sklearn
     logger.info("Pivoting features to wide format")
@@ -54,10 +70,6 @@ def load_dataset_from_csv(artifact_uri: Path, horizon_days: int) -> Tuple[pd.Dat
         values="value",
         aggfunc="first"  # Take first if duplicates
     ).reset_index()
-
-    # Load labels (symbol, date, horizon_days, forward_return, label)
-    logger.info(f"Loading labels from {labels_path}")
-    labels_df = pd.read_csv(labels_path)
 
     # Filter to specific horizon
     labels_horizon = labels_df[labels_df["horizon_days"] == horizon_days].copy()

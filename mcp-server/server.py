@@ -225,7 +225,8 @@ async def list_tools() -> List[Tool]:
             name="ml_dataset_build",
             description=(
                 "Build ML training dataset with features and labels. "
-                "Creates manifest, exports CSVs (prices.csv, features.csv, labels.csv). "
+                "Creates manifest, exports data files (prices, features, labels). "
+                "Supports CSV (default) or Parquet format for faster loading. "
                 "Specify either --symbols (comma-separated) or --exchange + --limit."
             ),
             inputSchema={
@@ -239,8 +240,9 @@ async def list_tools() -> List[Tool]:
                     "horizons": {"type": "string", "description": "Comma-separated horizons in days (e.g., 7,30,90)", "default": "7,30,90"},
                     "weak_thresholds": {"type": "string", "description": "Weak move thresholds (e.g., 0.02,0.05,0.10)", "default": "0.02,0.05,0.10"},
                     "strong_thresholds": {"type": "string", "description": "Strong move thresholds (e.g., 0.05,0.10,0.20)", "default": "0.05,0.10,0.20"},
-                    "out_dir": {"type": "string", "description": "Output directory for CSVs", "default": "datasets"},
-                    "export": {"type": "boolean", "description": "Export CSVs", "default": True},
+                    "format": {"type": "string", "description": "Export format: csv (default) or parquet (faster loading)", "default": "csv", "enum": ["csv", "parquet"]},
+                    "out_dir": {"type": "string", "description": "Output directory for dataset files", "default": "datasets"},
+                    "export": {"type": "boolean", "description": "Export data files", "default": True},
                 },
                 "required": ["name", "version"],
             },
@@ -833,6 +835,8 @@ async def _ml_dataset_build(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(['--weak-thresholds', args['weak_thresholds']])
         if args.get('strong_thresholds'):
             cmd.extend(['--strong-thresholds', args['strong_thresholds']])
+        if args.get('format'):
+            cmd.extend(['--format', args['format']])
         if args.get('out_dir'):
             cmd.extend(['--out-dir', args['out_dir']])
         if args.get('export', True):

@@ -34,6 +34,12 @@ ml_extended = [
     "lightgbm>=4.0",
     "pyarrow>=14.0",
 ]
+gpu = [
+    "torch>=2.0",
+]
+all = [
+    "g2[dev,ml_extended,gpu]",
+]
 
 [project.scripts]
 g2 = "g2.cli:entrypoint"
