@@ -159,3 +159,42 @@ If you see `Access denied: 'dev_status' is not available in operator role`:
 ### Role Not Taking Effect
 
 The role is read at server startup. Restart the MCP server after changing `G2_MCP_ROLE`.
+
+## Limitations and Future Directions
+
+### Current Limitation: Advisory Role Enforcement
+
+The MCP role system is **advisory only**. It provides guidelines to the LLM about expected behavior, but does not enforce restrictions on Claude Code's core tools.
+
+**The gap:**
+- MCP server returns role guidelines via `get_role_info`
+- Claude Code's core tools (Read, Edit, Write, Bash, Glob, Grep) remain available regardless of MCP role
+- An LLM in "operator" mode can still edit source files using Claude Code's built-in tools
+
+**Why this matters:**
+- In production, you may want to guarantee that an operator cannot modify code
+- Currently, role compliance depends on the LLM following guidelines, not technical enforcement
+
+### Potential Solutions to Explore
+
+1. **Claude Code Hooks** - Pre-tool hooks could check the MCP role and block file operations:
+   ```bash
+   # .claude/hooks/pre-tool.sh
+   if [[ "$TOOL_NAME" =~ ^(Edit|Write)$ ]]; then
+     # Check MCP role and block if operator
+   fi
+   ```
+
+2. **Separate Project Configs** - Maintain different `.claude/` configurations with different tool allowlists for operator vs developer workflows.
+
+3. **MCP-Only Mode** - A future Claude Code feature could restrict sessions to only use MCP tools, blocking direct filesystem access entirely.
+
+4. **Session Initialization Protocol** - Standardize checking `get_role_info` at conversation start and binding behavior accordingly.
+
+### Intent
+
+The role system is designed to:
+- **Operator**: Safe for production use by non-developers. Focus on data ops, ML training, monitoring. Should not modify source code or infrastructure.
+- **Developer**: Full access for local development. Can read/write source, access internal docs, run arbitrary commands.
+
+Until enforcement is strengthened, treat operator mode as a **strong hint** rather than a security boundary.
