@@ -2036,6 +2036,97 @@ def ml_predict_ensemble(
     )
 
 
+@ml_app.command("e2e-test")
+def ml_e2e_test(
+    exchange: str = typer.Option("NASDAQ", help="Exchange to test with"),
+    limit: int = typer.Option(10, help="Number of symbols to use (default: 10 for fast testing)"),
+    name: str = typer.Option("e2e_test", help="Test name prefix for artifacts"),
+    skip_data_update: bool = typer.Option(False, "--skip-data-update", help="Skip data update step"),
+    cleanup: bool = typer.Option(False, "--cleanup", help="Remove test artifacts after completion"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """
+    Run end-to-end ML pipeline test.
+
+    This command runs the full ML pipeline to validate system functionality:
+    1. Data Update - Fetch price data from AlphaVantage
+    2. Dataset Build - Create ML dataset with features and labels
+    3. Train Model - Train single XGBoost model
+    4. Train Ensemble - Train ensemble combining XGBoost and LightGBM
+    5. Predict - Generate predictions with single model
+    6. Predict Ensemble - Generate predictions with ensemble
+
+    Examples:
+        # Quick smoke test with defaults (10 NASDAQ symbols)
+        g2 ml e2e-test
+
+        # Test with more symbols
+        g2 ml e2e-test --limit 50
+
+        # Test on NYSE with cleanup
+        g2 ml e2e-test --exchange NYSE --limit 20 --cleanup
+
+        # Skip data update (if data is already fresh)
+        g2 ml e2e-test --skip-data-update
+    """
+    from g2.ml.e2e import run_e2e_test, E2E_STEPS
+
+    emit(f"Starting E2E ML pipeline test", json_output=json_output)
+    emit(f"Exchange: {exchange}, Limit: {limit}, Name: {name}", json_output=json_output)
+    emit("", json_output=json_output)
+
+    # Show steps
+    emit("Pipeline steps:", json_output=json_output)
+    for i, (step_name, step_desc) in enumerate(E2E_STEPS.items(), 1):
+        status = "[SKIP]" if step_name == "data_update" and skip_data_update else ""
+        emit(f"  {i}. {step_desc} {status}", json_output=json_output)
+    emit("", json_output=json_output)
+
+    url = _db_url(db_url)
+    with db_connection(url) as conn:
+        result = run_e2e_test(
+            exchange=exchange,
+            limit=limit,
+            name=name,
+            skip_data_update=skip_data_update,
+            cleanup=cleanup,
+            conn=conn,
+        )
+
+    # Report results
+    if result.success:
+        emit("", json_output=json_output)
+        emit("E2E Test PASSED", json_output=json_output)
+        emit(f"Duration: {result.duration_seconds}s", json_output=json_output)
+        emit(f"Steps completed: {len(result.steps_completed)}/{len(E2E_STEPS)}", json_output=json_output)
+
+        if result.artifacts:
+            emit("", json_output=json_output)
+            emit("Artifacts created:", json_output=json_output)
+            for key, value in result.artifacts.items():
+                emit(f"  {key}: {value}", json_output=json_output)
+
+        if json_output:
+            emit("", data=result.to_dict(), json_output=json_output)
+    else:
+        emit("", json_output=json_output)
+        emit_error("E2E Test FAILED", json_output=json_output)
+        emit(f"Duration: {result.duration_seconds}s", json_output=json_output)
+        emit(f"Steps completed: {result.steps_completed}", json_output=json_output)
+        emit(f"Steps failed: {result.steps_failed}", json_output=json_output)
+
+        if result.errors:
+            emit("", json_output=json_output)
+            emit("Errors:", json_output=json_output)
+            for step, error in result.errors.items():
+                emit(f"  {step}: {error}", json_output=json_output)
+
+        if json_output:
+            emit("", data=result.to_dict(), json_output=json_output)
+        raise typer.Exit(code=1)
+
+
 @app.command("prices-ingest")
 def ingest_prices(
     symbol: str = typer.Option(..., help="Ticker symbol to ingest"),

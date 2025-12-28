@@ -467,6 +467,85 @@ async def list_tools() -> List[Tool]:
             },
         ),
 
+        Tool(
+            name="ml_train_ensemble",
+            description=(
+                "Train ensemble model combining multiple algorithms for improved accuracy. "
+                "Trains each algorithm separately, then combines predictions via weighted averaging. "
+                "Supports quantile_regression, xgboost, and lightgbm algorithms."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset_name": {"type": "string", "description": "Dataset name to train on"},
+                    "dataset_version": {"type": "string", "description": "Dataset version to train on"},
+                    "model_name": {"type": "string", "description": "Ensemble model name for registry"},
+                    "model_version": {"type": "string", "description": "Model version (e.g., YYYYMMDD)"},
+                    "algorithms": {
+                        "type": "string",
+                        "description": "Comma-separated algorithms (e.g., xgboost,lightgbm)",
+                        "default": "quantile_regression,quantile_regression"
+                    },
+                    "weights": {
+                        "type": "string",
+                        "description": "Comma-separated weights (must sum to 1.0). Defaults to equal weights."
+                    },
+                    "out_dir": {"type": "string", "description": "Output directory for model artifacts", "default": "models"},
+                },
+                "required": ["dataset_name", "dataset_version", "model_name", "model_version"],
+            },
+        ),
+
+        Tool(
+            name="ml_predict_ensemble",
+            description=(
+                "Generate predictions using a trained ensemble model. "
+                "Loads each base model, generates predictions, computes weighted average. "
+                "Stores results in quantile_predictions table."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Ensemble model name"},
+                    "model_version": {"type": "string", "description": "Model version"},
+                    "prediction_date": {"type": "string", "description": "Date for predictions (YYYY-MM-DD)"},
+                    "symbols": {"type": "string", "description": "Comma-separated symbols (e.g., AAPL,MSFT)"},
+                    "exchange": {"type": "string", "description": "Exchange name (alternative to symbols)"},
+                    "limit": {"type": "integer", "description": "Limit symbols from exchange"},
+                },
+                "required": ["model_name", "model_version", "prediction_date"],
+            },
+        ),
+
+        Tool(
+            name="ml_e2e_test",
+            description=(
+                "Run end-to-end ML pipeline test. Tests the complete workflow: "
+                "data update -> dataset build -> model training -> ensemble training -> predictions. "
+                "Returns success/failure status and metrics for each step."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "exchange": {
+                        "type": "string",
+                        "description": "Exchange for test data (default: NASDAQ)",
+                        "default": "NASDAQ"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of symbols to test with (default: 10)",
+                        "default": 10
+                    },
+                    "skip_data_update": {
+                        "type": "boolean",
+                        "description": "Skip data update step if data already exists",
+                        "default": False
+                    },
+                },
+            },
+        ),
+
         # Database Query Tools
         Tool(
             name="query_predictions",
@@ -951,6 +1030,12 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _ml_train_classifier(arguments)
         elif name == "ml_predict_classifier":
             result = await _ml_predict_classifier(arguments)
+        elif name == "ml_train_ensemble":
+            result = await _ml_train_ensemble(arguments)
+        elif name == "ml_predict_ensemble":
+            result = await _ml_predict_ensemble(arguments)
+        elif name == "ml_e2e_test":
+            result = await _ml_e2e_test(arguments)
         elif name == "query_predictions":
             result = await _query_predictions(arguments)
         elif name == "query_model_performance":
@@ -1214,6 +1299,208 @@ async def _ml_predict_classifier(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(['--limit', str(args['limit'])])
 
     return await executor.run(*cmd)
+
+
+async def _ml_train_ensemble(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Train ensemble model combining multiple algorithms."""
+    cmd = [
+        'ml', 'train-ensemble',
+        '--dataset-name', args['dataset_name'],
+        '--dataset-version', args['dataset_version'],
+        '--model-name', args['model_name'],
+        '--model-version', args['model_version'],
+    ]
+
+    if args.get('algorithms'):
+        cmd.extend(['--algorithms', args['algorithms']])
+    if args.get('weights'):
+        cmd.extend(['--weights', args['weights']])
+    if args.get('out_dir'):
+        cmd.extend(['--out-dir', args['out_dir']])
+
+    return await executor.run(*cmd)
+
+
+async def _ml_predict_ensemble(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate predictions using trained ensemble model."""
+    cmd = [
+        'ml', 'predict-ensemble',
+        '--model-name', args['model_name'],
+        '--model-version', args['model_version'],
+        '--prediction-date', args['prediction_date'],
+    ]
+
+    if args.get('symbols'):
+        cmd.extend(['--symbols', args['symbols']])
+    elif args.get('exchange'):
+        cmd.extend(['--exchange', args['exchange']])
+        if args.get('limit'):
+            cmd.extend(['--limit', str(args['limit'])])
+
+    return await executor.run(*cmd)
+
+
+async def _ml_e2e_test(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Run end-to-end ML pipeline test."""
+    exchange = args.get('exchange', 'NASDAQ')
+    limit = args.get('limit', 10)
+    skip_data_update = args.get('skip_data_update', False)
+
+    results = {
+        'success': True,
+        'steps': {},
+        'exchange': exchange,
+        'limit': limit,
+    }
+
+    # Generate unique test identifiers
+    import time
+    test_id = f"e2e_{int(time.time())}"
+    dataset_name = f"{test_id}_dataset"
+    model_name = f"{test_id}_model"
+    ensemble_name = f"{test_id}_ensemble"
+    version = "v1"
+
+    try:
+        # Step 1: Data Update (optional)
+        if not skip_data_update:
+            step1 = await executor.run(
+                'data-update',
+                '--exchange', exchange,
+                '--limit', str(limit),
+            )
+            results['steps']['1_data_update'] = {
+                'success': step1.get('status') == 'ok',
+                'output': step1
+            }
+            if step1.get('status') != 'ok' and 'error' in step1:
+                results['success'] = False
+                results['error'] = f"Data update failed: {step1.get('error')}"
+                return results
+        else:
+            results['steps']['1_data_update'] = {'skipped': True}
+
+        # Step 2: Build Dataset
+        step2 = await executor.run(
+            'ml', 'dataset-build',
+            '--name', dataset_name,
+            '--version', version,
+            '--exchange', exchange,
+            '--limit', str(limit),
+            '--horizons', '7,30',
+            '--export',
+        )
+        results['steps']['2_dataset_build'] = {
+            'success': step2.get('status') == 'ok',
+            'output': step2
+        }
+        if step2.get('status') != 'ok':
+            results['success'] = False
+            results['error'] = f"Dataset build failed: {step2.get('error', step2)}"
+            return results
+
+        # Step 3: Train Single Model (baseline)
+        step3 = await executor.run(
+            'ml', 'train',
+            '--dataset-name', dataset_name,
+            '--dataset-version', version,
+            '--model-name', model_name,
+            '--model-version', version,
+            '--algorithm', 'quantile_regression',
+        )
+        results['steps']['3_train_model'] = {
+            'success': step3.get('status') == 'ok',
+            'output': step3
+        }
+        if step3.get('status') != 'ok':
+            results['success'] = False
+            results['error'] = f"Model training failed: {step3.get('error', step3)}"
+            return results
+
+        # Step 4: Train Ensemble
+        step4 = await executor.run(
+            'ml', 'train-ensemble',
+            '--dataset-name', dataset_name,
+            '--dataset-version', version,
+            '--model-name', ensemble_name,
+            '--model-version', version,
+            '--algorithms', 'quantile_regression,quantile_regression',
+        )
+        results['steps']['4_train_ensemble'] = {
+            'success': step4.get('status') == 'ok',
+            'output': step4
+        }
+        if step4.get('status') != 'ok':
+            results['success'] = False
+            results['error'] = f"Ensemble training failed: {step4.get('error', step4)}"
+            return results
+
+        # Step 5: Get latest date with features for predictions
+        step5a = await executor.run(
+            'query-database',
+            '--sql', 'SELECT MAX(date)::text FROM computed_features',
+        )
+        # Parse the date from output
+        pred_date = None
+        if step5a.get('status') == 'ok' and step5a.get('rows'):
+            pred_date = step5a['rows'][0][0]
+
+        if not pred_date:
+            results['steps']['5_predictions'] = {
+                'success': False,
+                'error': 'Could not determine prediction date'
+            }
+            results['success'] = False
+            return results
+
+        # Generate predictions with single model
+        step5b = await executor.run(
+            'ml', 'predict',
+            '--model-name', model_name,
+            '--model-version', version,
+            '--prediction-date', pred_date,
+            '--exchange', exchange,
+            '--limit', str(limit),
+        )
+        results['steps']['5_predictions'] = {
+            'success': step5b.get('status') == 'ok',
+            'prediction_date': pred_date,
+            'output': step5b
+        }
+
+        # Step 6: Generate ensemble predictions
+        step6 = await executor.run(
+            'ml', 'predict-ensemble',
+            '--model-name', ensemble_name,
+            '--model-version', version,
+            '--prediction-date', pred_date,
+            '--exchange', exchange,
+            '--limit', str(limit),
+        )
+        results['steps']['6_ensemble_predictions'] = {
+            'success': step6.get('status') == 'ok',
+            'output': step6
+        }
+
+        # Summary
+        results['summary'] = {
+            'dataset_name': dataset_name,
+            'model_name': model_name,
+            'ensemble_name': ensemble_name,
+            'version': version,
+            'prediction_date': pred_date,
+            'all_steps_passed': all(
+                s.get('success', s.get('skipped', False))
+                for s in results['steps'].values()
+            )
+        }
+        results['success'] = results['summary']['all_steps_passed']
+
+    except Exception as e:
+        results['success'] = False
+        results['error'] = str(e)
+
+    return results
 
 
 async def _query_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
