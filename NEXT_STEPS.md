@@ -1543,8 +1543,168 @@ Update this section as items are completed:
 - ✅ GPU training support for XGBoost/LightGBM
   - `--device` flag for ml train commands
   - Auto-detection via `g2 ml device`
+- ✅ MCP Role-Based Access Control (#27)
+  - `G2_MCP_ROLE` env var (default: operator)
+  - `dev_status` blocked for operator
+  - `get_role_info` tool with LLM guidelines
+  - `docs/MCP_PRODUCTION.md` deployment guide
+  - 12 TDD tests passing
 
 **In Progress**: None
 
-**Next Up**: #14 Advanced Backtesting Features or #26 Data Visualization
+**Next Up**: #14 Advanced Backtesting Features, #26 Data Visualization, or #28 Migration System Improvements
+
+---
+
+### 27. MCP Role-Based Access Control
+
+**Status**: ✅ Complete (2025-12-27)
+**Priority**: High (security for production deployment)
+**Effort**: 2-3 days
+**Path**: C (Scale-First)
+
+**Context**: MCP server will run on production for data operations. Need to prevent it from accessing source code, internal docs, or performing developer-only operations. Two distinct user profiles: developer (full access) and operator (data operations only).
+
+**Problem**:
+- Current MCP server exposes all tools regardless of deployment context
+- `query_database` allows arbitrary SQL (schema exposure, potential data modification)
+- `dev_status` exposes internal roadmap and planning docs
+- No way to restrict tools based on deployment role
+- Production MCP should not have access to source code or dev artifacts
+
+**Roles**:
+
+| Tool | Developer | Operator |
+|------|-----------|----------|
+| `data_update` | ✅ | ✅ |
+| `ml_train`, `ml_predict`, `ml_eval` | ✅ | ✅ |
+| `ml_train_classifier`, `ml_predict_classifier` | ✅ | ✅ |
+| `query_predictions`, `query_model_performance` | ✅ | ✅ |
+| `system_status`, `health_check`, `docker_status` | ✅ | ✅ |
+| `features_list` | ✅ | ✅ |
+| `cross_sectional_compute` | ✅ | ✅ |
+| `strategy_list`, `strategy_configs` | ✅ | ✅ |
+| `strategy_create_config` | ✅ | ❌ (read-only) |
+| `query_database` | ✅ | ✅ (SELECT only) |
+| `dev_status` | ✅ | ❌ (internal docs) |
+| `span_check`, `trace_*` | ✅ | ❌ (debugging) |
+| `ml_dataset_build` | ✅ | ❓ (review) |
+
+**Design Principle**: Operator role can read anything via `query_database` (SELECT only), but all write operations must go through explicit MCP tools (`data_update`, `strategy_create_config`, etc.). This gives query flexibility while maintaining controlled write paths.
+
+**Action Items**:
+- [ ] **Add role configuration**:
+  ```bash
+  # Environment variable
+  G2_MCP_ROLE=operator  # or "developer" (default)
+  ```
+
+- [ ] **Filter tools by role**:
+  - Modify MCP server initialization to check role
+  - Only register tools allowed for current role
+  - Log which tools are available at startup
+
+- [ ] **Enforce SELECT-only for operator `query_database`**:
+  - Parse SQL and reject if not SELECT
+  - Block DDL (CREATE, ALTER, DROP) and DML (INSERT, UPDATE, DELETE)
+  - Allow CTEs, JOINs, subqueries (read operations)
+
+- [ ] **Document role separation**:
+  - Which tools in each role
+  - How to configure for production
+  - Security considerations
+
+- [ ] **Consider filesystem isolation**:
+  - Operator role should not need file access
+  - If MCP runs in restricted dir, can't read source
+  - Document deployment best practices
+
+**Files to modify**:
+- `src/g2/mcp_server.py` (add role filtering)
+- `docs/MCP_PRODUCTION.md` (new - deployment guide)
+
+**Success Criteria**:
+- Operator role cannot run arbitrary SQL
+- Operator role cannot access dev docs/roadmap
+- Clear documentation for production deployment
+- Role logged at MCP server startup
+
+**Implementation Summary**:
+- Added `G2_MCP_ROLE` env var (default: `operator` for safety)
+- `dev_status` blocked for operator role
+- `query_database` already enforces SELECT-only (existing safety)
+- Added `get_role_info` tool with behavioral guidelines for LLMs
+- Created `docs/MCP_PRODUCTION.md` deployment guide
+- 12 TDD tests passing
+
+**Files created/modified**:
+- `mcp-server/server.py` (~60 lines added)
+- `mcp-server/test_rbac.py` (new, 12 tests)
+- `docs/MCP_PRODUCTION.md` (new)
+
+---
+
+### 28. Migration System Improvements
+
+**Status**: Planned
+**Priority**: Medium (operational reliability)
+**Effort**: 3-5 days
+**Path**: C (Scale-First)
+
+**Context**: Migration system records migrations as "applied" without verifying the SQL actually succeeded. If a migration partially fails or is recorded but not applied, there's no way to detect or repair this state. Discovered when `20251226_000002_stocks_fundamentals.sql` was marked as applied but the ALTER TABLE had silently failed.
+
+**Problem**:
+- `g2 db-migrate` trusts `schema_migrations` table blindly
+- No verification that recorded migrations actually created expected schema changes
+- No command to re-run a failed migration
+- Silent partial failures leave database in inconsistent state
+
+**Action Items**:
+- [ ] **Add verification command**:
+  ```bash
+  g2 db-migrate --verify
+  ```
+  - Parse each migration for expected schema changes (CREATE TABLE, ALTER TABLE ADD COLUMN, etc.)
+  - Check if those objects actually exist in database
+  - Report mismatches: "Migration X recorded but column Y missing"
+
+- [ ] **Add repair command**:
+  ```bash
+  g2 db-migrate --repair VERSION
+  # or
+  g2 db-migrate --force VERSION
+  ```
+  - Remove migration from `schema_migrations` table
+  - Re-apply the migration SQL
+  - Re-record if successful
+
+- [ ] **Add status command**:
+  ```bash
+  g2 db-migrate --status
+  ```
+  - Show all migrations: pending, applied, verified
+  - Show verification status (schema matches expected)
+  - Highlight any mismatches
+
+- [ ] **Improve error handling in apply_migration()**:
+  - Wrap SQL execution in explicit transaction
+  - Only record migration AFTER commit succeeds
+  - Capture and log detailed error messages
+  - Consider running each statement separately for better error isolation
+
+- [ ] **Add migration checksums**:
+  - Store SHA256 of migration file content (already in schema, not fully used)
+  - Warn if migration file changed after being applied
+  - Useful for detecting accidental modifications
+
+**Files to modify**:
+- `src/g2/db/migrate.py` (add verify, repair, status functions)
+- `src/g2/cli.py` (add new flags to db-migrate command)
+- `tests/test_migrate.py` (add tests for new functionality)
+
+**Success Criteria**:
+- Can detect when a recorded migration didn't actually apply
+- Can repair a failed migration without manual SQL
+- Clear status output showing migration health
+- Better error messages when migrations fail
 
