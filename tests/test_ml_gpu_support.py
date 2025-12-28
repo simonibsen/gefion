@@ -46,7 +46,7 @@ class TestXGBoostGPU:
 
     def test_xgboost_uses_gpu_when_device_cuda(self):
         """XGBoost training uses GPU params when device=cuda."""
-        pytest.importorskip("xgboost")
+        xgb = pytest.importorskip("xgboost")
         from g2.ml.models import train_quantile_model
 
         # Create minimal test data
@@ -57,7 +57,7 @@ class TestXGBoostGPU:
         y = pd.Series(np.random.randn(100))
 
         # Mock XGBRegressor to capture params
-        with patch('g2.ml.models.xgb.XGBRegressor') as mock_xgb:
+        with patch.object(xgb, 'XGBRegressor') as mock_xgb:
             mock_model = MagicMock()
             mock_xgb.return_value = mock_model
 
@@ -104,7 +104,7 @@ class TestLightGBMGPU:
 
     def test_lightgbm_uses_gpu_when_device_cuda(self):
         """LightGBM training uses GPU params when device=cuda."""
-        pytest.importorskip("lightgbm")
+        lgb = pytest.importorskip("lightgbm")
         from g2.ml.models import train_quantile_model
 
         X = pd.DataFrame({
@@ -113,7 +113,7 @@ class TestLightGBMGPU:
         })
         y = pd.Series(np.random.randn(100))
 
-        with patch('g2.ml.models.lgb.LGBMRegressor') as mock_lgb:
+        with patch.object(lgb, 'LGBMRegressor') as mock_lgb:
             mock_model = MagicMock()
             mock_lgb.return_value = mock_model
 
@@ -155,7 +155,7 @@ class TestClassifierGPU:
 
     def test_classifier_xgboost_uses_gpu(self):
         """XGBoost classifier uses GPU when device=cuda."""
-        pytest.importorskip("xgboost")
+        xgb = pytest.importorskip("xgboost")
         from g2.ml.classifier import train_classifier
 
         X = pd.DataFrame({
@@ -164,7 +164,7 @@ class TestClassifierGPU:
         })
         y = pd.Series(np.random.choice(['flat', 'weak_up', 'weak_down'], 100))
 
-        with patch('g2.ml.classifier.xgb.XGBClassifier') as mock_xgb:
+        with patch.object(xgb, 'XGBClassifier') as mock_xgb:
             mock_model = MagicMock()
             mock_model.classes_ = np.array(['flat', 'weak_up', 'weak_down'])
             mock_xgb.return_value = mock_model
