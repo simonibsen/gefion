@@ -201,46 +201,44 @@ ORDER BY csf.value DESC;
 
 ## Phase 4: Trading Strategies & Backtesting
 
-### 4.1 Seven Complete Trading Strategies
+### 4.1 Trading Strategies
 
-**Status**: Planned
+**Status**: ✅ 7 Strategies Implemented (2025-12-17)
 
-Implement production-ready strategies with full backtesting:
+Production-ready strategies available via `g2 backtest run --strategy <name>`:
 
-1. **Momentum Following** (aggressive, 7-30d horizons)
-   - Buy stocks with strong_up trend + q50 > 3%
-   - Position size by inverse IQR (q90-q10)
-   - Exit on trend reversal or 30-day horizon
+1. **Momentum** - Buy top-N stocks by momentum, rebalance periodically
+   - Parameters: `--lookback-days`, `--top-n`, `--rebalance-days`
 
-2. **Value with Catalyst** (moderate, 30-90d horizons)
-   - Undervalued stocks (low P/E, low P/B) with positive catalyst events
-   - Use 30-90d quantile predictions for entry timing
-   - Hold until reversion to fair value
+2. **Mean Reversion** - Buy oversold (RSI < threshold), sell overbought
+   - Parameters: `--rsi-oversold`, `--rsi-overbought`, `--rsi-period`
 
-3. **Capital Preservation** (conservative, 30-90d horizons)
-   - Only buy when q10 > 0 (downside protected)
-   - Focus on low-volatility, dividend stocks
-   - Position size: equal weight or risk parity
+3. **MA Crossover** - Buy on fast MA crossing above slow MA
+   - Parameters: `--fast-period`, `--slow-period`, `--max-positions`
 
-4. **Mean Reversion** (aggressive, 7-30d horizons)
-   - Buy oversold stocks (RSI < 30) with positive q50
-   - Sector-relative reversion signals
-   - Quick exits on profit targets
+4. **Breakout** - Buy on price/volume breakout above resistance
+   - Parameters: `--volume-threshold`
 
-5. **Sector Rotation** (moderate, 30-90d horizons)
-   - Identify strongest sectors using cross-sectional features
-   - Buy sector leaders with strong quantile predictions
-   - Rotate monthly based on updated predictions
+5. **Pairs Trading** - Trade spread between correlated pairs
+   - Parameters: `--entry-zscore`, `--exit-zscore`
 
-6. **Volatility Harvesting** (advanced, options-focused)
-   - Identify stocks with IQR mismatch to implied volatility
-   - Sell options when predicted volatility < market IV
-   - Buy options when predicted volatility > market IV
+6. **RSI Divergence** - Detect bullish/bearish RSI divergence
+   - Parameters: `--divergence-lookback`
 
-7. **Risk Parity** (moderate, 30-90d horizons)
-   - Allocate capital based on inverse volatility (q90-q10)
-   - Diversify across sectors and strategies
-   - Rebalance weekly or monthly
+7. **Volatility Contraction** - Trade Bollinger Band squeezes
+   - Parameters: `--bb-period`, `--bb-std-dev`, `--squeeze-threshold`
+
+**Usage**:
+```bash
+# Momentum strategy on tech stocks
+g2 backtest run --symbols AAPL,MSFT,GOOGL,NVDA \
+  --start-date 2024-01-01 --end-date 2024-12-01 \
+  --strategy momentum --top-n 3
+
+# Compare all strategies
+g2 backtest compare --all-strategies \
+  --start-date 2024-01-01 --end-date 2024-12-01
+```
 
 ### 4.2 Backtesting Engine
 
@@ -373,22 +371,23 @@ curl -X POST http://localhost:8000/predict \
 
 ## Implementation Priority
 
-**High Priority** (next 3-6 months):
-1. Move indicators to database
-2. Feature selection during dataset build
-3. Parquet export format
-4. Trend classification model
+### Completed
+- ✅ 1.1 Move indicators to database (2025-12-28)
+- ✅ 1.2 Feature selection during dataset build (2025-12-17)
+- ✅ 2.1 Trend classification model (2025-12-17)
+- ✅ 3.1 Cross-sectional features (2025-12-17)
+- ✅ 4.1 Trading strategies - 7 implemented (2025-12-17)
+- ✅ 4.2 Backtesting engine MVP (2025-12-17)
+- ✅ 5.3 Feature importance analysis (2025-12-28)
 
-**Medium Priority** (6-12 months):
-5. Cross-sectional features
-6. Backtesting engine
-7. First 3 trading strategies
+### Next Up
+1. **1.3 Parquet export format** - Quick win, pyarrow already in dependencies
+2. **5.4 Hyperparameter tuning** - Grid/random search, time-series CV
+3. **5.5 Online prediction API** - FastAPI server for real-time predictions
 
-**Long-term** (12+ months):
-8. Remaining trading strategies
-9. Warm-start retraining
-10. Model ensembles
-11. Online prediction API
+### Future
+4. 5.1 Warm-start retraining - Incremental learning for monthly updates
+5. 5.2 Model ensembles - Combine multiple algorithms
 
 ## Contributing
 
