@@ -357,12 +357,17 @@ def _run_predict(
     """Generate predictions by calling CLI command."""
     import subprocess
     import sys
+    import datetime
+
+    # Use yesterday's date for predictions (today's data may not be complete)
+    prediction_date = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 
     cmd = [
         sys.executable, "-m", "g2.cli",
         "ml", "predict",
         "--model-name", model_name,
         "--model-version", model_version,
+        "--prediction-date", prediction_date,
         "--exchange", exchange,
         "--limit", str(limit),
     ]
@@ -381,12 +386,17 @@ def _run_predict_ensemble(
     """Generate ensemble predictions by calling CLI command."""
     import subprocess
     import sys
+    import datetime
+
+    # Use yesterday's date for predictions (today's data may not be complete)
+    prediction_date = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 
     cmd = [
         sys.executable, "-m", "g2.cli",
         "ml", "predict-ensemble",
         "--model-name", model_name,
         "--model-version", model_version,
+        "--prediction-date", prediction_date,
         "--exchange", exchange,
         "--limit", str(limit),
     ]
