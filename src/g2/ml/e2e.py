@@ -51,6 +51,7 @@ def run_e2e_test(
     skip_data_update: bool = False,
     cleanup: bool = False,
     conn=None,
+    progress_callback: Optional[callable] = None,
 ) -> E2ETestResult:
     """Run end-to-end ML pipeline test.
 
@@ -61,10 +62,15 @@ def run_e2e_test(
         skip_data_update: Skip data update step if True
         cleanup: Remove test artifacts after completion if True
         conn: Database connection (optional, creates one if not provided)
+        progress_callback: Optional callback(step_name, status, message) for progress updates
+                          status is one of: "starting", "completed", "failed", "skipped"
 
     Returns:
         E2ETestResult with success status, completed steps, and artifacts
     """
+    def _progress(step: str, status: str, message: str = "") -> None:
+        if progress_callback:
+            progress_callback(step, status, message)
     with create_span("run_e2e_test") as span:
         span.set_attribute("exchange", exchange)
         span.set_attribute("limit", limit)
@@ -82,29 +88,36 @@ def run_e2e_test(
         # Step 1: Data Update
         if not skip_data_update:
             try:
+                _progress("data_update", "starting", "Updating price data...")
                 with create_span("e2e_data_update"):
                     _run_data_update(exchange, limit, conn)
                 steps_completed.append("data_update")
+                _progress("data_update", "completed")
             except Exception as e:
                 steps_failed.append("data_update")
                 errors["data_update"] = str(e)
+                _progress("data_update", "failed", str(e))
                 return _build_result(
                     False, steps_completed, steps_failed,
                     time.time() - start_time, artifacts, errors
                 )
         else:
-            steps_completed.append("data_update")  # Mark as skipped/complete
+            steps_completed.append("data_update")
+            _progress("data_update", "skipped")
 
         # Step 2: Dataset Build
         try:
+            _progress("dataset_build", "starting", "Building ML dataset...")
             with create_span("e2e_dataset_build"):
                 dataset_info = _run_dataset_build(exchange, limit, name, conn)
                 artifacts["dataset_name"] = dataset_info["name"]
                 artifacts["dataset_version"] = dataset_info["version"]
             steps_completed.append("dataset_build")
+            _progress("dataset_build", "completed", f"Dataset: {dataset_info['name']} {dataset_info['version']}")
         except Exception as e:
             steps_failed.append("dataset_build")
             errors["dataset_build"] = str(e)
+            _progress("dataset_build", "failed", str(e))
             return _build_result(
                 False, steps_completed, steps_failed,
                 time.time() - start_time, artifacts, errors
@@ -112,6 +125,7 @@ def run_e2e_test(
 
         # Step 3: Train Single Model
         try:
+            _progress("train_model", "starting", "Training XGBoost model...")
             with create_span("e2e_train_model"):
                 model_info = _run_train_model(
                     artifacts["dataset_name"],
@@ -122,9 +136,11 @@ def run_e2e_test(
                 artifacts["model_name"] = model_info["name"]
                 artifacts["model_version"] = model_info["version"]
             steps_completed.append("train_model")
+            _progress("train_model", "completed", f"Model: {model_info['name']}")
         except Exception as e:
             steps_failed.append("train_model")
             errors["train_model"] = str(e)
+            _progress("train_model", "failed", str(e))
             return _build_result(
                 False, steps_completed, steps_failed,
                 time.time() - start_time, artifacts, errors
@@ -132,6 +148,7 @@ def run_e2e_test(
 
         # Step 4: Train Ensemble
         try:
+            _progress("train_ensemble", "starting", "Training ensemble (XGBoost + LightGBM)...")
             with create_span("e2e_train_ensemble"):
                 ensemble_info = _run_train_ensemble(
                     artifacts["dataset_name"],
@@ -142,9 +159,11 @@ def run_e2e_test(
                 artifacts["ensemble_name"] = ensemble_info["name"]
                 artifacts["ensemble_version"] = ensemble_info["version"]
             steps_completed.append("train_ensemble")
+            _progress("train_ensemble", "completed", f"Ensemble: {ensemble_info['name']}")
         except Exception as e:
             steps_failed.append("train_ensemble")
             errors["train_ensemble"] = str(e)
+            _progress("train_ensemble", "failed", str(e))
             return _build_result(
                 False, steps_completed, steps_failed,
                 time.time() - start_time, artifacts, errors
@@ -152,6 +171,7 @@ def run_e2e_test(
 
         # Step 5: Generate Predictions (single model)
         try:
+            _progress("predict", "starting", "Generating predictions (single model)...")
             with create_span("e2e_predict"):
                 pred_info = _run_predict(
                     artifacts["model_name"],
@@ -162,9 +182,11 @@ def run_e2e_test(
                 )
                 artifacts["predictions_count"] = pred_info["count"]
             steps_completed.append("predict")
+            _progress("predict", "completed")
         except Exception as e:
             steps_failed.append("predict")
             errors["predict"] = str(e)
+            _progress("predict", "failed", str(e))
             return _build_result(
                 False, steps_completed, steps_failed,
                 time.time() - start_time, artifacts, errors
@@ -172,6 +194,7 @@ def run_e2e_test(
 
         # Step 6: Generate Ensemble Predictions
         try:
+            _progress("predict_ensemble", "starting", "Generating predictions (ensemble)...")
             with create_span("e2e_predict_ensemble"):
                 ensemble_pred_info = _run_predict_ensemble(
                     artifacts["ensemble_name"],
@@ -182,9 +205,11 @@ def run_e2e_test(
                 )
                 artifacts["ensemble_predictions_count"] = ensemble_pred_info["count"]
             steps_completed.append("predict_ensemble")
+            _progress("predict_ensemble", "completed")
         except Exception as e:
             steps_failed.append("predict_ensemble")
             errors["predict_ensemble"] = str(e)
+            _progress("predict_ensemble", "failed", str(e))
             return _build_result(
                 False, steps_completed, steps_failed,
                 time.time() - start_time, artifacts, errors

@@ -2085,6 +2085,21 @@ def ml_e2e_test(
         emit(f"  {i}. {step_desc} {status}", json_output=json_output)
     emit("", json_output=json_output)
 
+    # Progress callback to show step status
+    step_num = {"current": 0}
+    def progress_callback(step: str, status: str, message: str = "") -> None:
+        step_num["current"] += 1 if status == "starting" else 0
+        step_idx = step_num["current"]
+        if status == "starting":
+            emit(f"[{step_idx}/6] {message}", json_output=json_output)
+        elif status == "completed":
+            detail = f" - {message}" if message else ""
+            emit(f"  ✓ {step} completed{detail}", json_output=json_output)
+        elif status == "failed":
+            emit(f"  ✗ {step} FAILED", json_output=json_output, error=True)
+        elif status == "skipped":
+            emit(f"  - {step} skipped", json_output=json_output)
+
     url = _db_url(db_url)
     try:
         with db_connection(url) as conn:
@@ -2095,6 +2110,7 @@ def ml_e2e_test(
                 skip_data_update=skip_data_update,
                 cleanup=cleanup,
                 conn=conn,
+                progress_callback=progress_callback,
             )
     except Exception as e:
         emit("", json_output=json_output)
