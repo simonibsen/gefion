@@ -219,9 +219,8 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     # Compute labels from prices
     if price_count > 0 and horizons_days:
         try:
+            import numpy as np
             import pandas as pd
-
-            from g2.ml.labels import classify_return_5class
 
             thresholds = (manifest.get("label_spec") or {}).get("thresholds") or {}
 
@@ -244,15 +243,24 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
                     continue
                 shifted = df.groupby("symbol")["close_for_label"].shift(-h)
                 ret = (shifted / df["close_for_label"]) - 1.0
-                labels = ret.apply(
-                    lambda r: classify_return_5class(r, weak_threshold=weak, strong_threshold=strong).value
-                    if pd.notna(r) and abs(r) != float("inf")
-                    else None
-                )
-                tmp = df[["symbol", "date"]].copy()
-                tmp["horizon_days"] = h
-                tmp["forward_return"] = ret
-                tmp["label"] = labels
+
+                # Vectorized label classification (much faster than apply())
+                labels = pd.Series(index=ret.index, dtype=object)
+                valid_mask = ret.notna() & (ret.abs() != float("inf"))
+                labels[~valid_mask] = None
+                labels[valid_mask & (ret <= -strong)] = "strong_down"
+                labels[valid_mask & (ret > -strong) & (ret <= -weak)] = "weak_down"
+                labels[valid_mask & (ret > -weak) & (ret < weak)] = "flat"
+                labels[valid_mask & (ret >= weak) & (ret < strong)] = "weak_up"
+                labels[valid_mask & (ret >= strong)] = "strong_up"
+
+                tmp = pd.DataFrame({
+                    "symbol": df["symbol"],
+                    "date": df["date"],
+                    "horizon_days": h,
+                    "forward_return": ret,
+                    "label": labels,
+                })
                 out.append(tmp)
             if out:
                 labels_df = pd.concat(out, ignore_index=True)
