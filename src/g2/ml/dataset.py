@@ -88,6 +88,32 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     feature_names = manifest.get("feature_names") or []
     exclude_features = manifest.get("exclude_features") or []
 
+    # Resolve exchange + limit to actual symbols if no explicit symbols provided
+    if not symbols and universe.get("exchange"):
+        exchange = universe["exchange"]
+        limit = universe.get("limit")
+        with conn.cursor() as cur:
+            if limit:
+                cur.execute(
+                    """
+                    SELECT symbol FROM stocks
+                    WHERE exchange = %s
+                    ORDER BY symbol
+                    LIMIT %s;
+                    """,
+                    (exchange, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT symbol FROM stocks
+                    WHERE exchange = %s
+                    ORDER BY symbol;
+                    """,
+                    (exchange,),
+                )
+            symbols = [row[0] for row in cur.fetchall()]
+
     # Export prices - stream directly for CSV, load for parquet
     price_rows: list[dict[str, Any]] = []
     price_count = 0
