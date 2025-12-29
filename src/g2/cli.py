@@ -1050,7 +1050,8 @@ def ml_predict(
             emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
 
             # Load model for this horizon
-            horizon_model_path = Path(artifact_uri) / f"_h{horizon}"
+            # Model artifacts are saved as {artifact_uri}_h{horizon} (sibling dirs, not subdirs)
+            horizon_model_path = Path(f"{artifact_uri}_h{horizon}")
             model_data = load_model_artifact(horizon_model_path)
 
             # Generate predictions
@@ -2055,7 +2056,8 @@ def ml_predict_ensemble(
             emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
 
             # Load ensemble for this horizon
-            horizon_ensemble_path = Path(artifact_uri) / f"_h{horizon}"
+            # Ensemble artifacts are saved as {artifact_uri}_h{horizon} (sibling dirs, not subdirs)
+            horizon_ensemble_path = Path(f"{artifact_uri}_h{horizon}")
             try:
                 ensemble = load_ensemble(horizon_ensemble_path)
             except FileNotFoundError:

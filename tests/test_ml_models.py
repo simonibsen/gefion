@@ -182,5 +182,32 @@ def test_model_pipeline_pickle_compatibility():
     assert len(predictions) == 3
 
 
+def test_model_artifact_path_convention():
+    """Document the expected model artifact path structure.
+
+    Training saves models as: {base_artifact_uri}_h{horizon}
+    Example: models/mymodel_v1_h7, models/mymodel_v1_h30
+
+    NOT as subdirectories: models/mymodel_v1/_h7 (wrong!)
+
+    This is important for predict commands to find the correct paths.
+    """
+    from pathlib import Path
+
+    base_artifact_uri = "models/mymodel_v1"
+    horizon = 7
+
+    # CORRECT: suffix pattern (sibling directories)
+    correct_path = Path(f"{base_artifact_uri}_h{horizon}")
+    assert str(correct_path) == "models/mymodel_v1_h7"
+
+    # WRONG: subdirectory pattern
+    wrong_path = Path(base_artifact_uri) / f"_h{horizon}"
+    assert str(wrong_path) == "models/mymodel_v1/_h7"
+
+    # Verify they are different
+    assert correct_path != wrong_path
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
