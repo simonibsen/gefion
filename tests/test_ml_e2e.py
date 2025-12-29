@@ -113,55 +113,26 @@ class TestE2EPredictionDateQuery:
     def test_run_predict_uses_explicit_symbols(self):
         """Test that _run_predict uses explicit symbols passed to it.
 
-        Regression test: On large databases, we must use the same symbols
-        throughout the e2e pipeline, not re-select with ORDER BY LIMIT.
+        The CLI now auto-detects prediction date, so e2e just passes symbols.
         """
         from unittest.mock import patch, MagicMock
-        from datetime import date
 
-        # Mock the database connection and cursor
-        mock_cursor = MagicMock()
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
-        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-
-        # Set up cursor to return data_ids, then MAX date
-        mock_cursor.fetchall.return_value = [(1,), (2,), (3,)]  # data_ids
-        mock_cursor.fetchone.return_value = (date(2025, 12, 20),)  # MAX date
-
-        with patch('g2.cli_helpers.db_connection') as mock_db_connection, \
-             patch('subprocess.run') as mock_subprocess:
-            mock_db_connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
-            mock_db_connection.return_value.__exit__ = MagicMock(return_value=False)
+        with patch('subprocess.run') as mock_subprocess:
             mock_subprocess.return_value = MagicMock(returncode=0)
 
             from g2.ml.e2e import _run_predict
 
-            # Pass explicit symbols (not exchange/limit)
+            # Pass explicit symbols
             symbols = ["AAPL", "MSFT", "GOOGL"]
-            with patch.dict('os.environ', {'DATABASE_URL': 'postgresql://test'}):
-                _run_predict("test_model", "v1", symbols, None)
+            _run_predict("test_model", "v1", symbols, None)
 
-            # Verify cursor.execute was called twice:
-            # 1. SELECT id FROM stocks WHERE symbol = ANY(...)
-            # 2. SELECT MAX(date) FROM computed_features WHERE data_id = ANY(...)
-            assert mock_cursor.execute.call_count == 2
-
-            # First call should filter by explicit symbols
-            first_call_sql = mock_cursor.execute.call_args_list[0][0][0]
-            assert "SELECT id FROM stocks" in first_call_sql
-            assert "symbol = ANY" in first_call_sql
-
-            # Second call should use data_id = ANY(...)
-            second_call_sql = mock_cursor.execute.call_args_list[1][0][0]
-            assert "MAX(date)" in second_call_sql
-            assert "data_id = ANY" in second_call_sql
-
-            # Verify subprocess was called with --symbols
+            # Verify subprocess was called with --symbols (not --prediction-date)
             subprocess_call = mock_subprocess.call_args
             cmd = subprocess_call[0][0]
             assert "--symbols" in cmd
             assert "AAPL,MSFT,GOOGL" in cmd
+            # prediction_date is now auto-detected by CLI
+            assert "--prediction-date" not in cmd
 
 
 if __name__ == "__main__":

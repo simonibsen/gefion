@@ -104,7 +104,8 @@ def run_e2e_test(
                     time.time() - start_time, artifacts, errors
                 )
         else:
-            # When skipping data_update, get symbols with most recent data
+            # When skipping data_update, get symbols with most recent COMPUTED FEATURES
+            # (not just price data - we need features for prediction)
             import os
             from g2.cli_helpers import db_connection
             db_url = os.getenv("DATABASE_URL")
@@ -114,17 +115,19 @@ def run_e2e_test(
                         """
                         SELECT s.symbol
                         FROM stocks s
-                        JOIN stock_ohlcv o ON s.id = o.data_id
+                        JOIN computed_features cf ON s.id = cf.data_id
                         GROUP BY s.symbol
-                        ORDER BY MAX(o.date) DESC
+                        ORDER BY MAX(cf.date) DESC
                         LIMIT %s;
                         """,
                         (limit,),
                     )
                     symbols = [row[0] for row in cur.fetchall()]
+            if not symbols:
+                raise RuntimeError("No symbols with computed features found. Run without --skip-data-update first.")
             artifacts["symbols"] = symbols
             steps_completed.append("data_update")
-            _progress("data_update", "skipped", f"Using {len(symbols)} existing symbols")
+            _progress("data_update", "skipped", f"Using {len(symbols)} symbols with features")
 
         # Step 2: Dataset Build
         try:
@@ -399,44 +402,13 @@ def _run_predict(
     """Generate predictions by calling CLI command."""
     import subprocess
     import sys
-    import os
-    from g2.cli_helpers import db_connection
 
-    # Get the latest date with features for the specific symbols
-    db_url = os.getenv("DATABASE_URL")
-    with db_connection(db_url) as fresh_conn:
-        with fresh_conn.cursor() as cur:
-            # Get data_ids for the symbols we're predicting
-            cur.execute(
-                """
-                SELECT id FROM stocks
-                WHERE symbol = ANY(%s);
-                """,
-                (symbols,),
-            )
-            data_ids = [row[0] for row in cur.fetchall()]
-            if not data_ids:
-                raise RuntimeError(f"No stocks found for symbols: {symbols[:5]}...")
-
-            # Get MAX date for these specific symbols
-            cur.execute(
-                """
-                SELECT MAX(date) FROM computed_features
-                WHERE data_id = ANY(%s);
-                """,
-                (data_ids,),
-            )
-            row = cur.fetchone()
-            if not row or not row[0]:
-                raise RuntimeError(f"No computed features found for symbols: {symbols[:5]}...")
-            prediction_date = row[0].isoformat()
-
+    # Let CLI auto-detect the prediction date based on available features
     cmd = [
         sys.executable, "-m", "g2.cli",
         "ml", "predict",
         "--model-name", model_name,
         "--model-version", model_version,
-        "--prediction-date", prediction_date,
         "--symbols", ",".join(symbols),
     ]
 
@@ -454,44 +426,13 @@ def _run_predict_ensemble(
     """Generate ensemble predictions by calling CLI command."""
     import subprocess
     import sys
-    import os
-    from g2.cli_helpers import db_connection
 
-    # Get the latest date with features for the specific symbols
-    db_url = os.getenv("DATABASE_URL")
-    with db_connection(db_url) as fresh_conn:
-        with fresh_conn.cursor() as cur:
-            # Get data_ids for the symbols we're predicting
-            cur.execute(
-                """
-                SELECT id FROM stocks
-                WHERE symbol = ANY(%s);
-                """,
-                (symbols,),
-            )
-            data_ids = [row[0] for row in cur.fetchall()]
-            if not data_ids:
-                raise RuntimeError(f"No stocks found for symbols: {symbols[:5]}...")
-
-            # Get MAX date for these specific symbols
-            cur.execute(
-                """
-                SELECT MAX(date) FROM computed_features
-                WHERE data_id = ANY(%s);
-                """,
-                (data_ids,),
-            )
-            row = cur.fetchone()
-            if not row or not row[0]:
-                raise RuntimeError(f"No computed features found for symbols: {symbols[:5]}...")
-            prediction_date = row[0].isoformat()
-
+    # Let CLI auto-detect the prediction date based on available features
     cmd = [
         sys.executable, "-m", "g2.cli",
         "ml", "predict-ensemble",
         "--model-name", model_name,
         "--model-version", model_version,
-        "--prediction-date", prediction_date,
         "--symbols", ",".join(symbols),
     ]
 

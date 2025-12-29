@@ -842,7 +842,7 @@ def ml_train(
 def ml_predict(
     model_name: str = typer.Option(..., help="Model name to use for predictions"),
     model_version: str = typer.Option(..., help="Model version"),
-    prediction_date: str = typer.Option(..., help="Date to generate predictions for (YYYY-MM-DD)"),
+    prediction_date: Optional[str] = typer.Option(None, help="Date to generate predictions for (YYYY-MM-DD). Auto-detects latest date with features if not provided."),
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
@@ -853,11 +853,10 @@ def ml_predict(
     Generate predictions using a trained model.
 
     Examples:
-        # Generate predictions for specific symbols
-        g2 ml predict --model-name tech_qr --model-version v1 \\
-            --prediction-date 2025-01-15 --symbols AAPL,MSFT,GOOGL
+        # Generate predictions for specific symbols (auto-detect date)
+        g2 ml predict --model-name tech_qr --model-version v1 --symbols AAPL,MSFT,GOOGL
 
-        # Generate predictions for NASDAQ universe
+        # Generate predictions for NASDAQ universe with explicit date
         g2 ml predict --model-name nasdaq_xgb --model-version v1 \\
             --prediction-date 2025-01-15 --exchange NASDAQ --limit 50
     """
@@ -933,10 +932,32 @@ def ml_predict(
             emit_error("No symbols found in universe", json_output=json_output)
             return
 
+        data_ids = [u[0] for u in universe]
+
+        # Auto-detect prediction date if not provided
+        if not prediction_date:
+            with conn.cursor() as cur:
+                # Find the latest date that has features for these symbols
+                cur.execute(
+                    """
+                    SELECT MAX(cf.date)
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND fd.name = ANY(%s);
+                    """,
+                    (data_ids, feature_names),
+                )
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    emit_error(f"No features found for symbols. Ensure data-update has been run.", json_output=json_output)
+                    return
+                prediction_date = row[0].isoformat()
+                emit(f"Auto-detected prediction date: {prediction_date}", json_output=json_output)
+
         emit(f"Generating predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
 
         # Fetch features for all symbols on prediction_date
-        data_ids = [u[0] for u in universe]
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -1823,7 +1844,7 @@ def ml_train_ensemble(
 def ml_predict_ensemble(
     model_name: str = typer.Option(..., help="Ensemble model name"),
     model_version: str = typer.Option(..., help="Model version"),
-    prediction_date: str = typer.Option(..., help="Date to generate predictions for (YYYY-MM-DD)"),
+    prediction_date: Optional[str] = typer.Option(None, help="Date to generate predictions for (YYYY-MM-DD). Auto-detects latest date with features if not provided."),
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
@@ -1834,11 +1855,10 @@ def ml_predict_ensemble(
     Generate predictions using a trained ensemble model.
 
     Examples:
-        # Generate predictions for specific symbols
-        g2 ml predict-ensemble --model-name tech_ensemble --model-version v1 \\
-            --prediction-date 2025-01-15 --symbols AAPL,MSFT,GOOGL
+        # Generate predictions for specific symbols (auto-detect date)
+        g2 ml predict-ensemble --model-name tech_ensemble --model-version v1 --symbols AAPL,MSFT,GOOGL
 
-        # Generate predictions for NASDAQ universe
+        # Generate predictions for NASDAQ universe with explicit date
         g2 ml predict-ensemble --model-name nasdaq_ensemble --model-version v1 \\
             --prediction-date 2025-01-15 --exchange NASDAQ --limit 50
     """
@@ -1917,10 +1937,32 @@ def ml_predict_ensemble(
             emit_error("No symbols found in universe", json_output=json_output)
             return
 
+        data_ids = [u[0] for u in universe]
+
+        # Auto-detect prediction date if not provided
+        if not prediction_date:
+            with conn.cursor() as cur:
+                # Find the latest date that has features for these symbols
+                cur.execute(
+                    """
+                    SELECT MAX(cf.date)
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND fd.name = ANY(%s);
+                    """,
+                    (data_ids, feature_names),
+                )
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    emit_error(f"No features found for symbols. Ensure data-update has been run.", json_output=json_output)
+                    return
+                prediction_date = row[0].isoformat()
+                emit(f"Auto-detected prediction date: {prediction_date}", json_output=json_output)
+
         emit(f"Generating ensemble predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
 
         # Fetch features for all symbols on prediction_date
-        data_ids = [u[0] for u in universe]
         with conn.cursor() as cur:
             cur.execute(
                 """
