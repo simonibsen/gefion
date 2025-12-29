@@ -107,5 +107,55 @@ class TestE2ETestCleanup:
         assert "model_name" in result.artifacts
 
 
+class TestE2EPredictionDateQuery:
+    """Tests for prediction date query logic."""
+
+    def test_run_predict_queries_specific_symbols(self):
+        """Test that _run_predict queries MAX date for specific symbols, not global MAX.
+
+        Regression test: On large databases, global MAX(date) may return a date
+        that doesn't have features for the first N alphabetical symbols.
+        """
+        from unittest.mock import patch, MagicMock
+        from datetime import date
+
+        # Mock the database connection and cursor
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        # Set up cursor to return data_ids, then MAX date
+        mock_cursor.fetchall.return_value = [(1,), (2,), (3,)]  # data_ids
+        mock_cursor.fetchone.return_value = (date(2025, 12, 20),)  # MAX date
+
+        with patch('g2.cli_helpers.db_connection') as mock_db_connection, \
+             patch('subprocess.run') as mock_subprocess:
+            mock_db_connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+            mock_db_connection.return_value.__exit__ = MagicMock(return_value=False)
+            mock_subprocess.return_value = MagicMock(returncode=0)
+
+            from g2.ml.e2e import _run_predict
+
+            with patch.dict('os.environ', {'DATABASE_URL': 'postgresql://test'}):
+                _run_predict("test_model", "v1", "NASDAQ", 10, None)
+
+            # Verify cursor.execute was called twice:
+            # 1. SELECT id FROM stocks ORDER BY symbol LIMIT N
+            # 2. SELECT MAX(date) FROM computed_features WHERE data_id = ANY(...)
+            assert mock_cursor.execute.call_count == 2
+
+            # First call should select symbols
+            first_call_sql = mock_cursor.execute.call_args_list[0][0][0]
+            assert "SELECT id FROM stocks" in first_call_sql
+            assert "ORDER BY symbol" in first_call_sql
+            assert "LIMIT" in first_call_sql
+
+            # Second call should use data_id = ANY(...)
+            second_call_sql = mock_cursor.execute.call_args_list[1][0][0]
+            assert "MAX(date)" in second_call_sql
+            assert "data_id = ANY" in second_call_sql
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

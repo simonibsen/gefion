@@ -360,15 +360,35 @@ def _run_predict(
     import os
     from g2.cli_helpers import db_connection
 
-    # Get the latest date with features using a fresh connection
-    # (the passed conn may be stale after long subprocess calls)
+    # Get the latest date with features for the SPECIFIC symbols we'll use
+    # (must match the same symbol selection logic as ml predict command)
     db_url = os.getenv("DATABASE_URL")
     with db_connection(db_url) as fresh_conn:
         with fresh_conn.cursor() as cur:
-            cur.execute("SELECT MAX(date) FROM computed_features;")
+            # Get the data_ids for the symbols we'll use (first N alphabetically)
+            cur.execute(
+                """
+                SELECT id FROM stocks
+                ORDER BY symbol
+                LIMIT %s;
+                """,
+                (limit,),
+            )
+            data_ids = [row[0] for row in cur.fetchall()]
+            if not data_ids:
+                raise RuntimeError("No stocks found in database")
+
+            # Get MAX date for these specific symbols
+            cur.execute(
+                """
+                SELECT MAX(date) FROM computed_features
+                WHERE data_id = ANY(%s);
+                """,
+                (data_ids,),
+            )
             row = cur.fetchone()
             if not row or not row[0]:
-                raise RuntimeError("No computed features found in database")
+                raise RuntimeError(f"No computed features found for selected symbols (data_ids: {data_ids[:5]}...)")
             prediction_date = row[0].isoformat()
 
     cmd = [
@@ -398,15 +418,35 @@ def _run_predict_ensemble(
     import os
     from g2.cli_helpers import db_connection
 
-    # Get the latest date with features using a fresh connection
-    # (the passed conn may be stale after long subprocess calls)
+    # Get the latest date with features for the SPECIFIC symbols we'll use
+    # (must match the same symbol selection logic as ml predict-ensemble command)
     db_url = os.getenv("DATABASE_URL")
     with db_connection(db_url) as fresh_conn:
         with fresh_conn.cursor() as cur:
-            cur.execute("SELECT MAX(date) FROM computed_features;")
+            # Get the data_ids for the symbols we'll use (first N alphabetically)
+            cur.execute(
+                """
+                SELECT id FROM stocks
+                ORDER BY symbol
+                LIMIT %s;
+                """,
+                (limit,),
+            )
+            data_ids = [row[0] for row in cur.fetchall()]
+            if not data_ids:
+                raise RuntimeError("No stocks found in database")
+
+            # Get MAX date for these specific symbols
+            cur.execute(
+                """
+                SELECT MAX(date) FROM computed_features
+                WHERE data_id = ANY(%s);
+                """,
+                (data_ids,),
+            )
             row = cur.fetchone()
             if not row or not row[0]:
-                raise RuntimeError("No computed features found in database")
+                raise RuntimeError(f"No computed features found for selected symbols (data_ids: {data_ids[:5]}...)")
             prediction_date = row[0].isoformat()
 
     cmd = [
