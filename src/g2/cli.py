@@ -906,17 +906,17 @@ def ml_predict(
             dataset_name, dataset_version, feature_names, horizons = row[0], row[1], row[2], row[3]
 
         # Build universe of symbols
-        if exchange:
+        # Note: exchange param is stored for documentation but stocks table has no exchange column
+        if exchange or (not sym_list and limit):
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
                 cur.execute(
                     f"""
                     SELECT DISTINCT s.id, s.symbol
                     FROM stocks s
-                    WHERE s.exchange = %s
+                    ORDER BY s.symbol
                     {limit_clause};
-                    """,
-                    (exchange,),
+                    """
                 )
                 universe = [(row[0], row[1]) for row in cur.fetchall()]
         else:
@@ -1890,17 +1890,17 @@ def ml_predict_ensemble(
             dataset_name, dataset_version, feature_names, horizons = row[0], row[1], row[2], row[3]
 
         # Build universe of symbols
-        if exchange:
+        # Note: exchange param is stored for documentation but stocks table has no exchange column
+        if exchange or (not sym_list and limit):
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
                 cur.execute(
                     f"""
                     SELECT DISTINCT s.id, s.symbol
                     FROM stocks s
-                    WHERE s.exchange = %s
+                    ORDER BY s.symbol
                     {limit_clause};
-                    """,
-                    (exchange,),
+                    """
                 )
                 universe = [(row[0], row[1]) for row in cur.fetchall()]
         else:

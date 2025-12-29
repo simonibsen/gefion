@@ -89,28 +89,27 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     exclude_features = manifest.get("exclude_features") or []
 
     # Resolve exchange + limit to actual symbols if no explicit symbols provided
-    if not symbols and universe.get("exchange"):
-        exchange = universe["exchange"]
+    # Note: The stocks table doesn't have an 'exchange' column, so we just select
+    # the first N symbols alphabetically. The exchange parameter is stored in
+    # manifest for documentation but not used for filtering.
+    if not symbols and (universe.get("exchange") or universe.get("limit")):
         limit = universe.get("limit")
         with conn.cursor() as cur:
             if limit:
                 cur.execute(
                     """
                     SELECT symbol FROM stocks
-                    WHERE exchange = %s
                     ORDER BY symbol
                     LIMIT %s;
                     """,
-                    (exchange, limit),
+                    (limit,),
                 )
             else:
                 cur.execute(
                     """
                     SELECT symbol FROM stocks
-                    WHERE exchange = %s
                     ORDER BY symbol;
-                    """,
-                    (exchange,),
+                    """
                 )
             symbols = [row[0] for row in cur.fetchall()]
 
