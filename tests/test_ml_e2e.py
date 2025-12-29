@@ -140,5 +140,28 @@ class TestE2EPredictionDateQuery:
             assert result["count"] == 20
 
 
+class TestPredictClassifierCommand:
+    """Tests for the ml predict-classifier command."""
+
+    def test_predict_classifier_help_shows_options(self):
+        """Test that predict-classifier --help shows expected options."""
+        result = runner.invoke(app, ["ml", "predict-classifier", "--help"])
+
+        assert result.exit_code == 0
+        assert "--model-path" in result.output
+        assert "--prediction-date" in result.output
+        assert "--symbols" in result.output
+        assert "--exchange" in result.output
+        assert "--limit" in result.output
+
+    def test_predict_classifier_requires_model_path(self):
+        """Test that predict-classifier requires --model-path option."""
+        result = runner.invoke(app, ["ml", "predict-classifier"])
+
+        # Should fail without model-path
+        assert result.exit_code != 0
+        assert "model-path" in result.output.lower() or "missing" in result.output.lower()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

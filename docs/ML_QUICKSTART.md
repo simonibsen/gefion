@@ -455,6 +455,22 @@ ls -la models/your_model_version_h30/
 4. **Automated retraining** - Set up cron jobs to retrain weekly/monthly
 5. **Signal generation** - Convert predictions into trading signals (e.g., buy when q50 > 2% and q10 > 0%)
 
+## End-to-End Testing
+
+Validate the entire ML pipeline with a single command:
+
+```bash
+# Quick smoke test (~1 minute)
+g2 ml e2e-test --exchange NASDAQ --limit 10
+
+# Full test with cleanup
+g2 ml e2e-test --exchange NASDAQ --limit 50 --cleanup
+```
+
+This runs all steps automatically: data update → dataset build → train → ensemble → predict → quality check.
+
+See [E2E Test Guide](E2E_TEST_GUIDE.md) for details.
+
 ## Trend Classification
 
 Train a classifier to predict trend strength categories (strong_up, weak_up, flat, weak_down, strong_down):
@@ -468,6 +484,11 @@ g2 ml train-classifier \
   --model-version $(date +%Y%m%d) \
   --algorithm xgboost \
   --out-dir models
+
+# Generate trend predictions
+g2 ml predict-classifier \
+  --model-path models/trend_classifier_YYYYMMDD_h7 \
+  --symbols AAPL,MSFT,GOOGL
 ```
 
 **Combined Strategy** - Use both quantile predictions and trend classification:
@@ -526,7 +547,8 @@ g2 ml dataset-build \
 
 ## Reference
 
-- [ML Roadmap](ML_ROADMAP.md) - Future enhancements (trend classification, cross-sectional features, backtesting)
+- [E2E Test Guide](E2E_TEST_GUIDE.md) - Automated pipeline testing
+- [ML Roadmap](ML_ROADMAP.md) - Feature status and future enhancements
 - [ML System Design](archive/ml/ML_SYSTEM_DESIGN.md) - Database schema and architecture
 - [User Guide](USER_GUIDE.md) - Full CLI reference
 - [Architecture](ARCHITECTURE.md) - Overall system design

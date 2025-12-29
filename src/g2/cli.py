@@ -1664,39 +1664,182 @@ def ml_train_classifier(
 @ml_app.command("predict-classifier")
 def ml_predict_classifier(
     model_path: Path = typer.Option(..., help="Path to classifier model directory"),
-    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: str = typer.Option(..., help="End date (YYYY-MM-DD)"),
-    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols (optional, predicts all if not specified)"),
+    prediction_date: Optional[str] = typer.Option(None, help="Date to generate predictions for (YYYY-MM-DD). Auto-detects if not provided."),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols (optional)"),
+    exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
+    limit: Optional[int] = typer.Option(None, help="Optional universe limit"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
     """Generate trend class predictions using a trained classifier."""
+    import pandas as pd
     import joblib
     from g2.ml.classifier import predict_classifier
+    from decimal import Decimal
+    from psycopg.types.json import Json
 
     # Load model
     model_artifacts = joblib.load(model_path / "classifier.pkl")
     metadata_path = model_path / "metadata.json"
-    if metadata_path.exists():
-        metadata = json.loads(metadata_path.read_text())
-        emit(f"Loaded classifier: {metadata['model_name']} {metadata['model_version']}", json_output=json_output)
-        emit(f"  Horizon: {metadata['horizon_days']} days", json_output=json_output)
-        emit(f"  Algorithm: {metadata['algorithm']}", json_output=json_output)
+    if not metadata_path.exists():
+        emit_error(f"No metadata.json found in {model_path}", json_output=json_output)
+        return
+
+    metadata = json.loads(metadata_path.read_text())
+    emit(f"Loaded classifier: {metadata['model_name']} {metadata['model_version']}", json_output=json_output)
+    emit(f"  Horizon: {metadata['horizon_days']} days", json_output=json_output)
+    emit(f"  Algorithm: {metadata['algorithm']}", json_output=json_output)
+
+    feature_names = metadata.get("feature_names", [])
+    horizon = metadata["horizon_days"]
+    model_name = metadata["model_name"]
+    model_version = metadata["model_version"]
+
+    sym_list = parse_comma_separated(symbols) or []
+    if not sym_list and not exchange:
+        emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
+        return
 
     with db_connection(db_url) as conn:
         init_schema_tables(conn, ["trend_class_predictions"])
 
-        # Parse symbols
-        symbol_list = parse_comma_separated(symbols) if symbols else None
+        # Build universe of symbols
+        if exchange or (not sym_list and limit):
+            with conn.cursor() as cur:
+                limit_clause = f"LIMIT {limit}" if limit else ""
+                cur.execute(f"""
+                    SELECT DISTINCT s.id, s.symbol
+                    FROM stocks s
+                    ORDER BY s.symbol
+                    {limit_clause};
+                """)
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
+        else:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, symbol FROM stocks WHERE symbol = ANY(%s);",
+                    (sym_list,),
+                )
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
 
-        # TODO: Load features for the specified date range and symbols
-        # For now, emit a message that this needs feature loading implementation
-        emit(
-            "Prediction implementation: Load features from database for date range and symbols, "
-            "then call predict_classifier() and store results in trend_class_predictions table",
-            json_output=json_output
+        if not universe:
+            emit_error("No symbols found in universe", json_output=json_output)
+            return
+
+        data_ids = [u[0] for u in universe]
+        symbol_map = {u[0]: u[1] for u in universe}
+
+        # Auto-detect prediction date if not provided
+        if not prediction_date:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT MAX(cf.date)
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND fd.name = ANY(%s);
+                    """,
+                    (data_ids, feature_names),
+                )
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    emit_error("No features found for symbols. Ensure data-update has been run.", json_output=json_output)
+                    return
+                prediction_date = row[0].isoformat()
+                emit(f"Auto-detected prediction date: {prediction_date}", json_output=json_output)
+
+        emit(f"Generating predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
+
+        # Fetch features for all symbols on prediction_date
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT cf.data_id, fd.name, cf.value
+                FROM computed_features cf
+                JOIN feature_definitions fd ON cf.feature_id = fd.id
+                WHERE cf.data_id = ANY(%s)
+                  AND cf.date = %s
+                  AND fd.name = ANY(%s);
+                """,
+                (data_ids, prediction_date, feature_names),
+            )
+            features_data = cur.fetchall()
+
+        if not features_data:
+            emit_error(f"No features found for {prediction_date}", json_output=json_output)
+            return
+
+        # Convert to DataFrame and pivot to wide format
+        features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
+        features_wide = features_df.pivot_table(
+            index="data_id",
+            columns="feature_name",
+            values="value",
+            aggfunc="first"
         )
-        emit("Note: Full prediction workflow requires feature loading - to be implemented", json_output=json_output)
+
+        emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
+
+        # Generate predictions
+        predictions = predict_classifier(model_artifacts, features_wide)
+
+        # Get or create model record
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM ml_models WHERE name = %s AND version = %s;",
+                (model_name, model_version),
+            )
+            row = cur.fetchone()
+            if row:
+                model_id = row[0]
+            else:
+                # Insert model record if not exists
+                cur.execute(
+                    """
+                    INSERT INTO ml_models (name, version, algorithm, artifact_uri)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id;
+                    """,
+                    (model_name, model_version, f"classifier_{metadata['algorithm']}", str(model_path)),
+                )
+                model_id = cur.fetchone()[0]
+
+        # Store predictions in database
+        total_predictions = 0
+        with conn.cursor() as cur:
+            for data_id in predictions.index:
+                pred_row = predictions.loc[data_id]
+                predicted_class = pred_row["predicted_class"]
+                confidence = float(pred_row["confidence"])
+
+                # Get class probabilities
+                prob_cols = [c for c in predictions.columns if c.startswith("prob_")]
+                class_probs = {c.replace("prob_", ""): float(pred_row[c]) for c in prob_cols}
+
+                cur.execute(
+                    """
+                    INSERT INTO trend_class_predictions
+                      (model_id, data_id, prediction_date, horizon_days, predicted_class, confidence, class_probabilities, model_version)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (model_id, data_id, prediction_date, horizon_days) DO UPDATE SET
+                      predicted_class = EXCLUDED.predicted_class,
+                      confidence = EXCLUDED.confidence,
+                      class_probabilities = EXCLUDED.class_probabilities,
+                      model_version = EXCLUDED.model_version;
+                    """,
+                    (model_id, int(data_id), prediction_date, horizon, predicted_class, confidence, Json(class_probs), model_version),
+                )
+                total_predictions += 1
+
+        conn.commit()
+
+    emit(f"Generated {total_predictions} predictions", json_output=json_output)
+    emit(
+        f"Classifier predictions generated: {model_name} {model_version} for {prediction_date}",
+        data={"model_id": model_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizon": horizon},
+        json_output=json_output,
+    )
 
 
 @ml_app.command("train-ensemble")
@@ -4889,7 +5032,8 @@ def _update_all_impl(
                                 set_attributes(symbol_span, data_id=data_id)
 
                                 # Compute ALL active features (indicators, derivatives, etc.)
-                                # TODO: Add dependency ordering via feature_definitions.depends_on field
+                                # Note: Features are computed in arbitrary order. For dependency ordering,
+                                # add a depends_on column to feature_definitions and topological sort.
                                 result = compute_features(
                                     conn,
                                     data_id=data_id,
