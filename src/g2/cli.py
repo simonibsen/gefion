@@ -2117,28 +2117,20 @@ def ml_e2e_test(
         if json_output:
             emit("", data=result.to_dict(), json_output=json_output)
     else:
-        import sys
         emit("", json_output=json_output)
-        emit_error("E2E Test FAILED", json_output=json_output)
-        sys.stdout.flush()
-        sys.stderr.flush()
-        try:
-            emit(f"Duration: {result.duration_seconds}s", json_output=json_output)
-            emit(f"Steps completed: {result.steps_completed}", json_output=json_output)
-            emit(f"Steps failed: {result.steps_failed}", json_output=json_output)
+        emit("E2E Test FAILED", json_output=json_output, error=True)
+        emit(f"Duration: {result.duration_seconds}s", json_output=json_output)
+        emit(f"Steps completed: {result.steps_completed}", json_output=json_output)
+        emit(f"Steps failed: {result.steps_failed}", json_output=json_output)
 
-            if result.errors:
-                emit("", json_output=json_output)
-                emit("Errors:", json_output=json_output)
-                for step, error in result.errors.items():
-                    emit(f"  {step}: {error}", json_output=json_output)
+        if result.errors:
+            emit("", json_output=json_output)
+            emit("Errors:", json_output=json_output)
+            for step, error in result.errors.items():
+                emit(f"  {step}: {error}", json_output=json_output)
 
-            if json_output:
-                emit("", data=result.to_dict(), json_output=json_output)
-        except Exception as report_err:
-            print(f"ERROR reporting: {report_err}", file=sys.stderr, flush=True)
-            import traceback
-            traceback.print_exc()
+        if json_output:
+            emit("", data=result.to_dict(), json_output=json_output)
         raise typer.Exit(code=1)
 
 
