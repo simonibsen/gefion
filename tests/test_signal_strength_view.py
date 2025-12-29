@@ -3,15 +3,35 @@
 TDD: These tests are written FIRST, before running the migration.
 """
 import os
+from pathlib import Path
 import pytest
 import psycopg
 
 
 @pytest.fixture
 def db_conn():
-    """Get database connection."""
+    """Get database connection and ensure schema is applied."""
     url = os.environ.get("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
     with psycopg.connect(url) as conn:
+        # Ensure view exists by running schema if needed
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.views
+                    WHERE table_name = 'signal_strength_view'
+                )
+            """)
+            exists = cur.fetchone()[0]
+            if not exists:
+                # Run the schema to create all tables and views
+                schema_path = Path(__file__).parent.parent / "sql" / "schema.sql"
+                if schema_path.exists():
+                    # Can't use \echo commands with psycopg, so filter them out
+                    schema_sql = schema_path.read_text()
+                    # Remove psql-specific commands
+                    lines = [l for l in schema_sql.split('\n') if not l.strip().startswith('\\')]
+                    cur.execute('\n'.join(lines))
+                    conn.commit()
         yield conn
 
 
