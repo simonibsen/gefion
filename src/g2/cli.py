@@ -2084,15 +2084,22 @@ def ml_e2e_test(
     emit("", json_output=json_output)
 
     url = _db_url(db_url)
-    with db_connection(url) as conn:
-        result = run_e2e_test(
-            exchange=exchange,
-            limit=limit,
-            name=name,
-            skip_data_update=skip_data_update,
-            cleanup=cleanup,
-            conn=conn,
-        )
+    try:
+        with db_connection(url) as conn:
+            result = run_e2e_test(
+                exchange=exchange,
+                limit=limit,
+                name=name,
+                skip_data_update=skip_data_update,
+                cleanup=cleanup,
+                conn=conn,
+            )
+    except Exception as e:
+        emit("", json_output=json_output)
+        emit_error(f"E2E Test FAILED with exception: {e}", json_output=json_output)
+        import traceback
+        emit(traceback.format_exc(), json_output=json_output)
+        raise typer.Exit(code=1)
 
     # Report results
     if result.success:
