@@ -890,6 +890,26 @@ async def list_tools() -> List[Tool]:
             },
         ),
 
+        # Volatility Tools
+        Tool(
+            name="volatility_compute",
+            description=(
+                "Compute volatility thresholds for stocks. "
+                "Calculates per-stock adaptive thresholds based on historical volatility. "
+                "Thresholds scale by sqrt(T) for different horizons. "
+                "Stores results in volatility_thresholds table."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbols": {"type": "string", "description": "Comma-separated symbols (e.g., AAPL,MSFT)"},
+                    "horizons": {"type": "string", "description": "Comma-separated horizons in days (e.g., 7,30,90)", "default": "7,30,90"},
+                    "date": {"type": "string", "description": "Calculation date (YYYY-MM-DD). Defaults to today."},
+                },
+                "required": ["symbols"],
+            },
+        ),
+
         # Backtesting Tools
         Tool(
             name="backtest_run",
@@ -1070,6 +1090,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _strategy_configs(arguments)
         elif name == "strategy_create_config":
             result = await _strategy_create_config(arguments)
+        elif name == "volatility_compute":
+            result = await _volatility_compute(arguments)
         elif name == "backtest_run":
             result = await _backtest_run(arguments)
         elif name == "backtest_compare":
@@ -2794,6 +2816,26 @@ async def _strategy_create_config(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _create)
+
+
+# ============================================================================
+# Volatility Tools
+# ============================================================================
+
+async def _volatility_compute(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute volatility thresholds for stocks."""
+    async def _compute():
+        cmd = ['volatility', 'compute', '--symbols', args['symbols']]
+
+        if args.get('horizons'):
+            cmd.extend(['--horizons', args['horizons']])
+        if args.get('date'):
+            cmd.extend(['--date', args['date']])
+
+        cmd.append('--json')
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _compute)
 
 
 # ============================================================================
