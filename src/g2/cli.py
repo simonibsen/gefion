@@ -648,6 +648,38 @@ def ml_dataset_build(
 
     with db_connection(db_url) as conn:
         init_schema_tables(conn, ["ml_datasets"])
+
+        # If exporting and no feature_names specified, discover available features
+        if export and not feature_list:
+            with conn.cursor() as cur:
+                # Get all feature names that exist for the selected symbols
+                if sym_list:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT fd.name
+                        FROM computed_features cf
+                        JOIN feature_definitions fd ON fd.id = cf.feature_id
+                        JOIN stocks s ON s.id = cf.data_id
+                        WHERE s.symbol = ANY(%s)
+                        ORDER BY fd.name;
+                        """,
+                        (sym_list,),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT fd.name
+                        FROM computed_features cf
+                        JOIN feature_definitions fd ON fd.id = cf.feature_id
+                        ORDER BY fd.name;
+                        """
+                    )
+                discovered_features = [row[0] for row in cur.fetchall()]
+                if discovered_features:
+                    manifest["feature_names"] = discovered_features
+                    payload["feature_names"] = discovered_features
+                    emit(f"Discovered {len(discovered_features)} features", json_output=json_output)
+
         dataset_id = upsert_ml_dataset(conn, payload)
         if export:
             from g2.ml.dataset import export_dataset_artifacts

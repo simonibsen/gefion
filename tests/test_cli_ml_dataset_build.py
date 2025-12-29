@@ -112,9 +112,25 @@ def test_ml_dataset_build_rejects_threshold_mismatch(tmp_path):
 
 def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
     called = {"export": 0}
+    discovered = {"features": None}
+
+    class DummyCursor:
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchall(self):
+            # Return mock features to test discovery path
+            return [("indicator_rsi_14",), ("indicator_sma_20",)]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
 
     class DummyConn:
-        pass
+        def cursor(self):
+            return DummyCursor()
 
     class DummyCtx:
         def __enter__(self):
@@ -127,7 +143,13 @@ def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "init_schema_tables", lambda *a, **k: None)
 
     import g2.ml.store as store
-    monkeypatch.setattr(store, "upsert_ml_dataset", lambda *a, **k: 1)
+
+    def fake_upsert(conn, payload):
+        # Capture the payload to verify feature_names were discovered
+        discovered["features"] = payload.get("feature_names")
+        return 1
+
+    monkeypatch.setattr(store, "upsert_ml_dataset", fake_upsert)
 
     import g2.ml.dataset as ds
 
@@ -162,3 +184,5 @@ def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
     )
     assert res.exit_code == 0, res.output
     assert called["export"] == 1
+    # Verify feature discovery populated the payload
+    assert discovered["features"] == ["indicator_rsi_14", "indicator_sma_20"]

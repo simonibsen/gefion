@@ -97,3 +97,74 @@ def test_stocks_table_schema_documented(db_conn):
     assert "exchange" not in columns, (
         "stocks.exchange now exists - update code that works around its absence"
     )
+
+
+def test_discover_feature_names_from_computed_features(db_conn):
+    """Test that we can discover feature names from computed_features.
+
+    This is used by dataset-build --export when --features is not specified.
+    The query must match what exists in the database.
+    """
+    with db_conn.cursor() as cur:
+        # This query is used by dataset-build to discover features
+        cur.execute(
+            """
+            SELECT DISTINCT fd.name
+            FROM computed_features cf
+            JOIN feature_definitions fd ON fd.id = cf.feature_id
+            ORDER BY fd.name
+            LIMIT 10;
+            """
+        )
+        features = [row[0] for row in cur.fetchall()]
+
+    # Just verify the query works - may return empty on fresh DB
+    assert isinstance(features, list)
+
+
+def test_discovered_features_match_computed_features(db_conn):
+    """Test that discovered feature names can be used to query back.
+
+    Regression test: feature_names stored in ml_datasets must match
+    what can be queried from computed_features for prediction.
+    """
+    with db_conn.cursor() as cur:
+        # Get a symbol and feature that definitely exist together
+        cur.execute(
+            """
+            SELECT s.symbol, fd.name, cf.date
+            FROM computed_features cf
+            JOIN feature_definitions fd ON fd.id = cf.feature_id
+            JOIN stocks s ON s.id = cf.data_id
+            LIMIT 1;
+            """
+        )
+        row = cur.fetchone()
+        if not row:
+            pytest.skip("No computed features in database")
+
+        symbol, feature_name, date = row
+
+        # Now verify we can query back using these values
+        # (this is what predict does)
+        cur.execute(
+            """
+            SELECT s.id FROM stocks s WHERE s.symbol = %s;
+            """,
+            (symbol,),
+        )
+        data_id = cur.fetchone()[0]
+
+        cur.execute(
+            """
+            SELECT cf.value
+            FROM computed_features cf
+            JOIN feature_definitions fd ON fd.id = cf.feature_id
+            WHERE cf.data_id = %s
+              AND cf.date = %s
+              AND fd.name = %s;
+            """,
+            (data_id, date, feature_name),
+        )
+        result = cur.fetchone()
+        assert result is not None, "Should find feature by name"
