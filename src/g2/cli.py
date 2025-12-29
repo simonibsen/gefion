@@ -621,8 +621,10 @@ def ml_dataset_build(
     label_spec = {"type": "forward_return_5class", "thresholds": thresholds_by_horizon}
     split_spec = {"type": "walk_forward", "note": "TBD", "horizons_days": horizon_vals}
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = out_dir / f"{name}_{version}.json"
+    # Create a subdirectory for this dataset (so features/labels don't collide)
+    dataset_dir = out_dir / f"{name}_{version}"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = dataset_dir / "manifest.json"
     manifest = {
         "name": name,
         "version": version,
@@ -650,7 +652,7 @@ def ml_dataset_build(
         if export:
             from g2.ml.dataset import export_dataset_artifacts
 
-            export_dataset_artifacts(conn, manifest=manifest, out_dir=out_dir)
+            export_dataset_artifacts(conn, manifest=manifest, out_dir=dataset_dir)
 
     emit(
         f"Dataset registered: {name} {version}",

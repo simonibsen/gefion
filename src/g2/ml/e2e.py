@@ -260,6 +260,7 @@ def _run_dataset_build(
         "--horizons", "7,30",
         "--weak-thresholds", "0.02,0.05",
         "--strong-thresholds", "0.05,0.10",
+        "--export",  # Export features/labels to files for training
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)

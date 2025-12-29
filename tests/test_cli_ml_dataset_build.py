@@ -66,7 +66,9 @@ def test_ml_dataset_build_writes_manifest_and_upserts_db(tmp_path, monkeypatch):
     )
     assert res.exit_code == 0, res.output
 
-    manifest_path = out_dir / "mvp_v1.json"
+    # Dataset is in a subdirectory: out_dir/mvp_v1/manifest.json
+    dataset_dir = out_dir / "mvp_v1"
+    manifest_path = dataset_dir / "manifest.json"
     assert manifest_path.exists()
     manifest = json.loads(manifest_path.read_text())
     assert manifest["name"] == "mvp"
