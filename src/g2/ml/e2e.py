@@ -76,139 +76,129 @@ def run_e2e_test(
         artifacts = {}
         errors = {}
 
-        # Import here to avoid circular imports
-        from g2.db import get_connection
-
-        should_close_conn = False
         if conn is None:
-            conn = get_connection()
-            should_close_conn = True
+            raise ValueError("Database connection required. Pass conn parameter.")
 
+        # Step 1: Data Update
+        if not skip_data_update:
+            try:
+                with create_span("e2e_data_update"):
+                    _run_data_update(exchange, limit, conn)
+                steps_completed.append("data_update")
+            except Exception as e:
+                steps_failed.append("data_update")
+                errors["data_update"] = str(e)
+                return _build_result(
+                    False, steps_completed, steps_failed,
+                    time.time() - start_time, artifacts, errors
+                )
+        else:
+            steps_completed.append("data_update")  # Mark as skipped/complete
+
+        # Step 2: Dataset Build
         try:
-            # Step 1: Data Update
-            if not skip_data_update:
-                try:
-                    with create_span("e2e_data_update"):
-                        _run_data_update(exchange, limit, conn)
-                    steps_completed.append("data_update")
-                except Exception as e:
-                    steps_failed.append("data_update")
-                    errors["data_update"] = str(e)
-                    return _build_result(
-                        False, steps_completed, steps_failed,
-                        time.time() - start_time, artifacts, errors
-                    )
-            else:
-                steps_completed.append("data_update")  # Mark as skipped/complete
-
-            # Step 2: Dataset Build
-            try:
-                with create_span("e2e_dataset_build"):
-                    dataset_info = _run_dataset_build(exchange, limit, name, conn)
-                    artifacts["dataset_name"] = dataset_info["name"]
-                    artifacts["dataset_version"] = dataset_info["version"]
-                steps_completed.append("dataset_build")
-            except Exception as e:
-                steps_failed.append("dataset_build")
-                errors["dataset_build"] = str(e)
-                return _build_result(
-                    False, steps_completed, steps_failed,
-                    time.time() - start_time, artifacts, errors
-                )
-
-            # Step 3: Train Single Model
-            try:
-                with create_span("e2e_train_model"):
-                    model_info = _run_train_model(
-                        artifacts["dataset_name"],
-                        artifacts["dataset_version"],
-                        name,
-                        conn,
-                    )
-                    artifacts["model_name"] = model_info["name"]
-                    artifacts["model_version"] = model_info["version"]
-                steps_completed.append("train_model")
-            except Exception as e:
-                steps_failed.append("train_model")
-                errors["train_model"] = str(e)
-                return _build_result(
-                    False, steps_completed, steps_failed,
-                    time.time() - start_time, artifacts, errors
-                )
-
-            # Step 4: Train Ensemble
-            try:
-                with create_span("e2e_train_ensemble"):
-                    ensemble_info = _run_train_ensemble(
-                        artifacts["dataset_name"],
-                        artifacts["dataset_version"],
-                        name,
-                        conn,
-                    )
-                    artifacts["ensemble_name"] = ensemble_info["name"]
-                    artifacts["ensemble_version"] = ensemble_info["version"]
-                steps_completed.append("train_ensemble")
-            except Exception as e:
-                steps_failed.append("train_ensemble")
-                errors["train_ensemble"] = str(e)
-                return _build_result(
-                    False, steps_completed, steps_failed,
-                    time.time() - start_time, artifacts, errors
-                )
-
-            # Step 5: Generate Predictions (single model)
-            try:
-                with create_span("e2e_predict"):
-                    pred_info = _run_predict(
-                        artifacts["model_name"],
-                        artifacts["model_version"],
-                        exchange,
-                        limit,
-                        conn,
-                    )
-                    artifacts["predictions_count"] = pred_info["count"]
-                steps_completed.append("predict")
-            except Exception as e:
-                steps_failed.append("predict")
-                errors["predict"] = str(e)
-                return _build_result(
-                    False, steps_completed, steps_failed,
-                    time.time() - start_time, artifacts, errors
-                )
-
-            # Step 6: Generate Ensemble Predictions
-            try:
-                with create_span("e2e_predict_ensemble"):
-                    ensemble_pred_info = _run_predict_ensemble(
-                        artifacts["ensemble_name"],
-                        artifacts["ensemble_version"],
-                        exchange,
-                        limit,
-                        conn,
-                    )
-                    artifacts["ensemble_predictions_count"] = ensemble_pred_info["count"]
-                steps_completed.append("predict_ensemble")
-            except Exception as e:
-                steps_failed.append("predict_ensemble")
-                errors["predict_ensemble"] = str(e)
-                return _build_result(
-                    False, steps_completed, steps_failed,
-                    time.time() - start_time, artifacts, errors
-                )
-
-            # Cleanup if requested
-            if cleanup:
-                with create_span("e2e_cleanup"):
-                    _run_cleanup(artifacts, conn)
-
+            with create_span("e2e_dataset_build"):
+                dataset_info = _run_dataset_build(exchange, limit, name, conn)
+                artifacts["dataset_name"] = dataset_info["name"]
+                artifacts["dataset_version"] = dataset_info["version"]
+            steps_completed.append("dataset_build")
+        except Exception as e:
+            steps_failed.append("dataset_build")
+            errors["dataset_build"] = str(e)
             return _build_result(
-                True, steps_completed, steps_failed,
+                False, steps_completed, steps_failed,
                 time.time() - start_time, artifacts, errors
             )
 
-        finally:
-            if should_close_conn:
-                conn.close()
+        # Step 3: Train Single Model
+        try:
+            with create_span("e2e_train_model"):
+                model_info = _run_train_model(
+                    artifacts["dataset_name"],
+                    artifacts["dataset_version"],
+                    name,
+                    conn,
+                )
+                artifacts["model_name"] = model_info["name"]
+                artifacts["model_version"] = model_info["version"]
+            steps_completed.append("train_model")
+        except Exception as e:
+            steps_failed.append("train_model")
+            errors["train_model"] = str(e)
+            return _build_result(
+                False, steps_completed, steps_failed,
+                time.time() - start_time, artifacts, errors
+            )
+
+        # Step 4: Train Ensemble
+        try:
+            with create_span("e2e_train_ensemble"):
+                ensemble_info = _run_train_ensemble(
+                    artifacts["dataset_name"],
+                    artifacts["dataset_version"],
+                    name,
+                    conn,
+                )
+                artifacts["ensemble_name"] = ensemble_info["name"]
+                artifacts["ensemble_version"] = ensemble_info["version"]
+            steps_completed.append("train_ensemble")
+        except Exception as e:
+            steps_failed.append("train_ensemble")
+            errors["train_ensemble"] = str(e)
+            return _build_result(
+                False, steps_completed, steps_failed,
+                time.time() - start_time, artifacts, errors
+            )
+
+        # Step 5: Generate Predictions (single model)
+        try:
+            with create_span("e2e_predict"):
+                pred_info = _run_predict(
+                    artifacts["model_name"],
+                    artifacts["model_version"],
+                    exchange,
+                    limit,
+                    conn,
+                )
+                artifacts["predictions_count"] = pred_info["count"]
+            steps_completed.append("predict")
+        except Exception as e:
+            steps_failed.append("predict")
+            errors["predict"] = str(e)
+            return _build_result(
+                False, steps_completed, steps_failed,
+                time.time() - start_time, artifacts, errors
+            )
+
+        # Step 6: Generate Ensemble Predictions
+        try:
+            with create_span("e2e_predict_ensemble"):
+                ensemble_pred_info = _run_predict_ensemble(
+                    artifacts["ensemble_name"],
+                    artifacts["ensemble_version"],
+                    exchange,
+                    limit,
+                    conn,
+                )
+                artifacts["ensemble_predictions_count"] = ensemble_pred_info["count"]
+            steps_completed.append("predict_ensemble")
+        except Exception as e:
+            steps_failed.append("predict_ensemble")
+            errors["predict_ensemble"] = str(e)
+            return _build_result(
+                False, steps_completed, steps_failed,
+                time.time() - start_time, artifacts, errors
+            )
+
+        # Cleanup if requested
+        if cleanup:
+            with create_span("e2e_cleanup"):
+                _run_cleanup(artifacts, conn)
+
+        return _build_result(
+            True, steps_completed, steps_failed,
+            time.time() - start_time, artifacts, errors
+        )
 
 
 def _build_result(
