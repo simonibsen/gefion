@@ -6,8 +6,8 @@ Database-first ML platform for quantitative stock analysis. Ingests price data, 
 
 - 📊 AlphaVantage integration with 5,600+ NASDAQ stocks
 - 🔧 Technical indicators (RSI, MACD, Bollinger Bands, etc.) + cross-sectional features (market-relative)
-- 🤖 ML pipeline: multi-horizon quantile regression + trend classification (5-class)
-- 📈 Backtesting engine with point-in-time correctness + momentum strategy MVP
+- 🤖 ML pipeline: quantile regression, trend classification, model ensembles, e2e testing
+- 📈 Backtesting engine with execution modeling (costs, slippage, position sizing)
 - 💬 Natural language interface via MCP server
 - 🗃️ TimescaleDB for efficient time-series storage
 - 🔌 DB-first architecture: features and functions stored in database, exported to git
@@ -97,18 +97,31 @@ Train quantile regression models to predict return distributions:
 ```bash
 # Prerequisites: Have price data + features in database (see above)
 
+# Quick validation - run full e2e test (~2-5 minutes)
+g2 ml e2e-test --limit 10
+
+# Or step-by-step:
+
 # 1. Build dataset
 g2 ml dataset-build --name mvp --version v1 --symbols AAPL,MSFT --horizons 7,30 --export
 
 # 2. Train model (predicts q10/q50/q90 quantiles)
 g2 ml train --dataset-name mvp --dataset-version v1 --model-name model --model-version $(date +%Y%m%d)
 
-# 3. Generate predictions
-g2 ml predict --model-name model --model-version $(date +%Y-%m-%d) --prediction-date $(date +%Y-%m-%d) --symbols AAPL,MSFT
+# 3. Train ensemble (combines XGBoost + LightGBM)
+g2 ml train-ensemble --dataset-name mvp --dataset-version v1 --model-name ensemble --model-version $(date +%Y%m%d)
 
-# 4. Evaluate performance (calibration metrics)
+# 4. Generate predictions
+g2 ml predict --model-name model --model-version $(date +%Y%m%d) --symbols AAPL,MSFT
+
+# 5. Evaluate performance (calibration metrics)
 g2 ml eval --model-name model --model-version $(date +%Y%m%d) --start-date 2024-01-01 --end-date 2024-11-30
 ```
+
+**Additional ML commands:**
+- `g2 ml train-classifier` - Train 5-class trend classifier (strong_down → strong_up)
+- `g2 ml predict-classifier` - Generate trend class predictions
+- `g2 ml predict-ensemble` - Predictions using ensemble models
 
 **Learn more:** [docs/ML_QUICKSTART.md](docs/ML_QUICKSTART.md) - Complete ML workflow guide
 
@@ -582,7 +595,7 @@ pytest -q tests -k "not db"             # Explicitly skip DB tests
 ENABLE_DB_TESTS=1 pytest -q             # Force DB tests
 ```
 
-**Test Coverage:** 27 ML tests, full CLI integration tests
+**Test Coverage:** 127 tests (ML, CLI, strategies, backtesting, integration)
 
 ## Useful Commands
 
@@ -609,7 +622,9 @@ g2 feat-def-import --dir feature-definitions # Import definitions from git
 **Current State:**
 
 - ✅ Data pipeline complete (ingestion, features, storage)
-- ✅ ML Phase 1 complete (training, prediction, evaluation)
+- ✅ ML pipeline complete (quantile regression, trend classification, ensembles)
+- ✅ E2E test command for quick pipeline validation
+- ✅ Advanced backtesting (6 strategies, execution modeling)
 - ✅ MCP server implemented (natural language interface)
 - ✅ Production-ready database schema
 - ✅ Comprehensive documentation
