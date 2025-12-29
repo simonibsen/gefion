@@ -81,6 +81,9 @@ app.add_typer(backtest_app, name="backtest", cls=SortedGroup)
 strategy_app = typer.Typer(help="Strategy management commands (list/configs/create)")
 app.add_typer(strategy_app, name="strategy", cls=SortedGroup)
 
+volatility_app = typer.Typer(help="Volatility analysis commands (compute thresholds)")
+app.add_typer(volatility_app, name="volatility", cls=SortedGroup)
+
 
 def emit(
     message: str,
@@ -6009,6 +6012,160 @@ def strategy_create_config(
         emit_json({"id": config_id, "name": name, "strategy": strategy})
     else:
         emit(f"Created config '{name}' (id={config_id})")
+
+
+@volatility_app.command("compute")
+def volatility_compute(
+    symbols: Optional[str] = typer.Option(None, "--symbols", help="Comma-separated symbols"),
+    exchange: Optional[str] = typer.Option(None, "--exchange", help="Exchange name"),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Limit symbols from exchange"),
+    horizons: str = typer.Option("7,30,90", "--horizons", help="Comma-separated horizons in days"),
+    date: Optional[str] = typer.Option(None, "--date", help="Calculation date (YYYY-MM-DD)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Compute volatility thresholds for stocks."""
+    from datetime import datetime
+
+    from g2.ml.volatility import (
+        calculate_historical_volatility,
+        compute_adaptive_thresholds,
+        compute_volatility_percentile,
+    )
+
+    # Validate input
+    if not symbols and not exchange:
+        emit_error("Must specify --symbols or --exchange", json_output=json_output)
+
+    # Parse horizons
+    try:
+        horizon_list = [int(h.strip()) for h in horizons.split(",")]
+    except ValueError:
+        emit_error("Invalid horizons format", json_output=json_output)
+
+    # Parse date
+    calc_date = datetime.now().date() if date is None else datetime.strptime(date, "%Y-%m-%d").date()
+
+    url = _db_url(db_url)
+    try:
+        with psycopg.connect(url) as conn:
+            # Get symbols list
+            if symbols:
+                symbol_list = [s.strip().upper() for s in symbols.split(",")]
+            else:
+                with conn.cursor() as cur:
+                    query = "SELECT symbol FROM stocks WHERE exchange = %s"
+                    params: list = [exchange]
+                    if limit:
+                        query += " LIMIT %s"
+                        params.append(limit)
+                    cur.execute(query, params)
+                    symbol_list = [row[0] for row in cur.fetchall()]
+
+            if not symbol_list:
+                emit_error("No symbols found", json_output=json_output)
+
+            # Get price data and compute volatility for each symbol
+            import pandas as pd
+
+            results = []
+            all_volatilities = []
+
+            # First pass: compute volatilities
+            for sym in symbol_list:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT s.id, o.date, o.close
+                        FROM stock_ohlcv o
+                        JOIN stocks s ON o.data_id = s.id
+                        WHERE s.symbol = %s
+                        ORDER BY o.date DESC
+                        LIMIT 252
+                        """,
+                        (sym,),
+                    )
+                    rows = cur.fetchall()
+
+                if len(rows) < 60:
+                    continue
+
+                data_id = rows[0][0]
+                df = pd.DataFrame(rows, columns=["data_id", "date", "close"])
+                df = df.sort_values("date")
+                returns = df["close"].pct_change().dropna()
+
+                vol = calculate_historical_volatility(returns, window=60, annualize=True)
+                if vol is not None:
+                    all_volatilities.append((sym, data_id, vol, returns))
+
+            if not all_volatilities:
+                emit_error("No volatility data computed", json_output=json_output)
+
+            # Compute percentiles
+            vol_series = pd.Series([v[2] for v in all_volatilities])
+
+            # Second pass: compute thresholds and store
+            for sym, data_id, vol, returns in all_volatilities:
+                percentile = compute_volatility_percentile(vol, vol_series)
+
+                for horizon in horizon_list:
+                    weak, strong = compute_adaptive_thresholds(vol, horizon, percentile)
+
+                    # Upsert threshold
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO volatility_thresholds
+                                (data_id, horizon_days, calculation_date,
+                                 historical_volatility, weak_threshold, strong_threshold,
+                                 volatility_percentile)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (data_id, horizon_days, calculation_date)
+                            DO UPDATE SET
+                                historical_volatility = EXCLUDED.historical_volatility,
+                                weak_threshold = EXCLUDED.weak_threshold,
+                                strong_threshold = EXCLUDED.strong_threshold,
+                                volatility_percentile = EXCLUDED.volatility_percentile
+                            """,
+                            (data_id, horizon, calc_date, vol, weak, strong, percentile),
+                        )
+
+                    results.append({
+                        "symbol": sym,
+                        "horizon": horizon,
+                        "volatility": round(vol, 4),
+                        "weak_threshold": round(weak, 4),
+                        "strong_threshold": round(strong, 4),
+                        "percentile": round(percentile, 2),
+                    })
+
+            conn.commit()
+
+    except psycopg.Error as e:
+        emit_error(f"Database error: {e}", json_output=json_output)
+
+    if json_output:
+        emit_json({"count": len(results), "results": results})
+    else:
+        console = Console()
+        console.print(f"Computed {len(results)} volatility thresholds")
+        if results:
+            table = Table(title="Sample Thresholds")
+            table.add_column("Symbol")
+            table.add_column("Horizon")
+            table.add_column("Vol")
+            table.add_column("Weak")
+            table.add_column("Strong")
+            for r in results[:10]:
+                table.add_row(
+                    r["symbol"],
+                    str(r["horizon"]),
+                    f"{r['volatility']:.1%}",
+                    f"{r['weak_threshold']:.2%}",
+                    f"{r['strong_threshold']:.2%}",
+                )
+            console.print(table)
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
