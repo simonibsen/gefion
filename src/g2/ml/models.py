@@ -16,6 +16,22 @@ from sklearn.pipeline import Pipeline
 logger = logging.getLogger(__name__)
 
 
+class ModelPipeline:
+    """Wrapper for model + imputer that can be pickled.
+
+    Must be defined at module level for joblib serialization to work.
+    """
+
+    def __init__(self, imputer, model):
+        self.named_steps = {'imputer': imputer, 'model': model}
+        self.imputer = imputer
+        self.model = model
+
+    def predict(self, X):
+        X_imputed = self.imputer.transform(X)
+        return self.model.predict(X_imputed)
+
+
 def load_dataset(artifact_uri: Path, horizon_days: int) -> Tuple[pd.DataFrame, pd.Series]:
     """
     Load features and labels from CSV or Parquet files for a specific horizon.
@@ -321,18 +337,8 @@ def _train_xgboost_quantile(
     else:
         model.fit(X_imputed, y)
 
-    # Wrap in pipeline for consistency
-    class XGBPipeline:
-        def __init__(self, imputer, model):
-            self.named_steps = {'imputer': imputer, 'model': model}
-            self.imputer = imputer
-            self.model = model
-
-        def predict(self, X):
-            X_imputed = self.imputer.transform(X)
-            return self.model.predict(X_imputed)
-
-    return XGBPipeline(imputer, model)
+    # Use module-level class for pickle compatibility
+    return ModelPipeline(imputer, model)
 
 
 def _train_lightgbm_quantile(
@@ -392,18 +398,8 @@ def _train_lightgbm_quantile(
     else:
         model.fit(X_imputed, y)
 
-    # Wrap in pipeline
-    class LGBPipeline:
-        def __init__(self, imputer, model):
-            self.named_steps = {'imputer': imputer, 'model': model}
-            self.imputer = imputer
-            self.model = model
-
-        def predict(self, X):
-            X_imputed = self.imputer.transform(X)
-            return self.model.predict(X_imputed)
-
-    return LGBPipeline(imputer, model)
+    # Use module-level class for pickle compatibility
+    return ModelPipeline(imputer, model)
 
 
 def save_model_artifact(
