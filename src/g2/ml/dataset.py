@@ -32,6 +32,21 @@ def _write_to_file(
             writer.writerows(data)
 
 
+def _stream_to_csv(cursor, path: Path, header: List[str], row_mapper) -> int:
+    """Stream cursor results directly to CSV without loading all into memory.
+
+    Returns the number of rows written.
+    """
+    count = 0
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=header)
+        writer.writeheader()
+        for row in cursor:
+            writer.writerow(row_mapper(row))
+            count += 1
+    return count
+
+
 def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -> None:
     """
     Export dataset artifacts.
@@ -73,7 +88,9 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     feature_names = manifest.get("feature_names") or []
     exclude_features = manifest.get("exclude_features") or []
 
+    # Export prices - stream directly for CSV, load for parquet
     price_rows: list[dict[str, Any]] = []
+    price_count = 0
     try:
         with conn.cursor() as cur:
             if symbols:
@@ -96,24 +113,32 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
                     ORDER BY s.symbol, o.date;
                     """
                 )
-            for row in cur.fetchall():
-                price_rows.append(
-                    {
-                        "symbol": row[0],
-                        "date": row[1],
-                        "open": row[2],
-                        "high": row[3],
-                        "low": row[4],
-                        "close": row[5],
-                        "adjusted_close": row[6],
-                        "volume": row[7],
-                    }
-                )
+
+            def price_mapper(row):
+                return {
+                    "symbol": row[0],
+                    "date": row[1],
+                    "open": row[2],
+                    "high": row[3],
+                    "low": row[4],
+                    "close": row[5],
+                    "adjusted_close": row[6],
+                    "volume": row[7],
+                }
+
+            if export_format == "csv":
+                # Stream directly to CSV - much lower memory usage
+                price_count = _stream_to_csv(cur, prices_path, prices_header, price_mapper)
+            else:
+                # For parquet, need all data in memory
+                for row in cur:
+                    price_rows.append(price_mapper(row))
+                price_count = len(price_rows)
+                _write_to_file(price_rows, prices_path, prices_header, export_format)
     except Exception:
-        price_rows = []
+        _write_to_file([], prices_path, prices_header, export_format)
 
-    _write_to_file(price_rows, prices_path, prices_header, export_format)
-
+    # Export features - stream directly for CSV, load for parquet
     feature_rows: list[dict[str, Any]] = []
     try:
         with conn.cursor() as cur:
@@ -151,21 +176,34 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
             else:
                 cur.execute(sql)
 
-            for row in cur.fetchall():
-                feature_rows.append({"symbol": row[0], "date": row[1], "feature_name": row[2], "value": row[3]})
+            def feature_mapper(row):
+                return {"symbol": row[0], "date": row[1], "feature_name": row[2], "value": row[3]}
+
+            if export_format == "csv":
+                # Stream directly to CSV - much lower memory usage
+                _stream_to_csv(cur, features_path, features_header, feature_mapper)
+            else:
+                # For parquet, need all data in memory
+                for row in cur:
+                    feature_rows.append(feature_mapper(row))
+                _write_to_file(feature_rows, features_path, features_header, export_format)
     except Exception:
-        feature_rows = []
+        _write_to_file([], features_path, features_header, export_format)
 
-    _write_to_file(feature_rows, features_path, features_header, export_format)
-
-    if price_rows and horizons_days:
+    # Compute labels from prices
+    if price_count > 0 and horizons_days:
         try:
             import pandas as pd
 
             from g2.ml.labels import classify_return_5class
 
             thresholds = (manifest.get("label_spec") or {}).get("thresholds") or {}
-            df = pd.DataFrame(price_rows)
+
+            # Load price data: from memory if available, otherwise from the CSV file we just wrote
+            if price_rows:
+                df = pd.DataFrame(price_rows)
+            else:
+                df = pd.read_csv(prices_path)
             if df.empty:
                 return
             df["close_for_label"] = df["adjusted_close"].where(df["adjusted_close"].notna(), df["close"])

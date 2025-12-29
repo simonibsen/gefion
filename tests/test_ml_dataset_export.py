@@ -25,6 +25,9 @@ class _FakeCursor:
     def fetchall(self):
         return list(self._rows)
 
+    def __iter__(self):
+        return iter(self._rows)
+
     def __enter__(self):
         return self
 
