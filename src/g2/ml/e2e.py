@@ -357,10 +357,14 @@ def _run_predict(
     """Generate predictions by calling CLI command."""
     import subprocess
     import sys
-    import datetime
 
-    # Use yesterday's date for predictions (today's data may not be complete)
-    prediction_date = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    # Get the latest date with features in the database
+    with conn.cursor() as cur:
+        cur.execute("SELECT MAX(date) FROM computed_features;")
+        row = cur.fetchone()
+        if not row or not row[0]:
+            raise RuntimeError("No computed features found in database")
+        prediction_date = row[0].isoformat()
 
     cmd = [
         sys.executable, "-m", "g2.cli",
@@ -386,10 +390,14 @@ def _run_predict_ensemble(
     """Generate ensemble predictions by calling CLI command."""
     import subprocess
     import sys
-    import datetime
 
-    # Use yesterday's date for predictions (today's data may not be complete)
-    prediction_date = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    # Get the latest date with features in the database
+    with conn.cursor() as cur:
+        cur.execute("SELECT MAX(date) FROM computed_features;")
+        row = cur.fetchone()
+        if not row or not row[0]:
+            raise RuntimeError("No computed features found in database")
+        prediction_date = row[0].isoformat()
 
     cmd = [
         sys.executable, "-m", "g2.cli",
