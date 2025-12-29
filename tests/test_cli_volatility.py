@@ -22,11 +22,11 @@ class TestVolatilityComputeCommand:
         assert "--horizons" in result.output
         assert "--date" in result.output
 
-    def test_volatility_compute_requires_symbols_or_exchange(self):
-        """Test that command requires either symbols or exchange."""
+    def test_volatility_compute_requires_symbols_or_exchange_or_limit(self):
+        """Test that command requires either symbols, exchange, or limit."""
         result = runner.invoke(app, ["volatility", "compute", "--horizons", "7,30"])
 
-        # Should fail without symbols or exchange
+        # Should fail without symbols, exchange, or limit
         assert result.exit_code != 0
 
 

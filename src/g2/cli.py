@@ -6034,8 +6034,8 @@ def volatility_compute(
     )
 
     # Validate input
-    if not symbols and not exchange:
-        emit_error("Must specify --symbols or --exchange", json_output=json_output)
+    if not symbols and not exchange and not limit:
+        emit_error("Must specify --symbols, --exchange, or --limit", json_output=json_output)
 
     # Parse horizons
     try:
@@ -6054,12 +6054,17 @@ def volatility_compute(
                 symbol_list = [s.strip().upper() for s in symbols.split(",")]
             else:
                 with conn.cursor() as cur:
-                    query = "SELECT symbol FROM stocks WHERE exchange = %s"
-                    params: list = [exchange]
+                    # Query stocks with sufficient price history (at least 60 days)
+                    query = """
+                        SELECT s.symbol
+                        FROM stocks s
+                        JOIN stock_ohlcv o ON o.data_id = s.id
+                        GROUP BY s.symbol
+                        HAVING COUNT(*) >= 60
+                    """
                     if limit:
-                        query += " LIMIT %s"
-                        params.append(limit)
-                    cur.execute(query, params)
+                        query += f" LIMIT {limit}"
+                    cur.execute(query)
                     symbol_list = [row[0] for row in cur.fetchall()]
 
             if not symbol_list:
