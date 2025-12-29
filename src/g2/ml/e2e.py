@@ -18,6 +18,7 @@ E2E_STEPS = {
     "train_ensemble": "Train ensemble combining XGBoost and LightGBM",
     "predict": "Generate predictions with single model",
     "predict_ensemble": "Generate predictions with ensemble",
+    "quality_check": "Validate prediction quality metrics",
 }
 
 
@@ -237,6 +238,26 @@ def run_e2e_test(
                 time.time() - start_time, artifacts, errors
             )
 
+        # Step 7: Quality Check
+        try:
+            _progress("quality_check", "starting", "Validating prediction quality...")
+            with create_span("e2e_quality_check"):
+                quality_info = _run_quality_check(
+                    artifacts["model_name"],
+                    artifacts["ensemble_name"],
+                    conn,
+                )
+                artifacts["quality"] = quality_info
+            steps_completed.append("quality_check")
+            quality_msg = f"IQR: {quality_info['avg_iqr']:.1%}, ordering: {'OK' if quality_info['ordering_valid'] else 'FAIL'}"
+            _progress("quality_check", "completed", quality_msg)
+        except Exception as e:
+            steps_failed.append("quality_check")
+            errors["quality_check"] = str(e)
+            _progress("quality_check", "failed", str(e))
+            # Quality check failure is non-fatal - continue to cleanup
+            pass
+
         # Cleanup if requested
         if cleanup:
             with create_span("e2e_cleanup"):
@@ -402,6 +423,7 @@ def _run_predict(
     """Generate predictions by calling CLI command."""
     import subprocess
     import sys
+    import re
 
     # Let CLI auto-detect the prediction date based on available features
     cmd = [
@@ -416,8 +438,12 @@ def _run_predict(
     if result.returncode != 0:
         raise RuntimeError(f"ml predict failed: {result.stderr or result.stdout}")
 
-    # Parse output for count (simple heuristic)
-    return {"count": 0}  # Count not critical for e2e test
+    # Parse prediction count from output (e.g., "Generated 20 predictions")
+    count = 0
+    match = re.search(r"Generated (\d+) predictions", result.stdout)
+    if match:
+        count = int(match.group(1))
+    return {"count": count}
 
 
 def _run_predict_ensemble(
@@ -426,6 +452,7 @@ def _run_predict_ensemble(
     """Generate ensemble predictions by calling CLI command."""
     import subprocess
     import sys
+    import re
 
     # Let CLI auto-detect the prediction date based on available features
     cmd = [
@@ -440,7 +467,77 @@ def _run_predict_ensemble(
     if result.returncode != 0:
         raise RuntimeError(f"ml predict-ensemble failed: {result.stderr or result.stdout}")
 
-    return {"count": 0}  # Count not critical for e2e test
+    # Parse prediction count from output (e.g., "Generated 20 predictions")
+    count = 0
+    match = re.search(r"Generated (\d+) predictions", result.stdout)
+    if match:
+        count = int(match.group(1))
+    return {"count": count}
+
+
+def _run_quality_check(
+    model_name: str, ensemble_name: str, conn
+) -> Dict[str, Any]:
+    """Check prediction quality metrics.
+
+    Returns:
+        Dict with quality metrics:
+        - avg_iqr: Average interquartile range (q90 - q10) as fraction
+        - ordering_valid: True if q10 <= q50 <= q90 for all predictions
+        - prediction_count: Number of predictions checked
+        - ensemble_avg_iqr: Ensemble average IQR
+        - ensemble_ordering_valid: Ensemble ordering check
+    """
+    import os
+    from g2.cli_helpers import db_connection
+
+    db_url = os.getenv("DATABASE_URL")
+    with db_connection(db_url) as fresh_conn:
+        with fresh_conn.cursor() as cur:
+            # Check single model predictions
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) as cnt,
+                    AVG(q90 - q10) as avg_iqr,
+                    SUM(CASE WHEN q10 <= q50 AND q50 <= q90 THEN 1 ELSE 0 END) as valid_ordering
+                FROM quantile_predictions qp
+                JOIN ml_models m ON qp.model_id = m.id
+                WHERE m.name = %s;
+                """,
+                (model_name,),
+            )
+            row = cur.fetchone()
+            model_count = int(row[0]) if row[0] else 0
+            model_avg_iqr = float(row[1]) if row[1] else 0.0
+            model_valid = int(row[2]) if row[2] else 0
+
+            # Check ensemble predictions
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) as cnt,
+                    AVG(q90 - q10) as avg_iqr,
+                    SUM(CASE WHEN q10 <= q50 AND q50 <= q90 THEN 1 ELSE 0 END) as valid_ordering
+                FROM quantile_predictions qp
+                JOIN ml_models m ON qp.model_id = m.id
+                WHERE m.name = %s;
+                """,
+                (ensemble_name,),
+            )
+            row = cur.fetchone()
+            ensemble_count = int(row[0]) if row[0] else 0
+            ensemble_avg_iqr = float(row[1]) if row[1] else 0.0
+            ensemble_valid = int(row[2]) if row[2] else 0
+
+    return {
+        "avg_iqr": model_avg_iqr,
+        "ordering_valid": model_valid == model_count and model_count > 0,
+        "prediction_count": model_count,
+        "ensemble_avg_iqr": ensemble_avg_iqr,
+        "ensemble_ordering_valid": ensemble_valid == ensemble_count and ensemble_count > 0,
+        "ensemble_prediction_count": ensemble_count,
+    }
 
 
 def _run_cleanup(artifacts: Dict[str, Any], conn) -> None:

@@ -58,6 +58,7 @@ class TestE2ETestSteps:
             "train_ensemble",
             "predict",
             "predict_ensemble",
+            "quality_check",
         ]
 
         assert len(E2E_STEPS) == len(expected_steps)
@@ -118,13 +119,15 @@ class TestE2EPredictionDateQuery:
         from unittest.mock import patch, MagicMock
 
         with patch('subprocess.run') as mock_subprocess:
-            mock_subprocess.return_value = MagicMock(returncode=0)
+            mock_result = MagicMock(returncode=0)
+            mock_result.stdout = "Generated 20 predictions\nPredictions generated: test_model v1"
+            mock_subprocess.return_value = mock_result
 
             from g2.ml.e2e import _run_predict
 
             # Pass explicit symbols
             symbols = ["AAPL", "MSFT", "GOOGL"]
-            _run_predict("test_model", "v1", symbols, None)
+            result = _run_predict("test_model", "v1", symbols, None)
 
             # Verify subprocess was called with --symbols (not --prediction-date)
             subprocess_call = mock_subprocess.call_args
@@ -133,6 +136,8 @@ class TestE2EPredictionDateQuery:
             assert "AAPL,MSFT,GOOGL" in cmd
             # prediction_date is now auto-detected by CLI
             assert "--prediction-date" not in cmd
+            # Verify count is parsed from output
+            assert result["count"] == 20
 
 
 if __name__ == "__main__":

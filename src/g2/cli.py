@@ -1097,6 +1097,7 @@ def ml_predict(
 
         conn.commit()
 
+    emit(f"Generated {total_predictions} predictions", json_output=json_output)
     emit(
         f"Predictions generated: {model_name} {model_version} for {prediction_date}",
         data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizons": horizons},
@@ -2107,6 +2108,7 @@ def ml_predict_ensemble(
 
         conn.commit()
 
+    emit(f"Generated {total_predictions} predictions", json_output=json_output)
     emit(
         f"Ensemble predictions generated: {model_name} {model_version} for {prediction_date}",
         data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizons": horizons},
