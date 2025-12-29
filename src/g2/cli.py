@@ -1683,7 +1683,7 @@ def ml_train_ensemble(
             --weights 0.5,0.3,0.2
     """
     from g2.ml.store import get_ml_dataset
-    from g2.ml.models import load_dataset_from_csv
+    from g2.ml.models import load_dataset
     from g2.ml.ensemble import train_ensemble
 
     # Parse algorithms
@@ -1732,7 +1732,7 @@ def ml_train_ensemble(
             emit(f"Training ensemble for {horizon}-day horizon...", json_output=json_output)
 
             # Load features and labels for this horizon
-            X, y = load_dataset_from_csv(artifact_uri, horizon)
+            X, y = load_dataset(artifact_uri, horizon)
             emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
 
             # Train ensemble
