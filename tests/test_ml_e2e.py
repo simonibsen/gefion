@@ -110,11 +110,11 @@ class TestE2ETestCleanup:
 class TestE2EPredictionDateQuery:
     """Tests for prediction date query logic."""
 
-    def test_run_predict_queries_specific_symbols(self):
-        """Test that _run_predict queries MAX date for specific symbols, not global MAX.
+    def test_run_predict_uses_explicit_symbols(self):
+        """Test that _run_predict uses explicit symbols passed to it.
 
-        Regression test: On large databases, global MAX(date) may return a date
-        that doesn't have features for the first N alphabetical symbols.
+        Regression test: On large databases, we must use the same symbols
+        throughout the e2e pipeline, not re-select with ORDER BY LIMIT.
         """
         from unittest.mock import patch, MagicMock
         from datetime import date
@@ -137,24 +137,31 @@ class TestE2EPredictionDateQuery:
 
             from g2.ml.e2e import _run_predict
 
+            # Pass explicit symbols (not exchange/limit)
+            symbols = ["AAPL", "MSFT", "GOOGL"]
             with patch.dict('os.environ', {'DATABASE_URL': 'postgresql://test'}):
-                _run_predict("test_model", "v1", "NASDAQ", 10, None)
+                _run_predict("test_model", "v1", symbols, None)
 
             # Verify cursor.execute was called twice:
-            # 1. SELECT id FROM stocks ORDER BY symbol LIMIT N
+            # 1. SELECT id FROM stocks WHERE symbol = ANY(...)
             # 2. SELECT MAX(date) FROM computed_features WHERE data_id = ANY(...)
             assert mock_cursor.execute.call_count == 2
 
-            # First call should select symbols
+            # First call should filter by explicit symbols
             first_call_sql = mock_cursor.execute.call_args_list[0][0][0]
             assert "SELECT id FROM stocks" in first_call_sql
-            assert "ORDER BY symbol" in first_call_sql
-            assert "LIMIT" in first_call_sql
+            assert "symbol = ANY" in first_call_sql
 
             # Second call should use data_id = ANY(...)
             second_call_sql = mock_cursor.execute.call_args_list[1][0][0]
             assert "MAX(date)" in second_call_sql
             assert "data_id = ANY" in second_call_sql
+
+            # Verify subprocess was called with --symbols
+            subprocess_call = mock_subprocess.call_args
+            cmd = subprocess_call[0][0]
+            assert "--symbols" in cmd
+            assert "AAPL,MSFT,GOOGL" in cmd
 
 
 if __name__ == "__main__":

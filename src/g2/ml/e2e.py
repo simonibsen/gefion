@@ -86,13 +86,15 @@ def run_e2e_test(
             raise ValueError("Database connection required. Pass conn parameter.")
 
         # Step 1: Data Update
+        symbols = []
         if not skip_data_update:
             try:
                 _progress("data_update", "starting", "Updating price data...")
                 with create_span("e2e_data_update"):
-                    _run_data_update(exchange, limit, conn)
+                    symbols = _run_data_update(exchange, limit, conn)
+                    artifacts["symbols"] = symbols
                 steps_completed.append("data_update")
-                _progress("data_update", "completed")
+                _progress("data_update", "completed", f"Updated {len(symbols)} symbols")
             except Exception as e:
                 steps_failed.append("data_update")
                 errors["data_update"] = str(e)
@@ -102,14 +104,33 @@ def run_e2e_test(
                     time.time() - start_time, artifacts, errors
                 )
         else:
+            # When skipping data_update, get symbols with most recent data
+            import os
+            from g2.cli_helpers import db_connection
+            db_url = os.getenv("DATABASE_URL")
+            with db_connection(db_url) as fresh_conn:
+                with fresh_conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT s.symbol
+                        FROM stocks s
+                        JOIN stock_ohlcv o ON s.id = o.data_id
+                        GROUP BY s.symbol
+                        ORDER BY MAX(o.date) DESC
+                        LIMIT %s;
+                        """,
+                        (limit,),
+                    )
+                    symbols = [row[0] for row in cur.fetchall()]
+            artifacts["symbols"] = symbols
             steps_completed.append("data_update")
-            _progress("data_update", "skipped")
+            _progress("data_update", "skipped", f"Using {len(symbols)} existing symbols")
 
         # Step 2: Dataset Build
         try:
             _progress("dataset_build", "starting", "Building ML dataset...")
             with create_span("e2e_dataset_build"):
-                dataset_info = _run_dataset_build(exchange, limit, name, conn)
+                dataset_info = _run_dataset_build(symbols, name, conn)
                 artifacts["dataset_name"] = dataset_info["name"]
                 artifacts["dataset_version"] = dataset_info["version"]
             steps_completed.append("dataset_build")
@@ -176,8 +197,7 @@ def run_e2e_test(
                 pred_info = _run_predict(
                     artifacts["model_name"],
                     artifacts["model_version"],
-                    exchange,
-                    limit,
+                    symbols,
                     conn,
                 )
                 artifacts["predictions_count"] = pred_info["count"]
@@ -199,8 +219,7 @@ def run_e2e_test(
                 ensemble_pred_info = _run_predict_ensemble(
                     artifacts["ensemble_name"],
                     artifacts["ensemble_version"],
-                    exchange,
-                    limit,
+                    symbols,
                     conn,
                 )
                 artifacts["ensemble_predictions_count"] = ensemble_pred_info["count"]
@@ -245,10 +264,16 @@ def _build_result(
     )
 
 
-def _run_data_update(exchange: str, limit: int, conn) -> None:
-    """Run data update step by calling CLI command."""
+def _run_data_update(exchange: str, limit: int, conn) -> List[str]:
+    """Run data update step by calling CLI command.
+
+    Returns:
+        List of symbols that were updated (for use in subsequent steps)
+    """
     import subprocess
     import sys
+    import os
+    from g2.cli_helpers import db_connection
 
     # Call CLI via subprocess (simple and reliable)
     cmd = [
@@ -264,9 +289,27 @@ def _run_data_update(exchange: str, limit: int, conn) -> None:
     if result.returncode != 0:
         raise RuntimeError(f"data-update failed: {result.stderr or result.stdout}")
 
+    # Query which symbols now have the most recent data (these are the ones we updated)
+    db_url = os.getenv("DATABASE_URL")
+    with db_connection(db_url) as fresh_conn:
+        with fresh_conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.symbol
+                FROM stocks s
+                JOIN stock_ohlcv o ON s.id = o.data_id
+                GROUP BY s.symbol
+                ORDER BY MAX(o.date) DESC
+                LIMIT %s;
+                """,
+                (limit,),
+            )
+            symbols = [row[0] for row in cur.fetchall()]
+    return symbols
+
 
 def _run_dataset_build(
-    exchange: str, limit: int, name: str, conn
+    symbols: List[str], name: str, conn
 ) -> Dict[str, str]:
     """Build dataset by calling CLI command."""
     import subprocess
@@ -280,8 +323,7 @@ def _run_dataset_build(
         "ml", "dataset-build",
         "--name", name,
         "--version", version,
-        "--exchange", exchange,
-        "--limit", str(limit),
+        "--symbols", ",".join(symbols),
         "--horizons", "7,30",
         "--weak-thresholds", "0.02,0.05",
         "--strong-thresholds", "0.05,0.10",
@@ -292,7 +334,7 @@ def _run_dataset_build(
     if result.returncode != 0:
         raise RuntimeError(f"dataset-build failed: {result.stderr or result.stdout}")
 
-    return {"name": name, "version": version}
+    return {"name": name, "version": version, "symbols": symbols}
 
 
 def _run_train_model(
@@ -352,7 +394,7 @@ def _run_train_ensemble(
 
 
 def _run_predict(
-    model_name: str, model_version: str, exchange: str, limit: int, conn
+    model_name: str, model_version: str, symbols: List[str], conn
 ) -> Dict[str, int]:
     """Generate predictions by calling CLI command."""
     import subprocess
@@ -360,23 +402,21 @@ def _run_predict(
     import os
     from g2.cli_helpers import db_connection
 
-    # Get the latest date with features for the SPECIFIC symbols we'll use
-    # (must match the same symbol selection logic as ml predict command)
+    # Get the latest date with features for the specific symbols
     db_url = os.getenv("DATABASE_URL")
     with db_connection(db_url) as fresh_conn:
         with fresh_conn.cursor() as cur:
-            # Get the data_ids for the symbols we'll use (first N alphabetically)
+            # Get data_ids for the symbols we're predicting
             cur.execute(
                 """
                 SELECT id FROM stocks
-                ORDER BY symbol
-                LIMIT %s;
+                WHERE symbol = ANY(%s);
                 """,
-                (limit,),
+                (symbols,),
             )
             data_ids = [row[0] for row in cur.fetchall()]
             if not data_ids:
-                raise RuntimeError("No stocks found in database")
+                raise RuntimeError(f"No stocks found for symbols: {symbols[:5]}...")
 
             # Get MAX date for these specific symbols
             cur.execute(
@@ -388,7 +428,7 @@ def _run_predict(
             )
             row = cur.fetchone()
             if not row or not row[0]:
-                raise RuntimeError(f"No computed features found for selected symbols (data_ids: {data_ids[:5]}...)")
+                raise RuntimeError(f"No computed features found for symbols: {symbols[:5]}...")
             prediction_date = row[0].isoformat()
 
     cmd = [
@@ -397,8 +437,7 @@ def _run_predict(
         "--model-name", model_name,
         "--model-version", model_version,
         "--prediction-date", prediction_date,
-        "--exchange", exchange,
-        "--limit", str(limit),
+        "--symbols", ",".join(symbols),
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -410,7 +449,7 @@ def _run_predict(
 
 
 def _run_predict_ensemble(
-    model_name: str, model_version: str, exchange: str, limit: int, conn
+    model_name: str, model_version: str, symbols: List[str], conn
 ) -> Dict[str, int]:
     """Generate ensemble predictions by calling CLI command."""
     import subprocess
@@ -418,23 +457,21 @@ def _run_predict_ensemble(
     import os
     from g2.cli_helpers import db_connection
 
-    # Get the latest date with features for the SPECIFIC symbols we'll use
-    # (must match the same symbol selection logic as ml predict-ensemble command)
+    # Get the latest date with features for the specific symbols
     db_url = os.getenv("DATABASE_URL")
     with db_connection(db_url) as fresh_conn:
         with fresh_conn.cursor() as cur:
-            # Get the data_ids for the symbols we'll use (first N alphabetically)
+            # Get data_ids for the symbols we're predicting
             cur.execute(
                 """
                 SELECT id FROM stocks
-                ORDER BY symbol
-                LIMIT %s;
+                WHERE symbol = ANY(%s);
                 """,
-                (limit,),
+                (symbols,),
             )
             data_ids = [row[0] for row in cur.fetchall()]
             if not data_ids:
-                raise RuntimeError("No stocks found in database")
+                raise RuntimeError(f"No stocks found for symbols: {symbols[:5]}...")
 
             # Get MAX date for these specific symbols
             cur.execute(
@@ -446,7 +483,7 @@ def _run_predict_ensemble(
             )
             row = cur.fetchone()
             if not row or not row[0]:
-                raise RuntimeError(f"No computed features found for selected symbols (data_ids: {data_ids[:5]}...)")
+                raise RuntimeError(f"No computed features found for symbols: {symbols[:5]}...")
             prediction_date = row[0].isoformat()
 
     cmd = [
@@ -455,8 +492,7 @@ def _run_predict_ensemble(
         "--model-name", model_name,
         "--model-version", model_version,
         "--prediction-date", prediction_date,
-        "--exchange", exchange,
-        "--limit", str(limit),
+        "--symbols", ",".join(symbols),
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
