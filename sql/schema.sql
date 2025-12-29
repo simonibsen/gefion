@@ -188,6 +188,138 @@ CREATE INDEX IF NOT EXISTS idx_strategy_configs_active
     WHERE active = TRUE;
 
 -- =============================================================================
+-- ML TABLES
+-- =============================================================================
+
+-- ML dataset registry
+CREATE TABLE IF NOT EXISTS ml_datasets (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    universe JSONB,
+    feature_names JSONB,
+    lookback_days INTEGER,
+    horizons_days JSONB,
+    label_spec JSONB,
+    split_spec JSONB,
+    artifact_uri TEXT,
+    checksum TEXT,
+    UNIQUE (name, version)
+);
+CREATE INDEX IF NOT EXISTS ml_datasets_name_idx ON ml_datasets(name);
+
+-- ML run tracking
+CREATE TABLE IF NOT EXISTS ml_runs (
+    id SERIAL PRIMARY KEY,
+    run_type TEXT NOT NULL,  -- 'train' | 'predict' | 'eval'
+    status TEXT NOT NULL DEFAULT 'running',
+    created_at TIMESTAMP DEFAULT NOW(),
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    dataset_id INTEGER REFERENCES ml_datasets(id),
+    run_config JSONB NOT NULL,
+    code_version TEXT,
+    notes TEXT
+);
+CREATE INDEX IF NOT EXISTS ml_runs_type_status_idx ON ml_runs(run_type, status);
+
+-- ML model registry
+CREATE TABLE IF NOT EXISTS ml_models (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    train_run_id INTEGER REFERENCES ml_runs(id),
+    dataset_id INTEGER REFERENCES ml_datasets(id),
+    algorithm TEXT,
+    hyperparams JSONB,
+    metrics JSONB,
+    artifact_uri TEXT NOT NULL,
+    active BOOLEAN DEFAULT TRUE,
+    UNIQUE (name, version)
+);
+CREATE INDEX IF NOT EXISTS ml_models_active_idx ON ml_models(active, name);
+
+-- Quantile predictions (hypertable)
+CREATE TABLE IF NOT EXISTS quantile_predictions (
+    model_id INTEGER NOT NULL REFERENCES ml_models(id),
+    data_id INTEGER NOT NULL REFERENCES stocks(id),
+    prediction_date DATE NOT NULL,
+    horizon_days INTEGER NOT NULL,
+    q10 NUMERIC(10,4),
+    q50 NUMERIC(10,4),
+    q90 NUMERIC(10,4),
+    model_version TEXT,
+    features_snapshot JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    run_id INTEGER REFERENCES ml_runs(id),
+    PRIMARY KEY (model_id, data_id, prediction_date, horizon_days),
+    CONSTRAINT check_quantile_order CHECK (q10 <= q50 AND q50 <= q90),
+    CONSTRAINT check_horizon_positive CHECK (horizon_days > 0)
+);
+SELECT create_hypertable('quantile_predictions', 'prediction_date', if_not_exists => TRUE);
+
+-- Prediction outcomes for evaluation
+CREATE TABLE IF NOT EXISTS prediction_outcomes (
+    data_id INTEGER NOT NULL REFERENCES stocks(id),
+    prediction_date DATE NOT NULL,
+    outcome_date DATE NOT NULL,
+    horizon_days INTEGER NOT NULL,
+    actual_return NUMERIC(10,4),
+    model_id INTEGER REFERENCES ml_models(id),
+    created_at TIMESTAMP DEFAULT NOW(),
+    run_id INTEGER REFERENCES ml_runs(id),
+    PRIMARY KEY (data_id, prediction_date, horizon_days)
+);
+SELECT create_hypertable('prediction_outcomes', 'prediction_date', if_not_exists => TRUE);
+
+-- Model performance metrics
+CREATE TABLE IF NOT EXISTS model_performance (
+    model_id INTEGER PRIMARY KEY REFERENCES ml_models(id),
+    model_name TEXT NOT NULL,
+    horizon_days INTEGER NOT NULL,
+    q10_calibration NUMERIC(5,2),
+    q50_calibration NUMERIC(5,2),
+    q90_calibration NUMERIC(5,2),
+    quantile_loss NUMERIC(10,6),
+    avg_iqr NUMERIC(10,4),
+    eval_start_date DATE,
+    eval_end_date DATE,
+    num_predictions INTEGER,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    eval_run_id INTEGER REFERENCES ml_runs(id)
+);
+CREATE INDEX IF NOT EXISTS model_performance_name_horizon_idx ON model_performance(model_name, horizon_days);
+
+-- Trend class predictions (hypertable)
+CREATE TABLE IF NOT EXISTS trend_class_predictions (
+    model_id INTEGER NOT NULL REFERENCES ml_models(id),
+    data_id INTEGER NOT NULL REFERENCES stocks(id),
+    prediction_date DATE NOT NULL,
+    horizon_days INTEGER NOT NULL,
+    predicted_class TEXT NOT NULL,
+    p_strong_down NUMERIC(5,4),
+    p_weak_down NUMERIC(5,4),
+    p_flat NUMERIC(5,4),
+    p_weak_up NUMERIC(5,4),
+    p_strong_up NUMERIC(5,4),
+    confidence NUMERIC(5,4),
+    features_snapshot JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    run_id INTEGER REFERENCES ml_runs(id),
+    PRIMARY KEY (model_id, data_id, prediction_date, horizon_days)
+);
+SELECT create_hypertable('trend_class_predictions', 'prediction_date', if_not_exists => TRUE);
+
+CREATE INDEX IF NOT EXISTS quantile_predictions_symbol_date_idx
+    ON quantile_predictions(data_id, prediction_date, horizon_days);
+CREATE INDEX IF NOT EXISTS prediction_outcomes_symbol_date_idx
+    ON prediction_outcomes(data_id, prediction_date, horizon_days);
+CREATE INDEX IF NOT EXISTS trend_class_predictions_symbol_date_idx
+    ON trend_class_predictions(data_id, prediction_date, horizon_days);
+
+-- =============================================================================
 -- SUMMARY
 -- =============================================================================
 
@@ -203,6 +335,13 @@ CREATE INDEX IF NOT EXISTS idx_strategy_configs_active
 \echo '  - computed_features (hypertable)'
 \echo '  - strategy_registry'
 \echo '  - strategy_configs'
+\echo '  - ml_datasets'
+\echo '  - ml_runs'
+\echo '  - ml_models'
+\echo '  - quantile_predictions (hypertable)'
+\echo '  - prediction_outcomes (hypertable)'
+\echo '  - model_performance'
+\echo '  - trend_class_predictions (hypertable)'
 \echo ''
 
 -- Display table counts
