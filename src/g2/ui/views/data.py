@@ -3,6 +3,8 @@
 import streamlit as st
 import subprocess
 import sys
+import json
+import os
 from datetime import datetime
 
 
@@ -72,46 +74,107 @@ def render_update_section():
         )
 
     if st.button("🚀 Start Update", type="primary", use_container_width=True):
-        with st.spinner("Updating data... This may take a while."):
+        # Build command
+        cmd = [sys.executable, "-m", "g2.cli", "data-update", "--json"]
+        cmd.extend(["--exchange", exchange])
+        if limit:
+            cmd.extend(["--limit", str(limit)])
+        cmd.extend(["--timeframe", timeframe])
+        if refresh:
+            cmd.append("--refresh")
+
+        # Set environment
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        with st.status("Updating data...", expanded=True) as status:
+            # Create metrics display
+            col1, col2, col3, col4 = st.columns(4)
+            progress_metric = col1.empty()
+            inserted_metric = col2.empty()
+            errors_metric = col3.empty()
+            rate_metric = col4.empty()
+
+            # Progress bar
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
             try:
-                # Build command
-                cmd = [sys.executable, "-m", "g2.cli", "data-update", "--json"]
-
-                cmd.extend(["--exchange", exchange])
-
-                if limit:
-                    cmd.extend(["--limit", str(limit)])
-
-                cmd.extend(["--timeframe", timeframe])
-
-                if refresh:
-                    cmd.append("--refresh")
-
-                # Set environment
-                import os
-                env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
-
-                # Run command
-                result = subprocess.run(
+                # Start process with streaming output
+                process = subprocess.Popen(
                     cmd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
+                    bufsize=1,
                     env=env,
-                    timeout=600,  # 10 minute timeout
                 )
 
-                if result.returncode == 0:
-                    st.success("✅ Data update completed!")
-                    with st.expander("Output"):
-                        st.code(result.stdout)
-                else:
-                    st.error("❌ Update failed")
-                    st.code(result.stderr)
+                last_data = {}
 
-            except subprocess.TimeoutExpired:
-                st.error("Update timed out after 10 minutes")
+                # Stream output line by line
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        data = json.loads(line)
+                        last_data = data
+
+                        # Update progress bar
+                        pct = data.get("percent", 0)
+                        progress_bar.progress(min(1.0, pct / 100.0))
+
+                        # Update metrics
+                        done = data.get("done", 0)
+                        total = data.get("total", 0)
+                        progress_metric.metric("Progress", f"{done}/{total}")
+                        inserted_metric.metric("Inserted", f"{data.get('inserted_total', 0):,}")
+                        errors_metric.metric("Errors", f"{data.get('errors', 0)}")
+
+                        rate = data.get("rate_per_sec", 0)
+                        eta = data.get("eta_seconds")
+                        if eta and eta > 0:
+                            rate_metric.metric("ETA", f"{eta:.0f}s")
+                        else:
+                            rate_metric.metric("Rate", f"{rate:.1f}/s")
+
+                        # Update status text
+                        label = data.get("label", "")
+                        last_ok = data.get("last_ok", "")
+                        if label:
+                            status_text.write(f"Processing: **{label}**")
+                        elif last_ok:
+                            status_text.write(f"Last completed: **{last_ok}**")
+
+                    except json.JSONDecodeError:
+                        # Non-JSON output, show as-is
+                        status_text.write(line)
+
+                # Wait for process to complete
+                returncode = process.wait()
+
+                if returncode == 0:
+                    progress_bar.progress(1.0)
+                    status.update(label="✅ Update completed!", state="complete")
+
+                    # Show final summary
+                    if last_data:
+                        st.success(
+                            f"Completed: {last_data.get('successes', 0)} symbols, "
+                            f"{last_data.get('inserted_total', 0):,} records inserted, "
+                            f"{last_data.get('errors', 0)} errors"
+                        )
+                else:
+                    stderr = process.stderr.read()
+                    status.update(label="❌ Update failed", state="error")
+                    st.error("Update failed")
+                    if stderr:
+                        st.code(stderr)
+
             except Exception as e:
+                status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
     st.markdown("---")
@@ -126,27 +189,50 @@ def render_update_section():
     )
 
     if st.button("Update Symbol", use_container_width=True) and symbol:
-        with st.spinner(f"Updating {symbol}..."):
-            try:
-                import os
-                env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
 
-                result = subprocess.run(
+        with st.status(f"Updating {symbol.upper()}...", expanded=True) as status:
+            try:
+                process = subprocess.Popen(
                     [sys.executable, "-m", "g2.cli", "prices-ingest",
                      "--symbol", symbol.upper(), "--timeframe", "full", "--json"],
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
+                    bufsize=1,
                     env=env,
-                    timeout=120,
                 )
 
-                if result.returncode == 0:
-                    st.success(f"✅ {symbol.upper()} updated!")
+                status_text = st.empty()
+                last_data = {}
+
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        last_data = data
+                        inserted = data.get("inserted_total", data.get("inserted", 0))
+                        status_text.write(f"Fetched {inserted:,} records...")
+                    except json.JSONDecodeError:
+                        status_text.write(line)
+
+                returncode = process.wait()
+
+                if returncode == 0:
+                    status.update(label=f"✅ {symbol.upper()} updated!", state="complete")
+                    inserted = last_data.get("inserted_total", last_data.get("inserted", 0))
+                    if inserted:
+                        st.success(f"Inserted {inserted:,} records for {symbol.upper()}")
                 else:
-                    st.error(f"Failed: {result.stderr}")
+                    stderr = process.stderr.read()
+                    status.update(label=f"❌ Failed", state="error")
+                    st.error(f"Failed: {stderr}")
 
             except Exception as e:
+                status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
 
