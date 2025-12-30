@@ -1,12 +1,12 @@
-"""AI Assistant page - Claude Code reference."""
+"""AI Prompts page - Example prompts for Claude Code."""
 
 import streamlit as st
 
 
 def render_assistant():
-    """Render the AI Assistant reference page."""
-    st.title("🤖 AI Assistant")
-    st.markdown("Reference for using Claude Code with g2.")
+    """Render the AI Prompts reference page."""
+    st.title("🤖 AI Prompts")
+    st.markdown("Example prompts for using Claude Code with g2.")
 
     st.info("""
     💡 Use Claude Code in your terminal to analyze g2 data.

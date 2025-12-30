@@ -37,7 +37,7 @@ st.markdown("""
 PAGES = [
     "🏠 Dashboard",
     "📊 Charts",
-    "🤖 AI Assistant",
+    "🤖 AI Prompts",
     "📁 Data Management",
     "🧠 ML Pipeline",
     "📈 Backtesting",
@@ -96,7 +96,7 @@ def main():
     elif current_page == "📊 Charts":
         from g2.ui.views.charts import render_charts
         render_charts()
-    elif current_page == "🤖 AI Assistant":
+    elif current_page == "🤖 AI Prompts":
         from g2.ui.views.assistant import render_assistant
         render_assistant()
     elif current_page == "📁 Data Management":
