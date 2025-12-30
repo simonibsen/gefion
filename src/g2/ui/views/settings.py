@@ -9,77 +9,13 @@ def render_settings():
     st.title("⚙️ Settings")
     st.markdown("Configure g2 settings and preferences.")
 
-    tab1, tab2, tab3 = st.tabs(["🔑 API Keys", "🗄️ Database", "ℹ️ About"])
+    tab1, tab2 = st.tabs(["🗄️ Database", "ℹ️ About"])
 
     with tab1:
-        render_api_keys()
-
-    with tab2:
         render_database_settings()
 
-    with tab3:
+    with tab2:
         render_about()
-
-
-def render_api_keys():
-    """Render API key configuration."""
-    st.subheader("API Keys")
-
-    st.info("💡 API keys are stored in environment variables for security.")
-
-    # Anthropic API
-    st.markdown("### Claude API (Anthropic)")
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    key_status = "✅ Set" if anthropic_key else "❌ Not set"
-    st.markdown(f"Status: {key_status}")
-
-    new_anthropic = st.text_input(
-        "Anthropic API Key",
-        type="password",
-        placeholder="sk-ant-...",
-        help="Required for AI Assistant. Get from console.anthropic.com",
-    )
-
-    if st.button("Save Anthropic Key") and new_anthropic:
-        os.environ["ANTHROPIC_API_KEY"] = new_anthropic
-        st.success("✅ API key saved for this session")
-        st.info("For persistence, add to your shell profile: export ANTHROPIC_API_KEY=...")
-
-    st.markdown("---")
-
-    # AlphaVantage API
-    st.markdown("### AlphaVantage API")
-    av_key = os.environ.get("ALPHAVANTAGE_API_KEY", "")
-    av_status = "✅ Set" if av_key else "❌ Not set"
-    st.markdown(f"Status: {av_status}")
-
-    new_av = st.text_input(
-        "AlphaVantage API Key",
-        type="password",
-        placeholder="your-key-here",
-        help="Required for fetching market data. Get from alphavantage.co",
-    )
-
-    if st.button("Save AlphaVantage Key") and new_av:
-        os.environ["ALPHAVANTAGE_API_KEY"] = new_av
-        st.success("✅ API key saved for this session")
-
-    st.markdown("---")
-
-    st.markdown("""
-    ### Getting API Keys
-
-    1. **Anthropic (Claude)**
-       - Go to [console.anthropic.com](https://console.anthropic.com)
-       - Create an account and generate an API key
-       - Used for AI Assistant feature
-
-    2. **AlphaVantage**
-       - Go to [alphavantage.co](https://www.alphavantage.co/support/#api-key)
-       - Get a free API key (5 calls/minute, 500/day)
-       - Premium plans available for higher limits
-       - Used for fetching price data
-    """)
 
 
 def render_database_settings():
@@ -168,7 +104,7 @@ def render_about():
     **g2** is a comprehensive trading analysis platform that combines:
 
     - 📊 **Interactive Charts** - Professional Plotly visualizations
-    - 🤖 **AI Assistant** - Claude-powered analysis
+    - 🤖 **AI Prompts** - Example queries for Claude Code
     - 🧠 **ML Pipeline** - Quantile regression & classification models
     - 📈 **Backtesting** - Strategy testing with realistic execution
 
@@ -222,9 +158,3 @@ def render_about():
             st.markdown(f"- **Plotly**: {plotly.__version__}")
         except ImportError:
             st.markdown("- **Plotly**: Not installed")
-
-        try:
-            import anthropic
-            st.markdown(f"- **Anthropic SDK**: {anthropic.__version__}")
-        except ImportError:
-            st.markdown("- **Anthropic SDK**: Not installed")
