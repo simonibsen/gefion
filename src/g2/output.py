@@ -207,10 +207,11 @@ class Output:
         if self.command:
             meta["command"] = self.command
         if self.params:
-            # Filter out None values and internal params
+            # Keep all params including None (documents available options)
+            # Filter only internal params (underscore prefix)
             meta["params"] = {
                 k: v for k, v in self.params.items()
-                if v is not None and not k.startswith("_")
+                if not k.startswith("_")
             }
 
         output = {"_meta": meta, **payload}

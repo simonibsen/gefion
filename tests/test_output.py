@@ -150,14 +150,14 @@ class TestOutputJsonMetadata:
         assert data["_meta"]["params"]["json_output"] is True
         assert data["_meta"]["params"]["limit"] == 5
 
-    def test_meta_excludes_none_params(self, capsys):
-        """_meta filters out None params."""
+    def test_meta_includes_none_params(self, capsys):
+        """_meta includes None params to document available options."""
         out = Output(json_mode=True, params={"limit": 10, "offset": None})
         out.success("Done")
         captured = capsys.readouterr()
         data = json.loads(captured.out)
-        assert "limit" in data["_meta"]["params"]
-        assert "offset" not in data["_meta"]["params"]
+        assert data["_meta"]["params"]["limit"] == 10
+        assert data["_meta"]["params"]["offset"] is None
 
     def test_meta_excludes_internal_params(self, capsys):
         """_meta filters out params starting with underscore."""
