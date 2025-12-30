@@ -5920,28 +5920,34 @@ def strategy_list(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List all registered strategies."""
+    from g2.output import Column, get_output
     from g2.strategies.dispatcher import get_strategy_registry
 
     url = _db_url(db_url)
     with psycopg.connect(url) as conn:
         strategies = get_strategy_registry(conn)
 
-    if json_output:
-        emit_json({"strategies": strategies})
-    else:
-        console = Console()
-        table = Table(title="Registered Strategies")
-        table.add_column("Name", style="cyan")
-        table.add_column("Description")
-        table.add_column("Tags", style="dim")
-        table.add_column("Default Params", style="dim")
-
-        for s in strategies:
-            tags = ", ".join(s.get("tags", []))
-            params = json.dumps(s.get("default_params", {}))
-            table.add_row(s["name"], s.get("description", ""), tags, params)
-
-        console.print(table)
+    out = get_output(json_output)
+    out.table(
+        columns=[
+            Column("Name", style="cyan"),
+            Column("Description"),
+            Column("Tags", style="dim"),
+            Column("Default Params", style="dim"),
+        ],
+        rows=[
+            [
+                s["name"],
+                s.get("description", ""),
+                ", ".join(s.get("tags", [])),
+                json.dumps(s.get("default_params", {})),
+            ]
+            for s in strategies
+        ],
+        title="Registered Strategies",
+        data_key="strategies",
+        json_data=strategies,  # Pass raw data for JSON output
+    )
 
 
 @strategy_app.command("configs")
@@ -5950,32 +5956,34 @@ def strategy_configs(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List all active strategy configurations."""
+    from g2.output import Column, get_output
     from g2.strategies.dispatcher import get_strategy_configs
 
     url = _db_url(db_url)
     with psycopg.connect(url) as conn:
         configs = get_strategy_configs(conn)
 
-    if json_output:
-        emit_json({"configs": configs})
-    else:
-        console = Console()
-        table = Table(title="Strategy Configurations")
-        table.add_column("Name", style="cyan")
-        table.add_column("Strategy", style="green")
-        table.add_column("Params", style="dim")
-        table.add_column("Description")
-
-        for c in configs:
-            params = json.dumps(c.get("params", {}))
-            table.add_row(
+    out = get_output(json_output)
+    out.table(
+        columns=[
+            Column("Name", style="cyan"),
+            Column("Strategy", style="green"),
+            Column("Params", style="dim"),
+            Column("Description"),
+        ],
+        rows=[
+            [
                 c["name"],
                 c["strategy_name"],
-                params,
+                json.dumps(c.get("params", {})),
                 c.get("description", ""),
-            )
-
-        console.print(table)
+            ]
+            for c in configs
+        ],
+        title="Strategy Configurations",
+        data_key="configs",
+        json_data=configs,  # Pass raw data for JSON output
+    )
 
 
 @strategy_app.command("create-config")
@@ -5988,7 +5996,10 @@ def strategy_create_config(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Create a new strategy configuration."""
+    from g2.output import get_output
     from g2.strategies.dispatcher import create_strategy_config
+
+    out = get_output(json_output)
 
     # Parse params JSON
     parsed_params = {}
@@ -5996,7 +6007,8 @@ def strategy_create_config(
         try:
             parsed_params = json.loads(params)
         except json.JSONDecodeError as e:
-            emit_error(f"Invalid JSON in --params: {e}", json_output=json_output)
+            out.error(f"Invalid JSON in --params: {e}")
+            raise typer.Exit(code=1)
 
     url = _db_url(db_url)
     try:
@@ -6009,12 +6021,10 @@ def strategy_create_config(
                 description=description,
             )
     except ValueError as e:
-        emit_error(str(e), json_output=json_output)
+        out.error(str(e))
+        raise typer.Exit(code=1)
 
-    if json_output:
-        emit_json({"id": config_id, "name": name, "strategy": strategy})
-    else:
-        emit(f"Created config '{name}' (id={config_id})")
+    out.success(f"Created config '{name}'", {"id": config_id, "name": name, "strategy": strategy})
 
 
 @volatility_app.command("compute")
