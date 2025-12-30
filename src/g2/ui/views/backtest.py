@@ -3,6 +3,8 @@
 import streamlit as st
 import subprocess
 import sys
+import json
+import os
 from datetime import date, timedelta
 
 
@@ -121,50 +123,54 @@ def render_run_section():
             volume_threshold = st.slider("Volume Threshold", value=1.5, min_value=1.0, max_value=3.0)
 
     if st.button("🚀 Run Backtest", type="primary", use_container_width=True):
-        with st.spinner("Running backtest..."):
+        # Build command
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        cmd = [
+            sys.executable, "-m", "g2.cli", "backtest", "run",
+            "--strategy", strategy,
+            "--start-date", str(start_date),
+            "--end-date", str(end_date),
+            "--initial-cash", str(initial_cash),
+            "--json",
+        ]
+
+        # Add strategy-specific options
+        if strategy == "momentum":
+            cmd.extend([
+                "--lookback-days", str(lookback),
+                "--top-n", str(top_n),
+                "--rebalance-days", str(rebalance),
+            ])
+        elif strategy == "mean_reversion":
+            cmd.extend([
+                "--rsi-oversold", str(rsi_oversold),
+                "--rsi-overbought", str(rsi_overbought),
+                "--position-size", str(position_size),
+            ])
+        elif strategy == "ma_crossover":
+            cmd.extend([
+                "--fast-period", str(fast_period),
+                "--slow-period", str(slow_period),
+            ])
+        elif strategy == "breakout":
+            cmd.extend([
+                "--lookback-days", str(lookback),
+                "--volume-threshold", str(volume_threshold),
+            ])
+
+        if symbol_mode == "Selected":
+            cmd.extend(["--symbols", ",".join(selected_symbols)])
+        else:
+            cmd.extend(["--exchange", exchange, "--limit", str(bt_limit)])
+
+        # Show equivalent CLI command
+        cli_cmd = " ".join(cmd[2:])  # Skip python -m prefix
+        st.code(f"g2 {cli_cmd[8:]}", language="bash")  # Skip "g2.cli " prefix
+
+        with st.status("Running backtest...", expanded=True) as status:
             try:
-                import os
-                env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
-
-                cmd = [
-                    sys.executable, "-m", "g2.cli", "backtest", "run",
-                    "--strategy", strategy,
-                    "--start-date", str(start_date),
-                    "--end-date", str(end_date),
-                    "--initial-cash", str(initial_cash),
-                    "--json",
-                ]
-
-                # Add strategy-specific options
-                if strategy == "momentum":
-                    cmd.extend([
-                        "--lookback-days", str(lookback),
-                        "--top-n", str(top_n),
-                        "--rebalance-days", str(rebalance),
-                    ])
-                elif strategy == "mean_reversion":
-                    cmd.extend([
-                        "--rsi-oversold", str(rsi_oversold),
-                        "--rsi-overbought", str(rsi_overbought),
-                        "--position-size", str(position_size),
-                    ])
-                elif strategy == "ma_crossover":
-                    cmd.extend([
-                        "--fast-period", str(fast_period),
-                        "--slow-period", str(slow_period),
-                    ])
-                elif strategy == "breakout":
-                    cmd.extend([
-                        "--lookback-days", str(lookback),
-                        "--volume-threshold", str(volume_threshold),
-                    ])
-
-                if symbol_mode == "Selected":
-                    cmd.extend(["--symbols", ",".join(selected_symbols)])
-                else:
-                    cmd.extend(["--exchange", exchange, "--limit", str(bt_limit)])
-
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
@@ -174,10 +180,9 @@ def render_run_section():
                 )
 
                 if result.returncode == 0:
-                    st.success("✅ Backtest complete!")
+                    status.update(label="✅ Backtest complete!", state="complete")
 
                     try:
-                        import json
                         data = json.loads(result.stdout)
 
                         if "metrics" in data:
@@ -211,10 +216,15 @@ def render_run_section():
                     with st.expander("Full Output"):
                         st.code(result.stdout)
                 else:
-                    st.error("❌ Backtest failed")
+                    status.update(label="❌ Backtest failed", state="error")
+                    st.error("Backtest failed")
                     st.code(result.stderr)
 
+            except subprocess.TimeoutExpired:
+                status.update(label="❌ Timeout", state="error")
+                st.error("Backtest timed out after 10 minutes")
             except Exception as e:
+                status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
 
@@ -258,21 +268,25 @@ def render_compare_section():
         return
 
     if st.button("⚔️ Compare", type="primary", use_container_width=True):
-        with st.spinner("Comparing strategies..."):
+        # Build command
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        cmd = [
+            sys.executable, "-m", "g2.cli", "backtest", "compare",
+            "--strategies", ",".join(strategies),
+            "--start-date", str(start_date),
+            "--end-date", str(end_date),
+            "--symbols", ",".join(selected_symbols),
+            "--json",
+        ]
+
+        # Show equivalent CLI command
+        cli_cmd = " ".join(cmd[2:])  # Skip python -m prefix
+        st.code(f"g2 {cli_cmd[8:]}", language="bash")  # Skip "g2.cli " prefix
+
+        with st.status("Comparing strategies...", expanded=True) as status:
             try:
-                import os
-                env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
-
-                cmd = [
-                    sys.executable, "-m", "g2.cli", "backtest", "compare",
-                    "--strategies", ",".join(strategies),
-                    "--start-date", str(start_date),
-                    "--end-date", str(end_date),
-                    "--symbols", ",".join(selected_symbols),
-                    "--json",
-                ]
-
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
@@ -282,10 +296,9 @@ def render_compare_section():
                 )
 
                 if result.returncode == 0:
-                    st.success("✅ Comparison complete!")
+                    status.update(label="✅ Comparison complete!", state="complete")
 
                     try:
-                        import json
                         data = json.loads(result.stdout)
 
                         if "results" in data:
@@ -298,10 +311,15 @@ def render_compare_section():
                     with st.expander("Full Output"):
                         st.code(result.stdout)
                 else:
-                    st.error("❌ Comparison failed")
+                    status.update(label="❌ Comparison failed", state="error")
+                    st.error("Comparison failed")
                     st.code(result.stderr)
 
+            except subprocess.TimeoutExpired:
+                status.update(label="❌ Timeout", state="error")
+                st.error("Comparison timed out after 10 minutes")
             except Exception as e:
+                status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
 

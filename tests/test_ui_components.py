@@ -184,3 +184,69 @@ class TestStatusComponentStructure:
         """Should have render_system_status function."""
         content = status_module_path.read_text()
         assert "def render_system_status(" in content
+
+
+class TestCLICommandDisplay:
+    """Test that UI views display equivalent CLI commands."""
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+
+    def test_data_view_shows_cli_command(self, views_dir):
+        """Data view should display equivalent CLI commands."""
+        content = (views_dir / "data.py").read_text()
+        # Should show CLI command for data update
+        assert 'st.code(' in content
+        assert 'language="bash"' in content
+        assert 'g2 data-update' in content or 'g2", "data-update' in content
+
+    def test_ml_view_shows_cli_commands(self, views_dir):
+        """ML view should display equivalent CLI commands for all operations."""
+        content = (views_dir / "ml.py").read_text()
+        # Should show CLI commands
+        assert 'st.code(' in content
+        assert 'language="bash"' in content
+        # Should have commands for major operations
+        assert 'ml dataset-build' in content or 'ml", "dataset-build' in content
+        assert 'ml train' in content or 'ml", "train' in content
+        assert 'ml predict' in content or 'ml", "predict' in content
+        assert 'ml eval' in content or 'ml", "eval' in content
+
+    def test_backtest_view_shows_cli_commands(self, views_dir):
+        """Backtest view should display equivalent CLI commands."""
+        content = (views_dir / "backtest.py").read_text()
+        # Should show CLI command
+        assert 'st.code(' in content
+        assert 'language="bash"' in content
+        assert 'backtest run' in content or 'backtest", "run' in content
+        assert 'backtest compare' in content or 'backtest", "compare' in content
+
+
+class TestStreamingProgress:
+    """Test that views use streaming progress where appropriate."""
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+
+    def test_data_view_uses_streaming(self, views_dir):
+        """Data view should use subprocess.Popen for streaming output."""
+        content = (views_dir / "data.py").read_text()
+        assert 'subprocess.Popen(' in content
+        assert 'st.status(' in content
+        assert 'process.stdout' in content
+
+    def test_ml_view_uses_streaming(self, views_dir):
+        """ML view should use subprocess.Popen for streaming output."""
+        content = (views_dir / "ml.py").read_text()
+        assert 'subprocess.Popen(' in content
+        assert 'st.status(' in content
+        assert 'process.stdout' in content
+
+    def test_backtest_view_uses_status(self, views_dir):
+        """Backtest view should use st.status for progress."""
+        content = (views_dir / "backtest.py").read_text()
+        assert 'st.status(' in content

@@ -3,6 +3,8 @@
 import streamlit as st
 import subprocess
 import sys
+import json
+import os
 from datetime import datetime, date, timedelta
 
 
@@ -107,46 +109,73 @@ def render_dataset_section():
         )
 
     if st.button("🔨 Build Dataset", type="primary", use_container_width=True):
-        with st.spinner("Building dataset... This may take a few minutes."):
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        horizons_str = ",".join(str(h) for h in horizons)
+        weak_str = ",".join([f"{weak_threshold/100:.2f}"] * len(horizons))
+        strong_str = ",".join([f"{strong_threshold/100:.2f}"] * len(horizons))
+
+        cmd = [
+            sys.executable, "-m", "g2.cli", "ml", "dataset-build",
+            "--name", dataset_name,
+            "--version", dataset_version,
+            "--exchange", exchange,
+            "--limit", str(limit),
+            "--horizons", horizons_str,
+            "--weak-thresholds", weak_str,
+            "--strong-thresholds", strong_str,
+            "--format", export_format,
+            "--json",
+        ]
+
+        # Show equivalent CLI command
+        cli_cmd = (f"g2 ml dataset-build --name {dataset_name} --version {dataset_version} "
+                   f"--exchange {exchange} --limit {limit} --horizons {horizons_str} "
+                   f"--format {export_format}")
+        st.code(cli_cmd, language="bash")
+
+        with st.status("Building dataset...", expanded=True) as status:
+            status_text = st.empty()
+
             try:
-                import os
-                env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
-
-                horizons_str = ",".join(str(h) for h in horizons)
-                weak_str = ",".join([f"{weak_threshold/100:.2f}"] * len(horizons))
-                strong_str = ",".join([f"{strong_threshold/100:.2f}"] * len(horizons))
-
-                cmd = [
-                    sys.executable, "-m", "g2.cli", "ml", "dataset-build",
-                    "--name", dataset_name,
-                    "--version", dataset_version,
-                    "--exchange", exchange,
-                    "--limit", str(limit),
-                    "--horizons", horizons_str,
-                    "--weak-thresholds", weak_str,
-                    "--strong-thresholds", strong_str,
-                    "--format", export_format,
-                    "--json",
-                ]
-
-                result = subprocess.run(
+                process = subprocess.Popen(
                     cmd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
+                    bufsize=1,
                     env=env,
-                    timeout=600,
                 )
 
-                if result.returncode == 0:
-                    st.success("✅ Dataset built successfully!")
-                    with st.expander("Output"):
-                        st.code(result.stdout)
+                last_data = {}
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        last_data = data
+                        msg = data.get("message", data.get("status", ""))
+                        if msg:
+                            status_text.write(msg)
+                    except json.JSONDecodeError:
+                        status_text.write(line)
+
+                returncode = process.wait()
+
+                if returncode == 0:
+                    status.update(label="✅ Dataset built!", state="complete")
+                    st.success(f"Dataset {dataset_name} v{dataset_version} built successfully!")
                 else:
-                    st.error("❌ Build failed")
-                    st.code(result.stderr)
+                    stderr = process.stderr.read()
+                    status.update(label="❌ Build failed", state="error")
+                    st.error("Build failed")
+                    if stderr:
+                        st.code(stderr)
 
             except Exception as e:
+                status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
 
@@ -201,50 +230,85 @@ def render_train_section():
         )
 
     if st.button("🎯 Train Model", type="primary", use_container_width=True):
-        with st.spinner("Training model... This may take several minutes."):
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        if model_type == "Quantile Regression":
+            cmd = [
+                sys.executable, "-m", "g2.cli", "ml", "train",
+                "--dataset-name", dataset_name,
+                "--dataset-version", dataset_version,
+                "--model-name", model_name,
+                "--model-version", model_version,
+                "--algorithm", algorithm,
+                "--json",
+            ]
+            cli_subcommand = "train"
+        else:
+            cmd = [
+                sys.executable, "-m", "g2.cli", "ml", "train-classifier",
+                "--dataset-name", dataset_name,
+                "--dataset-version", dataset_version,
+                "--model-name", model_name,
+                "--model-version", model_version,
+                "--algorithm", algorithm,
+                "--json",
+            ]
+            cli_subcommand = "train-classifier"
+
+        # Show equivalent CLI command
+        cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
+                   f"--dataset-version {dataset_version} --model-name {model_name} "
+                   f"--model-version {model_version} --algorithm {algorithm}")
+        st.code(cli_cmd, language="bash")
+
+        with st.status("Training model...", expanded=True) as status:
+            status_text = st.empty()
+            metrics_container = st.empty()
+
             try:
-                import os
-                env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
-
-                if model_type == "Quantile Regression":
-                    cmd = [
-                        sys.executable, "-m", "g2.cli", "ml", "train",
-                        "--dataset-name", dataset_name,
-                        "--dataset-version", dataset_version,
-                        "--model-name", model_name,
-                        "--model-version", model_version,
-                        "--algorithm", algorithm,
-                        "--json",
-                    ]
-                else:
-                    cmd = [
-                        sys.executable, "-m", "g2.cli", "ml", "train-classifier",
-                        "--dataset-name", dataset_name,
-                        "--dataset-version", dataset_version,
-                        "--model-name", model_name,
-                        "--model-version", model_version,
-                        "--algorithm", algorithm,
-                        "--json",
-                    ]
-
-                result = subprocess.run(
+                process = subprocess.Popen(
                     cmd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
+                    bufsize=1,
                     env=env,
-                    timeout=1800,  # 30 min timeout
                 )
 
-                if result.returncode == 0:
-                    st.success("✅ Model trained successfully!")
-                    with st.expander("Output"):
-                        st.code(result.stdout)
+                last_data = {}
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        last_data = data
+                        # Show training progress
+                        msg = data.get("message", data.get("status", ""))
+                        horizon = data.get("horizon")
+                        quantile = data.get("quantile")
+                        if horizon and quantile:
+                            status_text.write(f"Training horizon {horizon}d, quantile {quantile}...")
+                        elif msg:
+                            status_text.write(msg)
+                    except json.JSONDecodeError:
+                        status_text.write(line)
+
+                returncode = process.wait()
+
+                if returncode == 0:
+                    status.update(label="✅ Model trained!", state="complete")
+                    st.success(f"Model {model_name} v{model_version} trained successfully!")
                 else:
-                    st.error("❌ Training failed")
-                    st.code(result.stderr)
+                    stderr = process.stderr.read()
+                    status.update(label="❌ Training failed", state="error")
+                    st.error("Training failed")
+                    if stderr:
+                        st.code(stderr)
 
             except Exception as e:
+                status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
 
@@ -323,42 +387,84 @@ def render_predict_section():
             )
 
     if st.button("🔮 Generate Predictions", type="primary", use_container_width=True):
-        with st.spinner("Generating predictions..."):
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        cmd = [
+            sys.executable, "-m", "g2.cli", "ml", "predict",
+            "--model-name", model_name,
+            "--model-version", model_version,
+            "--prediction-date", str(prediction_date),
+            "--json",
+        ]
+
+        if predict_mode == "Selected Symbols":
+            cmd.extend(["--symbols", ",".join(selected_symbols)])
+            symbols_arg = f"--symbols {','.join(selected_symbols)}"
+        else:
+            cmd.extend(["--exchange", exchange, "--limit", str(pred_limit)])
+            symbols_arg = f"--exchange {exchange} --limit {pred_limit}"
+
+        # Show equivalent CLI command
+        cli_cmd = (f"g2 ml predict --model-name {model_name} --model-version {model_version} "
+                   f"--prediction-date {prediction_date} {symbols_arg}")
+        st.code(cli_cmd, language="bash")
+
+        with st.status("Generating predictions...", expanded=True) as status:
+            col1, col2, col3 = st.columns(3)
+            progress_metric = col1.empty()
+            symbols_metric = col2.empty()
+            predictions_metric = col3.empty()
+            status_text = st.empty()
+
             try:
-                import os
-                env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
-
-                cmd = [
-                    sys.executable, "-m", "g2.cli", "ml", "predict",
-                    "--model-name", model_name,
-                    "--model-version", model_version,
-                    "--prediction-date", str(prediction_date),
-                    "--json",
-                ]
-
-                if predict_mode == "Selected Symbols":
-                    cmd.extend(["--symbols", ",".join(selected_symbols)])
-                else:
-                    cmd.extend(["--exchange", exchange, "--limit", str(pred_limit)])
-
-                result = subprocess.run(
+                process = subprocess.Popen(
                     cmd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
+                    bufsize=1,
                     env=env,
-                    timeout=300,
                 )
 
-                if result.returncode == 0:
-                    st.success("✅ Predictions generated!")
-                    with st.expander("Output"):
-                        st.code(result.stdout)
+                last_data = {}
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        last_data = data
+                        # Update metrics if available
+                        done = data.get("done", 0)
+                        total = data.get("total", 0)
+                        if total > 0:
+                            progress_metric.metric("Progress", f"{done}/{total}")
+                        symbols = data.get("symbols_processed", done)
+                        symbols_metric.metric("Symbols", symbols)
+                        preds = data.get("predictions_generated", 0)
+                        predictions_metric.metric("Predictions", preds)
+                        # Status message
+                        label = data.get("label", data.get("symbol", ""))
+                        if label:
+                            status_text.write(f"Processing: **{label}**")
+                    except json.JSONDecodeError:
+                        status_text.write(line)
+
+                returncode = process.wait()
+
+                if returncode == 0:
+                    status.update(label="✅ Predictions generated!", state="complete")
+                    st.success("Predictions generated successfully!")
                 else:
-                    st.error("❌ Prediction failed")
-                    st.code(result.stderr)
+                    stderr = process.stderr.read()
+                    status.update(label="❌ Prediction failed", state="error")
+                    st.error("Prediction failed")
+                    if stderr:
+                        st.code(stderr)
 
             except Exception as e:
+                status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
     st.markdown("---")
@@ -448,38 +554,70 @@ def render_evaluate_section():
         )
 
     if st.button("📊 Evaluate", type="primary", use_container_width=True):
-        with st.spinner("Evaluating model..."):
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        cmd = [
+            sys.executable, "-m", "g2.cli", "ml", "eval",
+            "--model-name", model_name,
+            "--model-version", model_version,
+            "--start-date", str(start_date),
+            "--end-date", str(end_date),
+            "--json",
+        ]
+
+        # Show equivalent CLI command
+        cli_cmd = (f"g2 ml eval --model-name {model_name} --model-version {model_version} "
+                   f"--start-date {start_date} --end-date {end_date}")
+        st.code(cli_cmd, language="bash")
+
+        with st.status("Evaluating model...", expanded=True) as status:
+            status_text = st.empty()
+            results_container = st.container()
+
             try:
-                import os
-                env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
-
-                cmd = [
-                    sys.executable, "-m", "g2.cli", "ml", "eval",
-                    "--model-name", model_name,
-                    "--model-version", model_version,
-                    "--start-date", str(start_date),
-                    "--end-date", str(end_date),
-                    "--json",
-                ]
-
-                result = subprocess.run(
+                process = subprocess.Popen(
                     cmd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
+                    bufsize=1,
                     env=env,
-                    timeout=300,
                 )
 
-                if result.returncode == 0:
-                    st.success("✅ Evaluation complete!")
-                    with st.expander("Results"):
-                        st.code(result.stdout)
+                last_data = {}
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        last_data = data
+                        msg = data.get("message", data.get("status", ""))
+                        if msg:
+                            status_text.write(msg)
+                        # Show horizon results as they come in
+                        horizon = data.get("horizon")
+                        if horizon and "q50_coverage" in data:
+                            with results_container:
+                                st.write(f"**Horizon {horizon}d**: Q50={data.get('q50_coverage', 0):.1%}")
+                    except json.JSONDecodeError:
+                        status_text.write(line)
+
+                returncode = process.wait()
+
+                if returncode == 0:
+                    status.update(label="✅ Evaluation complete!", state="complete")
+                    st.success("Evaluation completed!")
                 else:
-                    st.error("❌ Evaluation failed")
-                    st.code(result.stderr)
+                    stderr = process.stderr.read()
+                    status.update(label="❌ Evaluation failed", state="error")
+                    st.error("Evaluation failed")
+                    if stderr:
+                        st.code(stderr)
 
             except Exception as e:
+                status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
     st.markdown("---")

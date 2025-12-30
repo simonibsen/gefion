@@ -87,6 +87,15 @@ def render_update_section():
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
+        # Show equivalent CLI command
+        cli_parts = ["g2", "data-update", "--exchange", exchange]
+        if limit:
+            cli_parts.extend(["--limit", str(limit)])
+        cli_parts.extend(["--timeframe", timeframe])
+        if refresh:
+            cli_parts.append("--refresh")
+        st.code(" ".join(cli_parts), language="bash")
+
         with st.status("Updating data...", expanded=True) as status:
             # Create metrics display
             col1, col2, col3, col4 = st.columns(4)
@@ -191,6 +200,9 @@ def render_update_section():
     if st.button("Update Symbol", use_container_width=True) and symbol:
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
+
+        # Show equivalent CLI command
+        st.code(f"g2 prices-ingest --symbol {symbol.upper()} --timeframe full", language="bash")
 
         with st.status(f"Updating {symbol.upper()}...", expanded=True) as status:
             try:
