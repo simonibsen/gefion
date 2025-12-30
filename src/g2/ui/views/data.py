@@ -129,6 +129,11 @@ def render_update_section():
 
                     try:
                         data = json.loads(line)
+                        # Only process dict objects with progress data
+                        if not isinstance(data, dict):
+                            status_text.write(str(data))
+                            continue
+
                         last_data = data
 
                         # Update progress bar
@@ -225,6 +230,9 @@ def render_update_section():
                         continue
                     try:
                         data = json.loads(line)
+                        if not isinstance(data, dict):
+                            status_text.write(str(data))
+                            continue
                         last_data = data
                         inserted = data.get("inserted_total", data.get("inserted", 0))
                         status_text.write(f"Fetched {inserted:,} records...")
@@ -235,7 +243,7 @@ def render_update_section():
 
                 if returncode == 0:
                     status.update(label=f"✅ {symbol.upper()} updated!", state="complete")
-                    inserted = last_data.get("inserted_total", last_data.get("inserted", 0))
+                    inserted = last_data.get("inserted_total", last_data.get("inserted", 0)) if isinstance(last_data, dict) else 0
                     if inserted:
                         st.success(f"Inserted {inserted:,} records for {symbol.upper()}")
                 else:

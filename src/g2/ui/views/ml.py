@@ -155,6 +155,9 @@ def render_dataset_section():
                         continue
                     try:
                         data = json.loads(line)
+                        if not isinstance(data, dict):
+                            status_text.write(str(data))
+                            continue
                         last_data = data
                         msg = data.get("message", data.get("status", ""))
                         if msg:
@@ -283,6 +286,9 @@ def render_train_section():
                         continue
                     try:
                         data = json.loads(line)
+                        if not isinstance(data, dict):
+                            status_text.write(str(data))
+                            continue
                         last_data = data
                         # Show training progress
                         msg = data.get("message", data.get("status", ""))
@@ -434,6 +440,9 @@ def render_predict_section():
                         continue
                     try:
                         data = json.loads(line)
+                        if not isinstance(data, dict):
+                            status_text.write(str(data))
+                            continue
                         last_data = data
                         # Update metrics if available
                         done = data.get("done", 0)
@@ -592,6 +601,9 @@ def render_evaluate_section():
                         continue
                     try:
                         data = json.loads(line)
+                        if not isinstance(data, dict):
+                            status_text.write(str(data))
+                            continue
                         last_data = data
                         msg = data.get("message", data.get("status", ""))
                         if msg:

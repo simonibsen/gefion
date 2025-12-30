@@ -250,3 +250,24 @@ class TestStreamingProgress:
         """Backtest view should use st.status for progress."""
         content = (views_dir / "backtest.py").read_text()
         assert 'st.status(' in content
+
+
+class TestJSONParsingRobustness:
+    """Test that JSON parsing handles non-dict responses safely."""
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+
+    def test_data_view_checks_isinstance_dict(self, views_dir):
+        """Data view should check if parsed JSON is a dict before using .get()."""
+        content = (views_dir / "data.py").read_text()
+        # Should have isinstance check to handle JSON strings
+        assert 'isinstance(data, dict)' in content
+
+    def test_ml_view_checks_isinstance_dict(self, views_dir):
+        """ML view should check if parsed JSON is a dict before using .get()."""
+        content = (views_dir / "ml.py").read_text()
+        # Should have isinstance check to handle JSON strings
+        assert 'isinstance(data, dict)' in content
