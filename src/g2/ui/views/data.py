@@ -37,17 +37,26 @@ def render_update_section():
     with col1:
         exchange = st.selectbox(
             "Exchange",
-            ["NASDAQ", "NYSE", "All"],
-            help="Select exchange to update (or All for entire database)",
+            ["NASDAQ", "NYSE"],
+            help="Select exchange to update",
         )
 
-        limit = st.number_input(
-            "Symbol Limit",
-            min_value=1,
-            max_value=1000,
-            value=50,
-            help="Maximum number of symbols to update (for testing)",
+        use_limit = st.checkbox(
+            "Limit symbols (for testing)",
+            value=False,
+            help="Enable to update only a subset of symbols",
         )
+
+        if use_limit:
+            limit = st.number_input(
+                "Symbol Limit",
+                min_value=1,
+                max_value=500,
+                value=20,
+                help="Maximum number of symbols to update",
+            )
+        else:
+            limit = None
 
     with col2:
         timeframe = st.selectbox(
@@ -67,10 +76,11 @@ def render_update_section():
                 # Build command
                 cmd = [sys.executable, "-m", "g2.cli", "data-update", "--json"]
 
-                if exchange != "All":
-                    cmd.extend(["--exchange", exchange])
+                cmd.extend(["--exchange", exchange])
 
-                cmd.extend(["--limit", str(limit)])
+                if limit:
+                    cmd.extend(["--limit", str(limit)])
+
                 cmd.extend(["--timeframe", timeframe])
 
                 if refresh:
