@@ -168,3 +168,44 @@ def test_discovered_features_match_computed_features(db_conn):
         )
         result = cur.fetchone()
         assert result is not None, "Should find feature by name"
+
+
+def test_upsert_ml_dataset_jsonb_columns(db_conn):
+    """Test that upsert_ml_dataset properly handles JSONB columns.
+
+    Regression test: horizons_days and feature_names are JSONB columns
+    and must be wrapped with Json() adapter.
+    """
+    from g2.ml.store import upsert_ml_dataset
+
+    payload = {
+        "name": "test_jsonb",
+        "version": "20251230",
+        "universe": {"exchange": "NASDAQ", "limit": 5},
+        "feature_names": ["indicator_rsi_14", "indicator_macd"],
+        "lookback_days": 200,
+        "horizons_days": [7, 30, 90],  # This is a list that must be wrapped
+        "label_spec": {"type": "forward_return_5class", "thresholds": {}},
+        "split_spec": {"type": "walk_forward"},
+        "artifact_uri": "test/manifest.json",
+        "checksum": "abc123",
+    }
+
+    # Should not raise DatatypeMismatch
+    dataset_id = upsert_ml_dataset(db_conn, payload)
+    assert dataset_id > 0
+
+    # Verify the data was stored correctly
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT horizons_days, feature_names FROM ml_datasets WHERE id = %s",
+            (dataset_id,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == [7, 30, 90]  # JSONB comes back as list
+        assert row[1] == ["indicator_rsi_14", "indicator_macd"]
+
+        # Cleanup
+        cur.execute("DELETE FROM ml_datasets WHERE id = %s", (dataset_id,))
+    db_conn.commit()
