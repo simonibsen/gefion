@@ -41,22 +41,23 @@ def render_update_section():
             help="Select exchange to update",
         )
 
-        use_limit = st.checkbox(
-            "Limit symbols (for testing)",
-            value=False,
-            help="Enable to update only a subset of symbols",
+        symbol_count = st.selectbox(
+            "Symbols to Update",
+            ["All", "10", "20", "50", "100", "Custom"],
+            help="Number of symbols to update",
         )
 
-        if use_limit:
+        if symbol_count == "All":
+            limit = None
+        elif symbol_count == "Custom":
             limit = st.number_input(
-                "Symbol Limit",
+                "Custom Limit",
                 min_value=1,
                 max_value=500,
-                value=20,
-                help="Maximum number of symbols to update",
+                value=50,
             )
         else:
-            limit = None
+            limit = int(symbol_count)
 
     with col2:
         timeframe = st.selectbox(
