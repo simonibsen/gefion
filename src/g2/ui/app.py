@@ -17,24 +17,19 @@ st.set_page_config(
 # Custom CSS for better styling
 st.markdown("""
 <style>
+    /* Hide deploy button */
+    .stDeployButton {
+        display: none;
+    }
+    [data-testid="stToolbar"] {
+        display: none;
+    }
+
     /* Card-like containers */
     .stMetric {
         background-color: #f0f2f6;
         padding: 10px;
         border-radius: 5px;
-    }
-
-    /* Chat message styling */
-    .chat-message {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin-bottom: 1rem;
-    }
-    .chat-message.user {
-        background-color: #e3f2fd;
-    }
-    .chat-message.assistant {
-        background-color: #f5f5f5;
     }
 </style>
 """, unsafe_allow_html=True)
