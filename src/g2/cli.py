@@ -2968,7 +2968,7 @@ def health_check(
         if out.json_mode:
             out.json({"status": "ok" if status["running"] else "error", "service": service_lower, **status})
         else:
-            status_icon = "✅" if status["running"] else "❌"
+            status_icon = "✓" if status["running"] else "✗"
             style = "bold green" if status["running"] else "bold red"
             out.console.print(f"\n{status_icon} {service_lower.upper()}: {status['message']}\n", style=style)
 

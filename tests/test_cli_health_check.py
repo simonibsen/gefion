@@ -38,7 +38,7 @@ def test_health_check_all_services_healthy():
         result = runner.invoke(app, ["health"])
 
     assert result.exit_code == 0
-    assert "✅" in result.stdout
+    assert "✓" in result.stdout
     assert "DOCKER" in result.stdout
     assert "POSTGRES" in result.stdout
     assert "TEMPO" in result.stdout
@@ -71,7 +71,7 @@ def test_health_check_postgres_not_running():
 
     # Should still exit successfully but show errors
     assert result.exit_code == 0
-    assert "❌" in result.stdout
+    assert "✗" in result.stdout
     assert "POSTGRES" in result.stdout
     assert "Connection refused" in result.stdout or "not running" in result.stdout.lower()
     assert "docker compose up -d postgres" in result.stdout
@@ -120,7 +120,7 @@ def test_health_check_specific_service():
         result = runner.invoke(app, ["health", "--service", "postgres"])
 
     assert result.exit_code == 0
-    assert "✅" in result.stdout
+    assert "✓" in result.stdout
     assert "POSTGRES" in result.stdout
     assert "PostgreSQL 16.0" in result.stdout
 
@@ -139,6 +139,6 @@ def test_health_check_service_with_suggestion():
         result = runner.invoke(app, ["health", "--service", "postgres"])
 
     assert result.exit_code == 0  # Health check itself doesn't fail
-    assert "❌" in result.stdout
+    assert "✗" in result.stdout
     assert "Start PostgreSQL" in result.stdout
     assert "docker compose up -d postgres" in result.stdout

@@ -102,6 +102,9 @@ def check_tempo_health(endpoint: str | None = None, timeout: int = 2) -> Dict[st
     """
     Check if Tempo (OpenTelemetry tracing backend) is running.
 
+    Uses Docker container detection first, then HTTP health check.
+    This avoids false positives from SSH tunnels or other services.
+
     Args:
         endpoint: Tempo endpoint (defaults to http://localhost:3200)
         timeout: Request timeout in seconds
@@ -109,6 +112,32 @@ def check_tempo_health(endpoint: str | None = None, timeout: int = 2) -> Dict[st
     Returns:
         Dict with health status and suggestions
     """
+    import subprocess
+
+    # First check if tempo container is running via Docker
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--filter", "name=tempo", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+
+        container_running = result.returncode == 0 and "tempo" in result.stdout.lower()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # Docker not available, fall through to HTTP check
+        container_running = None
+
+    # If Docker says no tempo container, report not running
+    if container_running is False:
+        return {
+            "running": False,
+            "message": "Tempo container is not running",
+            "error_type": "not_running",
+            "suggestion": "Tempo is optional for most operations.\n\nTo enable tracing:\n  docker compose -f docker/tempo/docker-compose.tempo.yml up -d\n\nTo disable tracing warnings:\n  export OTEL_ENABLED=false"
+        }
+
+    # Verify via HTTP endpoint (container running or Docker unavailable)
     try:
         import requests
 
@@ -239,6 +268,64 @@ def check_docker_services() -> Dict[str, Any]:
         }
 
 
+def check_grafana_health(endpoint: str | None = None, timeout: int = 2) -> Dict[str, Any]:
+    """
+    Check if Grafana is running.
+
+    Args:
+        endpoint: Grafana endpoint (defaults to http://localhost:3000)
+        timeout: Request timeout in seconds
+
+    Returns:
+        Dict with health status
+    """
+    try:
+        import requests
+
+        grafana_url = endpoint or "http://localhost:3000"
+        health_url = f"{grafana_url}/api/health"
+
+        response = requests.get(health_url, timeout=timeout)
+
+        if response.status_code == 200:
+            return {
+                "running": True,
+                "message": "Grafana is healthy",
+                "endpoint": grafana_url
+            }
+        else:
+            return {
+                "running": False,
+                "message": f"Grafana returned status {response.status_code}",
+                "error_type": "unhealthy",
+                "suggestion": "Grafana may be running but unhealthy.\nCheck logs:\n  docker compose -f docker/tempo/docker-compose.tempo.yml logs grafana"
+            }
+
+    except requests.exceptions.ConnectionError:
+        return {
+            "running": False,
+            "message": "Grafana is not running",
+            "error": "Connection refused",
+            "error_type": "not_running",
+            "suggestion": "Grafana is optional (for trace visualization).\n\nTo start:\n  docker compose -f docker/tempo/docker-compose.tempo.yml up -d grafana"
+        }
+
+    except requests.exceptions.Timeout:
+        return {
+            "running": False,
+            "message": "Grafana connection timed out",
+            "error_type": "timeout"
+        }
+
+    except Exception as e:
+        return {
+            "running": False,
+            "message": "Error checking Grafana",
+            "error": str(e)[:200],
+            "error_type": "unknown"
+        }
+
+
 def check_all_services() -> Dict[str, Dict[str, Any]]:
     """
     Check health of all g2 services.
@@ -249,7 +336,8 @@ def check_all_services() -> Dict[str, Dict[str, Any]]:
     return {
         "docker": check_docker_services(),
         "postgres": check_postgres_health(),
-        "tempo": check_tempo_health()
+        "tempo": check_tempo_health(),
+        "grafana": check_grafana_health(),
     }
 
 
@@ -267,7 +355,7 @@ def format_health_report(health_status: Dict[str, Dict[str, Any]]) -> str:
 
     for service, status in health_status.items():
         running = status.get("running", False)
-        status_icon = "✅" if running else "❌"
+        status_icon = "✓" if running else "✗"
 
         lines.append(f"{status_icon} {service.upper()}: {status['message']}")
 

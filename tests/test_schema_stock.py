@@ -17,6 +17,10 @@ def create_connection():
 
 @pytest.fixture
 def conn():
+    # Skip early if DB tests not enabled - before any DB operations
+    if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+        pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
+
     connection = create_connection()
     connection.autocommit = True
     with connection.cursor() as cur:
