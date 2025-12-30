@@ -36,11 +36,14 @@ ml_extended = [
     "shap>=0.44",
     "optuna>=3.5",
 ]
+charts = [
+    "plotly>=5.18",
+]
 gpu = [
     "torch>=2.0",
 ]
 all = [
-    "g2[dev,ml_extended,gpu]",
+    "g2[dev,ml_extended,charts,gpu]",
 ]
 
 [project.scripts]
