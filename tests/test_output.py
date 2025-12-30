@@ -141,6 +141,15 @@ class TestOutputJsonMetadata:
         assert data["_meta"]["params"]["limit"] == 10
         assert data["_meta"]["params"]["verbose"] is True
 
+    def test_meta_includes_json_output_param(self, capsys):
+        """_meta includes json_output param for reproducibility."""
+        out = Output(json_mode=True, params={"json_output": True, "limit": 5})
+        out.success("Done")
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["_meta"]["params"]["json_output"] is True
+        assert data["_meta"]["params"]["limit"] == 5
+
     def test_meta_excludes_none_params(self, capsys):
         """_meta filters out None params."""
         out = Output(json_mode=True, params={"limit": 10, "offset": None})

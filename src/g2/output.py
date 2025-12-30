@@ -263,12 +263,9 @@ def get_output(json_mode: Optional[bool] = None) -> Output:
                 command_parts = command_parts[1:]
             command = " ".join(command_parts) if command_parts else None
 
-            # Extract parameters (excluding json_output flag itself)
+            # Extract parameters
             if ctx.params:
-                params = {
-                    k: v for k, v in ctx.params.items()
-                    if k != "json_output"
-                }
+                params = dict(ctx.params)
 
             # Get json_mode from context if not provided
             if json_mode is None and ctx.obj:
