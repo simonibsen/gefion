@@ -58,6 +58,7 @@ class TestE2ETestSteps:
             "train_ensemble",
             "predict",
             "predict_ensemble",
+            "quality_check",
         ]
 
         assert len(E2E_STEPS) == len(expected_steps)
@@ -105,6 +106,61 @@ class TestE2ETestCleanup:
 
         assert "dataset_name" in result.artifacts
         assert "model_name" in result.artifacts
+
+
+class TestE2EPredictionDateQuery:
+    """Tests for prediction date query logic."""
+
+    def test_run_predict_uses_explicit_symbols(self):
+        """Test that _run_predict uses explicit symbols passed to it.
+
+        The CLI now auto-detects prediction date, so e2e just passes symbols.
+        """
+        from unittest.mock import patch, MagicMock
+
+        with patch('subprocess.run') as mock_subprocess:
+            mock_result = MagicMock(returncode=0)
+            mock_result.stdout = "Generated 20 predictions\nPredictions generated: test_model v1"
+            mock_subprocess.return_value = mock_result
+
+            from g2.ml.e2e import _run_predict
+
+            # Pass explicit symbols
+            symbols = ["AAPL", "MSFT", "GOOGL"]
+            result = _run_predict("test_model", "v1", symbols, None)
+
+            # Verify subprocess was called with --symbols (not --prediction-date)
+            subprocess_call = mock_subprocess.call_args
+            cmd = subprocess_call[0][0]
+            assert "--symbols" in cmd
+            assert "AAPL,MSFT,GOOGL" in cmd
+            # prediction_date is now auto-detected by CLI
+            assert "--prediction-date" not in cmd
+            # Verify count is parsed from output
+            assert result["count"] == 20
+
+
+class TestPredictClassifierCommand:
+    """Tests for the ml predict-classifier command."""
+
+    def test_predict_classifier_help_shows_options(self):
+        """Test that predict-classifier --help shows expected options."""
+        result = runner.invoke(app, ["ml", "predict-classifier", "--help"])
+
+        assert result.exit_code == 0
+        assert "--model-path" in result.output
+        assert "--prediction-date" in result.output
+        assert "--symbols" in result.output
+        assert "--exchange" in result.output
+        assert "--limit" in result.output
+
+    def test_predict_classifier_requires_model_path(self):
+        """Test that predict-classifier requires --model-path option."""
+        result = runner.invoke(app, ["ml", "predict-classifier"])
+
+        # Should fail without model-path
+        assert result.exit_code != 0
+        assert "model-path" in result.output.lower() or "missing" in result.output.lower()
 
 
 if __name__ == "__main__":

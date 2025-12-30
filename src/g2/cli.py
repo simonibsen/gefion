@@ -81,6 +81,12 @@ app.add_typer(backtest_app, name="backtest", cls=SortedGroup)
 strategy_app = typer.Typer(help="Strategy management commands (list/configs/create)")
 app.add_typer(strategy_app, name="strategy", cls=SortedGroup)
 
+volatility_app = typer.Typer(help="Volatility analysis commands (compute thresholds)")
+app.add_typer(volatility_app, name="volatility", cls=SortedGroup)
+
+experiment_app = typer.Typer(help="AI Experimentation Framework (propose/approve/run)")
+app.add_typer(experiment_app, name="experiment", cls=SortedGroup)
+
 
 def emit(
     message: str,
@@ -621,8 +627,10 @@ def ml_dataset_build(
     label_spec = {"type": "forward_return_5class", "thresholds": thresholds_by_horizon}
     split_spec = {"type": "walk_forward", "note": "TBD", "horizons_days": horizon_vals}
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = out_dir / f"{name}_{version}.json"
+    # Create a subdirectory for this dataset (so features/labels don't collide)
+    dataset_dir = out_dir / f"{name}_{version}"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = dataset_dir / "manifest.json"
     manifest = {
         "name": name,
         "version": version,
@@ -646,11 +654,43 @@ def ml_dataset_build(
 
     with db_connection(db_url) as conn:
         init_schema_tables(conn, ["ml_datasets"])
+
+        # If exporting and no feature_names specified, discover available features
+        if export and not feature_list:
+            with conn.cursor() as cur:
+                # Get all feature names that exist for the selected symbols
+                if sym_list:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT fd.name
+                        FROM computed_features cf
+                        JOIN feature_definitions fd ON fd.id = cf.feature_id
+                        JOIN stocks s ON s.id = cf.data_id
+                        WHERE s.symbol = ANY(%s)
+                        ORDER BY fd.name;
+                        """,
+                        (sym_list,),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT fd.name
+                        FROM computed_features cf
+                        JOIN feature_definitions fd ON fd.id = cf.feature_id
+                        ORDER BY fd.name;
+                        """
+                    )
+                discovered_features = [row[0] for row in cur.fetchall()]
+                if discovered_features:
+                    manifest["feature_names"] = discovered_features
+                    payload["feature_names"] = discovered_features
+                    emit(f"Discovered {len(discovered_features)} features", json_output=json_output)
+
         dataset_id = upsert_ml_dataset(conn, payload)
         if export:
             from g2.ml.dataset import export_dataset_artifacts
 
-            export_dataset_artifacts(conn, manifest=manifest, out_dir=out_dir)
+            export_dataset_artifacts(conn, manifest=manifest, out_dir=dataset_dir)
 
     emit(
         f"Dataset registered: {name} {version}",
@@ -840,7 +880,7 @@ def ml_train(
 def ml_predict(
     model_name: str = typer.Option(..., help="Model name to use for predictions"),
     model_version: str = typer.Option(..., help="Model version"),
-    prediction_date: str = typer.Option(..., help="Date to generate predictions for (YYYY-MM-DD)"),
+    prediction_date: Optional[str] = typer.Option(None, help="Date to generate predictions for (YYYY-MM-DD). Auto-detects latest date with features if not provided."),
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
@@ -851,11 +891,10 @@ def ml_predict(
     Generate predictions using a trained model.
 
     Examples:
-        # Generate predictions for specific symbols
-        g2 ml predict --model-name tech_qr --model-version v1 \\
-            --prediction-date 2025-01-15 --symbols AAPL,MSFT,GOOGL
+        # Generate predictions for specific symbols (auto-detect date)
+        g2 ml predict --model-name tech_qr --model-version v1 --symbols AAPL,MSFT,GOOGL
 
-        # Generate predictions for NASDAQ universe
+        # Generate predictions for NASDAQ universe with explicit date
         g2 ml predict --model-name nasdaq_xgb --model-version v1 \\
             --prediction-date 2025-01-15 --exchange NASDAQ --limit 50
     """
@@ -904,17 +943,17 @@ def ml_predict(
             dataset_name, dataset_version, feature_names, horizons = row[0], row[1], row[2], row[3]
 
         # Build universe of symbols
-        if exchange:
+        # Note: exchange param is stored for documentation but stocks table has no exchange column
+        if exchange or (not sym_list and limit):
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
                 cur.execute(
                     f"""
                     SELECT DISTINCT s.id, s.symbol
                     FROM stocks s
-                    WHERE s.exchange = %s
+                    ORDER BY s.symbol
                     {limit_clause};
-                    """,
-                    (exchange,),
+                    """
                 )
                 universe = [(row[0], row[1]) for row in cur.fetchall()]
         else:
@@ -931,10 +970,32 @@ def ml_predict(
             emit_error("No symbols found in universe", json_output=json_output)
             return
 
+        data_ids = [u[0] for u in universe]
+
+        # Auto-detect prediction date if not provided
+        if not prediction_date:
+            with conn.cursor() as cur:
+                # Find the latest date that has features for these symbols
+                cur.execute(
+                    """
+                    SELECT MAX(cf.date)
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND fd.name = ANY(%s);
+                    """,
+                    (data_ids, feature_names),
+                )
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    emit_error(f"No features found for symbols. Ensure data-update has been run.", json_output=json_output)
+                    return
+                prediction_date = row[0].isoformat()
+                emit(f"Auto-detected prediction date: {prediction_date}", json_output=json_output)
+
         emit(f"Generating predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
 
         # Fetch features for all symbols on prediction_date
-        data_ids = [u[0] for u in universe]
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -995,7 +1056,8 @@ def ml_predict(
             emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
 
             # Load model for this horizon
-            horizon_model_path = Path(artifact_uri) / f"_h{horizon}"
+            # Model artifacts are saved as {artifact_uri}_h{horizon} (sibling dirs, not subdirs)
+            horizon_model_path = Path(f"{artifact_uri}_h{horizon}")
             model_data = load_model_artifact(horizon_model_path)
 
             # Generate predictions
@@ -1041,6 +1103,7 @@ def ml_predict(
 
         conn.commit()
 
+    emit(f"Generated {total_predictions} predictions", json_output=json_output)
     emit(
         f"Predictions generated: {model_name} {model_version} for {prediction_date}",
         data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizons": horizons},
@@ -1607,39 +1670,182 @@ def ml_train_classifier(
 @ml_app.command("predict-classifier")
 def ml_predict_classifier(
     model_path: Path = typer.Option(..., help="Path to classifier model directory"),
-    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: str = typer.Option(..., help="End date (YYYY-MM-DD)"),
-    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols (optional, predicts all if not specified)"),
+    prediction_date: Optional[str] = typer.Option(None, help="Date to generate predictions for (YYYY-MM-DD). Auto-detects if not provided."),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols (optional)"),
+    exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
+    limit: Optional[int] = typer.Option(None, help="Optional universe limit"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
     """Generate trend class predictions using a trained classifier."""
+    import pandas as pd
     import joblib
     from g2.ml.classifier import predict_classifier
+    from decimal import Decimal
+    from psycopg.types.json import Json
 
     # Load model
     model_artifacts = joblib.load(model_path / "classifier.pkl")
     metadata_path = model_path / "metadata.json"
-    if metadata_path.exists():
-        metadata = json.loads(metadata_path.read_text())
-        emit(f"Loaded classifier: {metadata['model_name']} {metadata['model_version']}", json_output=json_output)
-        emit(f"  Horizon: {metadata['horizon_days']} days", json_output=json_output)
-        emit(f"  Algorithm: {metadata['algorithm']}", json_output=json_output)
+    if not metadata_path.exists():
+        emit_error(f"No metadata.json found in {model_path}", json_output=json_output)
+        return
+
+    metadata = json.loads(metadata_path.read_text())
+    emit(f"Loaded classifier: {metadata['model_name']} {metadata['model_version']}", json_output=json_output)
+    emit(f"  Horizon: {metadata['horizon_days']} days", json_output=json_output)
+    emit(f"  Algorithm: {metadata['algorithm']}", json_output=json_output)
+
+    feature_names = metadata.get("feature_names", [])
+    horizon = metadata["horizon_days"]
+    model_name = metadata["model_name"]
+    model_version = metadata["model_version"]
+
+    sym_list = parse_comma_separated(symbols) or []
+    if not sym_list and not exchange:
+        emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
+        return
 
     with db_connection(db_url) as conn:
         init_schema_tables(conn, ["trend_class_predictions"])
 
-        # Parse symbols
-        symbol_list = parse_comma_separated(symbols) if symbols else None
+        # Build universe of symbols
+        if exchange or (not sym_list and limit):
+            with conn.cursor() as cur:
+                limit_clause = f"LIMIT {limit}" if limit else ""
+                cur.execute(f"""
+                    SELECT DISTINCT s.id, s.symbol
+                    FROM stocks s
+                    ORDER BY s.symbol
+                    {limit_clause};
+                """)
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
+        else:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, symbol FROM stocks WHERE symbol = ANY(%s);",
+                    (sym_list,),
+                )
+                universe = [(row[0], row[1]) for row in cur.fetchall()]
 
-        # TODO: Load features for the specified date range and symbols
-        # For now, emit a message that this needs feature loading implementation
-        emit(
-            "Prediction implementation: Load features from database for date range and symbols, "
-            "then call predict_classifier() and store results in trend_class_predictions table",
-            json_output=json_output
+        if not universe:
+            emit_error("No symbols found in universe", json_output=json_output)
+            return
+
+        data_ids = [u[0] for u in universe]
+        symbol_map = {u[0]: u[1] for u in universe}
+
+        # Auto-detect prediction date if not provided
+        if not prediction_date:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT MAX(cf.date)
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND fd.name = ANY(%s);
+                    """,
+                    (data_ids, feature_names),
+                )
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    emit_error("No features found for symbols. Ensure data-update has been run.", json_output=json_output)
+                    return
+                prediction_date = row[0].isoformat()
+                emit(f"Auto-detected prediction date: {prediction_date}", json_output=json_output)
+
+        emit(f"Generating predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
+
+        # Fetch features for all symbols on prediction_date
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT cf.data_id, fd.name, cf.value
+                FROM computed_features cf
+                JOIN feature_definitions fd ON cf.feature_id = fd.id
+                WHERE cf.data_id = ANY(%s)
+                  AND cf.date = %s
+                  AND fd.name = ANY(%s);
+                """,
+                (data_ids, prediction_date, feature_names),
+            )
+            features_data = cur.fetchall()
+
+        if not features_data:
+            emit_error(f"No features found for {prediction_date}", json_output=json_output)
+            return
+
+        # Convert to DataFrame and pivot to wide format
+        features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
+        features_wide = features_df.pivot_table(
+            index="data_id",
+            columns="feature_name",
+            values="value",
+            aggfunc="first"
         )
-        emit("Note: Full prediction workflow requires feature loading - to be implemented", json_output=json_output)
+
+        emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
+
+        # Generate predictions
+        predictions = predict_classifier(model_artifacts, features_wide)
+
+        # Get or create model record
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM ml_models WHERE name = %s AND version = %s;",
+                (model_name, model_version),
+            )
+            row = cur.fetchone()
+            if row:
+                model_id = row[0]
+            else:
+                # Insert model record if not exists
+                cur.execute(
+                    """
+                    INSERT INTO ml_models (name, version, algorithm, artifact_uri)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id;
+                    """,
+                    (model_name, model_version, f"classifier_{metadata['algorithm']}", str(model_path)),
+                )
+                model_id = cur.fetchone()[0]
+
+        # Store predictions in database
+        total_predictions = 0
+        with conn.cursor() as cur:
+            for data_id in predictions.index:
+                pred_row = predictions.loc[data_id]
+                predicted_class = pred_row["predicted_class"]
+                confidence = float(pred_row["confidence"])
+
+                # Get class probabilities
+                prob_cols = [c for c in predictions.columns if c.startswith("prob_")]
+                class_probs = {c.replace("prob_", ""): float(pred_row[c]) for c in prob_cols}
+
+                cur.execute(
+                    """
+                    INSERT INTO trend_class_predictions
+                      (model_id, data_id, prediction_date, horizon_days, predicted_class, confidence, class_probabilities, model_version)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (model_id, data_id, prediction_date, horizon_days) DO UPDATE SET
+                      predicted_class = EXCLUDED.predicted_class,
+                      confidence = EXCLUDED.confidence,
+                      class_probabilities = EXCLUDED.class_probabilities,
+                      model_version = EXCLUDED.model_version;
+                    """,
+                    (model_id, int(data_id), prediction_date, horizon, predicted_class, confidence, Json(class_probs), model_version),
+                )
+                total_predictions += 1
+
+        conn.commit()
+
+    emit(f"Generated {total_predictions} predictions", json_output=json_output)
+    emit(
+        f"Classifier predictions generated: {model_name} {model_version} for {prediction_date}",
+        data={"model_id": model_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizon": horizon},
+        json_output=json_output,
+    )
 
 
 @ml_app.command("train-ensemble")
@@ -1681,7 +1887,7 @@ def ml_train_ensemble(
             --weights 0.5,0.3,0.2
     """
     from g2.ml.store import get_ml_dataset
-    from g2.ml.models import load_dataset_from_csv
+    from g2.ml.models import load_dataset
     from g2.ml.ensemble import train_ensemble
 
     # Parse algorithms
@@ -1730,7 +1936,7 @@ def ml_train_ensemble(
             emit(f"Training ensemble for {horizon}-day horizon...", json_output=json_output)
 
             # Load features and labels for this horizon
-            X, y = load_dataset_from_csv(artifact_uri, horizon)
+            X, y = load_dataset(artifact_uri, horizon)
             emit(f"  Loaded {len(X)} samples with {X.shape[1]} features", json_output=json_output)
 
             # Train ensemble
@@ -1821,7 +2027,7 @@ def ml_train_ensemble(
 def ml_predict_ensemble(
     model_name: str = typer.Option(..., help="Ensemble model name"),
     model_version: str = typer.Option(..., help="Model version"),
-    prediction_date: str = typer.Option(..., help="Date to generate predictions for (YYYY-MM-DD)"),
+    prediction_date: Optional[str] = typer.Option(None, help="Date to generate predictions for (YYYY-MM-DD). Auto-detects latest date with features if not provided."),
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
@@ -1832,11 +2038,10 @@ def ml_predict_ensemble(
     Generate predictions using a trained ensemble model.
 
     Examples:
-        # Generate predictions for specific symbols
-        g2 ml predict-ensemble --model-name tech_ensemble --model-version v1 \\
-            --prediction-date 2025-01-15 --symbols AAPL,MSFT,GOOGL
+        # Generate predictions for specific symbols (auto-detect date)
+        g2 ml predict-ensemble --model-name tech_ensemble --model-version v1 --symbols AAPL,MSFT,GOOGL
 
-        # Generate predictions for NASDAQ universe
+        # Generate predictions for NASDAQ universe with explicit date
         g2 ml predict-ensemble --model-name nasdaq_ensemble --model-version v1 \\
             --prediction-date 2025-01-15 --exchange NASDAQ --limit 50
     """
@@ -1888,17 +2093,17 @@ def ml_predict_ensemble(
             dataset_name, dataset_version, feature_names, horizons = row[0], row[1], row[2], row[3]
 
         # Build universe of symbols
-        if exchange:
+        # Note: exchange param is stored for documentation but stocks table has no exchange column
+        if exchange or (not sym_list and limit):
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
                 cur.execute(
                     f"""
                     SELECT DISTINCT s.id, s.symbol
                     FROM stocks s
-                    WHERE s.exchange = %s
+                    ORDER BY s.symbol
                     {limit_clause};
-                    """,
-                    (exchange,),
+                    """
                 )
                 universe = [(row[0], row[1]) for row in cur.fetchall()]
         else:
@@ -1915,10 +2120,32 @@ def ml_predict_ensemble(
             emit_error("No symbols found in universe", json_output=json_output)
             return
 
+        data_ids = [u[0] for u in universe]
+
+        # Auto-detect prediction date if not provided
+        if not prediction_date:
+            with conn.cursor() as cur:
+                # Find the latest date that has features for these symbols
+                cur.execute(
+                    """
+                    SELECT MAX(cf.date)
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND fd.name = ANY(%s);
+                    """,
+                    (data_ids, feature_names),
+                )
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    emit_error(f"No features found for symbols. Ensure data-update has been run.", json_output=json_output)
+                    return
+                prediction_date = row[0].isoformat()
+                emit(f"Auto-detected prediction date: {prediction_date}", json_output=json_output)
+
         emit(f"Generating ensemble predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
 
         # Fetch features for all symbols on prediction_date
-        data_ids = [u[0] for u in universe]
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -1979,7 +2206,8 @@ def ml_predict_ensemble(
             emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
 
             # Load ensemble for this horizon
-            horizon_ensemble_path = Path(artifact_uri) / f"_h{horizon}"
+            # Ensemble artifacts are saved as {artifact_uri}_h{horizon} (sibling dirs, not subdirs)
+            horizon_ensemble_path = Path(f"{artifact_uri}_h{horizon}")
             try:
                 ensemble = load_ensemble(horizon_ensemble_path)
             except FileNotFoundError:
@@ -2029,6 +2257,7 @@ def ml_predict_ensemble(
 
         conn.commit()
 
+    emit(f"Generated {total_predictions} predictions", json_output=json_output)
     emit(
         f"Ensemble predictions generated: {model_name} {model_version} for {prediction_date}",
         data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizons": horizons},
@@ -2083,16 +2312,39 @@ def ml_e2e_test(
         emit(f"  {i}. {step_desc} {status}", json_output=json_output)
     emit("", json_output=json_output)
 
+    # Progress callback to show step status
+    step_num = {"current": 0}
+    def progress_callback(step: str, status: str, message: str = "") -> None:
+        step_num["current"] += 1 if status == "starting" else 0
+        step_idx = step_num["current"]
+        if status == "starting":
+            emit(f"[{step_idx}/6] {message}", json_output=json_output)
+        elif status == "completed":
+            detail = f" - {message}" if message else ""
+            emit(f"  ✓ {step} completed{detail}", json_output=json_output)
+        elif status == "failed":
+            emit(f"  ✗ {step} FAILED", json_output=json_output, error=True)
+        elif status == "skipped":
+            emit(f"  - {step} skipped", json_output=json_output)
+
     url = _db_url(db_url)
-    with db_connection(url) as conn:
-        result = run_e2e_test(
-            exchange=exchange,
-            limit=limit,
-            name=name,
-            skip_data_update=skip_data_update,
-            cleanup=cleanup,
-            conn=conn,
-        )
+    try:
+        with db_connection(url) as conn:
+            result = run_e2e_test(
+                exchange=exchange,
+                limit=limit,
+                name=name,
+                skip_data_update=skip_data_update,
+                cleanup=cleanup,
+                conn=conn,
+                progress_callback=progress_callback,
+            )
+    except Exception as e:
+        emit("", json_output=json_output)
+        emit_error(f"E2E Test FAILED with exception: {e}", json_output=json_output)
+        import traceback
+        emit(traceback.format_exc(), json_output=json_output)
+        raise typer.Exit(code=1)
 
     # Report results
     if result.success:
@@ -2111,7 +2363,7 @@ def ml_e2e_test(
             emit("", data=result.to_dict(), json_output=json_output)
     else:
         emit("", json_output=json_output)
-        emit_error("E2E Test FAILED", json_output=json_output)
+        emit("E2E Test FAILED", json_output=json_output, error=True)
         emit(f"Duration: {result.duration_seconds}s", json_output=json_output)
         emit(f"Steps completed: {result.steps_completed}", json_output=json_output)
         emit(f"Steps failed: {result.steps_failed}", json_output=json_output)
@@ -4786,7 +5038,8 @@ def _update_all_impl(
                                 set_attributes(symbol_span, data_id=data_id)
 
                                 # Compute ALL active features (indicators, derivatives, etc.)
-                                # TODO: Add dependency ordering via feature_definitions.depends_on field
+                                # Note: Features are computed in arbitrary order. For dependency ordering,
+                                # add a depends_on column to feature_definitions and topological sort.
                                 result = compute_features(
                                     conn,
                                     data_id=data_id,
@@ -5762,6 +6015,770 @@ def strategy_create_config(
         emit_json({"id": config_id, "name": name, "strategy": strategy})
     else:
         emit(f"Created config '{name}' (id={config_id})")
+
+
+@volatility_app.command("compute")
+def volatility_compute(
+    symbols: Optional[str] = typer.Option(None, "--symbols", help="Comma-separated symbols"),
+    exchange: Optional[str] = typer.Option(None, "--exchange", help="Exchange name"),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Limit symbols from exchange"),
+    horizons: str = typer.Option("7,30,90", "--horizons", help="Comma-separated horizons in days"),
+    date: Optional[str] = typer.Option(None, "--date", help="Calculation date (YYYY-MM-DD)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Compute volatility thresholds for stocks."""
+    from datetime import datetime
+
+    from g2.ml.volatility import (
+        calculate_historical_volatility,
+        compute_adaptive_thresholds,
+        compute_volatility_percentile,
+    )
+
+    # Validate input
+    if not symbols and not exchange and not limit:
+        emit_error("Must specify --symbols, --exchange, or --limit", json_output=json_output)
+
+    # Parse horizons
+    try:
+        horizon_list = [int(h.strip()) for h in horizons.split(",")]
+    except ValueError:
+        emit_error("Invalid horizons format", json_output=json_output)
+
+    # Parse date
+    calc_date = datetime.now().date() if date is None else datetime.strptime(date, "%Y-%m-%d").date()
+
+    url = _db_url(db_url)
+    try:
+        with psycopg.connect(url) as conn:
+            # Get symbols list
+            if symbols:
+                symbol_list = [s.strip().upper() for s in symbols.split(",")]
+            else:
+                with conn.cursor() as cur:
+                    # Query stocks with sufficient price history (at least 60 days)
+                    query = """
+                        SELECT s.symbol
+                        FROM stocks s
+                        JOIN stock_ohlcv o ON o.data_id = s.id
+                        GROUP BY s.symbol
+                        HAVING COUNT(*) >= 60
+                    """
+                    if limit:
+                        query += f" LIMIT {limit}"
+                    cur.execute(query)
+                    symbol_list = [row[0] for row in cur.fetchall()]
+
+            if not symbol_list:
+                emit_error("No symbols found", json_output=json_output)
+
+            # Get price data and compute volatility for each symbol
+            import pandas as pd
+
+            results = []
+            all_volatilities = []
+
+            # First pass: compute volatilities
+            for sym in symbol_list:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT s.id, o.date, o.close
+                        FROM stock_ohlcv o
+                        JOIN stocks s ON o.data_id = s.id
+                        WHERE s.symbol = %s
+                        ORDER BY o.date DESC
+                        LIMIT 252
+                        """,
+                        (sym,),
+                    )
+                    rows = cur.fetchall()
+
+                if len(rows) < 60:
+                    continue
+
+                data_id = rows[0][0]
+                df = pd.DataFrame(rows, columns=["data_id", "date", "close"])
+                df = df.sort_values("date")
+                returns = df["close"].pct_change().dropna()
+
+                vol = calculate_historical_volatility(returns, window=60, annualize=True)
+                if vol is not None:
+                    all_volatilities.append((sym, data_id, vol, returns))
+
+            if not all_volatilities:
+                emit_error("No volatility data computed", json_output=json_output)
+
+            # Compute percentiles
+            vol_series = pd.Series([v[2] for v in all_volatilities])
+
+            # Second pass: compute thresholds and store
+            for sym, data_id, vol, returns in all_volatilities:
+                percentile = compute_volatility_percentile(vol, vol_series)
+
+                for horizon in horizon_list:
+                    weak, strong = compute_adaptive_thresholds(vol, horizon, percentile)
+
+                    # Upsert threshold
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO volatility_thresholds
+                                (data_id, horizon_days, calculation_date,
+                                 historical_volatility, weak_threshold, strong_threshold,
+                                 volatility_percentile)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (data_id, horizon_days, calculation_date)
+                            DO UPDATE SET
+                                historical_volatility = EXCLUDED.historical_volatility,
+                                weak_threshold = EXCLUDED.weak_threshold,
+                                strong_threshold = EXCLUDED.strong_threshold,
+                                volatility_percentile = EXCLUDED.volatility_percentile
+                            """,
+                            (data_id, horizon, calc_date, vol, weak, strong, percentile),
+                        )
+
+                    results.append({
+                        "symbol": sym,
+                        "horizon": horizon,
+                        "volatility": round(vol, 4),
+                        "weak_threshold": round(weak, 4),
+                        "strong_threshold": round(strong, 4),
+                        "percentile": round(percentile, 2),
+                    })
+
+            conn.commit()
+
+    except psycopg.Error as e:
+        emit_error(f"Database error: {e}", json_output=json_output)
+
+    if json_output:
+        emit_json({"count": len(results), "results": results})
+    else:
+        console = Console()
+        console.print(f"Computed {len(results)} volatility thresholds")
+        if results:
+            table = Table(title="Sample Thresholds")
+            table.add_column("Symbol")
+            table.add_column("Horizon")
+            table.add_column("Vol")
+            table.add_column("Weak")
+            table.add_column("Strong")
+            for r in results[:10]:
+                table.add_row(
+                    r["symbol"],
+                    str(r["horizon"]),
+                    f"{r['volatility']:.1%}",
+                    f"{r['weak_threshold']:.2%}",
+                    f"{r['strong_threshold']:.2%}",
+                )
+            console.print(table)
+
+
+# =============================================================================
+# EXPERIMENT COMMANDS
+# =============================================================================
+
+
+@experiment_app.command("propose")
+def experiment_propose(
+    name: str = typer.Option(..., "--name", "-n", help="Experiment name"),
+    experiment_type: str = typer.Option(
+        "strategy_params", "--type", "-t",
+        help="Experiment type (strategy_params, feature_selection, hyperparameter)"
+    ),
+    strategy: Optional[str] = typer.Option(
+        None, "--strategy", help="Strategy name (for strategy_params type)"
+    ),
+    search_space: str = typer.Option(
+        ..., "--search-space", "-s",
+        help='JSON search space, e.g. \'{"lookback_days": {"type": "int", "low": 5, "high": 20}}\''
+    ),
+    symbols: Optional[str] = typer.Option(
+        None, "--symbols", help="Comma-separated symbols (e.g., AAPL,MSFT,GOOGL)"
+    ),
+    exchange: Optional[str] = typer.Option(None, "--exchange", help="Exchange name"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date (YYYY-MM-DD)"),
+    objective: str = typer.Option("sharpe_ratio", "--objective", "-o", help="Metric to optimize"),
+    max_trials: int = typer.Option(50, "--max-trials", help="Maximum number of trials"),
+    search_method: str = typer.Option(
+        "grid", "--search-method", "-m",
+        help="Search method: grid, random, or bayesian"
+    ),
+    goal_type: Optional[str] = typer.Option(
+        None, "--goal-type",
+        help="Goal type: achieve (target value), improve (beat baseline)"
+    ),
+    goal_target: Optional[float] = typer.Option(None, "--goal-target", help="Target value for goal"),
+    baseline: Optional[float] = typer.Option(None, "--baseline", help="Baseline value for improvement goals"),
+    early_stop: bool = typer.Option(False, "--early-stop", help="Stop when goal achieved"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Propose a new experiment for approval."""
+    from g2.experiments.core import ExperimentConfig, ExperimentRunner
+
+    try:
+        search_space_dict = json.loads(search_space)
+    except json.JSONDecodeError as e:
+        emit_error(f"Invalid JSON in search-space: {e}", json_output=json_output)
+
+    # Build extra config
+    extra_config = {}
+    if strategy:
+        extra_config["strategy"] = strategy
+
+    config = ExperimentConfig(
+        name=name,
+        experiment_type=experiment_type,
+        search_space=search_space_dict,
+        objective_metric=objective,
+        max_trials=max_trials,
+        search_method=search_method,
+        goal_type=goal_type,
+        goal_target=goal_target,
+        baseline_value=baseline,
+        early_stop_on_goal=early_stop,
+        symbols=parse_comma_separated(symbols) if symbols else None,
+        exchange=exchange,
+        start_date=start_date,
+        end_date=end_date,
+        extra_config=extra_config,
+    )
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        experiment_id = runner.propose(config, proposed_by="user")
+        experiment = runner.get(experiment_id)
+
+        if json_output:
+            emit_json({
+                "experiment_id": experiment_id,
+                "name": name,
+                "status": "proposed",
+                "message": f"Experiment #{experiment_id} proposed. Use 'g2 experiment approve --id {experiment_id}' to approve."
+            })
+        else:
+            console = Console()
+            console.print(f"[bold green]Experiment #{experiment_id} proposed[/bold green]")
+            console.print(f"  Name: {name}")
+            console.print(f"  Type: {experiment_type}")
+            console.print(f"  Objective: {objective}")
+            console.print(f"  Max Trials: {max_trials}")
+            if goal_type:
+                console.print(f"  Goal: {goal_type} {goal_target}")
+            console.print()
+            console.print(f"[dim]To approve: g2 experiment approve --id {experiment_id}[/dim]")
+
+    except Exception as e:
+        emit_error(f"Failed to propose experiment: {e}", json_output=json_output)
+
+
+@experiment_app.command("list")
+def experiment_list(
+    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by status"),
+    experiment_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by type"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Maximum results"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """List experiments."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        experiments = runner.list(status=status, experiment_type=experiment_type, limit=limit)
+
+        if json_output:
+            emit_json({"count": len(experiments), "experiments": experiments})
+        else:
+            console = Console()
+            if not experiments:
+                console.print("[dim]No experiments found[/dim]")
+                return
+
+            table = Table(title="Experiments")
+            table.add_column("ID", style="cyan")
+            table.add_column("Name")
+            table.add_column("Type")
+            table.add_column("Status")
+            table.add_column("Trials")
+            table.add_column("Best Score")
+
+            for exp in experiments:
+                trials = f"{exp.get('completed_trials', 0) or 0}/{exp.get('total_trials', 0) or 0}"
+                best = f"{exp['best_score']:.4f}" if exp.get('best_score') else "-"
+                table.add_row(
+                    str(exp["id"]),
+                    exp["name"][:30],
+                    exp["experiment_type"],
+                    exp["status"],
+                    trials,
+                    best,
+                )
+
+            console.print(table)
+
+    except Exception as e:
+        emit_error(f"Failed to list experiments: {e}", json_output=json_output)
+
+
+@experiment_app.command("pending")
+def experiment_pending(
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """List experiments awaiting approval."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        pending = runner.get_pending_approvals()
+
+        if json_output:
+            emit_json({"count": len(pending), "pending": pending})
+        else:
+            console = Console()
+            if not pending:
+                console.print("[dim]No experiments awaiting approval[/dim]")
+                return
+
+            console.print(f"[bold]{len(pending)} experiment(s) awaiting approval:[/bold]\n")
+
+            for exp in pending:
+                console.print(f"[cyan]#{exp['id']}[/cyan] {exp['name']}")
+                console.print(f"  Type: {exp['experiment_type']}")
+                console.print(f"  Objective: {exp['objective_metric']}")
+                console.print(f"  Trials: {exp.get('total_trials', 0)}")
+                if exp.get('goal_type'):
+                    console.print(f"  Goal: {exp['goal_type']} {exp.get('goal_target')}")
+                console.print(f"  [dim]Approve: g2 experiment approve --id {exp['id']}[/dim]")
+                console.print()
+
+    except Exception as e:
+        emit_error(f"Failed to get pending experiments: {e}", json_output=json_output)
+
+
+@experiment_app.command("approve")
+def experiment_approve(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to approve"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Approve a proposed experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        runner.approve(experiment_id, approver="user")
+        experiment = runner.get(experiment_id)
+
+        if json_output:
+            emit_json({
+                "experiment_id": experiment_id,
+                "status": "approved",
+                "message": f"Experiment #{experiment_id} approved. Use 'g2 experiment run --id {experiment_id}' to run."
+            })
+        else:
+            console = Console()
+            console.print(f"[bold green]Experiment #{experiment_id} approved[/bold green]")
+            console.print(f"[dim]To run: g2 experiment run --id {experiment_id}[/dim]")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+    except Exception as e:
+        emit_error(f"Failed to approve experiment: {e}", json_output=json_output)
+
+
+@experiment_app.command("reject")
+def experiment_reject(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to reject"),
+    reason: Optional[str] = typer.Option(None, "--reason", "-r", help="Rejection reason"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Reject a proposed experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        runner.reject(experiment_id, reason=reason)
+
+        if json_output:
+            emit_json({
+                "experiment_id": experiment_id,
+                "status": "rejected",
+                "reason": reason,
+            })
+        else:
+            console = Console()
+            console.print(f"[bold yellow]Experiment #{experiment_id} rejected[/bold yellow]")
+            if reason:
+                console.print(f"  Reason: {reason}")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+    except Exception as e:
+        emit_error(f"Failed to reject experiment: {e}", json_output=json_output)
+
+
+@experiment_app.command("status")
+def experiment_status(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Get detailed status of an experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        experiment = runner.get(experiment_id)
+
+        if json_output:
+            # Convert datetime objects to strings for JSON
+            for key in ["created_at", "started_at", "completed_at"]:
+                if experiment.get(key):
+                    experiment[key] = str(experiment[key])
+            emit_json(experiment)
+        else:
+            console = Console()
+            console.print(f"[bold]Experiment #{experiment_id}[/bold]\n")
+
+            status_color = {
+                "proposed": "yellow",
+                "approved": "blue",
+                "running": "cyan",
+                "completed": "green",
+                "failed": "red",
+                "rejected": "dim",
+            }.get(experiment["status"], "white")
+
+            console.print(f"  Name: {experiment['name']}")
+            console.print(f"  Type: {experiment['experiment_type']}")
+            console.print(f"  Status: [{status_color}]{experiment['status']}[/{status_color}]")
+            console.print(f"  Objective: {experiment['objective_metric']} ({experiment['objective_direction']})")
+
+            if experiment.get("goal_type"):
+                console.print(f"  Goal: {experiment['goal_type']} {experiment.get('goal_target')}")
+                if experiment.get("baseline_value"):
+                    console.print(f"  Baseline: {experiment['baseline_value']}")
+
+            console.print()
+            console.print(f"  Trials: {experiment.get('completed_trials', 0) or 0}/{experiment.get('total_trials', 0) or 0}")
+            if experiment.get("best_score"):
+                console.print(f"  Best Score: {experiment['best_score']:.6f}")
+            if experiment.get("goal_achieved") is not None:
+                ga = "[green]Yes[/green]" if experiment["goal_achieved"] else "[red]No[/red]"
+                console.print(f"  Goal Achieved: {ga}")
+
+            console.print()
+            console.print(f"  Created: {experiment.get('created_at')}")
+            if experiment.get("started_at"):
+                console.print(f"  Started: {experiment['started_at']}")
+            if experiment.get("completed_at"):
+                console.print(f"  Completed: {experiment['completed_at']}")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+    except Exception as e:
+        emit_error(f"Failed to get experiment status: {e}", json_output=json_output)
+
+
+@experiment_app.command("run")
+def experiment_run(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to run"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Run an approved experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        # Check experiment is approved before running
+        experiment = runner.get(experiment_id)
+        if experiment["status"] != "approved":
+            emit_error(
+                f"Experiment {experiment_id} has status '{experiment['status']}'. "
+                "Only 'approved' experiments can be run.",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        if not json_output:
+            console = Console()
+            console.print(f"[bold]Running experiment #{experiment_id}:[/bold] {experiment['name']}")
+            console.print()
+
+        # Run the experiment
+        results = runner.run(experiment_id)
+
+        if json_output:
+            emit_json(results)
+        else:
+            console.print("[green]Experiment completed![/green]\n")
+            console.print(f"  Trials completed: {results['completed_trials']}")
+            if results.get("best_score") is not None:
+                console.print(f"  Best score: {results['best_score']:.6f}")
+            if results.get("best_params"):
+                console.print(f"  Best params: {results['best_params']}")
+            if results.get("goal_achieved") is not None:
+                ga = "[green]Yes[/green]" if results["goal_achieved"] else "[red]No[/red]"
+                console.print(f"  Goal achieved: {ga}")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        raise typer.Exit(1)
+    except Exception as e:
+        emit_error(f"Experiment failed: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("results")
+def experiment_results(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    show_trials: bool = typer.Option(False, "--trials", "-t", help="Show all trial details"),
+) -> None:
+    """Get results for a completed experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        results = runner.get_results(experiment_id)
+
+        if results["status"] != "completed":
+            emit_error(
+                f"Experiment {experiment_id} has status '{results['status']}'. "
+                "Results are only available for 'completed' experiments.",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        if json_output:
+            emit_json(results)
+        else:
+            console = Console()
+            console.print(f"[bold]Results for Experiment #{experiment_id}[/bold]\n")
+
+            # Extract best params and score from results
+            result_data = results.get("results") or {}
+            best_params = result_data.get("best_params")
+            best_score = results.get("best_score")
+
+            console.print(f"  Status: [green]{results['status']}[/green]")
+            console.print(f"  Trials: {results['completed_trials']}/{results.get('total_trials', 'N/A')}")
+
+            if best_score is not None:
+                console.print(f"  Best Score: [bold cyan]{best_score:.6f}[/bold cyan]")
+
+            if best_params:
+                console.print(f"  Best Params: {best_params}")
+
+            if results.get("goal_achieved") is not None:
+                ga = "[green]Yes[/green]" if results["goal_achieved"] else "[red]No[/red]"
+                console.print(f"  Goal Achieved: {ga}")
+
+            if show_trials:
+                console.print("\n[bold]Trial Details:[/bold]")
+                # Query trials from database
+                import psycopg
+                with psycopg.connect(db_url) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT trial_number, params, metrics, score, duration_seconds
+                            FROM experiment_trials
+                            WHERE experiment_id = %s
+                            ORDER BY trial_number
+                        """, (experiment_id,))
+                        for row in cur.fetchall():
+                            trial_num, params, metrics, score, duration = row
+                            score_str = f"{float(score):.6f}" if score is not None else "N/A"
+                            console.print(f"  Trial {trial_num}: score={score_str} params={params}")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        raise typer.Exit(1)
+    except Exception as e:
+        emit_error(f"Failed to get experiment results: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("chain")
+def experiment_chain(
+    parent_id: int = typer.Option(..., "--parent", "-p", help="Parent experiment ID"),
+    name: str = typer.Option(..., "--name", "-n", help="Name for child experiment"),
+    search_space: str = typer.Option(
+        ..., "--search-space", "-s",
+        help='JSON search space for child experiment'
+    ),
+    depends_on: str = typer.Option(
+        "best_params", "--depends-on", "-d",
+        help="Parent output to use (best_params, best_score)"
+    ),
+    strategy: Optional[str] = typer.Option(None, "--strategy", help="Strategy name"),
+    symbols: Optional[str] = typer.Option(None, "--symbols", help="Comma-separated symbols"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="Start date"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date"),
+    max_trials: int = typer.Option(50, "--max-trials", help="Maximum trials"),
+    search_method: str = typer.Option("grid", "--search-method", "-m", help="Search method"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Create a child experiment chained to a parent."""
+    from g2.experiments.core import ExperimentConfig, ExperimentRunner
+
+    try:
+        search_space_dict = json.loads(search_space)
+    except json.JSONDecodeError as e:
+        emit_error(f"Invalid JSON in search-space: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+    extra_config = {}
+    if strategy:
+        extra_config["strategy"] = strategy
+
+    child_config = ExperimentConfig(
+        name=name,
+        experiment_type="strategy_params",
+        search_space=search_space_dict,
+        max_trials=max_trials,
+        search_method=search_method,
+        symbols=parse_comma_separated(symbols) if symbols else None,
+        start_date=start_date,
+        end_date=end_date,
+        extra_config=extra_config,
+    )
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        child_id = runner.chain(parent_id, child_config, depends_on=depends_on)
+
+        if json_output:
+            emit_json({
+                "status": "proposed",
+                "child_id": child_id,
+                "parent_id": parent_id,
+                "depends_on": depends_on,
+            })
+        else:
+            console = Console()
+            console.print(f"[green]Child experiment #{child_id} created![/green]")
+            console.print(f"  Parent: #{parent_id}")
+            console.print(f"  Depends on: {depends_on}")
+            console.print(f"  Status: proposed")
+            console.print("\nApprove with: g2 experiment approve --id", child_id)
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        raise typer.Exit(1)
+    except Exception as e:
+        emit_error(f"Failed to chain experiment: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("children")
+def experiment_children(
+    parent_id: int = typer.Option(..., "--parent", "-p", help="Parent experiment ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """List child experiments of a parent."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        children = runner.list_children(parent_id)
+
+        if json_output:
+            # Convert datetime objects to strings
+            for child in children:
+                for key in ["created_at", "completed_at"]:
+                    if child.get(key):
+                        child[key] = str(child[key])
+            emit_json(children)
+        else:
+            console = Console()
+            if not children:
+                console.print(f"No child experiments for parent #{parent_id}")
+                return
+
+            console.print(f"[bold]Children of Experiment #{parent_id}[/bold]\n")
+            for child in children:
+                status_color = {
+                    "proposed": "yellow",
+                    "approved": "blue",
+                    "running": "cyan",
+                    "completed": "green",
+                    "failed": "red",
+                }.get(child["status"], "white")
+
+                score_str = f" (score: {child['best_score']:.4f})" if child.get("best_score") else ""
+                console.print(
+                    f"  #{child['id']} {child['name']} "
+                    f"[{status_color}]{child['status']}[/{status_color}]{score_str}"
+                )
+                console.print(f"      Depends on: {child['depends_on']}")
+
+    except Exception as e:
+        emit_error(f"Failed to list children: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("parent")
+def experiment_parent(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Show parent experiment and its results for a chained experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        parent_results = runner.get_parent_results(experiment_id)
+
+        if parent_results is None:
+            if json_output:
+                emit_json({"parent": None})
+            else:
+                console = Console()
+                console.print(f"Experiment #{experiment_id} has no parent.")
+            return
+
+        if json_output:
+            emit_json(parent_results)
+        else:
+            console = Console()
+            console.print(f"[bold]Parent of Experiment #{experiment_id}[/bold]\n")
+            console.print(f"  Parent ID: #{parent_results['experiment_id']}")
+            console.print(f"  Name: {parent_results['name']}")
+            console.print(f"  Status: {parent_results['status']}")
+            console.print(f"  Depends on: {parent_results['depends_on']}")
+
+            if parent_results.get("best_score") is not None:
+                console.print(f"  Best Score: {parent_results['best_score']:.6f}")
+            if parent_results.get("best_params"):
+                console.print(f"  Best Params: {parent_results['best_params']}")
+
+    except Exception as e:
+        emit_error(f"Failed to get parent: {e}", json_output=json_output)
+        raise typer.Exit(1)
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper

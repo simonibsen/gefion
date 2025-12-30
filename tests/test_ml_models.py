@@ -145,5 +145,69 @@ def test_train_with_missing_values():
     assert model_data["train_metrics"]["missing_value_pct"] > 0
 
 
+def test_model_pipeline_pickle_compatibility():
+    """Test that ModelPipeline can be pickled by joblib.
+
+    Regression test: local classes inside functions can't be pickled,
+    so ModelPipeline must be defined at module level.
+    """
+    import joblib
+    import io
+    from g2.ml.models import ModelPipeline
+    from sklearn.impute import SimpleImputer
+    from sklearn.linear_model import LinearRegression
+
+    # Create a simple pipeline
+    imputer = SimpleImputer(strategy='median')
+    model = LinearRegression()
+
+    # Fit on dummy data
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    y = np.array([1, 2, 3])
+    imputer.fit(X)
+    model.fit(X, y)
+
+    pipeline = ModelPipeline(imputer, model)
+
+    # Test that it can be pickled and unpickled
+    buffer = io.BytesIO()
+    joblib.dump(pipeline, buffer)
+    buffer.seek(0)
+    loaded = joblib.load(buffer)
+
+    # Verify it works after unpickling
+    assert hasattr(loaded, 'predict')
+    assert hasattr(loaded, 'named_steps')
+    predictions = loaded.predict(X)
+    assert len(predictions) == 3
+
+
+def test_model_artifact_path_convention():
+    """Document the expected model artifact path structure.
+
+    Training saves models as: {base_artifact_uri}_h{horizon}
+    Example: models/mymodel_v1_h7, models/mymodel_v1_h30
+
+    NOT as subdirectories: models/mymodel_v1/_h7 (wrong!)
+
+    This is important for predict commands to find the correct paths.
+    """
+    from pathlib import Path
+
+    base_artifact_uri = "models/mymodel_v1"
+    horizon = 7
+
+    # CORRECT: suffix pattern (sibling directories)
+    correct_path = Path(f"{base_artifact_uri}_h{horizon}")
+    assert str(correct_path) == "models/mymodel_v1_h7"
+
+    # WRONG: subdirectory pattern
+    wrong_path = Path(base_artifact_uri) / f"_h{horizon}"
+    assert str(wrong_path) == "models/mymodel_v1/_h7"
+
+    # Verify they are different
+    assert correct_path != wrong_path
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

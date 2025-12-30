@@ -6,7 +6,7 @@ This white paper explores the evolution of technical analysis from rule-based pa
 
 **Author**: g2 Development Team
 **Target Audience**: Quantitative analysts, algorithmic traders, data scientists, software engineers
-**Date**: December 2024
+**Date**: December 2024 (Last Updated: December 2024)
 
 ---
 
@@ -501,15 +501,15 @@ This is the practical value of distribution forecasting.
 
 ---
 
-## Future Directions: Multi-Model Integration
+## Multi-Model Integration
 
-### Trend Classification: Categorical Predictions
+### Trend Classification: Categorical Predictions (Implemented)
 
 Quantile regression predicts **how much** prices might move. But sometimes we care about **trend strength**:
 - Will this stock show momentum (strong trend)?
 - Or is it range-bound (mean reversion)?
 
-g2's roadmap includes **trend classification** alongside quantile regression:
+g2 includes **trend classification** alongside quantile regression:
 
 **Labels** (derived from forward returns and thresholds):
 - `strong_up`: r > 5%
@@ -532,6 +532,28 @@ model.fit(X_train, y_train_class)
 predictions = model.predict_proba(X_test)
 # Output: [P(strong_down), P(weak_down), P(neutral), P(weak_up), P(strong_up)]
 ```
+
+### Model Ensembles (Implemented)
+
+g2 supports combining multiple algorithms for improved prediction accuracy:
+
+```bash
+# Train ensemble with XGBoost + LightGBM
+g2 ml train-ensemble \
+  --dataset-name nasdaq100 --dataset-version v1 \
+  --model-name ensemble_model --model-version 20241214 \
+  --algorithms xgboost,lightgbm
+
+# Generate ensemble predictions
+g2 ml predict-ensemble \
+  --model-name ensemble_model --model-version 20241214 \
+  --symbols AAPL,MSFT,GOOGL
+```
+
+**Benefits**:
+- Reduces prediction variance through weighted averaging
+- Combines linear + non-linear patterns
+- More robust to outliers and regime changes
 
 ### Combined Strategy
 
@@ -559,13 +581,15 @@ This dual-model approach combines:
 - **Trend classification**: Screen for momentum/reversal patterns
 - **Quantile regression**: Size positions by risk/reward
 
-### Cross-Sectional Features
+### Cross-Sectional Features (Implemented)
 
-Current implementation uses **time-series features** (stock's own history):
+g2 supports both **time-series features** (stock's own history) and **cross-sectional features** (stock vs peers):
+
+**Time-series features**:
 - RSI, MACD, Bollinger Bands
 - Past returns and volatility
 
-Future enhancement: **Cross-sectional features** (stock vs peers):
+**Cross-sectional features** (market-relative metrics):
 - Return relative to sector benchmark
 - Volume relative to sector average
 - Sector rotation momentum
@@ -678,29 +702,32 @@ g2 seed-features
 
 ### Quick ML Workflow
 
+**Option 1: Automated E2E Test** (validates entire pipeline):
+```bash
+# Run all steps automatically with quality validation
+g2 ml e2e-test --exchange NASDAQ --limit 10
+```
+
+**Option 2: Manual Steps**:
 ```bash
 # 1. Ingest data
 g2 data-update --exchange NASDAQ --limit 50
 
-# 2. Compute features
-g2 feat-compute --exchange NASDAQ --limit 50 --local
-
-# 3. Build dataset
+# 2. Build dataset (features computed automatically during data-update)
 g2 ml dataset-build --name demo --version v1 \
   --exchange NASDAQ --limit 50 \
   --horizons 7,30 --export
 
-# 4. Train model
+# 3. Train model
 g2 ml train --dataset-name demo --dataset-version v1 \
   --model-name test --model-version 20241214 \
   --algorithm xgboost
 
-# 5. Generate predictions
+# 4. Generate predictions (date auto-detected)
 g2 ml predict --model-name test --model-version 20241214 \
-  --prediction-date 2024-12-14 \
   --exchange NASDAQ --limit 50
 
-# 6. Evaluate
+# 5. Evaluate
 g2 ml eval --model-name test --model-version 20241214 \
   --start-date 2024-01-01 --end-date 2024-12-01
 ```
@@ -709,6 +736,7 @@ g2 ml eval --model-name test --model-version 20241214 \
 
 - **User Guide**: [docs/USER_GUIDE.md](USER_GUIDE.md)
 - **ML Quickstart**: [docs/ML_QUICKSTART.md](ML_QUICKSTART.md)
+- **E2E Test Guide**: [docs/E2E_TEST_GUIDE.md](E2E_TEST_GUIDE.md)
 - **Architecture**: [docs/ARCHITECTURE.md](ARCHITECTURE.md)
 - **ML Roadmap**: [docs/ML_ROADMAP.md](ML_ROADMAP.md)
 

@@ -248,3 +248,190 @@ def calculate_forecast_skill_metrics(
                     f"Directional={directional_accuracy:.1f}%")
 
     return metrics
+
+
+def compute_expected_calibration_error(
+    predicted_probs: np.ndarray,
+    actual_outcomes: np.ndarray,
+    n_bins: int = 10
+) -> tuple[float, list[dict]]:
+    """
+    Compute Expected Calibration Error (ECE) for classifier predictions.
+
+    ECE measures how well predicted probabilities match actual frequencies.
+    ECE = sum over bins of (|accuracy - confidence| * bin_size / total)
+    Perfect calibration = ECE of 0.
+
+    Args:
+        predicted_probs: Array of predicted probabilities (0-1)
+        actual_outcomes: Array of actual binary outcomes (0 or 1)
+        n_bins: Number of bins for calibration calculation (default 10)
+
+    Returns:
+        Tuple of (ece_score, bin_details):
+            - ece_score: Float in [0, 1], lower is better
+            - bin_details: List of dicts with bin information
+
+    Example:
+        >>> probs = np.array([0.8, 0.8, 0.8, 0.8, 0.8])
+        >>> outcomes = np.array([1, 1, 1, 1, 0])  # 80% correct
+        >>> ece, details = compute_expected_calibration_error(probs, outcomes)
+        >>> ece < 0.1  # Well calibrated
+        True
+    """
+    predicted_probs = np.asarray(predicted_probs)
+    actual_outcomes = np.asarray(actual_outcomes)
+
+    bin_boundaries = np.linspace(0, 1, n_bins + 1)
+    bin_details = []
+    ece = 0.0
+
+    for i in range(n_bins):
+        in_bin = (predicted_probs >= bin_boundaries[i]) & \
+                 (predicted_probs < bin_boundaries[i + 1])
+
+        # Include upper bound in last bin
+        if i == n_bins - 1:
+            in_bin = in_bin | (predicted_probs == bin_boundaries[i + 1])
+
+        n_in_bin = np.sum(in_bin)
+
+        if n_in_bin > 0:
+            avg_confidence = float(np.mean(predicted_probs[in_bin]))
+            accuracy = float(np.mean(actual_outcomes[in_bin]))
+            calibration_error = abs(accuracy - avg_confidence)
+            ece += (n_in_bin / len(predicted_probs)) * calibration_error
+
+            bin_details.append({
+                "bin": i,
+                "count": int(n_in_bin),
+                "avg_confidence": avg_confidence,
+                "accuracy": accuracy,
+                "calibration_error": calibration_error
+            })
+
+    logger.debug(f"ECE computed: {ece:.4f} over {len(bin_details)} non-empty bins")
+
+    return float(ece), bin_details
+
+
+def calculate_accuracy_by_confidence(
+    predictions: pd.DataFrame,
+    actuals: pd.Series,
+    confidence_col: str,
+    n_buckets: int = 10
+) -> dict[int, dict[str, float]]:
+    """
+    Stratify predictions by confidence and compute accuracy per bucket.
+
+    This helps answer: "Do high-confidence predictions have higher accuracy?"
+
+    Args:
+        predictions: DataFrame with predictions and confidence scores
+        actuals: Series of actual outcomes
+        confidence_col: Column name for confidence scores
+        n_buckets: Number of decile buckets (default 10)
+
+    Returns:
+        Dict mapping bucket number (1-n_buckets) to accuracy metrics:
+            - count: Number of samples in bucket
+            - accuracy: Accuracy in bucket (0-1)
+            - avg_confidence: Average confidence in bucket
+            - min_confidence: Minimum confidence in bucket
+            - max_confidence: Maximum confidence in bucket
+
+    Example:
+        >>> df = pd.DataFrame({"predicted": [1, 1, 0], "confidence": [0.9, 0.5, 0.3]})
+        >>> actuals = pd.Series([1, 0, 0])
+        >>> results = calculate_accuracy_by_confidence(df, actuals, "confidence", 3)
+        >>> 1 in results  # At least one bucket has results
+        True
+    """
+    df = predictions.copy()
+    df["actual"] = actuals.values
+
+    # Create decile buckets using quantile-based binning
+    try:
+        df["bucket"] = pd.qcut(df[confidence_col], n_buckets, labels=False, duplicates="drop") + 1
+    except ValueError:
+        # If too few unique values, use simple cut
+        df["bucket"] = pd.cut(df[confidence_col], n_buckets, labels=False, duplicates="drop") + 1
+
+    results = {}
+    for bucket in df["bucket"].dropna().unique():
+        bucket_data = df[df["bucket"] == bucket]
+        if len(bucket_data) > 0:
+            bucket_int = int(bucket)
+            results[bucket_int] = {
+                "count": len(bucket_data),
+                "accuracy": float((bucket_data["predicted"] == bucket_data["actual"]).mean()),
+                "avg_confidence": float(bucket_data[confidence_col].mean()),
+                "min_confidence": float(bucket_data[confidence_col].min()),
+                "max_confidence": float(bucket_data[confidence_col].max()),
+            }
+
+    logger.debug(f"Accuracy by confidence: {len(results)} buckets computed")
+
+    return results
+
+
+def get_reliability_diagram_data(
+    predicted_probs: np.ndarray,
+    actual_outcomes: np.ndarray,
+    n_bins: int = 10
+) -> dict[str, list[float]]:
+    """
+    Get data for plotting a reliability diagram (calibration curve).
+
+    A reliability diagram plots mean predicted probability vs actual frequency.
+    Perfect calibration lies on the diagonal (y = x).
+
+    Args:
+        predicted_probs: Array of predicted probabilities (0-1)
+        actual_outcomes: Array of actual binary outcomes (0 or 1)
+        n_bins: Number of bins (default 10)
+
+    Returns:
+        Dict with:
+            - mean_predicted_probs: List of mean predicted probabilities per bin
+            - fraction_positive: List of actual positive fractions per bin
+            - bin_counts: List of sample counts per bin
+
+    Example:
+        >>> probs = np.linspace(0, 1, 100)
+        >>> outcomes = (np.random.rand(100) < probs).astype(int)
+        >>> data = get_reliability_diagram_data(probs, outcomes)
+        >>> len(data["mean_predicted_probs"]) > 0
+        True
+    """
+    predicted_probs = np.asarray(predicted_probs)
+    actual_outcomes = np.asarray(actual_outcomes)
+
+    bin_boundaries = np.linspace(0, 1, n_bins + 1)
+
+    mean_predicted_probs = []
+    fraction_positive = []
+    bin_counts = []
+
+    for i in range(n_bins):
+        in_bin = (predicted_probs >= bin_boundaries[i]) & \
+                 (predicted_probs < bin_boundaries[i + 1])
+
+        # Include upper bound in last bin
+        if i == n_bins - 1:
+            in_bin = in_bin | (predicted_probs == bin_boundaries[i + 1])
+
+        n_in_bin = np.sum(in_bin)
+
+        if n_in_bin > 0:
+            mean_predicted_probs.append(float(np.mean(predicted_probs[in_bin])))
+            fraction_positive.append(float(np.mean(actual_outcomes[in_bin])))
+            bin_counts.append(int(n_in_bin))
+
+    logger.debug(f"Reliability diagram data: {len(mean_predicted_probs)} bins with data")
+
+    return {
+        "mean_predicted_probs": mean_predicted_probs,
+        "fraction_positive": fraction_positive,
+        "bin_counts": bin_counts
+    }

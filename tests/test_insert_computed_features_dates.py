@@ -20,12 +20,28 @@ def require_db():
     return conn
 
 
+def _table_exists(cur, table_name: str) -> bool:
+    cur.execute("""
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = %s
+        );
+    """, (table_name,))
+    return cur.fetchone()[0]
+
+
 @pytest.fixture(autouse=True)
 def clean_db():
     conn = require_db()
     conn.autocommit = True
     with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        # Use targeted cleanup instead of DROP SCHEMA to avoid deadlocks
+        if _table_exists(cur, 'computed_features'):
+            cur.execute("DELETE FROM computed_features WHERE data_id = 1;")
+        if _table_exists(cur, 'feature_definitions'):
+            cur.execute("DELETE FROM feature_definitions WHERE name = 'indicator_rsi_14';")
+        if _table_exists(cur, 'stocks'):
+            cur.execute("DELETE FROM stocks WHERE symbol = 'TEST';")
     conn.close()
     yield
 

@@ -32,6 +32,21 @@ def _write_to_file(
             writer.writerows(data)
 
 
+def _stream_to_csv(cursor, path: Path, header: List[str], row_mapper) -> int:
+    """Stream cursor results directly to CSV without loading all into memory.
+
+    Returns the number of rows written.
+    """
+    count = 0
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=header)
+        writer.writeheader()
+        for row in cursor:
+            writer.writerow(row_mapper(row))
+            count += 1
+    return count
+
+
 def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -> None:
     """
     Export dataset artifacts.
@@ -73,7 +88,34 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     feature_names = manifest.get("feature_names") or []
     exclude_features = manifest.get("exclude_features") or []
 
+    # Resolve exchange + limit to actual symbols if no explicit symbols provided
+    # Note: The stocks table doesn't have an 'exchange' column, so we just select
+    # the first N symbols alphabetically. The exchange parameter is stored in
+    # manifest for documentation but not used for filtering.
+    if not symbols and (universe.get("exchange") or universe.get("limit")):
+        limit = universe.get("limit")
+        with conn.cursor() as cur:
+            if limit:
+                cur.execute(
+                    """
+                    SELECT symbol FROM stocks
+                    ORDER BY symbol
+                    LIMIT %s;
+                    """,
+                    (limit,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT symbol FROM stocks
+                    ORDER BY symbol;
+                    """
+                )
+            symbols = [row[0] for row in cur.fetchall()]
+
+    # Export prices - stream directly for CSV, load for parquet
     price_rows: list[dict[str, Any]] = []
+    price_count = 0
     try:
         with conn.cursor() as cur:
             if symbols:
@@ -96,24 +138,32 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
                     ORDER BY s.symbol, o.date;
                     """
                 )
-            for row in cur.fetchall():
-                price_rows.append(
-                    {
-                        "symbol": row[0],
-                        "date": row[1],
-                        "open": row[2],
-                        "high": row[3],
-                        "low": row[4],
-                        "close": row[5],
-                        "adjusted_close": row[6],
-                        "volume": row[7],
-                    }
-                )
+
+            def price_mapper(row):
+                return {
+                    "symbol": row[0],
+                    "date": row[1],
+                    "open": row[2],
+                    "high": row[3],
+                    "low": row[4],
+                    "close": row[5],
+                    "adjusted_close": row[6],
+                    "volume": row[7],
+                }
+
+            if export_format == "csv":
+                # Stream directly to CSV - much lower memory usage
+                price_count = _stream_to_csv(cur, prices_path, prices_header, price_mapper)
+            else:
+                # For parquet, need all data in memory
+                for row in cur:
+                    price_rows.append(price_mapper(row))
+                price_count = len(price_rows)
+                _write_to_file(price_rows, prices_path, prices_header, export_format)
     except Exception:
-        price_rows = []
+        _write_to_file([], prices_path, prices_header, export_format)
 
-    _write_to_file(price_rows, prices_path, prices_header, export_format)
-
+    # Export features - stream directly for CSV, load for parquet
     feature_rows: list[dict[str, Any]] = []
     try:
         with conn.cursor() as cur:
@@ -151,21 +201,33 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
             else:
                 cur.execute(sql)
 
-            for row in cur.fetchall():
-                feature_rows.append({"symbol": row[0], "date": row[1], "feature_name": row[2], "value": row[3]})
+            def feature_mapper(row):
+                return {"symbol": row[0], "date": row[1], "feature_name": row[2], "value": row[3]}
+
+            if export_format == "csv":
+                # Stream directly to CSV - much lower memory usage
+                _stream_to_csv(cur, features_path, features_header, feature_mapper)
+            else:
+                # For parquet, need all data in memory
+                for row in cur:
+                    feature_rows.append(feature_mapper(row))
+                _write_to_file(feature_rows, features_path, features_header, export_format)
     except Exception:
-        feature_rows = []
+        _write_to_file([], features_path, features_header, export_format)
 
-    _write_to_file(feature_rows, features_path, features_header, export_format)
-
-    if price_rows and horizons_days:
+    # Compute labels from prices
+    if price_count > 0 and horizons_days:
         try:
+            import numpy as np
             import pandas as pd
 
-            from g2.ml.labels import classify_return_5class
-
             thresholds = (manifest.get("label_spec") or {}).get("thresholds") or {}
-            df = pd.DataFrame(price_rows)
+
+            # Load price data: from memory if available, otherwise from the CSV file we just wrote
+            if price_rows:
+                df = pd.DataFrame(price_rows)
+            else:
+                df = pd.read_csv(prices_path)
             if df.empty:
                 return
             df["close_for_label"] = df["adjusted_close"].where(df["adjusted_close"].notna(), df["close"])
@@ -180,15 +242,24 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
                     continue
                 shifted = df.groupby("symbol")["close_for_label"].shift(-h)
                 ret = (shifted / df["close_for_label"]) - 1.0
-                labels = ret.apply(
-                    lambda r: classify_return_5class(r, weak_threshold=weak, strong_threshold=strong).value
-                    if pd.notna(r) and abs(r) != float("inf")
-                    else None
-                )
-                tmp = df[["symbol", "date"]].copy()
-                tmp["horizon_days"] = h
-                tmp["forward_return"] = ret
-                tmp["label"] = labels
+
+                # Vectorized label classification (much faster than apply())
+                labels = pd.Series(index=ret.index, dtype=object)
+                valid_mask = ret.notna() & (ret.abs() != float("inf"))
+                labels[~valid_mask] = None
+                labels[valid_mask & (ret <= -strong)] = "strong_down"
+                labels[valid_mask & (ret > -strong) & (ret <= -weak)] = "weak_down"
+                labels[valid_mask & (ret > -weak) & (ret < weak)] = "flat"
+                labels[valid_mask & (ret >= weak) & (ret < strong)] = "weak_up"
+                labels[valid_mask & (ret >= strong)] = "strong_up"
+
+                tmp = pd.DataFrame({
+                    "symbol": df["symbol"],
+                    "date": df["date"],
+                    "horizon_days": h,
+                    "forward_return": ret,
+                    "label": labels,
+                })
                 out.append(tmp)
             if out:
                 labels_df = pd.concat(out, ignore_index=True)

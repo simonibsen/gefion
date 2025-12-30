@@ -51,6 +51,36 @@ g2 is a production-ready database-first technical analysis platform with:
 
 ## Recent Changes
 
+### December 29, 2025
+
+**E2E Test Quality Validation & Classifier Implementation:**
+
+- **Quality Check Step (Step 7)**: Added prediction quality validation to e2e test pipeline
+  - Calculates average IQR (interquartile range: q90 - q10) to measure prediction confidence
+  - Validates quantile ordering (q10 ≤ q50 ≤ q90) for all predictions
+  - Reports quality metrics in e2e test output
+  - Updated E2E_TEST_GUIDE.md with quality metrics interpretation
+
+- **Predict-Classifier Implementation**: Fully implemented `g2 ml predict-classifier` command
+  - Was placeholder TODO, now loads features from database
+  - Generates 5-class trend predictions (strong_down, weak_down, flat, weak_up, strong_up)
+  - Stores results in trend_predictions table
+  - Added CLI tests for command structure
+
+- **Documentation Updates**:
+  - Updated WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md to reflect implemented features
+  - Updated ML_QUICKSTART.md with e2e test section and classifier usage
+  - Updated E2E_TEST_GUIDE.md with quality check step (7 steps total)
+
+**Files Modified:**
+
+- src/g2/cli.py - Implemented predict-classifier, added prediction count output
+- src/g2/ml/e2e.py - Added quality_check step, prediction count parsing
+- tests/test_ml_e2e.py - Added predict-classifier tests, updated step count
+- docs/E2E_TEST_GUIDE.md - Added quality metrics section
+- docs/ML_QUICKSTART.md - Added e2e test and classifier sections
+- docs/WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md - Updated implemented features
+
 ### December 17, 2025
 
 **Phase 1 Completion - All Tactical Items (#1-10) Complete:**

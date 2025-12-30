@@ -23,13 +23,14 @@ g2 ml e2e-test --cleanup
 g2 ml e2e-test --exchange NASDAQ --limit 50 --name my_test --cleanup
 ```
 
-The command runs all 6 pipeline steps automatically:
+The command runs all 7 pipeline steps automatically:
 1. **Data Update** - Fetch price data from AlphaVantage
 2. **Dataset Build** - Create ML dataset with features and labels
 3. **Train Model** - Train single XGBoost model
 4. **Train Ensemble** - Train ensemble (XGBoost + LightGBM)
 5. **Predict** - Generate predictions with single model
 6. **Predict Ensemble** - Generate predictions with ensemble
+7. **Quality Check** - Validate prediction quality metrics
 
 ## Prerequisites
 
@@ -60,8 +61,32 @@ ml_e2e_test(exchange="NASDAQ", limit=10, skip_data_update=false, cleanup=false)
 | Dataset Build | Dataset registered in ml_datasets |
 | Single Model | XGBoost model trained for all horizons |
 | Ensemble | Ensemble with 2 base models trained |
-| Predictions | Single model generated predictions |
-| Ensemble Predictions | Ensemble generated predictions |
+| Predictions | Single model generated predictions (count > 0) |
+| Ensemble Predictions | Ensemble generated predictions (count > 0) |
+| Quality Check | IQR reasonable, quantile ordering valid |
+
+## Quality Metrics
+
+The quality check step validates prediction quality:
+
+- **Average IQR** - Average interquartile range (q90 - q10). Measures prediction confidence/uncertainty. Typical values: 5-20% for stock returns.
+- **Ordering Valid** - Confirms q10 ≤ q50 ≤ q90 for all predictions. Should always be true for properly trained models.
+
+Example output:
+```
+[7/7] Validating prediction quality...
+  ✓ quality_check completed - IQR: 8.3%, ordering: OK
+
+Artifacts created:
+  predictions_count: 20
+  ensemble_predictions_count: 20
+  quality: {avg_iqr: 0.083, ordering_valid: true, ...}
+```
+
+**Interpreting IQR:**
+- **< 5%**: Very confident predictions (tight range)
+- **5-15%**: Normal uncertainty
+- **> 20%**: High uncertainty (volatile stocks or uncertain conditions)
 
 ## Manual Steps (Reference)
 

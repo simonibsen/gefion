@@ -890,6 +890,26 @@ async def list_tools() -> List[Tool]:
             },
         ),
 
+        # Volatility Tools
+        Tool(
+            name="volatility_compute",
+            description=(
+                "Compute volatility thresholds for stocks. "
+                "Calculates per-stock adaptive thresholds based on historical volatility. "
+                "Thresholds scale by sqrt(T) for different horizons. "
+                "Stores results in volatility_thresholds table."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbols": {"type": "string", "description": "Comma-separated symbols (e.g., AAPL,MSFT)"},
+                    "horizons": {"type": "string", "description": "Comma-separated horizons in days (e.g., 7,30,90)", "default": "7,30,90"},
+                    "date": {"type": "string", "description": "Calculation date (YYYY-MM-DD). Defaults to today."},
+                },
+                "required": ["symbols"],
+            },
+        ),
+
         # Backtesting Tools
         Tool(
             name="backtest_run",
@@ -985,6 +1005,148 @@ async def list_tools() -> List[Tool]:
                 "properties": {},
             },
         ),
+
+        # ============================================================
+        # AI Experimentation Framework Tools
+        # ============================================================
+        Tool(
+            name="experiment_propose",
+            description=(
+                "Propose a new experiment for approval. "
+                "Creates an experiment with 'proposed' status. "
+                "Supports strategy parameter optimization with grid, random, or bayesian search."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Experiment name"},
+                    "strategy": {"type": "string", "description": "Strategy name (momentum, mean_reversion, ma_crossover, breakout)"},
+                    "search_space": {"type": "string", "description": "JSON search space definition"},
+                    "symbols": {"type": "string", "description": "Comma-separated symbols"},
+                    "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                    "objective": {"type": "string", "default": "sharpe_ratio", "description": "Metric to optimize"},
+                    "max_trials": {"type": "integer", "default": 50, "description": "Maximum trials"},
+                    "search_method": {"type": "string", "default": "grid", "description": "Search method: grid, random, or bayesian"},
+                    "goal_type": {"type": "string", "description": "Goal type: achieve, improve"},
+                    "goal_target": {"type": "number", "description": "Target value for goal"},
+                    "baseline": {"type": "number", "description": "Baseline for improvement goals"},
+                    "early_stop": {"type": "boolean", "default": False, "description": "Stop when goal achieved"},
+                },
+                "required": ["name", "search_space"],
+            },
+        ),
+        Tool(
+            name="experiment_list",
+            description=(
+                "List experiments with optional filters. "
+                "Returns experiment summaries with status, scores, and trial counts."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Filter by status (proposed, approved, running, completed, failed)"},
+                    "experiment_type": {"type": "string", "description": "Filter by type (strategy_params)"},
+                    "limit": {"type": "integer", "default": 20, "description": "Max results"},
+                },
+            },
+        ),
+        Tool(
+            name="experiment_approve",
+            description=(
+                "Approve a proposed experiment for execution. "
+                "Changes status from 'proposed' to 'approved'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_id": {"type": "integer", "description": "Experiment ID to approve"},
+                },
+                "required": ["experiment_id"],
+            },
+        ),
+        Tool(
+            name="experiment_run",
+            description=(
+                "Run an approved experiment. "
+                "Executes all trials, tracks results, and updates best score. "
+                "Supports early stopping when goal is achieved."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_id": {"type": "integer", "description": "Experiment ID to run"},
+                },
+                "required": ["experiment_id"],
+            },
+        ),
+        Tool(
+            name="experiment_results",
+            description=(
+                "Get results for a completed experiment. "
+                "Returns best params, best score, trial count, and goal achievement."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_id": {"type": "integer", "description": "Experiment ID"},
+                    "show_trials": {"type": "boolean", "default": False, "description": "Include trial details"},
+                },
+                "required": ["experiment_id"],
+            },
+        ),
+        Tool(
+            name="experiment_chain",
+            description=(
+                "Create a child experiment chained to a parent. "
+                "Child can use parent's best_params or best_score. "
+                "Parent must be completed before chaining."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "parent_id": {"type": "integer", "description": "Parent experiment ID"},
+                    "name": {"type": "string", "description": "Child experiment name"},
+                    "search_space": {"type": "string", "description": "JSON search space for child"},
+                    "depends_on": {"type": "string", "default": "best_params", "description": "Parent output to use"},
+                    "strategy": {"type": "string", "description": "Strategy name"},
+                    "symbols": {"type": "string", "description": "Comma-separated symbols"},
+                    "start_date": {"type": "string", "description": "Start date"},
+                    "end_date": {"type": "string", "description": "End date"},
+                    "max_trials": {"type": "integer", "default": 50, "description": "Max trials"},
+                    "search_method": {"type": "string", "default": "grid", "description": "Search method"},
+                },
+                "required": ["parent_id", "name", "search_space"],
+            },
+        ),
+        Tool(
+            name="experiment_children",
+            description=(
+                "List child experiments of a parent. "
+                "Shows all experiments that were chained from a parent experiment."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "parent_id": {"type": "integer", "description": "Parent experiment ID"},
+                },
+                "required": ["parent_id"],
+            },
+        ),
+        Tool(
+            name="experiment_status",
+            description=(
+                "Get detailed status of an experiment. "
+                "Returns full experiment details including config, progress, and results."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_id": {"type": "integer", "description": "Experiment ID"},
+                },
+                "required": ["experiment_id"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -1070,10 +1232,29 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _strategy_configs(arguments)
         elif name == "strategy_create_config":
             result = await _strategy_create_config(arguments)
+        elif name == "volatility_compute":
+            result = await _volatility_compute(arguments)
         elif name == "backtest_run":
             result = await _backtest_run(arguments)
         elif name == "backtest_compare":
             result = await _backtest_compare(arguments)
+        # Experiment tools
+        elif name == "experiment_propose":
+            result = await _experiment_propose(arguments)
+        elif name == "experiment_list":
+            result = await _experiment_list(arguments)
+        elif name == "experiment_approve":
+            result = await _experiment_approve(arguments)
+        elif name == "experiment_run":
+            result = await _experiment_run(arguments)
+        elif name == "experiment_results":
+            result = await _experiment_results(arguments)
+        elif name == "experiment_chain":
+            result = await _experiment_chain(arguments)
+        elif name == "experiment_children":
+            result = await _experiment_children(arguments)
+        elif name == "experiment_status":
+            result = await _experiment_status(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -2797,6 +2978,26 @@ async def _strategy_create_config(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ============================================================================
+# Volatility Tools
+# ============================================================================
+
+async def _volatility_compute(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute volatility thresholds for stocks."""
+    async def _compute():
+        cmd = ['volatility', 'compute', '--symbols', args['symbols']]
+
+        if args.get('horizons'):
+            cmd.extend(['--horizons', args['horizons']])
+        if args.get('date'):
+            cmd.extend(['--date', args['date']])
+
+        cmd.append('--json')
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _compute)
+
+
+# ============================================================================
 # Backtesting Tools
 # ============================================================================
 
@@ -2899,6 +3100,152 @@ async def _backtest_compare(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _compare)
+
+
+# ============================================================================
+# Experiment Tools
+# ============================================================================
+
+async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Propose a new experiment for approval."""
+    async def _propose():
+        cmd = ["g2", "experiment", "propose"]
+
+        # Required arguments
+        cmd.extend(["--name", args["name"]])
+        cmd.extend(["--search-space", args["search_space"]])
+
+        # Optional arguments
+        if args.get("strategy"):
+            cmd.extend(["--strategy", args["strategy"]])
+        if args.get("symbols"):
+            cmd.extend(["--symbols", args["symbols"]])
+        if args.get("start_date"):
+            cmd.extend(["--start-date", args["start_date"]])
+        if args.get("end_date"):
+            cmd.extend(["--end-date", args["end_date"]])
+        if args.get("objective"):
+            cmd.extend(["--objective", args["objective"]])
+        if args.get("max_trials"):
+            cmd.extend(["--max-trials", str(args["max_trials"])])
+        if args.get("search_method"):
+            cmd.extend(["--search-method", args["search_method"]])
+        if args.get("goal_type"):
+            cmd.extend(["--goal-type", args["goal_type"]])
+        if args.get("goal_target") is not None:
+            cmd.extend(["--goal-target", str(args["goal_target"])])
+        if args.get("baseline") is not None:
+            cmd.extend(["--baseline", str(args["baseline"])])
+        if args.get("early_stop"):
+            cmd.append("--early-stop")
+
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _propose)
+
+
+async def _experiment_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List experiments with optional filters."""
+    async def _list():
+        cmd = ["g2", "experiment", "list"]
+
+        if args.get("status"):
+            cmd.extend(["--status", args["status"]])
+        if args.get("experiment_type"):
+            cmd.extend(["--type", args["experiment_type"]])
+        if args.get("limit"):
+            cmd.extend(["--limit", str(args["limit"])])
+
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _list)
+
+
+async def _experiment_approve(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Approve an experiment for execution."""
+    async def _approve():
+        cmd = ["g2", "experiment", "approve", "--id", str(args["experiment_id"])]
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _approve)
+
+
+async def _experiment_run(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Run an approved experiment."""
+    async def _run():
+        cmd = ["g2", "experiment", "run", "--id", str(args["experiment_id"])]
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _experiment_results(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Get results for a completed experiment."""
+    async def _results():
+        cmd = ["g2", "experiment", "results", "--id", str(args["experiment_id"])]
+
+        if args.get("show_trials"):
+            cmd.append("--show-trials")
+
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _results)
+
+
+async def _experiment_chain(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a child experiment chained to a parent."""
+    async def _chain():
+        cmd = [
+            "g2", "experiment", "chain",
+            "--parent-id", str(args["parent_id"]),
+            "--name", args["name"],
+            "--search-space", args["search_space"],
+        ]
+
+        if args.get("depends_on"):
+            cmd.extend(["--depends-on", args["depends_on"]])
+        if args.get("strategy"):
+            cmd.extend(["--strategy", args["strategy"]])
+        if args.get("symbols"):
+            cmd.extend(["--symbols", args["symbols"]])
+        if args.get("start_date"):
+            cmd.extend(["--start-date", args["start_date"]])
+        if args.get("end_date"):
+            cmd.extend(["--end-date", args["end_date"]])
+        if args.get("max_trials"):
+            cmd.extend(["--max-trials", str(args["max_trials"])])
+        if args.get("search_method"):
+            cmd.extend(["--search-method", args["search_method"]])
+
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _chain)
+
+
+async def _experiment_children(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List child experiments of a parent."""
+    async def _children():
+        cmd = ["g2", "experiment", "children", "--parent-id", str(args["parent_id"])]
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _children)
+
+
+async def _experiment_status(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Get detailed status of an experiment."""
+    async def _status():
+        cmd = ["g2", "experiment", "status", "--id", str(args["experiment_id"])]
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _status)
 
 
 # ============================================================================
