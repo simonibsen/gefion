@@ -319,6 +319,84 @@ g2 cross-sectional-compute --feature indicator_rsi_14 --json
 - AAPL with RSI 72, rank 3, percentile 0.85 in `sector:TECHNOLOGY`
 - Means: AAPL's RSI is 3rd highest among tech stocks, in the top 15%
 
+### AI Experimentation Framework
+
+The experiments module enables autonomous strategy parameter optimization. AI proposes experiments, users approve, and the system runs trials using grid, random, or Bayesian search.
+
+**Propose an experiment:**
+```bash
+# Basic: explore parameter space
+g2 experiment propose \
+  --name "momentum_optimization" \
+  --strategy momentum \
+  --search-space '{"lookback_days": {"type": "int", "low": 5, "high": 30}}' \
+  --symbols AAPL,MSFT,GOOGL \
+  --start-date 2023-01-01 --end-date 2024-01-01 \
+  --objective sharpe_ratio \
+  --search-method bayesian \
+  --max-trials 50
+
+# With goal: early-stop when target achieved
+g2 experiment propose \
+  --name "target_sharpe_2" \
+  --strategy momentum \
+  --search-space '{"lookback_days": {"type": "int", "low": 5, "high": 30}}' \
+  --symbols AAPL,MSFT \
+  --start-date 2023-01-01 --end-date 2024-01-01 \
+  --goal-type achieve --goal-target 2.0 \
+  --early-stop
+```
+
+**Search space format:**
+```json
+{
+  "lookback_days": {"type": "int", "low": 5, "high": 30},
+  "entry_threshold": {"type": "float", "low": 0.01, "high": 0.10},
+  "exit_type": {"type": "categorical", "choices": ["trailing", "fixed"]}
+}
+```
+
+**Manage experiments:**
+```bash
+# List pending approvals
+g2 experiment list --status proposed
+
+# Approve for execution
+g2 experiment approve --id 1
+
+# Run experiment (executes all trials)
+g2 experiment run --id 1
+
+# View results
+g2 experiment results --id 1 --show-trials
+
+# Get detailed status
+g2 experiment status --id 1
+```
+
+**Chaining experiments:**
+```bash
+# Create child experiment that uses parent's best params
+g2 experiment chain \
+  --parent-id 1 \
+  --name "fine_tune_thresholds" \
+  --search-space '{"entry_threshold": {"type": "float", "low": 0.01, "high": 0.10}}' \
+  --depends-on best_params
+
+# List children of an experiment
+g2 experiment children --parent-id 1
+
+# Get parent info
+g2 experiment parent --id 2
+```
+
+**Search methods:**
+- `grid` - Exhaustive search (default)
+- `random` - Random sampling
+- `bayesian` - Adaptive optimization (Optuna TPE sampler)
+
+See [EXPERIMENTS.md](EXPERIMENTS.md) for detailed documentation.
+
 ## Tips and Behaviors
 - Prices/indicators skip symbols already current (latest date = today).
 - Price ingest is weekend-aware: running on Sat/Sun treats the previous weekday as “current”.

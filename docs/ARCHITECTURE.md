@@ -341,8 +341,92 @@ This enables:
 - Cross-sectional ranking and screening
 - Sector rotation strategies
 
+## AI Experimentation Framework
+
+### Overview
+
+The experiments module enables autonomous experimentation with trading strategy parameters, ML model hyperparameters, and feature selection. It follows a **hybrid autonomy** model where AI proposes experiments and users approve them initially.
+
+### Core Concepts
+
+**Experiment Types** (extensible):
+- `strategy_params` - Optimize trading strategy parameters via grid/random/bayesian search
+- Future: `feature_selection`, `hyperparameter`, `model_comparison`
+
+**Experiment Lifecycle**:
+```
+proposed → approved → running → completed/failed
+    ↓
+ rejected
+```
+
+**Search Strategies**:
+- `GridSearch` - Exhaustive search over parameter grid
+- `RandomSearch` - Random sampling from parameter space
+- `BayesianSearch` - Adaptive optimization using Optuna's TPE sampler
+
+### Database Schema
+
+```sql
+-- Core experiment tracking
+experiments (
+    id, name, experiment_type,
+    config JSONB,              -- Type-specific configuration
+    search_space JSONB,        -- Parameters to explore
+    objective_metric,          -- What to optimize (sharpe_ratio, etc.)
+    objective_direction,       -- maximize or minimize
+    goal_target, goal_type,    -- Optional goal (achieve, improve)
+    status,                    -- proposed, approved, running, completed, failed
+    parent_experiment_id,      -- For chaining
+    results JSONB,             -- Best params, metrics
+    best_score, total_trials, completed_trials
+)
+
+-- Individual trial results
+experiment_trials (
+    id, experiment_id, trial_number,
+    params JSONB,              -- Parameters tested
+    metrics JSONB,             -- All metrics (sharpe, return, drawdown)
+    score,                     -- Primary optimization metric
+    duration_seconds
+)
+```
+
+### Experiment Chaining
+
+Experiments can be chained where child experiments use parent outputs:
+
+```
+Experiment A (feature_selection)
+    ↓ output: best_features
+Experiment B (hyperparameter, uses best_features)
+    ↓ output: best_model
+Experiment C (threshold_tuning)
+```
+
+### Integration Points
+
+- **Backtest Engine**: Strategy param experiments run backtests for evaluation
+- **ML Pipeline**: Hyperparameter experiments train and evaluate models
+- **MCP Server**: AI can propose experiments via MCP tools
+- **CLI**: Full experiment management via `g2 experiment` commands
+
+### Module Structure
+
+```
+src/g2/experiments/
+├── __init__.py          # Public API exports
+├── core.py              # ExperimentConfig, ExperimentRunner
+├── search.py            # GridSearch, RandomSearch, BayesianSearch
+└── types/
+    └── strategy_params.py   # StrategyParamExperiment
+```
+
+See [EXPERIMENTS.md](EXPERIMENTS.md) for detailed documentation.
+
 ## Related Documentation
 
+- **Experiments**: [EXPERIMENTS.md](EXPERIMENTS.md) - AI experimentation framework
 - **ML Roadmap**: [ML_ROADMAP.md](ML_ROADMAP.md) - Future features and enhancements
 - **ML Vision**: [archive/ml/HIGHLEVEL.md](archive/ml/HIGHLEVEL.md) - Long-term ML goals
 - **Security Deep Dive**: [archive/ml/SECURITY_SANDBOXING.md](archive/ml/SECURITY_SANDBOXING.md) - Threat model and mitigation

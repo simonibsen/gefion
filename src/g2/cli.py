@@ -84,6 +84,9 @@ app.add_typer(strategy_app, name="strategy", cls=SortedGroup)
 volatility_app = typer.Typer(help="Volatility analysis commands (compute thresholds)")
 app.add_typer(volatility_app, name="volatility", cls=SortedGroup)
 
+experiment_app = typer.Typer(help="AI Experimentation Framework (propose/approve/run)")
+app.add_typer(experiment_app, name="experiment", cls=SortedGroup)
+
 
 def emit(
     message: str,
@@ -6171,6 +6174,611 @@ def volatility_compute(
                     f"{r['strong_threshold']:.2%}",
                 )
             console.print(table)
+
+
+# =============================================================================
+# EXPERIMENT COMMANDS
+# =============================================================================
+
+
+@experiment_app.command("propose")
+def experiment_propose(
+    name: str = typer.Option(..., "--name", "-n", help="Experiment name"),
+    experiment_type: str = typer.Option(
+        "strategy_params", "--type", "-t",
+        help="Experiment type (strategy_params, feature_selection, hyperparameter)"
+    ),
+    strategy: Optional[str] = typer.Option(
+        None, "--strategy", help="Strategy name (for strategy_params type)"
+    ),
+    search_space: str = typer.Option(
+        ..., "--search-space", "-s",
+        help='JSON search space, e.g. \'{"lookback_days": {"type": "int", "low": 5, "high": 20}}\''
+    ),
+    symbols: Optional[str] = typer.Option(
+        None, "--symbols", help="Comma-separated symbols (e.g., AAPL,MSFT,GOOGL)"
+    ),
+    exchange: Optional[str] = typer.Option(None, "--exchange", help="Exchange name"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date (YYYY-MM-DD)"),
+    objective: str = typer.Option("sharpe_ratio", "--objective", "-o", help="Metric to optimize"),
+    max_trials: int = typer.Option(50, "--max-trials", help="Maximum number of trials"),
+    search_method: str = typer.Option(
+        "grid", "--search-method", "-m",
+        help="Search method: grid, random, or bayesian"
+    ),
+    goal_type: Optional[str] = typer.Option(
+        None, "--goal-type",
+        help="Goal type: achieve (target value), improve (beat baseline)"
+    ),
+    goal_target: Optional[float] = typer.Option(None, "--goal-target", help="Target value for goal"),
+    baseline: Optional[float] = typer.Option(None, "--baseline", help="Baseline value for improvement goals"),
+    early_stop: bool = typer.Option(False, "--early-stop", help="Stop when goal achieved"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Propose a new experiment for approval."""
+    from g2.experiments.core import ExperimentConfig, ExperimentRunner
+
+    try:
+        search_space_dict = json.loads(search_space)
+    except json.JSONDecodeError as e:
+        emit_error(f"Invalid JSON in search-space: {e}", json_output=json_output)
+
+    # Build extra config
+    extra_config = {}
+    if strategy:
+        extra_config["strategy"] = strategy
+
+    config = ExperimentConfig(
+        name=name,
+        experiment_type=experiment_type,
+        search_space=search_space_dict,
+        objective_metric=objective,
+        max_trials=max_trials,
+        search_method=search_method,
+        goal_type=goal_type,
+        goal_target=goal_target,
+        baseline_value=baseline,
+        early_stop_on_goal=early_stop,
+        symbols=parse_comma_separated(symbols) if symbols else None,
+        exchange=exchange,
+        start_date=start_date,
+        end_date=end_date,
+        extra_config=extra_config,
+    )
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        experiment_id = runner.propose(config, proposed_by="user")
+        experiment = runner.get(experiment_id)
+
+        if json_output:
+            emit_json({
+                "experiment_id": experiment_id,
+                "name": name,
+                "status": "proposed",
+                "message": f"Experiment #{experiment_id} proposed. Use 'g2 experiment approve --id {experiment_id}' to approve."
+            })
+        else:
+            console = Console()
+            console.print(f"[bold green]Experiment #{experiment_id} proposed[/bold green]")
+            console.print(f"  Name: {name}")
+            console.print(f"  Type: {experiment_type}")
+            console.print(f"  Objective: {objective}")
+            console.print(f"  Max Trials: {max_trials}")
+            if goal_type:
+                console.print(f"  Goal: {goal_type} {goal_target}")
+            console.print()
+            console.print(f"[dim]To approve: g2 experiment approve --id {experiment_id}[/dim]")
+
+    except Exception as e:
+        emit_error(f"Failed to propose experiment: {e}", json_output=json_output)
+
+
+@experiment_app.command("list")
+def experiment_list(
+    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by status"),
+    experiment_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by type"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Maximum results"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """List experiments."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        experiments = runner.list(status=status, experiment_type=experiment_type, limit=limit)
+
+        if json_output:
+            emit_json({"count": len(experiments), "experiments": experiments})
+        else:
+            console = Console()
+            if not experiments:
+                console.print("[dim]No experiments found[/dim]")
+                return
+
+            table = Table(title="Experiments")
+            table.add_column("ID", style="cyan")
+            table.add_column("Name")
+            table.add_column("Type")
+            table.add_column("Status")
+            table.add_column("Trials")
+            table.add_column("Best Score")
+
+            for exp in experiments:
+                trials = f"{exp.get('completed_trials', 0) or 0}/{exp.get('total_trials', 0) or 0}"
+                best = f"{exp['best_score']:.4f}" if exp.get('best_score') else "-"
+                table.add_row(
+                    str(exp["id"]),
+                    exp["name"][:30],
+                    exp["experiment_type"],
+                    exp["status"],
+                    trials,
+                    best,
+                )
+
+            console.print(table)
+
+    except Exception as e:
+        emit_error(f"Failed to list experiments: {e}", json_output=json_output)
+
+
+@experiment_app.command("pending")
+def experiment_pending(
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """List experiments awaiting approval."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        pending = runner.get_pending_approvals()
+
+        if json_output:
+            emit_json({"count": len(pending), "pending": pending})
+        else:
+            console = Console()
+            if not pending:
+                console.print("[dim]No experiments awaiting approval[/dim]")
+                return
+
+            console.print(f"[bold]{len(pending)} experiment(s) awaiting approval:[/bold]\n")
+
+            for exp in pending:
+                console.print(f"[cyan]#{exp['id']}[/cyan] {exp['name']}")
+                console.print(f"  Type: {exp['experiment_type']}")
+                console.print(f"  Objective: {exp['objective_metric']}")
+                console.print(f"  Trials: {exp.get('total_trials', 0)}")
+                if exp.get('goal_type'):
+                    console.print(f"  Goal: {exp['goal_type']} {exp.get('goal_target')}")
+                console.print(f"  [dim]Approve: g2 experiment approve --id {exp['id']}[/dim]")
+                console.print()
+
+    except Exception as e:
+        emit_error(f"Failed to get pending experiments: {e}", json_output=json_output)
+
+
+@experiment_app.command("approve")
+def experiment_approve(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to approve"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Approve a proposed experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        runner.approve(experiment_id, approver="user")
+        experiment = runner.get(experiment_id)
+
+        if json_output:
+            emit_json({
+                "experiment_id": experiment_id,
+                "status": "approved",
+                "message": f"Experiment #{experiment_id} approved. Use 'g2 experiment run --id {experiment_id}' to run."
+            })
+        else:
+            console = Console()
+            console.print(f"[bold green]Experiment #{experiment_id} approved[/bold green]")
+            console.print(f"[dim]To run: g2 experiment run --id {experiment_id}[/dim]")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+    except Exception as e:
+        emit_error(f"Failed to approve experiment: {e}", json_output=json_output)
+
+
+@experiment_app.command("reject")
+def experiment_reject(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to reject"),
+    reason: Optional[str] = typer.Option(None, "--reason", "-r", help="Rejection reason"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Reject a proposed experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        runner.reject(experiment_id, reason=reason)
+
+        if json_output:
+            emit_json({
+                "experiment_id": experiment_id,
+                "status": "rejected",
+                "reason": reason,
+            })
+        else:
+            console = Console()
+            console.print(f"[bold yellow]Experiment #{experiment_id} rejected[/bold yellow]")
+            if reason:
+                console.print(f"  Reason: {reason}")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+    except Exception as e:
+        emit_error(f"Failed to reject experiment: {e}", json_output=json_output)
+
+
+@experiment_app.command("status")
+def experiment_status(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Get detailed status of an experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        experiment = runner.get(experiment_id)
+
+        if json_output:
+            # Convert datetime objects to strings for JSON
+            for key in ["created_at", "started_at", "completed_at"]:
+                if experiment.get(key):
+                    experiment[key] = str(experiment[key])
+            emit_json(experiment)
+        else:
+            console = Console()
+            console.print(f"[bold]Experiment #{experiment_id}[/bold]\n")
+
+            status_color = {
+                "proposed": "yellow",
+                "approved": "blue",
+                "running": "cyan",
+                "completed": "green",
+                "failed": "red",
+                "rejected": "dim",
+            }.get(experiment["status"], "white")
+
+            console.print(f"  Name: {experiment['name']}")
+            console.print(f"  Type: {experiment['experiment_type']}")
+            console.print(f"  Status: [{status_color}]{experiment['status']}[/{status_color}]")
+            console.print(f"  Objective: {experiment['objective_metric']} ({experiment['objective_direction']})")
+
+            if experiment.get("goal_type"):
+                console.print(f"  Goal: {experiment['goal_type']} {experiment.get('goal_target')}")
+                if experiment.get("baseline_value"):
+                    console.print(f"  Baseline: {experiment['baseline_value']}")
+
+            console.print()
+            console.print(f"  Trials: {experiment.get('completed_trials', 0) or 0}/{experiment.get('total_trials', 0) or 0}")
+            if experiment.get("best_score"):
+                console.print(f"  Best Score: {experiment['best_score']:.6f}")
+            if experiment.get("goal_achieved") is not None:
+                ga = "[green]Yes[/green]" if experiment["goal_achieved"] else "[red]No[/red]"
+                console.print(f"  Goal Achieved: {ga}")
+
+            console.print()
+            console.print(f"  Created: {experiment.get('created_at')}")
+            if experiment.get("started_at"):
+                console.print(f"  Started: {experiment['started_at']}")
+            if experiment.get("completed_at"):
+                console.print(f"  Completed: {experiment['completed_at']}")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+    except Exception as e:
+        emit_error(f"Failed to get experiment status: {e}", json_output=json_output)
+
+
+@experiment_app.command("run")
+def experiment_run(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to run"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Run an approved experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        # Check experiment is approved before running
+        experiment = runner.get(experiment_id)
+        if experiment["status"] != "approved":
+            emit_error(
+                f"Experiment {experiment_id} has status '{experiment['status']}'. "
+                "Only 'approved' experiments can be run.",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        if not json_output:
+            console = Console()
+            console.print(f"[bold]Running experiment #{experiment_id}:[/bold] {experiment['name']}")
+            console.print()
+
+        # Run the experiment
+        results = runner.run(experiment_id)
+
+        if json_output:
+            emit_json(results)
+        else:
+            console.print("[green]Experiment completed![/green]\n")
+            console.print(f"  Trials completed: {results['completed_trials']}")
+            if results.get("best_score") is not None:
+                console.print(f"  Best score: {results['best_score']:.6f}")
+            if results.get("best_params"):
+                console.print(f"  Best params: {results['best_params']}")
+            if results.get("goal_achieved") is not None:
+                ga = "[green]Yes[/green]" if results["goal_achieved"] else "[red]No[/red]"
+                console.print(f"  Goal achieved: {ga}")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        raise typer.Exit(1)
+    except Exception as e:
+        emit_error(f"Experiment failed: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("results")
+def experiment_results(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    show_trials: bool = typer.Option(False, "--trials", "-t", help="Show all trial details"),
+) -> None:
+    """Get results for a completed experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        results = runner.get_results(experiment_id)
+
+        if results["status"] != "completed":
+            emit_error(
+                f"Experiment {experiment_id} has status '{results['status']}'. "
+                "Results are only available for 'completed' experiments.",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        if json_output:
+            emit_json(results)
+        else:
+            console = Console()
+            console.print(f"[bold]Results for Experiment #{experiment_id}[/bold]\n")
+
+            # Extract best params and score from results
+            result_data = results.get("results") or {}
+            best_params = result_data.get("best_params")
+            best_score = results.get("best_score")
+
+            console.print(f"  Status: [green]{results['status']}[/green]")
+            console.print(f"  Trials: {results['completed_trials']}/{results.get('total_trials', 'N/A')}")
+
+            if best_score is not None:
+                console.print(f"  Best Score: [bold cyan]{best_score:.6f}[/bold cyan]")
+
+            if best_params:
+                console.print(f"  Best Params: {best_params}")
+
+            if results.get("goal_achieved") is not None:
+                ga = "[green]Yes[/green]" if results["goal_achieved"] else "[red]No[/red]"
+                console.print(f"  Goal Achieved: {ga}")
+
+            if show_trials:
+                console.print("\n[bold]Trial Details:[/bold]")
+                # Query trials from database
+                import psycopg
+                with psycopg.connect(db_url) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT trial_number, params, metrics, score, duration_seconds
+                            FROM experiment_trials
+                            WHERE experiment_id = %s
+                            ORDER BY trial_number
+                        """, (experiment_id,))
+                        for row in cur.fetchall():
+                            trial_num, params, metrics, score, duration = row
+                            score_str = f"{float(score):.6f}" if score is not None else "N/A"
+                            console.print(f"  Trial {trial_num}: score={score_str} params={params}")
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        raise typer.Exit(1)
+    except Exception as e:
+        emit_error(f"Failed to get experiment results: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("chain")
+def experiment_chain(
+    parent_id: int = typer.Option(..., "--parent", "-p", help="Parent experiment ID"),
+    name: str = typer.Option(..., "--name", "-n", help="Name for child experiment"),
+    search_space: str = typer.Option(
+        ..., "--search-space", "-s",
+        help='JSON search space for child experiment'
+    ),
+    depends_on: str = typer.Option(
+        "best_params", "--depends-on", "-d",
+        help="Parent output to use (best_params, best_score)"
+    ),
+    strategy: Optional[str] = typer.Option(None, "--strategy", help="Strategy name"),
+    symbols: Optional[str] = typer.Option(None, "--symbols", help="Comma-separated symbols"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="Start date"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date"),
+    max_trials: int = typer.Option(50, "--max-trials", help="Maximum trials"),
+    search_method: str = typer.Option("grid", "--search-method", "-m", help="Search method"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Create a child experiment chained to a parent."""
+    from g2.experiments.core import ExperimentConfig, ExperimentRunner
+
+    try:
+        search_space_dict = json.loads(search_space)
+    except json.JSONDecodeError as e:
+        emit_error(f"Invalid JSON in search-space: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+    extra_config = {}
+    if strategy:
+        extra_config["strategy"] = strategy
+
+    child_config = ExperimentConfig(
+        name=name,
+        experiment_type="strategy_params",
+        search_space=search_space_dict,
+        max_trials=max_trials,
+        search_method=search_method,
+        symbols=parse_comma_separated(symbols) if symbols else None,
+        start_date=start_date,
+        end_date=end_date,
+        extra_config=extra_config,
+    )
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        child_id = runner.chain(parent_id, child_config, depends_on=depends_on)
+
+        if json_output:
+            emit_json({
+                "status": "proposed",
+                "child_id": child_id,
+                "parent_id": parent_id,
+                "depends_on": depends_on,
+            })
+        else:
+            console = Console()
+            console.print(f"[green]Child experiment #{child_id} created![/green]")
+            console.print(f"  Parent: #{parent_id}")
+            console.print(f"  Depends on: {depends_on}")
+            console.print(f"  Status: proposed")
+            console.print("\nApprove with: g2 experiment approve --id", child_id)
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        raise typer.Exit(1)
+    except Exception as e:
+        emit_error(f"Failed to chain experiment: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("children")
+def experiment_children(
+    parent_id: int = typer.Option(..., "--parent", "-p", help="Parent experiment ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """List child experiments of a parent."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        children = runner.list_children(parent_id)
+
+        if json_output:
+            # Convert datetime objects to strings
+            for child in children:
+                for key in ["created_at", "completed_at"]:
+                    if child.get(key):
+                        child[key] = str(child[key])
+            emit_json(children)
+        else:
+            console = Console()
+            if not children:
+                console.print(f"No child experiments for parent #{parent_id}")
+                return
+
+            console.print(f"[bold]Children of Experiment #{parent_id}[/bold]\n")
+            for child in children:
+                status_color = {
+                    "proposed": "yellow",
+                    "approved": "blue",
+                    "running": "cyan",
+                    "completed": "green",
+                    "failed": "red",
+                }.get(child["status"], "white")
+
+                score_str = f" (score: {child['best_score']:.4f})" if child.get("best_score") else ""
+                console.print(
+                    f"  #{child['id']} {child['name']} "
+                    f"[{status_color}]{child['status']}[/{status_color}]{score_str}"
+                )
+                console.print(f"      Depends on: {child['depends_on']}")
+
+    except Exception as e:
+        emit_error(f"Failed to list children: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("parent")
+def experiment_parent(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Show parent experiment and its results for a chained experiment."""
+    from g2.experiments.core import ExperimentRunner
+
+    db_url = str(SETTINGS.database_url)
+    runner = ExperimentRunner(db_url)
+
+    try:
+        parent_results = runner.get_parent_results(experiment_id)
+
+        if parent_results is None:
+            if json_output:
+                emit_json({"parent": None})
+            else:
+                console = Console()
+                console.print(f"Experiment #{experiment_id} has no parent.")
+            return
+
+        if json_output:
+            emit_json(parent_results)
+        else:
+            console = Console()
+            console.print(f"[bold]Parent of Experiment #{experiment_id}[/bold]\n")
+            console.print(f"  Parent ID: #{parent_results['experiment_id']}")
+            console.print(f"  Name: {parent_results['name']}")
+            console.print(f"  Status: {parent_results['status']}")
+            console.print(f"  Depends on: {parent_results['depends_on']}")
+
+            if parent_results.get("best_score") is not None:
+                console.print(f"  Best Score: {parent_results['best_score']:.6f}")
+            if parent_results.get("best_params"):
+                console.print(f"  Best Params: {parent_results['best_params']}")
+
+    except Exception as e:
+        emit_error(f"Failed to get parent: {e}", json_output=json_output)
+        raise typer.Exit(1)
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
