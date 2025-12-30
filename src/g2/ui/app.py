@@ -42,6 +42,7 @@ PAGES = [
     "📁 Data Management",
     "🧠 ML Pipeline",
     "📈 Backtesting",
+    "📚 Documentation",
     "⚙️ Settings",
 ]
 
@@ -108,6 +109,9 @@ def main():
     elif current_page == "📈 Backtesting":
         from g2.ui.views.backtest import render_backtest
         render_backtest()
+    elif current_page == "📚 Documentation":
+        from g2.ui.views.documentation import render_docs
+        render_docs()
     elif current_page == "⚙️ Settings":
         from g2.ui.views.settings import render_settings
         render_settings()

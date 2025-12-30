@@ -49,6 +49,7 @@ class TestUIStructure:
             "data.py",
             "ml.py",
             "backtest.py",
+            "documentation.py",
             "settings.py",
         ]
 
@@ -90,6 +91,11 @@ class TestUIStructure:
         """Settings view should have render_settings function."""
         content = (ui_dir / "views" / "settings.py").read_text()
         assert "def render_settings(" in content
+
+    def test_documentation_has_render_function(self, ui_dir):
+        """Documentation view should have render_docs function."""
+        content = (ui_dir / "views" / "documentation.py").read_text()
+        assert "def render_docs(" in content
 
 
 class TestUILaunchCommand:
