@@ -17,11 +17,11 @@ st.set_page_config(
 # Custom CSS for better styling
 st.markdown("""
 <style>
-    /* Hide deploy button */
+    /* Hide deploy button only, keep other toolbar functions */
     .stDeployButton {
         display: none;
     }
-    [data-testid="stToolbar"] {
+    [data-testid="stToolbarActionButton"][aria-label="Deploy"] {
         display: none;
     }
 
