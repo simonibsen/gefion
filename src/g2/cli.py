@@ -7391,6 +7391,64 @@ def chart_rolling(
         open_in_browser(chart_path)
 
 
+@app.command("ui")
+def launch_ui(
+    port: int = typer.Option(8501, "--port", "-p", help="Port to run the UI on"),
+    host: str = typer.Option("localhost", "--host", "-h", help="Host to bind to"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Don't auto-open browser"),
+) -> None:
+    """Launch the Streamlit web UI.
+
+    Opens an interactive web interface for g2 with:
+    - Charts and visualizations
+    - AI-powered analysis (Claude)
+    - ML pipeline management
+    - Backtesting tools
+
+    Examples:
+        g2 ui                    # Launch on default port 8501
+        g2 ui --port 8080        # Use custom port
+        g2 ui --no-browser       # Don't open browser automatically
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    # Find the app.py file
+    ui_app = Path(__file__).parent / "ui" / "app.py"
+
+    if not ui_app.exists():
+        emit("UI app not found. Please reinstall g2.", error=True)
+        raise typer.Exit(1)
+
+    emit(f"Starting g2 UI on http://{host}:{port}")
+    emit("Press Ctrl+C to stop")
+
+    cmd = [
+        sys.executable, "-m", "streamlit", "run",
+        str(ui_app),
+        "--server.port", str(port),
+        "--server.address", host,
+        "--theme.primaryColor", "#2962ff",
+        "--theme.backgroundColor", "#ffffff",
+        "--theme.secondaryBackgroundColor", "#f0f2f6",
+    ]
+
+    if no_browser:
+        cmd.extend(["--server.headless", "true"])
+
+    try:
+        subprocess.run(cmd, check=True)
+    except KeyboardInterrupt:
+        emit("\nShutting down UI...")
+    except subprocess.CalledProcessError as e:
+        emit(f"UI failed to start: {e}", error=True)
+        raise typer.Exit(1)
+    except FileNotFoundError:
+        emit("Streamlit not installed. Install with: pip install 'g2[ui]'", error=True)
+        raise typer.Exit(1)
+
+
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
     import atexit
     # Register shutdown handler to flush traces on exit
