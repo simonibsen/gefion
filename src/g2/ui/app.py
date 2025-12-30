@@ -57,25 +57,42 @@ st.markdown("""
 
 def main():
     """Main application entry point."""
+    # Page options
+    pages = [
+        "🏠 Dashboard",
+        "📊 Charts",
+        "🤖 AI Assistant",
+        "📁 Data Management",
+        "🧠 ML Pipeline",
+        "📈 Backtesting",
+        "⚙️ Settings",
+    ]
+
+    # Initialize session state for navigation
+    if "page" not in st.session_state:
+        st.session_state.page = pages[0]
+
+    # Ensure page is valid
+    if st.session_state.page not in pages:
+        st.session_state.page = pages[0]
+
     # Sidebar navigation
     with st.sidebar:
         st.title("📈 g2 Trading")
         st.markdown("---")
 
-        # Navigation
+        # Navigation - use session state for current selection
         page = st.radio(
             "Navigation",
-            [
-                "🏠 Dashboard",
-                "📊 Charts",
-                "🤖 AI Assistant",
-                "📁 Data Management",
-                "🧠 ML Pipeline",
-                "📈 Backtesting",
-                "⚙️ Settings",
-            ],
+            pages,
+            index=pages.index(st.session_state.page),
             label_visibility="collapsed",
+            key="nav_radio",
         )
+
+        # Update session state when radio changes
+        if page != st.session_state.page:
+            st.session_state.page = page
 
         st.markdown("---")
 
@@ -91,25 +108,27 @@ def main():
         st.caption("g2 Trading Analysis v1.0")
 
     # Main content area based on selected page
-    if page == "🏠 Dashboard":
+    current_page = st.session_state.page
+
+    if current_page == "🏠 Dashboard":
         from g2.ui.pages.dashboard import render_dashboard
         render_dashboard()
-    elif page == "📊 Charts":
+    elif current_page == "📊 Charts":
         from g2.ui.pages.charts import render_charts
         render_charts()
-    elif page == "🤖 AI Assistant":
+    elif current_page == "🤖 AI Assistant":
         from g2.ui.pages.assistant import render_assistant
         render_assistant()
-    elif page == "📁 Data Management":
+    elif current_page == "📁 Data Management":
         from g2.ui.pages.data import render_data
         render_data()
-    elif page == "🧠 ML Pipeline":
+    elif current_page == "🧠 ML Pipeline":
         from g2.ui.pages.ml import render_ml
         render_ml()
-    elif page == "📈 Backtesting":
+    elif current_page == "📈 Backtesting":
         from g2.ui.pages.backtest import render_backtest
         render_backtest()
-    elif page == "⚙️ Settings":
+    elif current_page == "⚙️ Settings":
         from g2.ui.pages.settings import render_settings
         render_settings()
 

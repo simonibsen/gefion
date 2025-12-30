@@ -1,230 +1,182 @@
-"""AI Assistant page - Claude integration for analysis."""
+"""AI Assistant page - Claude Code integration."""
 
 import streamlit as st
-import os
-from datetime import datetime
-
-
-def get_system_context() -> str:
-    """Build system context with current market data."""
-    context_parts = ["You are a trading analysis assistant integrated with g2."]
-
-    try:
-        from g2.ui.components.database import get_connection, get_symbols
-
-        symbols = get_symbols()
-        context_parts.append(f"\nAvailable symbols: {len(symbols)} stocks in database.")
-
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                # Get latest prices for context
-                cur.execute("""
-                    SELECT s.symbol, o.close, o.date
-                    FROM stock_ohlcv o
-                    JOIN stocks s ON o.data_id = s.id
-                    WHERE o.date = (SELECT MAX(date) FROM stock_ohlcv)
-                    ORDER BY s.symbol
-                    LIMIT 20
-                """)
-                prices = cur.fetchall()
-
-                if prices:
-                    price_str = ", ".join([f"{s}: ${p:.2f}" for s, p, _ in prices[:10]])
-                    context_parts.append(f"\nRecent prices: {price_str}")
-                    context_parts.append(f"Data as of: {prices[0][2]}")
-
-    except Exception:
-        pass
-
-    context_parts.append("""
-
-You can help with:
-- Stock analysis and insights
-- Technical analysis interpretation
-- Strategy recommendations
-- Explaining chart patterns
-- Portfolio suggestions
-
-Always be helpful, accurate, and educational. When discussing specific stocks,
-remind users that this is not financial advice.""")
-
-    return "\n".join(context_parts)
-
-
-def call_claude(messages: list, system: str) -> str:
-    """Call Claude API with messages."""
-    import anthropic
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set")
-
-    client = anthropic.Anthropic(api_key=api_key)
-
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2048,
-        system=system,
-        messages=messages,
-    )
-
-    return response.content[0].text
 
 
 def render_assistant():
-    """Render the AI assistant page."""
+    """Render the AI Assistant page."""
     st.title("🤖 AI Assistant")
-    st.markdown("Chat with Claude about stocks, strategies, and market analysis.")
+    st.markdown("Use Claude Code for AI-powered analysis of your trading data.")
 
-    # Check for API key
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        st.warning("⚠️ ANTHROPIC_API_KEY not set. Please set it in your environment or Settings page.")
+    st.info("""
+    💡 **Claude Code Integration**
 
-        with st.expander("How to set API key"):
-            st.markdown("""
-            **Option 1: Environment variable**
-            ```bash
-            export ANTHROPIC_API_KEY=your-key-here
-            ```
-
-            **Option 2: Settings page**
-            Go to Settings and enter your API key there.
-            """)
-
-        # Allow setting key in UI
-        key_input = st.text_input("Enter API Key", type="password")
-        if key_input:
-            os.environ["ANTHROPIC_API_KEY"] = key_input
-            st.success("API key set for this session")
-            st.rerun()
-        return
-
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    if "system_context" not in st.session_state:
-        st.session_state.system_context = get_system_context()
-
-    # Quick prompts
-    st.markdown("### Quick Prompts")
-    quick_prompts = st.columns(4)
-
-    with quick_prompts[0]:
-        if st.button("📊 Analyze AAPL", use_container_width=True):
-            st.session_state.quick_prompt = "Analyze Apple (AAPL) stock. What are the key factors to consider?"
-
-    with quick_prompts[1]:
-        if st.button("📈 Bull vs Bear", use_container_width=True):
-            st.session_state.quick_prompt = "What's the bull case vs bear case for the tech sector right now?"
-
-    with quick_prompts[2]:
-        if st.button("🎯 Strategy Tips", use_container_width=True):
-            st.session_state.quick_prompt = "What are some effective momentum trading strategies?"
-
-    with quick_prompts[3]:
-        if st.button("📉 Risk Mgmt", use_container_width=True):
-            st.session_state.quick_prompt = "Explain position sizing and risk management best practices."
+    This UI works alongside your Claude Code session. Ask Claude Code questions
+    about your g2 data directly in your terminal - it has full access to:
+    - Database queries via MCP tools
+    - Chart generation
+    - Backtesting
+    - ML predictions
+    """)
 
     st.markdown("---")
 
-    # Chat container
-    chat_container = st.container()
+    # Quick prompts section
+    st.subheader("📋 Quick Prompts")
+    st.markdown("Copy these prompts to use with Claude Code:")
 
-    # Display chat history
-    with chat_container:
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    prompts = [
+        {
+            "title": "Market Analysis",
+            "prompt": "Analyze the current market conditions for my portfolio. Look at recent price movements, volatility, and any notable patterns.",
+            "icon": "📊"
+        },
+        {
+            "title": "Stock Deep Dive",
+            "prompt": "Give me a detailed analysis of [SYMBOL] including recent price action, technical indicators, and any predictions we have.",
+            "icon": "🔍"
+        },
+        {
+            "title": "Compare Stocks",
+            "prompt": "Compare the performance of [SYMBOL1] and [SYMBOL2] over the last year. Show me a comparison chart.",
+            "icon": "⚖️"
+        },
+        {
+            "title": "Strategy Recommendation",
+            "prompt": "Based on my data, which trading strategy (momentum, mean_reversion, ma_crossover, breakout) would have performed best recently?",
+            "icon": "🎯"
+        },
+        {
+            "title": "Risk Assessment",
+            "prompt": "Analyze the risk profile of my portfolio. Look at volatility, drawdowns, and correlation between holdings.",
+            "icon": "⚠️"
+        },
+        {
+            "title": "ML Predictions",
+            "prompt": "What are the current ML predictions for my top holdings? Show me the q10/q50/q90 ranges.",
+            "icon": "🧠"
+        },
+    ]
 
-    # Handle quick prompts
-    if "quick_prompt" in st.session_state:
-        prompt = st.session_state.quick_prompt
-        del st.session_state.quick_prompt
+    cols = st.columns(2)
+    for i, p in enumerate(prompts):
+        with cols[i % 2]:
+            with st.expander(f"{p['icon']} {p['title']}"):
+                st.code(p["prompt"], language=None)
 
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    st.markdown("---")
 
-        with chat_container:
-            with st.chat_message("user"):
-                st.markdown(prompt)
+    # Database context section
+    st.subheader("📊 Current Data Context")
+    st.markdown("Information Claude Code can access about your g2 setup:")
 
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        response = call_claude(
-                            st.session_state.messages,
-                            st.session_state.system_context
-                        )
-                        st.markdown(response)
-                        st.session_state.messages.append({"role": "assistant", "content": response})
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-
-    # Chat input
-    if prompt := st.chat_input("Ask about stocks, strategies, or analysis..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        with chat_container:
-            with st.chat_message("user"):
-                st.markdown(prompt)
-
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        response = call_claude(
-                            st.session_state.messages,
-                            st.session_state.system_context
-                        )
-                        st.markdown(response)
-                        st.session_state.messages.append({"role": "assistant", "content": response})
-                    except Exception as e:
-                        st.error(f"Error calling Claude: {e}")
-
-    # Sidebar controls
-    with st.sidebar:
-        st.markdown("### Chat Controls")
-
-        if st.button("🗑️ Clear Chat", use_container_width=True):
-            st.session_state.messages = []
-            st.rerun()
-
-        if st.button("🔄 Refresh Context", use_container_width=True):
-            st.session_state.system_context = get_system_context()
-            st.success("Context refreshed with latest data")
-
-        with st.expander("📋 System Context"):
-            st.text(st.session_state.system_context[:500] + "...")
-
-
-def render_stock_context(symbol: str) -> str:
-    """Get detailed context for a specific stock."""
     try:
         from g2.ui.components.database import get_connection
-        from g2.charts.analysis import compute_price_insights
 
         with get_connection() as conn:
-            from g2.charts.queries import fetch_ohlcv_for_chart
-            from datetime import timedelta, date
+            with conn.cursor() as cur:
+                # Get counts
+                cur.execute("SELECT COUNT(*) FROM stocks WHERE status = 'Active'")
+                stock_count = cur.fetchone()[0]
 
-            end = date.today()
-            start = end - timedelta(days=365)
-            ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
+                cur.execute("SELECT COUNT(*) FROM stock_ohlcv")
+                price_count = cur.fetchone()[0]
 
-            if ohlcv:
-                insights = compute_price_insights(ohlcv, {})
-                return f"""
-Stock: {symbol}
-Current Price: ${insights.get('current_price', 0):.2f}
-1-Day Change: {insights.get('change_1d_pct', 0):+.2f}%
-1-Month Change: {insights.get('change_1m_pct', 0):+.2f}%
-Period High: ${insights.get('period_high', 0):.2f}
-Period Low: ${insights.get('period_low', 0):.2f}
-Volatility: {insights.get('volatility', 0):.1f}%
+                cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
+                feature_count = cur.fetchone()[0]
 
-Insights:
-{chr(10).join('- ' + i for i in insights.get('insights', [])[:5])}
-"""
-    except Exception:
-        pass
-    return f"Stock: {symbol} (detailed data not available)"
+                cur.execute("SELECT COUNT(*) FROM ml_models")
+                model_count = cur.fetchone()[0]
+
+                # Get date range
+                cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
+                date_range = cur.fetchone()
+
+                # Get symbols
+                cur.execute("""
+                    SELECT symbol FROM stocks
+                    WHERE status = 'Active'
+                    ORDER BY symbol LIMIT 20
+                """)
+                symbols = [row[0] for row in cur.fetchall()]
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Active Stocks", stock_count)
+        with col2:
+            st.metric("Price Records", f"{price_count:,}")
+        with col3:
+            st.metric("Features", feature_count)
+        with col4:
+            st.metric("ML Models", model_count)
+
+        if date_range[0] and date_range[1]:
+            st.caption(f"Data range: {date_range[0]} to {date_range[1]}")
+
+        if symbols:
+            st.markdown("**Available Symbols:**")
+            st.code(" ".join(symbols) + ("..." if stock_count > 20 else ""))
+
+    except Exception as e:
+        st.error(f"Could not load context: {e}")
+
+    st.markdown("---")
+
+    # MCP Tools reference
+    st.subheader("🔧 Available MCP Tools")
+    st.markdown("Claude Code can use these g2 tools directly:")
+
+    tools = [
+        ("query_database", "Run SQL queries on g2 data"),
+        ("data_update", "Fetch latest prices from AlphaVantage"),
+        ("features_list", "List available technical indicators"),
+        ("ml_train", "Train quantile regression models"),
+        ("ml_predict", "Generate price predictions"),
+        ("ml_eval", "Evaluate model performance"),
+        ("backtest_run", "Run strategy backtests"),
+        ("backtest_compare", "Compare multiple strategies"),
+        ("system_status", "Check system health"),
+    ]
+
+    for tool, desc in tools:
+        st.markdown(f"- `{tool}` - {desc}")
+
+    st.markdown("---")
+
+    # Example conversation
+    with st.expander("💬 Example Claude Code Conversation"):
+        st.markdown("""
+```
+You: What's the current state of my g2 data?
+
+Claude: Let me check the system status...
+[Uses system_status tool]
+
+You have 50 active stocks with price data from 2020-01-01 to today.
+NVDA and AMD have the most recent updates. 3 ML models are trained
+and ready for predictions.
+
+You: Generate predictions for NVDA
+
+Claude: I'll generate predictions using the latest model...
+[Uses ml_predict tool]
+
+NVDA 7-day prediction:
+- Q10 (bearish): $130.50
+- Q50 (median): $138.20
+- Q90 (bullish): $145.80
+
+The wide range suggests moderate uncertainty.
+
+You: Show me a volatility chart for NVDA
+
+Claude: Creating volatility analysis chart...
+[Uses chart command]
+
+[Opens chart in browser showing Bollinger Bands, ATR, and
+historical volatility for NVDA]
+```
+        """)
+
+    st.markdown("---")
+    st.caption("💡 Tip: Keep Claude Code running in your terminal while using this UI for the best experience.")

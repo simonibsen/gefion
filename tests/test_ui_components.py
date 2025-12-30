@@ -70,7 +70,7 @@ class TestUIStructure:
         """Assistant page should have render_assistant function."""
         content = (ui_dir / "pages" / "assistant.py").read_text()
         assert "def render_assistant(" in content
-        assert "call_claude" in content  # Claude integration
+        assert "Claude Code" in content  # Claude Code integration
 
     def test_data_has_render_function(self, ui_dir):
         """Data page should have render_data function."""
