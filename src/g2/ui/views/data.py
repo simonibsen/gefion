@@ -124,15 +124,14 @@ def render_update_section():
                 # Stream output line by line
                 for line in process.stdout:
                     line = line.strip()
-                    if not line:
+                    if not line or len(line) < 3:  # Skip empty/trivial lines
                         continue
 
                     try:
                         data = json.loads(line)
                         # Only process dict objects with progress data
                         if not isinstance(data, dict):
-                            status_text.write(str(data))
-                            continue
+                            continue  # Skip non-dict JSON
 
                         last_data = data
 
@@ -163,8 +162,9 @@ def render_update_section():
                             status_text.write(f"Last completed: **{last_ok}**")
 
                     except json.JSONDecodeError:
-                        # Non-JSON output, show as-is
-                        status_text.write(line)
+                        # Only show meaningful status messages
+                        if not line.startswith(('{', '}', '[', ']')):
+                            status_text.write(line)
 
                 # Wait for process to complete
                 returncode = process.wait()
@@ -226,18 +226,19 @@ def render_update_section():
 
                 for line in process.stdout:
                     line = line.strip()
-                    if not line:
+                    if not line or len(line) < 3:  # Skip empty/trivial lines like }
                         continue
                     try:
                         data = json.loads(line)
                         if not isinstance(data, dict):
-                            status_text.write(str(data))
-                            continue
+                            continue  # Skip non-dict JSON (strings, etc.)
                         last_data = data
                         inserted = data.get("inserted_total", data.get("inserted", 0))
                         status_text.write(f"Fetched {inserted:,} records...")
                     except json.JSONDecodeError:
-                        status_text.write(line)
+                        # Only show meaningful status messages
+                        if not line.startswith(('{', '}', '[', ']')):
+                            status_text.write(line)
 
                 returncode = process.wait()
 

@@ -271,3 +271,10 @@ class TestJSONParsingRobustness:
         content = (views_dir / "ml.py").read_text()
         # Should have isinstance check to handle JSON strings
         assert 'isinstance(data, dict)' in content
+
+    def test_data_view_filters_json_fragments(self, views_dir):
+        """Data view should filter out JSON fragments like } from display."""
+        content = (views_dir / "data.py").read_text()
+        # Should skip short lines and JSON bracket lines
+        assert 'len(line) < 3' in content
+        assert "startswith(('{', '}'" in content
