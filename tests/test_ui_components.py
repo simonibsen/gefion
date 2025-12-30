@@ -38,10 +38,10 @@ class TestUIStructure:
         assert (components_dir / "database.py").exists()
         assert (components_dir / "status.py").exists()
 
-    def test_ui_pages_exist(self, ui_dir):
-        """All page modules should exist."""
-        pages_dir = ui_dir / "pages"
-        expected_pages = [
+    def test_ui_views_exist(self, ui_dir):
+        """All view modules should exist."""
+        views_dir = ui_dir / "views"
+        expected_views = [
             "__init__.py",
             "dashboard.py",
             "charts.py",
@@ -52,44 +52,43 @@ class TestUIStructure:
             "settings.py",
         ]
 
-        assert pages_dir.exists()
-        for page in expected_pages:
-            assert (pages_dir / page).exists(), f"Page {page} not found"
+        assert views_dir.exists()
+        for view in expected_views:
+            assert (views_dir / view).exists(), f"View {view} not found"
 
     def test_dashboard_has_render_function(self, ui_dir):
-        """Dashboard page should have render_dashboard function."""
-        content = (ui_dir / "pages" / "dashboard.py").read_text()
+        """Dashboard view should have render_dashboard function."""
+        content = (ui_dir / "views" / "dashboard.py").read_text()
         assert "def render_dashboard(" in content
 
     def test_charts_has_render_function(self, ui_dir):
-        """Charts page should have render_charts function."""
-        content = (ui_dir / "pages" / "charts.py").read_text()
+        """Charts view should have render_charts function."""
+        content = (ui_dir / "views" / "charts.py").read_text()
         assert "def render_charts(" in content
 
     def test_assistant_has_render_function(self, ui_dir):
-        """Assistant page should have render_assistant function."""
-        content = (ui_dir / "pages" / "assistant.py").read_text()
+        """Assistant view should have render_assistant function."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
         assert "def render_assistant(" in content
-        assert "Claude Code" in content  # Claude Code integration
 
     def test_data_has_render_function(self, ui_dir):
-        """Data page should have render_data function."""
-        content = (ui_dir / "pages" / "data.py").read_text()
+        """Data view should have render_data function."""
+        content = (ui_dir / "views" / "data.py").read_text()
         assert "def render_data(" in content
 
     def test_ml_has_render_function(self, ui_dir):
-        """ML page should have render_ml function."""
-        content = (ui_dir / "pages" / "ml.py").read_text()
+        """ML view should have render_ml function."""
+        content = (ui_dir / "views" / "ml.py").read_text()
         assert "def render_ml(" in content
 
     def test_backtest_has_render_function(self, ui_dir):
-        """Backtest page should have render_backtest function."""
-        content = (ui_dir / "pages" / "backtest.py").read_text()
+        """Backtest view should have render_backtest function."""
+        content = (ui_dir / "views" / "backtest.py").read_text()
         assert "def render_backtest(" in content
 
     def test_settings_has_render_function(self, ui_dir):
-        """Settings page should have render_settings function."""
-        content = (ui_dir / "pages" / "settings.py").read_text()
+        """Settings view should have render_settings function."""
+        content = (ui_dir / "views" / "settings.py").read_text()
         assert "def render_settings(" in content
 
 

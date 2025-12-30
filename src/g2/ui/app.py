@@ -96,25 +96,25 @@ def main():
     current_page = st.session_state.current_page
 
     if current_page == "🏠 Dashboard":
-        from g2.ui.pages.dashboard import render_dashboard
+        from g2.ui.views.dashboard import render_dashboard
         render_dashboard()
     elif current_page == "📊 Charts":
-        from g2.ui.pages.charts import render_charts
+        from g2.ui.views.charts import render_charts
         render_charts()
     elif current_page == "🤖 AI Assistant":
-        from g2.ui.pages.assistant import render_assistant
+        from g2.ui.views.assistant import render_assistant
         render_assistant()
     elif current_page == "📁 Data Management":
-        from g2.ui.pages.data import render_data
+        from g2.ui.views.data import render_data
         render_data()
     elif current_page == "🧠 ML Pipeline":
-        from g2.ui.pages.ml import render_ml
+        from g2.ui.views.ml import render_ml
         render_ml()
     elif current_page == "📈 Backtesting":
-        from g2.ui.pages.backtest import render_backtest
+        from g2.ui.views.backtest import render_backtest
         render_backtest()
     elif current_page == "⚙️ Settings":
-        from g2.ui.pages.settings import render_settings
+        from g2.ui.views.settings import render_settings
         render_settings()
 
 
