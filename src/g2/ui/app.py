@@ -36,11 +36,11 @@ st.markdown("""
 # Page options
 PAGES = [
     "🏠 Dashboard",
-    "📊 Charts",
-    "🤖 AI Prompts",
     "📁 Data Management",
     "🧠 ML Pipeline",
     "📈 Backtesting",
+    "📊 Charts",
+    "🤖 AI Prompts",
     "📚 Documentation",
     "⚙️ Settings",
 ]
