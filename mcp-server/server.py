@@ -1147,6 +1147,63 @@ async def list_tools() -> List[Tool]:
                 "required": ["experiment_id"],
             },
         ),
+
+        # ============================================================
+        # Chart Tools
+        # ============================================================
+        Tool(
+            name="chart_price",
+            description=(
+                "Generate interactive candlestick price chart for a symbol. "
+                "Creates HTML chart file and returns rich context with price insights, "
+                "volume trends, and technical signals. Auto-opens in browser unless --no-open."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Stock symbol (e.g., AAPL)"},
+                    "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                    "indicators": {"type": "string", "description": "Comma-separated indicator names to overlay"},
+                },
+                "required": ["symbol"],
+            },
+        ),
+        Tool(
+            name="chart_predictions",
+            description=(
+                "Generate price chart with ML prediction bands (q10/q50/q90). "
+                "Shows historical price with quantile prediction confidence intervals. "
+                "Returns rich context with predicted direction, confidence width, and insights."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Stock symbol (e.g., AAPL)"},
+                    "model": {"type": "string", "description": "Model name for predictions"},
+                    "horizon": {"type": "integer", "description": "Prediction horizon in days", "default": 7},
+                },
+                "required": ["symbol", "model"],
+            },
+        ),
+        Tool(
+            name="chart_features",
+            description=(
+                "Generate price chart with technical indicator overlays. "
+                "Creates subplots for each feature (RSI, MACD, etc.) below price chart. "
+                "Returns rich context with technical signals and pattern detection."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Stock symbol (e.g., AAPL)"},
+                    "features": {"type": "string", "description": "Comma-separated feature names (e.g., indicator_rsi_14,indicator_macd)"},
+                    "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                },
+                "required": ["symbol", "features"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -1255,6 +1312,13 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _experiment_children(arguments)
         elif name == "experiment_status":
             result = await _experiment_status(arguments)
+        # Chart tools
+        elif name == "chart_price":
+            result = await _chart_price(arguments)
+        elif name == "chart_predictions":
+            result = await _chart_predictions(arguments)
+        elif name == "chart_features":
+            result = await _chart_features(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -3246,6 +3310,54 @@ async def _experiment_status(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _status)
+
+
+# ============================================================================
+# Chart Tools
+# ============================================================================
+
+async def _chart_price(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate candlestick price chart with rich context."""
+    async def _generate():
+        cmd = ["g2", "chart", "price", args["symbol"], "--json", "--no-open"]
+        if args.get("start_date"):
+            cmd.extend(["--start-date", args["start_date"]])
+        if args.get("end_date"):
+            cmd.extend(["--end-date", args["end_date"]])
+        if args.get("indicators"):
+            cmd.extend(["--indicators", args["indicators"]])
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _generate)
+
+
+async def _chart_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate prediction chart with rich context."""
+    async def _generate():
+        cmd = ["g2", "chart", "predictions", args["symbol"],
+               "--model", args["model"], "--json", "--no-open"]
+        if args.get("horizon"):
+            cmd.extend(["--horizon", str(args["horizon"])])
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _generate)
+
+
+async def _chart_features(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate feature overlay chart with rich context."""
+    async def _generate():
+        cmd = ["g2", "chart", "features", args["symbol"],
+               "--features", args["features"], "--json", "--no-open"]
+        if args.get("start_date"):
+            cmd.extend(["--start-date", args["start_date"]])
+        if args.get("end_date"):
+            cmd.extend(["--end-date", args["end_date"]])
+        executor = CLIExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _generate)
 
 
 # ============================================================================

@@ -87,6 +87,9 @@ app.add_typer(volatility_app, name="volatility", cls=SortedGroup)
 experiment_app = typer.Typer(help="AI Experimentation Framework (propose/approve/run)")
 app.add_typer(experiment_app, name="experiment", cls=SortedGroup)
 
+chart_app = typer.Typer(help="Chart and visualization commands (price/predictions/features)")
+app.add_typer(chart_app, name="chart", cls=SortedGroup)
+
 
 def emit(
     message: str,
@@ -6808,6 +6811,584 @@ def experiment_parent(
     except Exception as e:
         emit_error(f"Failed to get parent: {e}", json_output=json_output)
         raise typer.Exit(1)
+
+
+# ==============================================================================
+# Chart Commands
+# ==============================================================================
+
+
+@chart_app.command("price")
+def chart_price(
+    symbol: str = typer.Argument(..., help="Stock symbol (e.g., AAPL)"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", "-s", help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", "-e", help="End date (YYYY-MM-DD)"),
+    indicators: Optional[str] = typer.Option(None, "--indicators", "-i", help="Comma-separated indicators to overlay"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate candlestick price chart for a symbol."""
+    try:
+        from g2.charts.queries import fetch_ohlcv_for_chart, fetch_features_for_chart
+        from g2.charts.renderers import create_candlestick_chart
+        from g2.charts.analysis import compute_price_insights
+        from g2.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+    except ImportError as e:
+        emit(f"Charts not available: {e}", json_output=json_output, error=True)
+        emit("Install with: pip install 'g2[charts]'", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    from datetime import datetime
+
+    start = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else None
+    end = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
+
+    with db_connection(None) as conn:
+        ohlcv = fetch_ohlcv_for_chart(conn, symbol.upper(), start, end)
+
+        if not ohlcv:
+            emit(f"No data found for {symbol}", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        # Fetch indicators if requested
+        indicator_data = None
+        if indicators:
+            feature_names = [f.strip() for f in indicators.split(",")]
+            indicator_data = fetch_features_for_chart(conn, symbol.upper(), feature_names, start, end)
+
+        # Compute insights for rich context (before chart so we can display on chart)
+        insights = compute_price_insights(ohlcv, indicator_data)
+
+        # Create chart with insights panel
+        fig = create_candlestick_chart(ohlcv, symbol.upper(), indicators=indicator_data, insights=insights)
+
+        # Save chart
+        filename = generate_chart_filename(symbol.upper(), "price")
+        chart_path = save_chart_html(fig, filename)
+
+        if json_output:
+            emit_json({
+                "status": "ok",
+                "chart_path": str(chart_path),
+                "chart_type": "price",
+                "symbol": symbol.upper(),
+                "date_range": {
+                    "start": str(ohlcv[0]["date"]) if ohlcv else None,
+                    "end": str(ohlcv[-1]["date"]) if ohlcv else None,
+                },
+                "summary": insights,
+                "data_points": len(ohlcv),
+            })
+        else:
+            emit(f"✓ Chart saved: {chart_path}")
+            for insight in insights.get("insights", []):
+                emit(f"  - {insight}")
+
+        if not no_open and not json_output:
+            open_in_browser(chart_path)
+
+
+@chart_app.command("predictions")
+def chart_predictions(
+    symbol: str = typer.Argument(..., help="Stock symbol (e.g., AAPL)"),
+    model: str = typer.Option(..., "--model", "-m", help="Model name for predictions"),
+    horizon: int = typer.Option(7, "--horizon", "-h", help="Prediction horizon in days"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate price chart with prediction bands (q10/q50/q90)."""
+    try:
+        from g2.charts.queries import fetch_ohlcv_for_chart, fetch_predictions_for_chart
+        from g2.charts.renderers import create_prediction_chart
+        from g2.charts.analysis import compute_prediction_insights
+        from g2.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+    except ImportError as e:
+        emit(f"Charts not available: {e}", json_output=json_output, error=True)
+        emit("Install with: pip install 'g2[charts]'", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    with db_connection(None) as conn:
+        ohlcv = fetch_ohlcv_for_chart(conn, symbol.upper())
+        predictions = fetch_predictions_for_chart(conn, symbol.upper(), model, horizon)
+
+        if not ohlcv:
+            emit(f"No price data found for {symbol}", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        if not predictions:
+            emit(f"No predictions found for {symbol} with model {model}", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        current_price = ohlcv[-1]["close"]
+
+        # Create chart
+        fig = create_prediction_chart(ohlcv, predictions, symbol.upper())
+
+        # Compute insights for rich context
+        insights = compute_prediction_insights(predictions, current_price)
+
+        # Save chart
+        filename = generate_chart_filename(symbol.upper(), "predictions")
+        chart_path = save_chart_html(fig, filename)
+
+        if json_output:
+            emit_json({
+                "status": "ok",
+                "chart_path": str(chart_path),
+                "chart_type": "predictions",
+                "symbol": symbol.upper(),
+                "model": model,
+                "horizon_days": horizon,
+                "summary": {
+                    "description": insights["description"],
+                    "current_price": current_price,
+                    "predicted_median": insights["predicted_median"],
+                    "prediction_range": insights["prediction_range"],
+                    "confidence_width": insights["confidence_width"],
+                },
+                "insights": insights["insights"],
+            })
+        else:
+            emit(f"✓ Chart saved: {chart_path}")
+            for insight in insights.get("insights", []):
+                emit(f"  - {insight}")
+
+        if not no_open and not json_output:
+            open_in_browser(chart_path)
+
+
+@chart_app.command("features")
+def chart_features(
+    symbol: str = typer.Argument(..., help="Stock symbol (e.g., AAPL)"),
+    features: str = typer.Option(..., "--features", "-f", help="Comma-separated feature names"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", "-s", help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", "-e", help="End date (YYYY-MM-DD)"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate price chart with feature overlays."""
+    try:
+        from g2.charts.queries import fetch_ohlcv_for_chart, fetch_features_for_chart
+        from g2.charts.renderers import create_feature_chart
+        from g2.charts.analysis import compute_price_insights, detect_technical_signals
+        from g2.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+    except ImportError as e:
+        emit(f"Charts not available: {e}", json_output=json_output, error=True)
+        emit("Install with: pip install 'g2[charts]'", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    from datetime import datetime
+
+    start = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else None
+    end = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
+
+    feature_names = [f.strip() for f in features.split(",")]
+
+    with db_connection(None) as conn:
+        ohlcv = fetch_ohlcv_for_chart(conn, symbol.upper(), start, end)
+        feature_data = fetch_features_for_chart(conn, symbol.upper(), feature_names, start, end)
+
+        if not ohlcv:
+            emit(f"No price data found for {symbol}", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        # Check if any features have data
+        features_with_data = {k: v for k, v in feature_data.items() if v}
+        if not features_with_data:
+            emit(f"No feature data found for {symbol}", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        # Create chart
+        fig = create_feature_chart(ohlcv, features_with_data, symbol.upper())
+
+        # Compute insights
+        price_insights = compute_price_insights(ohlcv, features_with_data)
+        tech_signals = detect_technical_signals(ohlcv, features_with_data)
+
+        # Save chart
+        filename = generate_chart_filename(symbol.upper(), "features")
+        chart_path = save_chart_html(fig, filename)
+
+        if json_output:
+            emit_json({
+                "status": "ok",
+                "chart_path": str(chart_path),
+                "chart_type": "features",
+                "symbol": symbol.upper(),
+                "features_shown": list(features_with_data.keys()),
+                "date_range": {
+                    "start": str(ohlcv[0]["date"]) if ohlcv else None,
+                    "end": str(ohlcv[-1]["date"]) if ohlcv else None,
+                },
+                "summary": price_insights,
+                "technical_signals": tech_signals,
+                "data_points": len(ohlcv),
+            })
+        else:
+            emit(f"✓ Chart saved: {chart_path}")
+            emit(f"  Features: {', '.join(features_with_data.keys())}")
+            for signal in tech_signals:
+                emit(f"  - {signal}")
+
+        if not no_open and not json_output:
+            open_in_browser(chart_path)
+
+
+@chart_app.command("compare")
+def chart_compare(
+    symbols: str = typer.Argument(..., help="Comma-separated symbols (e.g., NVDA,AMD)"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", "-s", help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", "-e", help="End date (YYYY-MM-DD)"),
+    period: Optional[str] = typer.Option("1y", "--period", "-p", help="Period: 1m, 3m, 6m, 1y, 2y, 5y, max"),
+    no_normalize: bool = typer.Option(False, "--no-normalize", help="Show actual prices instead of normalized"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Compare price performance of multiple symbols."""
+    try:
+        from g2.charts.queries import fetch_ohlcv_for_chart
+        from g2.charts.renderers import create_comparison_chart
+        from g2.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+    except ImportError as e:
+        emit(f"Charts not available: {e}", json_output=json_output, error=True)
+        emit("Install with: pip install 'g2[charts]'", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    from datetime import datetime, timedelta
+
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    if len(symbol_list) < 2:
+        emit("Please provide at least 2 symbols to compare", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    # Calculate date range from period if not specified
+    end = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else datetime.now().date()
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        period_days = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "2y": 730, "5y": 1825, "max": 36500}
+        days = period_days.get(period, 365)
+        start = end - timedelta(days=days)
+
+    symbol_data = {}
+    with db_connection(None) as conn:
+        for symbol in symbol_list:
+            ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
+            if ohlcv:
+                symbol_data[symbol] = ohlcv
+            else:
+                emit(f"Warning: No data found for {symbol}", json_output=json_output)
+
+    if len(symbol_data) < 2:
+        emit("Need at least 2 symbols with data to compare", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    # Create comparison chart
+    fig = create_comparison_chart(symbol_data, normalize=not no_normalize)
+
+    # Calculate performance metrics
+    performance = {}
+    for sym, data in symbol_data.items():
+        if data:
+            sorted_data = sorted(data, key=lambda x: x["date"])
+            start_price = sorted_data[0]["close"]
+            end_price = sorted_data[-1]["close"]
+            total_return = ((end_price / start_price) - 1) * 100 if start_price > 0 else 0
+            performance[sym] = {
+                "start_price": start_price,
+                "end_price": end_price,
+                "total_return": total_return,
+                "data_points": len(data),
+            }
+
+    # Save chart
+    filename = generate_chart_filename("_".join(symbol_list[:3]), "compare")
+    chart_path = save_chart_html(fig, filename)
+
+    if json_output:
+        emit_json({
+            "status": "ok",
+            "chart_path": str(chart_path),
+            "chart_type": "comparison",
+            "symbols": list(symbol_data.keys()),
+            "period": period,
+            "date_range": {
+                "start": str(start),
+                "end": str(end),
+            },
+            "performance": performance,
+        })
+    else:
+        emit(f"✓ Comparison chart saved: {chart_path}")
+        emit(f"  Symbols: {', '.join(symbol_data.keys())}")
+        emit(f"  Period: {start} to {end}")
+        for sym, perf in performance.items():
+            emit(f"  {sym}: {perf['total_return']:+.1f}% (${perf['start_price']:.2f} → ${perf['end_price']:.2f})")
+
+    if not no_open and not json_output:
+        open_in_browser(chart_path)
+
+
+@chart_app.command("correlation")
+def chart_correlation(
+    symbols: str = typer.Argument(..., help="Comma-separated symbols (e.g., AAPL,MSFT,GOOGL,AMZN)"),
+    period: Optional[str] = typer.Option("1y", "--period", "-p", help="Period: 1m, 3m, 6m, 1y, 2y, 5y"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate correlation matrix heatmap for multiple symbols."""
+    try:
+        from g2.charts.queries import fetch_ohlcv_for_chart
+        from g2.charts.renderers import create_correlation_matrix
+        from g2.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+    except ImportError as e:
+        emit(f"Charts not available: {e}", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    from datetime import datetime, timedelta
+
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    if len(symbol_list) < 2:
+        emit("Please provide at least 2 symbols", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    end = datetime.now().date()
+    period_days = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "2y": 730, "5y": 1825}
+    start = end - timedelta(days=period_days.get(period, 365))
+
+    symbol_data = {}
+    with db_connection(None) as conn:
+        for symbol in symbol_list:
+            ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
+            if ohlcv:
+                symbol_data[symbol] = ohlcv
+
+    if len(symbol_data) < 2:
+        emit("Need at least 2 symbols with data", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    fig = create_correlation_matrix(symbol_data)
+    filename = generate_chart_filename("correlation", "matrix")
+    chart_path = save_chart_html(fig, filename)
+
+    if json_output:
+        emit_json({"status": "ok", "chart_path": str(chart_path), "symbols": list(symbol_data.keys())})
+    else:
+        emit(f"✓ Correlation matrix saved: {chart_path}")
+
+    if not no_open and not json_output:
+        open_in_browser(chart_path)
+
+
+@chart_app.command("sector")
+def chart_sector(
+    exchange: Optional[str] = typer.Option("NASDAQ", "--exchange", "-x", help="Exchange to analyze"),
+    limit: Optional[int] = typer.Option(50, "--limit", "-l", help="Max symbols per sector"),
+    period: Optional[str] = typer.Option("1m", "--period", "-p", help="Period: 1w, 1m, 3m, 6m, 1y"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate sector performance heatmap."""
+    try:
+        from g2.charts.queries import fetch_ohlcv_for_chart
+        from g2.charts.renderers import create_sector_heatmap
+        from g2.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+    except ImportError as e:
+        emit(f"Charts not available: {e}", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    from datetime import datetime, timedelta
+
+    end = datetime.now().date()
+    period_days = {"1w": 7, "1m": 30, "3m": 90, "6m": 180, "1y": 365}
+    start = end - timedelta(days=period_days.get(period, 30))
+
+    sector_data: Dict[str, Dict[str, float]] = {}
+
+    with db_connection(None) as conn:
+        # Get symbols with sector info
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT symbol, COALESCE(sector, 'Unknown') as sector
+                FROM stocks
+                WHERE status = 'Active' AND sector IS NOT NULL
+                ORDER BY sector, symbol
+            """)
+            rows = cur.fetchall()
+
+        sector_symbols: Dict[str, List[str]] = {}
+        for symbol, sector in rows:
+            if sector not in sector_symbols:
+                sector_symbols[sector] = []
+            if len(sector_symbols[sector]) < limit:
+                sector_symbols[sector].append(symbol)
+
+        # Calculate returns for each symbol
+        for sector, symbols in sector_symbols.items():
+            sector_data[sector] = {}
+            for symbol in symbols:
+                ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
+                if ohlcv and len(ohlcv) >= 2:
+                    start_price = ohlcv[0]["close"]
+                    end_price = ohlcv[-1]["close"]
+                    if start_price > 0:
+                        ret = ((end_price / start_price) - 1) * 100
+                        sector_data[sector][symbol] = ret
+
+        # Remove empty sectors
+        sector_data = {k: v for k, v in sector_data.items() if v}
+
+    if not sector_data:
+        emit("No sector data found", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    fig = create_sector_heatmap(sector_data)
+    filename = generate_chart_filename("sector", "heatmap")
+    chart_path = save_chart_html(fig, filename)
+
+    if json_output:
+        emit_json({"status": "ok", "chart_path": str(chart_path), "sectors": list(sector_data.keys())})
+    else:
+        emit(f"✓ Sector heatmap saved: {chart_path}")
+        emit(f"  Sectors: {len(sector_data)}, Symbols: {sum(len(v) for v in sector_data.values())}")
+
+    if not no_open and not json_output:
+        open_in_browser(chart_path)
+
+
+@chart_app.command("volatility")
+def chart_volatility(
+    symbol: str = typer.Argument(..., help="Stock symbol (e.g., AAPL)"),
+    period: Optional[str] = typer.Option("1y", "--period", "-p", help="Period: 3m, 6m, 1y, 2y"),
+    window: int = typer.Option(20, "--window", "-w", help="Lookback window for calculations"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate volatility analysis chart (Bollinger Bands, ATR, Historical Vol)."""
+    try:
+        from g2.charts.queries import fetch_ohlcv_for_chart
+        from g2.charts.renderers import create_volatility_chart
+        from g2.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+    except ImportError as e:
+        emit(f"Charts not available: {e}", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    from datetime import datetime, timedelta
+
+    end = datetime.now().date()
+    period_days = {"3m": 90, "6m": 180, "1y": 365, "2y": 730}
+    start = end - timedelta(days=period_days.get(period, 365))
+
+    with db_connection(None) as conn:
+        ohlcv = fetch_ohlcv_for_chart(conn, symbol.upper(), start, end)
+
+    if not ohlcv:
+        emit(f"No data found for {symbol}", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    fig = create_volatility_chart(ohlcv, symbol.upper(), window=window)
+    filename = generate_chart_filename(symbol.upper(), "volatility")
+    chart_path = save_chart_html(fig, filename)
+
+    if json_output:
+        emit_json({"status": "ok", "chart_path": str(chart_path), "symbol": symbol.upper()})
+    else:
+        emit(f"✓ Volatility chart saved: {chart_path}")
+
+    if not no_open and not json_output:
+        open_in_browser(chart_path)
+
+
+@chart_app.command("drawdown")
+def chart_drawdown(
+    symbol: str = typer.Argument(..., help="Stock symbol (e.g., AAPL)"),
+    period: Optional[str] = typer.Option("2y", "--period", "-p", help="Period: 1y, 2y, 5y, max"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate drawdown analysis chart."""
+    try:
+        from g2.charts.queries import fetch_ohlcv_for_chart
+        from g2.charts.renderers import create_drawdown_chart
+        from g2.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+    except ImportError as e:
+        emit(f"Charts not available: {e}", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    from datetime import datetime, timedelta
+
+    end = datetime.now().date()
+    period_days = {"1y": 365, "2y": 730, "5y": 1825, "max": 36500}
+    start = end - timedelta(days=period_days.get(period, 730))
+
+    with db_connection(None) as conn:
+        ohlcv = fetch_ohlcv_for_chart(conn, symbol.upper(), start, end)
+
+    if not ohlcv:
+        emit(f"No data found for {symbol}", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    fig = create_drawdown_chart(ohlcv, symbol.upper())
+    filename = generate_chart_filename(symbol.upper(), "drawdown")
+    chart_path = save_chart_html(fig, filename)
+
+    if json_output:
+        emit_json({"status": "ok", "chart_path": str(chart_path), "symbol": symbol.upper()})
+    else:
+        emit(f"✓ Drawdown chart saved: {chart_path}")
+
+    if not no_open and not json_output:
+        open_in_browser(chart_path)
+
+
+@chart_app.command("rolling")
+def chart_rolling(
+    symbols: str = typer.Argument(..., help="Comma-separated symbols (e.g., NVDA,AMD)"),
+    period: Optional[str] = typer.Option("1y", "--period", "-p", help="Period: 6m, 1y, 2y"),
+    windows: Optional[str] = typer.Option("30,60,90", "--windows", "-w", help="Rolling windows in days"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate rolling returns comparison chart."""
+    try:
+        from g2.charts.queries import fetch_ohlcv_for_chart
+        from g2.charts.renderers import create_rolling_returns_chart
+        from g2.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+    except ImportError as e:
+        emit(f"Charts not available: {e}", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    from datetime import datetime, timedelta
+
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    window_list = [int(w.strip()) for w in windows.split(",")]
+
+    end = datetime.now().date()
+    period_days = {"6m": 180, "1y": 365, "2y": 730}
+    start = end - timedelta(days=period_days.get(period, 365))
+
+    symbol_data = {}
+    with db_connection(None) as conn:
+        for symbol in symbol_list:
+            ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
+            if ohlcv:
+                symbol_data[symbol] = ohlcv
+
+    if not symbol_data:
+        emit("No data found for any symbols", json_output=json_output, error=True)
+        raise typer.Exit(1)
+
+    fig = create_rolling_returns_chart(symbol_data, windows=window_list)
+    filename = generate_chart_filename("_".join(symbol_list[:3]), "rolling")
+    chart_path = save_chart_html(fig, filename)
+
+    if json_output:
+        emit_json({"status": "ok", "chart_path": str(chart_path), "symbols": list(symbol_data.keys())})
+    else:
+        emit(f"✓ Rolling returns chart saved: {chart_path}")
+
+    if not no_open and not json_output:
+        open_in_browser(chart_path)
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
