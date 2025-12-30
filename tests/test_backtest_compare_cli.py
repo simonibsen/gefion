@@ -4,6 +4,7 @@ TDD tests for backtest compare CLI command.
 These tests will initially fail (RED) and drive the implementation of
 the CLI command for strategy comparison.
 """
+import json
 import pytest
 from datetime import date, timedelta
 from typer.testing import CliRunner
@@ -12,6 +13,16 @@ from g2.cli import app
 
 
 runner = CliRunner()
+
+
+def parse_json_output(output: str) -> dict:
+    """Parse JSON output, handling pretty-printed multi-line format."""
+    # Find the last complete JSON object (starts with '{\n  "_meta"')
+    last_json_start = output.rfind('{\n  "_meta"')
+    if last_json_start == -1:
+        # Fallback: try to parse the whole output
+        return json.loads(output)
+    return json.loads(output[last_json_start:])
 
 
 class TestBacktestCompareCommand:
@@ -138,9 +149,8 @@ class TestBacktestCompareOutput:
 
         assert result.exit_code == 0
 
-        # Parse JSON output (last line contains the comparison results)
-        lines = [l for l in result.output.strip().split("\n") if l]
-        output = json.loads(lines[-1])
+        # Parse JSON output
+        output = parse_json_output(result.output)
 
         # Check structure
         assert "comparison" in output
@@ -198,9 +208,7 @@ class TestBacktestCompareMetrics:
         )
 
         assert result.exit_code == 0
-        # Parse JSON output (last line contains the comparison results)
-        lines = [l for l in result.output.strip().split("\n") if l]
-        output = json.loads(lines[-1])
+        output = parse_json_output(result.output)
 
         metrics = output["comparison"]["momentum"]
 
@@ -249,9 +257,7 @@ class TestBacktestCompareRanking:
         )
 
         assert result.exit_code == 0
-        # Parse JSON output (last line contains the comparison results)
-        lines = [l for l in result.output.strip().split("\n") if l]
-        output = json.loads(lines[-1])
+        output = parse_json_output(result.output)
 
         # Should include ranking
         assert "ranking" in output
@@ -296,9 +302,7 @@ class TestBacktestCompareAllStrategies:
         )
 
         assert result.exit_code == 0
-        # Parse JSON output (last line contains the comparison results)
-        lines = [l for l in result.output.strip().split("\n") if l]
-        output = json.loads(lines[-1])
+        output = parse_json_output(result.output)
 
         # Should have results for all available strategies
         for strategy_name in AVAILABLE_STRATEGIES.keys():

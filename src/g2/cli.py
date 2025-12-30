@@ -94,37 +94,26 @@ def emit(
     json_output: Optional[bool] = None,
     error: bool = False,
 ) -> None:
-    """Emit either plain text or JSON."""
-    if json_output is None:
-        try:
-            ctx = click.get_current_context(silent=True)
-        except Exception:
-            ctx = None
-        if ctx and getattr(ctx, "obj", None) is not None:
-            json_output = ctx.obj.get("json_output")
-    json_output = bool(json_output)
-    if json_output:
-        payload = {"status": "error" if error else "ok", "message": message}
-        if data:
-            payload.update(data)
-        typer.echo(json.dumps(payload))
+    """Emit either plain text or JSON using unified Output interface."""
+    from g2.output import get_output
+    out = get_output(json_output)
+    if error:
+        out.error(message, data)
     else:
-        console = Console()
-        style = "bold red" if error else "bold green"
-        console.print(message, style=style)
-        if data:
-            for k, v in data.items():
-                console.print(f"{k}: {v}", style="dim")
+        out.success(message, data)
 
 
 def emit_error(message: str, json_output: Optional[bool] = None, data: Optional[dict] = None) -> None:
+    """Emit error message and exit."""
     emit(message, data=data, json_output=json_output, error=True)
     raise typer.Exit(code=1)
 
 
 def emit_json(payload: dict) -> None:
-    """Lightweight JSON emitter to mirror emit() when only a payload is needed."""
-    typer.echo(json.dumps(payload))
+    """Emit JSON payload using unified Output interface."""
+    from g2.output import get_output
+    out = get_output(json_mode=True)
+    out.json(payload)
 
 
 def _tempo_get_json(tempo_url: str, path: str, *, params: Optional[dict] = None, timeout_s: float = 3.0) -> dict:
@@ -2960,6 +2949,9 @@ def health_check(
         # JSON output
         g2 health --json
     """
+    from g2.output import get_output
+    out = get_output(json_output)
+
     if service:
         # Check specific service
         service_lower = service.lower()
@@ -2970,37 +2962,29 @@ def health_check(
         elif service_lower == "docker":
             status = health.check_docker_services()
         else:
-            emit_error(f"Unknown service: {service}. Valid options: postgres, tempo, docker", json_output=json_output)
-            return
+            out.error(f"Unknown service: {service}. Valid options: postgres, tempo, docker")
+            raise typer.Exit(code=1)
 
-        if json_output:
-            emit_json({
-                "status": "ok" if status["running"] else "error",
-                "service": service_lower,
-                **status
-            })
+        if out.json_mode:
+            out.json({"status": "ok" if status["running"] else "error", "service": service_lower, **status})
         else:
-            console = Console()
             status_icon = "✅" if status["running"] else "❌"
-            console.print(f"\n{status_icon} {service_lower.upper()}: {status['message']}\n", style="bold")
+            style = "bold green" if status["running"] else "bold red"
+            out.console.print(f"\n{status_icon} {service_lower.upper()}: {status['message']}\n", style=style)
 
             if not status["running"] and "suggestion" in status:
-                console.print(f"   → {status['suggestion']}\n")
+                out.console.print(f"   → {status['suggestion']}\n")
             elif status["running"] and "version" in status:
-                console.print(f"   Version: {status['version']}\n")
+                out.console.print(f"   Version: {status['version']}\n")
     else:
         # Check all services
         all_status = health.check_all_services()
 
-        if json_output:
-            emit_json({
-                "status": "ok",
-                "services": all_status
-            })
+        if out.json_mode:
+            out.json({"status": "ok", "services": all_status})
         else:
             report = health.format_health_report(all_status)
-            console = Console()
-            console.print(report)
+            out.console.print(report)
 
 
 @app.command("db-init")
@@ -3472,6 +3456,10 @@ def list_functions(
     show_body: bool = typer.Option(False, "--show-body/--no-show-body", help="Include function_body in output"),
 ) -> None:
     """List registered feature functions."""
+    from g2.output import Column, get_output
+
+    out = get_output(json_output)
+
     try:
         with db_connection(db_url) as conn:
             init_schema_tables(conn, ["feature_functions"])
@@ -3511,13 +3499,14 @@ def list_functions(
                 entry["function_body"] = r[8]
             data.append(entry)
 
-        if json_output:
-            emit("Feature functions", data={"functions": data}, json_output=True)
+        if not data:
+            out.warning("No feature functions found")
+            if out.json_mode:
+                out.json({"functions": [], "count": 0})
             return
 
-        console = Console()
-        if not data:
-            console.print("[yellow]No feature functions found.[/yellow]")
+        if out.json_mode:
+            out.json({"status": "ok", "functions": data, "count": len(data)})
             return
 
         if show_body:
@@ -3525,38 +3514,46 @@ def list_functions(
                 header = f"[bold]{d['name']}[/bold] v{d['version']} ({d['status']})"
                 header += f" [{'ENABLED' if d['enabled'] else 'DISABLED'}]"
                 header += f" [{d['language']}]"
-                console.print(header)
+                out.console.print(header)
                 if d.get("tags"):
-                    console.print(f"tags: {', '.join(d['tags'])}", style="blue")
+                    out.console.print(f"tags: {', '.join(d['tags'])}", style="blue")
                 if d.get("updated_at"):
-                    console.print(f"updated: {d['updated_at']}", style="dim")
+                    out.console.print(f"updated: {d['updated_at']}", style="dim")
                 if d.get("description"):
-                    console.print(d["description"])
+                    out.console.print(d["description"])
                 body = d.get("function_body") or ""
-                console.print(body, style="cyan")
-                console.print()
+                out.console.print(body, style="cyan")
+                out.console.print()
         else:
-            table = Table(title="Feature Functions", header_style="bold cyan")
-            table.add_column("Name", style="white")
-            table.add_column("Version", style="magenta")
-            table.add_column("Status", style="green")
-            table.add_column("Enabled", style="yellow")
-            table.add_column("Language", style="cyan")
-            table.add_column("Tags", style="blue")
-            table.add_column("Updated", style="dim")
-            for d in data:
-                table.add_row(
-                    d["name"] or "",
-                    d["version"] or "",
-                    d["status"] or "",
-                    str(d["enabled"]),
-                    d["language"] or "",
-                    ",".join(d["tags"]) if d.get("tags") else "",
-                    d["updated_at"] or "",
-                )
-            console.print(table)
+            out.table(
+                columns=[
+                    Column("Name", style="white", json_key="name"),
+                    Column("Version", style="magenta", json_key="version"),
+                    Column("Status", style="green", json_key="status"),
+                    Column("Enabled", style="yellow", json_key="enabled"),
+                    Column("Language", style="cyan", json_key="language"),
+                    Column("Tags", style="blue", json_key="tags"),
+                    Column("Updated", style="dim", json_key="updated_at"),
+                ],
+                rows=[
+                    [
+                        d["name"] or "",
+                        d["version"] or "",
+                        d["status"] or "",
+                        str(d["enabled"]),
+                        d["language"] or "",
+                        ",".join(d["tags"]) if d.get("tags") else "",
+                        d["updated_at"] or "",
+                    ]
+                    for d in data
+                ],
+                title="Feature Functions",
+                data_key="functions",
+                json_data=data,
+            )
     except Exception as exc:
-        emit_error(f"List functions failed: {exc}", json_output=json_output)
+        out.error(f"List functions failed: {exc}")
+        raise typer.Exit(code=1)
 
 
 @app.command("feat-fx-export")
@@ -3897,6 +3894,10 @@ def features_list(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """List feature definitions."""
+    from g2.output import Column, get_output
+
+    out = get_output(json_output)
+
     try:
         with db_connection(db_url) as conn:
             init_schema_tables(conn, ["feature_definitions"])
@@ -3925,36 +3926,47 @@ def features_list(
                         }
                     )
 
-        if json_output:
-            emit("Features", data={"features": data}, json_output=True)
-        else:
-            console = Console()
-            if not data:
-                console.print("[yellow]No features found.[/yellow]")
-                return
-            table = Table(title="Features", header_style="bold cyan")
-            table.add_column("Name", style="white")
-            table.add_column("Function", style="magenta")
-            table.add_column("Source", style="cyan")
-            table.add_column("Source Col", style="cyan")
-            table.add_column("Store", style="green")
-            table.add_column("Column", style="blue")
-            table.add_column("Active", style="yellow")
-            table.add_column("Created", style="dim")
-            for d in data:
-                table.add_row(
-                    d["name"] or "",
-                    d["function"] or "",
-                    d.get("source_table") or "",
-                    d.get("source_column") or "",
-                    d["store_table"] or "",
-                    d["store_column"] or "",
-                    str(d["active"]),
-                    d["created_at"] or "",
-                )
-            console.print(table)
+        if not data:
+            out.warning("No features found")
+            if out.json_mode:
+                out.json({"status": "ok", "features": [], "count": 0})
+            return
+
+        if out.json_mode:
+            out.json({"status": "ok", "features": data, "count": len(data)})
+            return
+
+        table_rows = [
+            [
+                d["name"] or "",
+                d["function"] or "",
+                d.get("source_table") or "",
+                d.get("source_column") or "",
+                d["store_table"] or "",
+                d["store_column"] or "",
+                str(d["active"]),
+                d["created_at"] or "",
+            ]
+            for d in data
+        ]
+
+        out.table(
+            columns=[
+                Column("Name", style="white", json_key="name"),
+                Column("Function", style="magenta", json_key="function"),
+                Column("Source", style="cyan", json_key="source_table"),
+                Column("Source Col", style="cyan", json_key="source_column"),
+                Column("Store", style="green", json_key="store_table"),
+                Column("Column", style="blue", json_key="store_column"),
+                Column("Active", style="yellow", json_key="active"),
+                Column("Created", style="dim", json_key="created_at"),
+            ],
+            rows=table_rows,
+            title="Features",
+        )
     except Exception as exc:
-        emit_error(f"List failed: {exc}", json_output=json_output)
+        out.error(f"List failed: {exc}")
+        raise typer.Exit(code=1)
 
 
 @app.command("feat-def-show")
@@ -6296,45 +6308,52 @@ def experiment_list(
 ) -> None:
     """List experiments."""
     from g2.experiments.core import ExperimentRunner
+    from g2.output import Column, get_output
 
+    out = get_output(json_output)
     db_url = str(SETTINGS.database_url)
     runner = ExperimentRunner(db_url)
 
     try:
         experiments = runner.list(status=status, experiment_type=experiment_type, limit=limit)
 
-        if json_output:
-            emit_json({"count": len(experiments), "experiments": experiments})
-        else:
-            console = Console()
-            if not experiments:
-                console.print("[dim]No experiments found[/dim]")
-                return
+        if not experiments:
+            out.info("No experiments found")
+            if out.json_mode:
+                out.json({"experiments": [], "count": 0})
+            return
 
-            table = Table(title="Experiments")
-            table.add_column("ID", style="cyan")
-            table.add_column("Name")
-            table.add_column("Type")
-            table.add_column("Status")
-            table.add_column("Trials")
-            table.add_column("Best Score")
+        rows = []
+        for exp in experiments:
+            trials = f"{exp.get('completed_trials', 0) or 0}/{exp.get('total_trials', 0) or 0}"
+            best = f"{exp['best_score']:.4f}" if exp.get('best_score') else "-"
+            rows.append([
+                str(exp["id"]),
+                exp["name"][:30],
+                exp["experiment_type"],
+                exp["status"],
+                trials,
+                best,
+            ])
 
-            for exp in experiments:
-                trials = f"{exp.get('completed_trials', 0) or 0}/{exp.get('total_trials', 0) or 0}"
-                best = f"{exp['best_score']:.4f}" if exp.get('best_score') else "-"
-                table.add_row(
-                    str(exp["id"]),
-                    exp["name"][:30],
-                    exp["experiment_type"],
-                    exp["status"],
-                    trials,
-                    best,
-                )
-
-            console.print(table)
+        out.table(
+            columns=[
+                Column("ID", style="cyan", json_key="id"),
+                Column("Name", json_key="name"),
+                Column("Type", json_key="experiment_type"),
+                Column("Status", json_key="status"),
+                Column("Trials", json_key="trials"),
+                Column("Best Score", json_key="best_score"),
+            ],
+            rows=rows,
+            title="Experiments",
+            data_key="experiments",
+            json_data=experiments,
+        )
 
     except Exception as e:
-        emit_error(f"Failed to list experiments: {e}", json_output=json_output)
+        out.error(f"Failed to list experiments: {e}")
+        raise typer.Exit(code=1)
 
 
 @experiment_app.command("pending")

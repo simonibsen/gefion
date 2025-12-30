@@ -25,8 +25,14 @@ def test_prices_ingest_api_fetch(monkeypatch):
 
     res = runner.invoke(cli.app, ["prices-ingest", "--symbol", "IBM", "--json"])
     assert res.exit_code == 0
-    # take last JSON line
-    lines = [ln for ln in res.stdout.splitlines() if ln.strip()]
-    payload = json.loads(lines[-1])
+    # Parse the final JSON object (skip progress lines)
+    # Find the last complete JSON object by looking for the final "}"
+    output = res.stdout.strip()
+    # The final output is pretty-printed JSON starting with "{"
+    last_json_start = output.rfind('{\n  "_meta"')
+    if last_json_start == -1:
+        # Fallback: try to find any JSON starting with {
+        last_json_start = output.rfind('{')
+    payload = json.loads(output[last_json_start:])
     assert payload["status"] == "ok"
     assert called["symbols"] == ["IBM"]
