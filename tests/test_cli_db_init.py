@@ -28,8 +28,19 @@ def db_conn():
 
 @pytest.fixture
 def clean_feature_tables(db_conn):
-    """Clear feature tables before test."""
+    """Clear feature tables before test, creating them if needed."""
     with db_conn.cursor() as cur:
+        # Ensure tables exist before trying to clear them
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'feature_functions'
+            )
+        """)
+        if not cur.fetchone()[0]:
+            # Tables don't exist - run schema init to create them
+            init_schema_tables(db_conn, ["feature_functions", "feature_definitions"])
+
         cur.execute("DELETE FROM feature_definitions WHERE true")
         cur.execute("DELETE FROM feature_functions WHERE true")
     yield

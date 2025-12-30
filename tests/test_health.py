@@ -97,21 +97,49 @@ class TestCheckTempoHealth:
 
     def test_tempo_healthy(self):
         """Test successful Tempo connection returns healthy status."""
+        # Mock Docker check to find tempo container
+        docker_result = MagicMock()
+        docker_result.returncode = 0
+        docker_result.stdout = "tempo"
+
         mock_response = MagicMock()
         mock_response.status_code = 200
 
-        with patch('requests.get', return_value=mock_response):
+        with patch('subprocess.run', return_value=docker_result), \
+             patch('requests.get', return_value=mock_response):
             result = health.check_tempo_health()
 
         assert result["running"] is True
         assert result["message"] == "Tempo is healthy"
         assert result["endpoint"] == "http://localhost:3200"
 
+    def test_tempo_container_not_running(self):
+        """Test Tempo container not running returns helpful error."""
+        # Mock Docker check to NOT find tempo container
+        docker_result = MagicMock()
+        docker_result.returncode = 0
+        docker_result.stdout = ""  # No container named tempo
+
+        with patch('subprocess.run', return_value=docker_result):
+            result = health.check_tempo_health()
+
+        assert result["running"] is False
+        assert result["message"] == "Tempo container is not running"
+        assert result["error_type"] == "not_running"
+        assert "docker compose -f docker/tempo/docker-compose.tempo.yml up -d" in result["suggestion"]
+        assert "OTEL_ENABLED=false" in result["suggestion"]
+
     def test_tempo_connection_refused(self):
         """Test Tempo connection refused returns helpful error."""
         import requests
 
-        with patch('requests.get', side_effect=requests.exceptions.ConnectionError("Connection refused")):
+        # Mock Docker check to find tempo container
+        docker_result = MagicMock()
+        docker_result.returncode = 0
+        docker_result.stdout = "tempo"
+
+        with patch('subprocess.run', return_value=docker_result), \
+             patch('requests.get', side_effect=requests.exceptions.ConnectionError("Connection refused")):
             result = health.check_tempo_health()
 
         assert result["running"] is False
@@ -125,7 +153,13 @@ class TestCheckTempoHealth:
         """Test Tempo connection timeout returns helpful error."""
         import requests
 
-        with patch('requests.get', side_effect=requests.exceptions.Timeout("Timeout")):
+        # Mock Docker check to find tempo container
+        docker_result = MagicMock()
+        docker_result.returncode = 0
+        docker_result.stdout = "tempo"
+
+        with patch('subprocess.run', return_value=docker_result), \
+             patch('requests.get', side_effect=requests.exceptions.Timeout("Timeout")):
             result = health.check_tempo_health()
 
         assert result["running"] is False
@@ -135,10 +169,16 @@ class TestCheckTempoHealth:
 
     def test_tempo_unhealthy_status(self):
         """Test Tempo returning non-200 status."""
+        # Mock Docker check to find tempo container
+        docker_result = MagicMock()
+        docker_result.returncode = 0
+        docker_result.stdout = "tempo"
+
         mock_response = MagicMock()
         mock_response.status_code = 503
 
-        with patch('requests.get', return_value=mock_response):
+        with patch('subprocess.run', return_value=docker_result), \
+             patch('requests.get', return_value=mock_response):
             result = health.check_tempo_health()
 
         assert result["running"] is False
@@ -202,16 +242,19 @@ class TestCheckAllServices:
         """Test check_all_services returns dict with all services."""
         with patch('g2.health.check_docker_services', return_value={"running": True, "message": "Docker ok"}), \
              patch('g2.health.check_postgres_health', return_value={"running": True, "message": "Postgres ok"}), \
-             patch('g2.health.check_tempo_health', return_value={"running": True, "message": "Tempo ok"}):
+             patch('g2.health.check_tempo_health', return_value={"running": True, "message": "Tempo ok"}), \
+             patch('g2.health.check_grafana_health', return_value={"running": True, "message": "Grafana ok"}):
 
             result = health.check_all_services()
 
         assert "docker" in result
         assert "postgres" in result
         assert "tempo" in result
+        assert "grafana" in result
         assert result["docker"]["running"] is True
         assert result["postgres"]["running"] is True
         assert result["tempo"]["running"] is True
+        assert result["grafana"]["running"] is True
 
 
 class TestFormatHealthReport:
@@ -239,7 +282,7 @@ class TestFormatHealthReport:
         report = health.format_health_report(health_status)
 
         assert "=== Service Health Check ===" in report
-        assert "✅" in report
+        assert "✓" in report
         assert "DOCKER" in report
         assert "POSTGRES" in report
         assert "TEMPO" in report
@@ -266,8 +309,8 @@ class TestFormatHealthReport:
 
         report = health.format_health_report(health_status)
 
-        assert "✅" in report  # Docker is healthy
-        assert "❌" in report  # Others are not
+        assert "✓" in report  # Docker is healthy
+        assert "✗" in report  # Others are not
         assert "Start PostgreSQL" in report
         assert "docker compose up -d postgres" in report
         assert "Start Tempo or disable tracing" in report

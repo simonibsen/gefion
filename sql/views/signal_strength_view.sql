@@ -55,38 +55,38 @@ classifier_signals AS (
         tcp.predicted_class,
         tcp.p_strong_down,
         tcp.p_weak_down,
-        tcp.p_flat,
+        tcp.p_neutral,
         tcp.p_weak_up,
         tcp.p_strong_up,
         -- Probability-weighted class score [-1 to +1]
         (COALESCE(tcp.p_strong_up, 0) * 1.0 +
          COALESCE(tcp.p_weak_up, 0) * 0.5 +
-         COALESCE(tcp.p_flat, 0) * 0.0 +
+         COALESCE(tcp.p_neutral, 0) * 0.0 +
          COALESCE(tcp.p_weak_down, 0) * -0.5 +
          COALESCE(tcp.p_strong_down, 0) * -1.0) AS classifier_component,
         -- Margin between top-2 classes
         GREATEST(
             COALESCE(tcp.p_strong_up, 0),
             COALESCE(tcp.p_weak_up, 0),
-            COALESCE(tcp.p_flat, 0),
+            COALESCE(tcp.p_neutral, 0),
             COALESCE(tcp.p_weak_down, 0),
             COALESCE(tcp.p_strong_down, 0)
         ) - (
             -- Second highest probability (approximate using sorted logic)
             CASE
-                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_flat, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_strong_up
-                THEN GREATEST(tcp.p_weak_up, tcp.p_flat, tcp.p_weak_down, tcp.p_strong_down)
-                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_flat, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_weak_up
-                THEN GREATEST(tcp.p_strong_up, tcp.p_flat, tcp.p_weak_down, tcp.p_strong_down)
-                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_flat, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_flat
+                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_strong_up
+                THEN GREATEST(tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down)
+                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_weak_up
+                THEN GREATEST(tcp.p_strong_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down)
+                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_neutral
                 THEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_weak_down, tcp.p_strong_down)
-                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_flat, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_weak_down
-                THEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_flat, tcp.p_strong_down)
-                ELSE GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_flat, tcp.p_weak_down)
+                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_weak_down
+                THEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_strong_down)
+                ELSE GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down)
             END
         ) AS margin,
         -- Confidence from existing column or computed
-        COALESCE(tcp.confidence, 0.5) AS classifier_confidence
+        COALESCE(tcp.margin, 0.5) AS classifier_confidence
     FROM trend_class_predictions tcp
 )
 SELECT

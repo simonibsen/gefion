@@ -22,6 +22,10 @@ def require_db():
 
 @pytest.fixture(autouse=True)
 def clean_db():
+    # Skip early if DB tests not enabled - before any DB operations
+    if not DB_TESTS_ENABLED:
+        pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
+
     conn = require_db()
     conn.autocommit = True
     with conn.cursor() as cur:
