@@ -17,26 +17,11 @@ st.set_page_config(
 # Custom CSS for better styling
 st.markdown("""
 <style>
-    /* Improve sidebar styling */
-    .css-1d391kg { padding-top: 1rem; }
-
     /* Card-like containers */
     .stMetric {
         background-color: #f0f2f6;
         padding: 10px;
         border-radius: 5px;
-    }
-
-    /* Tooltip styling */
-    .tooltip {
-        position: relative;
-        display: inline-block;
-        cursor: help;
-    }
-
-    /* Better button styling */
-    .stButton > button {
-        width: 100%;
     }
 
     /* Chat message styling */
@@ -54,45 +39,45 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Page options
+PAGES = [
+    "🏠 Dashboard",
+    "📊 Charts",
+    "🤖 AI Assistant",
+    "📁 Data Management",
+    "🧠 ML Pipeline",
+    "📈 Backtesting",
+    "⚙️ Settings",
+]
+
+
+def navigate_to(page_name: str):
+    """Navigate to a specific page."""
+    st.session_state.current_page = page_name
+
 
 def main():
     """Main application entry point."""
-    # Page options
-    pages = [
-        "🏠 Dashboard",
-        "📊 Charts",
-        "🤖 AI Assistant",
-        "📁 Data Management",
-        "🧠 ML Pipeline",
-        "📈 Backtesting",
-        "⚙️ Settings",
-    ]
-
     # Initialize session state for navigation
-    if "page" not in st.session_state:
-        st.session_state.page = pages[0]
-
-    # Ensure page is valid
-    if st.session_state.page not in pages:
-        st.session_state.page = pages[0]
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = PAGES[0]
 
     # Sidebar navigation
     with st.sidebar:
         st.title("📈 g2 Trading")
         st.markdown("---")
 
-        # Navigation - use session state for current selection
-        page = st.radio(
-            "Navigation",
-            pages,
-            index=pages.index(st.session_state.page),
-            label_visibility="collapsed",
-            key="nav_radio",
-        )
-
-        # Update session state when radio changes
-        if page != st.session_state.page:
-            st.session_state.page = page
+        # Navigation buttons instead of radio for reliable navigation
+        for page in PAGES:
+            is_current = st.session_state.current_page == page
+            if st.button(
+                page,
+                key=f"nav_{page}",
+                use_container_width=True,
+                type="primary" if is_current else "secondary",
+            ):
+                st.session_state.current_page = page
+                st.rerun()
 
         st.markdown("---")
 
@@ -108,7 +93,7 @@ def main():
         st.caption("g2 Trading Analysis v1.0")
 
     # Main content area based on selected page
-    current_page = st.session_state.page
+    current_page = st.session_state.current_page
 
     if current_page == "🏠 Dashboard":
         from g2.ui.pages.dashboard import render_dashboard

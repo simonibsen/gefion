@@ -26,28 +26,28 @@ def render_dashboard():
         st.markdown("### 📊 Charts")
         st.markdown("Analyze price movements with interactive charts.")
         if st.button("Open Charts", key="quick_charts", use_container_width=True):
-            st.session_state.page = "📊 Charts"
+            st.session_state.current_page = "📊 Charts"
             st.rerun()
 
     with col2:
         st.markdown("### 🤖 AI Assistant")
         st.markdown("Ask Claude about stocks, strategies, and analysis.")
         if st.button("Chat with Claude", key="quick_ai", use_container_width=True):
-            st.session_state.page = "🤖 AI Assistant"
+            st.session_state.current_page = "🤖 AI Assistant"
             st.rerun()
 
     with col3:
         st.markdown("### 📈 Backtest")
         st.markdown("Test trading strategies on historical data.")
         if st.button("Run Backtest", key="quick_backtest", use_container_width=True):
-            st.session_state.page = "📈 Backtesting"
+            st.session_state.current_page = "📈 Backtesting"
             st.rerun()
 
     with col4:
         st.markdown("### 🧠 ML Predict")
         st.markdown("Generate price predictions using trained models.")
         if st.button("Get Predictions", key="quick_ml", use_container_width=True):
-            st.session_state.page = "🧠 ML Pipeline"
+            st.session_state.current_page = "🧠 ML Pipeline"
             st.rerun()
 
     st.markdown("---")

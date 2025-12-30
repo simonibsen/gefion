@@ -1,182 +1,170 @@
-"""AI Assistant page - Claude Code integration."""
+"""AI Assistant page - Direct Claude Code integration via message queue."""
 
 import streamlit as st
+import time
+
+
+def send_message(prompt: str) -> int:
+    """Send a message to Claude Code via database queue. Returns message ID."""
+    from g2.ui.components.database import get_connection
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO ui_messages (prompt, status) VALUES (%s, 'pending') RETURNING id",
+                (prompt,)
+            )
+            msg_id = cur.fetchone()[0]
+            conn.commit()
+            return msg_id
+
+
+def get_response(msg_id: int, timeout: int = 60) -> str | None:
+    """Poll for response from Claude Code. Returns response or None if timeout."""
+    from g2.ui.components.database import get_connection
+
+    start = time.time()
+    while time.time() - start < timeout:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT response, status FROM ui_messages WHERE id = %s",
+                    (msg_id,)
+                )
+                row = cur.fetchone()
+                if row and row[1] == 'responded':
+                    return row[0]
+        time.sleep(1)
+    return None
+
+
+def get_chat_history() -> list:
+    """Get recent chat history from database."""
+    from g2.ui.components.database import get_connection
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT prompt, response, status, created_at
+                FROM ui_messages
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            rows = cur.fetchall()
+            return list(reversed(rows))
 
 
 def render_assistant():
-    """Render the AI Assistant page."""
+    """Render the AI Assistant page with direct Claude Code integration."""
     st.title("🤖 AI Assistant")
-    st.markdown("Use Claude Code for AI-powered analysis of your trading data.")
+    st.markdown("Chat directly with Claude Code through this interface.")
 
-    st.info("""
-    💡 **Claude Code Integration**
+    st.success("""
+    💬 **Direct Integration**
 
-    This UI works alongside your Claude Code session. Ask Claude Code questions
-    about your g2 data directly in your terminal - it has full access to:
-    - Database queries via MCP tools
-    - Chart generation
-    - Backtesting
-    - ML predictions
+    Messages you send here go directly to the Claude Code session running in your terminal.
+    Claude Code will see your message and respond.
     """)
 
+    # Initialize session state
+    if "waiting_for_response" not in st.session_state:
+        st.session_state.waiting_for_response = False
+    if "pending_msg_id" not in st.session_state:
+        st.session_state.pending_msg_id = None
+
     st.markdown("---")
 
-    # Quick prompts section
-    st.subheader("📋 Quick Prompts")
-    st.markdown("Copy these prompts to use with Claude Code:")
+    # Quick prompts
+    st.subheader("Quick Prompts")
+    cols = st.columns(4)
 
-    prompts = [
-        {
-            "title": "Market Analysis",
-            "prompt": "Analyze the current market conditions for my portfolio. Look at recent price movements, volatility, and any notable patterns.",
-            "icon": "📊"
-        },
-        {
-            "title": "Stock Deep Dive",
-            "prompt": "Give me a detailed analysis of [SYMBOL] including recent price action, technical indicators, and any predictions we have.",
-            "icon": "🔍"
-        },
-        {
-            "title": "Compare Stocks",
-            "prompt": "Compare the performance of [SYMBOL1] and [SYMBOL2] over the last year. Show me a comparison chart.",
-            "icon": "⚖️"
-        },
-        {
-            "title": "Strategy Recommendation",
-            "prompt": "Based on my data, which trading strategy (momentum, mean_reversion, ma_crossover, breakout) would have performed best recently?",
-            "icon": "🎯"
-        },
-        {
-            "title": "Risk Assessment",
-            "prompt": "Analyze the risk profile of my portfolio. Look at volatility, drawdowns, and correlation between holdings.",
-            "icon": "⚠️"
-        },
-        {
-            "title": "ML Predictions",
-            "prompt": "What are the current ML predictions for my top holdings? Show me the q10/q50/q90 ranges.",
-            "icon": "🧠"
-        },
+    quick_prompts = [
+        ("📊 Market Status", "Give me an overview of my current market data and any notable patterns."),
+        ("📈 NVDA Analysis", "Analyze NVDA - show me a price chart and key metrics."),
+        ("🎯 Best Strategy", "Which trading strategy would perform best on my current data?"),
+        ("🧠 ML Status", "What ML models do I have and what predictions are available?"),
     ]
 
-    cols = st.columns(2)
-    for i, p in enumerate(prompts):
-        with cols[i % 2]:
-            with st.expander(f"{p['icon']} {p['title']}"):
-                st.code(p["prompt"], language=None)
+    for i, (label, prompt) in enumerate(quick_prompts):
+        with cols[i]:
+            if st.button(label, use_container_width=True, disabled=st.session_state.waiting_for_response):
+                msg_id = send_message(prompt)
+                st.session_state.pending_msg_id = msg_id
+                st.session_state.waiting_for_response = True
+                st.rerun()
 
     st.markdown("---")
 
-    # Database context section
-    st.subheader("📊 Current Data Context")
-    st.markdown("Information Claude Code can access about your g2 setup:")
+    # Chat history
+    st.subheader("Conversation")
 
-    try:
-        from g2.ui.components.database import get_connection
+    chat_container = st.container()
 
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                # Get counts
-                cur.execute("SELECT COUNT(*) FROM stocks WHERE status = 'Active'")
-                stock_count = cur.fetchone()[0]
+    with chat_container:
+        history = get_chat_history()
+        for prompt, response, status, created_at in history:
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            if response:
+                with st.chat_message("assistant"):
+                    st.markdown(response)
+            elif status == 'pending':
+                with st.chat_message("assistant"):
+                    st.info("⏳ Waiting for Claude Code to respond...")
 
-                cur.execute("SELECT COUNT(*) FROM stock_ohlcv")
-                price_count = cur.fetchone()[0]
+    # Show waiting indicator
+    if st.session_state.waiting_for_response and st.session_state.pending_msg_id:
+        with st.spinner("Waiting for Claude Code response... (check your terminal)"):
+            # Check every 2 seconds for up to 5 checks, then let user refresh
+            response = get_response(st.session_state.pending_msg_id, timeout=10)
+            if response:
+                st.session_state.waiting_for_response = False
+                st.session_state.pending_msg_id = None
+                st.rerun()
+            else:
+                st.warning("Still waiting... Claude Code will respond when ready. Click 'Refresh' to check.")
+                if st.button("🔄 Refresh"):
+                    st.rerun()
 
-                cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
-                feature_count = cur.fetchone()[0]
-
-                cur.execute("SELECT COUNT(*) FROM ml_models")
-                model_count = cur.fetchone()[0]
-
-                # Get date range
-                cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
-                date_range = cur.fetchone()
-
-                # Get symbols
-                cur.execute("""
-                    SELECT symbol FROM stocks
-                    WHERE status = 'Active'
-                    ORDER BY symbol LIMIT 20
-                """)
-                symbols = [row[0] for row in cur.fetchall()]
-
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Active Stocks", stock_count)
-        with col2:
-            st.metric("Price Records", f"{price_count:,}")
-        with col3:
-            st.metric("Features", feature_count)
-        with col4:
-            st.metric("ML Models", model_count)
-
-        if date_range[0] and date_range[1]:
-            st.caption(f"Data range: {date_range[0]} to {date_range[1]}")
-
-        if symbols:
-            st.markdown("**Available Symbols:**")
-            st.code(" ".join(symbols) + ("..." if stock_count > 20 else ""))
-
-    except Exception as e:
-        st.error(f"Could not load context: {e}")
-
+    # Chat input
     st.markdown("---")
+    prompt = st.chat_input(
+        "Ask Claude Code anything about your trading data...",
+        disabled=st.session_state.waiting_for_response
+    )
 
-    # MCP Tools reference
-    st.subheader("🔧 Available MCP Tools")
-    st.markdown("Claude Code can use these g2 tools directly:")
+    if prompt:
+        msg_id = send_message(prompt)
+        st.session_state.pending_msg_id = msg_id
+        st.session_state.waiting_for_response = True
+        st.rerun()
 
-    tools = [
-        ("query_database", "Run SQL queries on g2 data"),
-        ("data_update", "Fetch latest prices from AlphaVantage"),
-        ("features_list", "List available technical indicators"),
-        ("ml_train", "Train quantile regression models"),
-        ("ml_predict", "Generate price predictions"),
-        ("ml_eval", "Evaluate model performance"),
-        ("backtest_run", "Run strategy backtests"),
-        ("backtest_compare", "Compare multiple strategies"),
-        ("system_status", "Check system health"),
-    ]
+    # Sidebar controls
+    with st.sidebar:
+        st.markdown("### Chat Controls")
 
-    for tool, desc in tools:
-        st.markdown(f"- `{tool}` - {desc}")
+        if st.button("🔄 Refresh Chat", use_container_width=True):
+            st.session_state.waiting_for_response = False
+            st.session_state.pending_msg_id = None
+            st.rerun()
 
-    st.markdown("---")
+        if st.button("🗑️ Clear History", use_container_width=True):
+            from g2.ui.components.database import get_connection
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM ui_messages")
+                    conn.commit()
+            st.session_state.waiting_for_response = False
+            st.session_state.pending_msg_id = None
+            st.rerun()
 
-    # Example conversation
-    with st.expander("💬 Example Claude Code Conversation"):
+        st.markdown("---")
+        st.markdown("### How it Works")
         st.markdown("""
-```
-You: What's the current state of my g2 data?
+        1. You type a message here
+        2. It's sent to Claude Code via the database
+        3. Claude Code sees it and responds
+        4. Response appears here
 
-Claude: Let me check the system status...
-[Uses system_status tool]
-
-You have 50 active stocks with price data from 2020-01-01 to today.
-NVDA and AMD have the most recent updates. 3 ML models are trained
-and ready for predictions.
-
-You: Generate predictions for NVDA
-
-Claude: I'll generate predictions using the latest model...
-[Uses ml_predict tool]
-
-NVDA 7-day prediction:
-- Q10 (bearish): $130.50
-- Q50 (median): $138.20
-- Q90 (bullish): $145.80
-
-The wide range suggests moderate uncertainty.
-
-You: Show me a volatility chart for NVDA
-
-Claude: Creating volatility analysis chart...
-[Uses chart command]
-
-[Opens chart in browser showing Bollinger Bands, ATR, and
-historical volatility for NVDA]
-```
+        **Note:** Claude Code must be running!
         """)
-
-    st.markdown("---")
-    st.caption("💡 Tip: Keep Claude Code running in your terminal while using this UI for the best experience.")
