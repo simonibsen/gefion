@@ -62,6 +62,12 @@ class TestUIStructure:
         content = (ui_dir / "views" / "dashboard.py").read_text()
         assert "def render_dashboard(" in content
 
+    def test_dashboard_references_ai_prompts_not_assistant(self, ui_dir):
+        """Dashboard should reference AI Prompts, not AI Assistant."""
+        content = (ui_dir / "views" / "dashboard.py").read_text()
+        assert "AI Prompts" in content
+        assert "AI Assistant" not in content
+
     def test_charts_has_render_function(self, ui_dir):
         """Charts view should have render_charts function."""
         content = (ui_dir / "views" / "charts.py").read_text()

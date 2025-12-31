@@ -30,10 +30,10 @@ def render_dashboard():
             st.rerun()
 
     with col2:
-        st.markdown("### 🤖 AI Assistant")
-        st.markdown("Ask Claude about stocks, strategies, and analysis.")
-        if st.button("Chat with Claude", key="quick_ai", use_container_width=True):
-            st.session_state.current_page = "🤖 AI Assistant"
+        st.markdown("### 🤖 AI Prompts")
+        st.markdown("Example prompts for Claude Code analysis.")
+        if st.button("View Prompts", key="quick_ai", use_container_width=True):
+            st.session_state.current_page = "🤖 AI Prompts"
             st.rerun()
 
     with col3:
@@ -134,7 +134,7 @@ def render_dashboard():
 
         **g2** is a comprehensive trading analysis platform that combines:
         - 📊 **Interactive Charts** - Candlesticks, comparisons, volatility analysis
-        - 🤖 **AI Assistant** - Claude-powered analysis and recommendations
+        - 🤖 **AI Prompts** - Example queries for Claude Code
         - 🧠 **ML Predictions** - Quantile regression and trend classification
         - 📈 **Backtesting** - Test strategies with realistic execution modeling
 
@@ -142,7 +142,7 @@ def render_dashboard():
 
         1. **Update Data**: Go to Data Management → Update to fetch latest prices
         2. **View Charts**: Select a symbol and explore different chart types
-        3. **Ask Claude**: Use the AI Assistant for analysis and insights
+        3. **Use Claude Code**: Copy prompts from AI Prompts for analysis
         4. **Run Backtests**: Test strategies on your portfolio
 
         ### Keyboard Shortcuts
