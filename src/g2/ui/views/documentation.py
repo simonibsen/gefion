@@ -44,11 +44,12 @@ def render_docs():
     st.title("📚 Documentation")
     st.markdown("Guides and theory for g2 quantitative trading platform.")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📜 Whitepaper",
         "🚀 Quick Start",
         "🧠 ML Pipeline",
         "📈 Backtesting",
+        "🧪 Experiments",
         "🔧 Troubleshooting",
     ])
 
@@ -65,6 +66,9 @@ def render_docs():
         render_backtest_docs()
 
     with tab5:
+        render_experiments_docs()
+
+    with tab6:
         render_troubleshooting()
 
 
@@ -282,6 +286,92 @@ def render_backtest_docs():
         "breakout": "Buy on price breakouts with volume confirmation",
     }
 
+    for name, desc in strategies.items():
+        st.markdown(f"- **{name}**: {desc}")
+
+
+def render_experiments_docs():
+    """Render the experiments documentation."""
+    st.subheader("AI Experimentation Framework")
+
+    st.info("""
+    The experiments module enables **autonomous experimentation** with trading
+    strategy parameters, ML hyperparameters, and feature selection. AI proposes
+    experiments, users approve them.
+    """)
+
+    content = load_doc("EXPERIMENTS.md")
+
+    if content.startswith("*Document not found"):
+        st.error(content)
+        return
+
+    sections = extract_sections(content)
+
+    # Key experiment sections
+    key_sections = [
+        "Overview",
+        "Core Concepts",
+        "CLI Commands",
+        "Search Space Format",
+        "Experiment Chaining",
+        "MCP Tools",
+        "Database Schema",
+        "Python API",
+        "Example Workflow",
+        "Best Practices",
+    ]
+
+    for section in key_sections:
+        if section in sections:
+            expanded = section == "Overview" or section == "CLI Commands"
+            with st.expander(f"**{section}**", expanded=expanded):
+                st.markdown(sections[section])
+
+    # Quick reference
+    st.markdown("---")
+    st.markdown("### Quick Reference")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("""
+        **Propose Experiment**
+        ```bash
+        g2 experiment propose \\
+          --name "momentum_opt" \\
+          --strategy momentum \\
+          --search-space '{"lookback_days": \\
+            {"type": "int", "low": 5, "high": 30}}' \\
+          --symbols AAPL,MSFT \\
+          --search-method bayesian
+        ```
+        """)
+
+    with col2:
+        st.markdown("""
+        **Approve & Run**
+        ```bash
+        # List pending
+        g2 experiment list --status proposed
+
+        # Approve
+        g2 experiment approve --id 1
+
+        # Run
+        g2 experiment run --id 1
+
+        # View results
+        g2 experiment results --id 1
+        ```
+        """)
+
+    st.markdown("### Search Strategies")
+    strategies = {
+        "grid": "Exhaustive - all parameter combinations",
+        "random": "Random sampling - quick exploration",
+        "bayesian": "Adaptive optimization (Optuna TPE) - efficient",
+    }
     for name, desc in strategies.items():
         st.markdown(f"- **{name}**: {desc}")
 
