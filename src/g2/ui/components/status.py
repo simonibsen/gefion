@@ -71,11 +71,20 @@ def get_system_stats() -> Optional[SystemStats]:
                 cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
                 date_range = cur.fetchone()
 
-                cur.execute("SELECT COUNT(*) FROM ml_models")
-                model_count = cur.fetchone()[0]
+                # ML tables may not exist yet - query gracefully
+                model_count = 0
+                prediction_count = 0
+                try:
+                    cur.execute("SELECT COUNT(*) FROM ml_models")
+                    model_count = cur.fetchone()[0]
+                except Exception:
+                    pass
 
-                cur.execute("SELECT COUNT(*) FROM quantile_predictions")
-                prediction_count = cur.fetchone()[0]
+                try:
+                    cur.execute("SELECT COUNT(*) FROM quantile_predictions")
+                    prediction_count = cur.fetchone()[0]
+                except Exception:
+                    pass
 
         return SystemStats(
             total_stocks=total_stocks,

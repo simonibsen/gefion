@@ -245,6 +245,21 @@ class TestStatusComponentStructure:
         assert "def get_latest_data_date(" in content
         assert "get_system_stats.clear()" in content
 
+    def test_ml_table_queries_handle_missing_tables(self, status_module_path):
+        """ML table queries should handle missing tables gracefully.
+
+        ml_models and quantile_predictions may not exist yet, so queries
+        should fail gracefully and default to 0 instead of crashing.
+        """
+        content = status_module_path.read_text()
+        # Should have individual try/except blocks for ML tables
+        assert "# ML tables may not exist yet" in content
+        assert content.count("SELECT COUNT(*) FROM ml_models") == 1
+        assert content.count("SELECT COUNT(*) FROM quantile_predictions") == 1
+        # Both queries should be in their own try/except blocks
+        assert "model_count = 0" in content
+        assert "prediction_count = 0" in content
+
 
 class TestCLICommandDisplay:
     """Test that UI views display equivalent CLI commands."""
