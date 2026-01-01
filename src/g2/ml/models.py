@@ -366,6 +366,13 @@ def _train_lightgbm_quantile(
         import lightgbm as lgb
     except ImportError:
         raise ImportError("LightGBM not installed. Install with: pip install 'g2[ml_extended]'")
+    except OSError as e:
+        if "libomp" in str(e):
+            raise OSError(
+                "LightGBM requires OpenMP library. On macOS, install with: brew install libomp\n"
+                "Alternatively, use --algorithm xgboost or --algorithm quantile_regression"
+            ) from e
+        raise
 
     n_estimators = hyperparams.get("n_estimators", 100)
     max_depth = hyperparams.get("max_depth", 6)

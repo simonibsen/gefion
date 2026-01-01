@@ -54,6 +54,11 @@ This enables:
    pip install 'g2[ml_extended]'
    ```
 
+   **macOS users**: LightGBM requires OpenMP. Install with Homebrew:
+   ```bash
+   brew install libomp
+   ```
+
    **When to use extended algorithms:**
    - **Start with `quantile_regression`**: Fast, simple, good for prototyping and linear relationships
    - **Upgrade to `xgboost`**: Better accuracy for non-linear patterns, worth the extra training time for production
