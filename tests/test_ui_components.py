@@ -119,6 +119,12 @@ class TestUIStructure:
         # The dataset build command must include --export for training to work
         assert '"--export"' in content, "Dataset build must include --export flag"
 
+    def test_ml_dataset_build_warns_on_overwrite(self, ui_dir):
+        """ML dataset build should warn when overwriting existing dataset."""
+        content = (ui_dir / "views" / "ml.py").read_text()
+        # Should check if dataset exists and show warning
+        assert "already exists" in content.lower(), "Should warn about overwriting"
+
     def test_backtest_has_render_function(self, ui_dir):
         """Backtest view should have render_backtest function."""
         content = (ui_dir / "views" / "backtest.py").read_text()

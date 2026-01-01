@@ -229,6 +229,18 @@ def render_dataset_section():
                 feature_include = []
                 feature_exclude = []
 
+    # Check if dataset already exists
+    dataset_exists = False
+    existing_dataset_key = f"{dataset_name}_{dataset_version}"
+    for ds in _get_datasets():
+        if ds["name"] == dataset_name and ds["version"] == dataset_version:
+            dataset_exists = True
+            break
+
+    # Show warning if dataset exists
+    if dataset_exists:
+        st.warning(f"⚠️ Dataset `{dataset_name}` version `{dataset_version}` already exists and will be overwritten.")
+
     if st.button("🔨 Build Dataset", type="primary", use_container_width=True):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
