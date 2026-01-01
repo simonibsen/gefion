@@ -6,6 +6,17 @@ import sys
 import json
 import os
 from datetime import datetime, date, timedelta
+from typing import Dict, Any
+
+
+@st.cache_resource
+def _detect_device() -> Dict[str, Any]:
+    """Detect available compute device for ML training."""
+    try:
+        from g2.ml.device import detect_device
+        return detect_device(return_info=True)
+    except Exception:
+        return {"device": "cpu", "cuda_available": False}
 
 
 @st.cache_data(ttl=60)
@@ -503,9 +514,20 @@ def render_train_section():
     """Render model training section."""
     st.subheader("Train Model")
 
-    st.info("""
-    💡 **Training** builds quantile regression (q10/q50/q90) or classification models
-    on your prepared dataset. Models are saved locally and registered in the database.
+    # Device detection
+    device_info = _detect_device()
+    device = device_info.get("device", "cpu")
+    cuda_available = device_info.get("cuda_available", False)
+
+    if cuda_available:
+        gpu_name = device_info.get("cuda_device_name", "GPU")
+        st.success(f"🚀 **GPU Available:** {gpu_name} — Training will use CUDA acceleration")
+    else:
+        st.info("💻 **CPU Mode** — All algorithms work on CPU. GPU acceleration available with CUDA-capable hardware.")
+
+    st.caption("""
+    💡 **Training** builds quantile regression (q10/q50/q90) or classification models.
+    LightGBM and XGBoost support GPU acceleration. Quantile Regression (sklearn) is CPU-only.
     """)
 
     # Get available datasets for selection
@@ -541,11 +563,17 @@ def render_train_section():
         dataset_horizons = datasets[selected_idx].get("horizons") or [7, 30, 90]
 
     with col2:
+        if model_type == "Quantile Regression":
+            algo_options = ["lightgbm", "xgboost", "quantile_regression"]
+            algo_help = "LightGBM/XGBoost: GPU-accelerated. Quantile Regression (sklearn): CPU-only"
+        else:
+            algo_options = ["xgboost", "lightgbm"]
+            algo_help = "Both support GPU acceleration when available"
+
         algorithm = st.selectbox(
             "Algorithm",
-            ["lightgbm", "xgboost", "quantile_regression"] if model_type == "Quantile Regression"
-            else ["xgboost", "lightgbm"],
-            help="ML algorithm to use",
+            algo_options,
+            help=algo_help,
         )
 
         model_name = st.text_input(
@@ -572,6 +600,9 @@ def render_train_section():
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
+        # Use detected device (cuda if available, else cpu)
+        train_device = device if algorithm != "quantile_regression" else "cpu"
+
         if model_type == "Quantile Regression":
             cmd = [
                 sys.executable, "-m", "g2.cli", "ml", "train",
@@ -580,6 +611,7 @@ def render_train_section():
                 "--model-name", model_name,
                 "--model-version", model_version,
                 "--algorithm", algorithm,
+                "--device", train_device,
                 "--json",
             ]
             cli_subcommand = "train"
@@ -590,6 +622,7 @@ def render_train_section():
                 "--dataset-version", dataset_version,
                 "--model-name", model_name,
                 "--model-version", model_version,
+                "--device", train_device,
                 "--algorithm", algorithm,
                 "--horizon", str(horizon),
                 "--json",
@@ -599,7 +632,8 @@ def render_train_section():
         # Show equivalent CLI command
         cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
                    f"--dataset-version {dataset_version} --model-name {model_name} "
-                   f"--model-version {model_version} --algorithm {algorithm}")
+                   f"--model-version {model_version} --algorithm {algorithm} "
+                   f"--device {train_device}")
         if model_type == "Trend Classifier":
             cli_cmd += f" --horizon {horizon}"
         st.code(cli_cmd, language="bash")

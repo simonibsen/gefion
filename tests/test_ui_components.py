@@ -119,6 +119,23 @@ class TestUIStructure:
         assert "# Get model counts separately" in content
         assert "ml_models may not exist" in content
 
+    def test_ml_train_has_device_detection(self, ui_dir):
+        """ML train section should detect and display GPU/CPU device."""
+        content = (ui_dir / "views" / "ml.py").read_text()
+        # Should have device detection
+        assert "_detect_device" in content
+        # Should show device status
+        assert "GPU Available" in content
+        assert "CPU Mode" in content
+        # Should pass device to training command
+        assert '"--device"' in content
+
+    def test_ml_train_shows_algorithm_gpu_support(self, ui_dir):
+        """ML train should show which algorithms support GPU."""
+        content = (ui_dir / "views" / "ml.py").read_text()
+        assert "GPU-accelerated" in content
+        assert "CPU-only" in content
+
     def test_ml_dataset_has_feature_selection(self, ui_dir):
         """ML dataset section should have feature include/exclude options."""
         content = (ui_dir / "views" / "ml.py").read_text()
