@@ -59,9 +59,9 @@ def upsert_ml_dataset(conn: psycopg.Connection, payload: Dict[str, Any]) -> int:
         "name": payload["name"],
         "version": payload["version"],
         "universe": Json(payload.get("universe")) if payload.get("universe") is not None else None,
-        "feature_names": Json(payload.get("feature_names") or []),
+        "feature_names": payload.get("feature_names") or [],  # text[] - pass list directly
         "lookback_days": payload["lookback_days"],
-        "horizons_days": Json(payload["horizons_days"]),
+        "horizons_days": payload["horizons_days"],  # integer[] - pass list directly
         "label_spec": Json(payload["label_spec"]),
         "split_spec": Json(payload["split_spec"]),
         "artifact_uri": payload["artifact_uri"],
