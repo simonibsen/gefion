@@ -250,6 +250,8 @@ def export_dataset_artifacts(
             if df.empty:
                 return
             df["close_for_label"] = df["adjusted_close"].where(df["adjusted_close"].notna(), df["close"])
+            # Convert to float to handle Decimal types from PostgreSQL
+            df["close_for_label"] = pd.to_numeric(df["close_for_label"], errors="coerce")
             df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
             out = []
             for h in horizons_days:
@@ -289,5 +291,6 @@ def export_dataset_artifacts(
                     else:
                         labels_df.to_csv(labels_path, index=False)
                     emit_progress(f"Labels computed: {len(labels_df):,} records")
-        except Exception:
+        except Exception as e:
+            emit_progress(f"Warning: Failed to compute labels: {e}")
             return
