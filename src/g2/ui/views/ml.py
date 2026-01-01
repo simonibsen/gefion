@@ -247,21 +247,26 @@ def render_dataset_section():
                 )
 
                 last_data = {}
+                json_buffer = []
                 for line in process.stdout:
                     line = line.strip()
                     if not line:
                         continue
+                    # Accumulate lines for multi-line JSON parsing
+                    json_buffer.append(line)
                     try:
-                        data = json.loads(line)
+                        data = json.loads("\n".join(json_buffer))
+                        json_buffer = []  # Reset buffer on successful parse
                         if not isinstance(data, dict):
-                            status_text.write(str(data))
                             continue
                         last_data = data
-                        msg = data.get("message", data.get("status", ""))
+                        # Show status message if present
+                        msg = data.get("message", "")
                         if msg:
                             status_text.write(msg)
                     except json.JSONDecodeError:
-                        status_text.write(line)
+                        # Not yet complete JSON, keep buffering
+                        pass
 
                 returncode = process.wait()
 
@@ -444,18 +449,20 @@ def render_train_section():
                 )
 
                 last_data = {}
+                json_buffer = []
                 for line in process.stdout:
                     line = line.strip()
                     if not line:
                         continue
+                    json_buffer.append(line)
                     try:
-                        data = json.loads(line)
+                        data = json.loads("\n".join(json_buffer))
+                        json_buffer = []
                         if not isinstance(data, dict):
-                            status_text.write(str(data))
                             continue
                         last_data = data
                         # Show training progress
-                        msg = data.get("message", data.get("status", ""))
+                        msg = data.get("message", "")
                         horizon = data.get("horizon")
                         quantile = data.get("quantile")
                         if horizon and quantile:
@@ -463,7 +470,7 @@ def render_train_section():
                         elif msg:
                             status_text.write(msg)
                     except json.JSONDecodeError:
-                        status_text.write(line)
+                        pass
 
                 returncode = process.wait()
 
@@ -598,14 +605,16 @@ def render_predict_section():
                 )
 
                 last_data = {}
+                json_buffer = []
                 for line in process.stdout:
                     line = line.strip()
                     if not line:
                         continue
+                    json_buffer.append(line)
                     try:
-                        data = json.loads(line)
+                        data = json.loads("\n".join(json_buffer))
+                        json_buffer = []
                         if not isinstance(data, dict):
-                            status_text.write(str(data))
                             continue
                         last_data = data
                         # Update metrics if available
@@ -622,7 +631,7 @@ def render_predict_section():
                         if label:
                             status_text.write(f"Processing: **{label}**")
                     except json.JSONDecodeError:
-                        status_text.write(line)
+                        pass
 
                 returncode = process.wait()
 
@@ -759,17 +768,19 @@ def render_evaluate_section():
                 )
 
                 last_data = {}
+                json_buffer = []
                 for line in process.stdout:
                     line = line.strip()
                     if not line:
                         continue
+                    json_buffer.append(line)
                     try:
-                        data = json.loads(line)
+                        data = json.loads("\n".join(json_buffer))
+                        json_buffer = []
                         if not isinstance(data, dict):
-                            status_text.write(str(data))
                             continue
                         last_data = data
-                        msg = data.get("message", data.get("status", ""))
+                        msg = data.get("message", "")
                         if msg:
                             status_text.write(msg)
                         # Show horizon results as they come in
@@ -778,7 +789,7 @@ def render_evaluate_section():
                             with results_container:
                                 st.write(f"**Horizon {horizon}d**: Q50={data.get('q50_coverage', 0):.1%}")
                     except json.JSONDecodeError:
-                        status_text.write(line)
+                        pass
 
                 returncode = process.wait()
 
