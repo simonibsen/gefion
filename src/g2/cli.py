@@ -821,6 +821,133 @@ def ml_dataset_delete(
             )
 
 
+@ml_app.command("dataset-inspect")
+def ml_dataset_inspect(
+    name: str = typer.Option(..., help="Dataset name"),
+    version: str = typer.Option(..., help="Dataset version"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Inspect a dataset's metadata and show dependent models.
+
+    Displays dataset configuration, feature list, horizons, thresholds,
+    and lists all models trained on this dataset.
+
+    Examples:
+        # Inspect a dataset
+        g2 ml dataset-inspect --name nasdaq_50 --version v1
+
+        # Get JSON output for programmatic use
+        g2 ml dataset-inspect --name nasdaq_50 --version v1 --json
+    """
+    with db_connection(db_url) as conn:
+        init_schema_tables(conn, ["ml_datasets", "ml_models"])
+
+        with conn.cursor() as cur:
+            # Fetch dataset info
+            cur.execute(
+                """
+                SELECT id, name, version, created_at, universe, feature_names,
+                       horizons_days, label_spec, artifact_uri
+                FROM ml_datasets
+                WHERE name = %s AND version = %s
+                """,
+                (name, version),
+            )
+            row = cur.fetchone()
+
+            if not row:
+                emit_error(
+                    f"Dataset not found: {name} {version}",
+                    json_output=json_output,
+                )
+                return
+
+            dataset_id = row[0]
+            dataset_info = {
+                "id": row[0],
+                "name": row[1],
+                "version": row[2],
+                "created_at": str(row[3]) if row[3] else None,
+                "universe": row[4],
+                "feature_names": row[5] or [],
+                "horizons_days": row[6] or [],
+                "label_spec": row[7],
+                "artifact_uri": row[8],
+            }
+
+            # Fetch dependent models
+            cur.execute(
+                """
+                SELECT name, version, algorithm, created_at
+                FROM ml_models
+                WHERE dataset_id = %s
+                ORDER BY created_at DESC
+                """,
+                (dataset_id,),
+            )
+            models = [
+                {
+                    "name": m[0],
+                    "version": m[1],
+                    "algorithm": m[2],
+                    "created_at": str(m[3]) if m[3] else None,
+                }
+                for m in cur.fetchall()
+            ]
+            dataset_info["models"] = models
+
+        # Output
+        if json_output:
+            emit(
+                f"Dataset: {name} {version}",
+                data=dataset_info,
+                json_output=json_output,
+            )
+        else:
+            # Pretty print for CLI
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            console.print(f"\n[bold]Dataset: {name} {version}[/bold]")
+            console.print(f"  Created: {dataset_info['created_at']}")
+
+            universe = dataset_info.get("universe") or {}
+            if isinstance(universe, dict):
+                if universe.get("exchange"):
+                    console.print(f"  Universe: {universe.get('exchange')} (limit: {universe.get('limit', 'all')})")
+                elif universe.get("symbols"):
+                    symbols = universe.get("symbols", [])
+                    console.print(f"  Universe: {len(symbols)} symbols")
+            console.print(f"  Horizons: {dataset_info['horizons_days']} days")
+            console.print(f"  Features: {len(dataset_info['feature_names'])} features")
+
+            label_spec = dataset_info.get("label_spec") or {}
+            thresholds = label_spec.get("thresholds") or {}
+            if thresholds:
+                console.print("  Thresholds:")
+                for horizon, thresh in thresholds.items():
+                    console.print(f"    {horizon}d: weak={thresh.get('weak')}, strong={thresh.get('strong')}")
+
+            console.print(f"  Artifact: {dataset_info['artifact_uri']}")
+
+            # Models table
+            console.print(f"\n[bold]Models using this dataset ({len(models)}):[/bold]")
+            if models:
+                table = Table(show_header=True)
+                table.add_column("Name")
+                table.add_column("Version")
+                table.add_column("Algorithm")
+                table.add_column("Created")
+                for m in models:
+                    table.add_row(m["name"], m["version"], m["algorithm"] or "-", m["created_at"] or "-")
+                console.print(table)
+            else:
+                console.print("  (no models)")
+
+
 @ml_app.command("train")
 def ml_train(
     dataset_name: str = typer.Option(..., help="Dataset name to train on"),

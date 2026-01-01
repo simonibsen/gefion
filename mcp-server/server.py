@@ -289,6 +289,23 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="ml_dataset_inspect",
+            description=(
+                "Inspect a dataset's metadata and show dependent models. "
+                "Returns dataset configuration (universe, horizons, features, thresholds) "
+                "and lists all models trained on this dataset."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Dataset name"},
+                    "version": {"type": "string", "description": "Dataset version"},
+                },
+                "required": ["name", "version"],
+            },
+        ),
+
+        Tool(
             name="ml_train",
             description=(
                 "Train quantile regression models for multi-horizon prediction. "
@@ -1282,6 +1299,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _get_role_info(arguments)
         elif name == "ml_dataset_build":
             result = await _ml_dataset_build(arguments)
+        elif name == "ml_dataset_inspect":
+            result = await _ml_dataset_inspect(arguments)
         elif name == "ml_train":
             result = await _ml_train(arguments)
         elif name == "ml_predict":
@@ -1458,6 +1477,16 @@ async def _ml_dataset_build(args: Dict[str, Any]) -> Dict[str, Any]:
 
     # ML operations require PostgreSQL
     return await _execute_with_health_check(['postgres'], _build)
+
+
+async def _ml_dataset_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Inspect ML dataset metadata and dependent models."""
+    async def _inspect():
+        cmd = ['ml', 'dataset-inspect', '--name', args['name'], '--version', args['version']]
+        return await executor.run(*cmd)
+
+    # Inspect requires PostgreSQL
+    return await _execute_with_health_check(['postgres'], _inspect)
 
 
 async def _ml_train(args: Dict[str, Any]) -> Dict[str, Any]:

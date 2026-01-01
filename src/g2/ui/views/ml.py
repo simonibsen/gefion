@@ -93,6 +93,84 @@ def _get_models() -> list[dict]:
         return []
 
 
+def _render_dataset_inspection(ds: dict):
+    """Render dataset inspection panel with details and dependent models."""
+    env = os.environ.copy()
+    env["OTEL_ENABLED"] = "false"
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "g2.cli", "ml", "dataset-inspect",
+            "--name", ds["name"],
+            "--version", ds["version"],
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    if result.returncode != 0:
+        st.error(f"Failed to inspect dataset: {result.stderr or result.stdout}")
+        return
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        st.error("Invalid response from dataset-inspect")
+        return
+
+    with st.expander(f"📋 Dataset Details: {ds['name']} {ds['version']}", expanded=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Configuration**")
+            st.write(f"- Created: {data.get('created_at', 'Unknown')}")
+            universe = data.get("universe", {})
+            if isinstance(universe, dict):
+                if universe.get("exchange"):
+                    st.write(f"- Exchange: {universe.get('exchange')}")
+                if universe.get("limit"):
+                    st.write(f"- Symbol limit: {universe.get('limit')}")
+                if universe.get("symbols"):
+                    st.write(f"- Symbols: {len(universe.get('symbols', []))}")
+            horizons = data.get("horizons_days", [])
+            st.write(f"- Horizons: {horizons} days")
+
+        with col2:
+            st.markdown("**Features**")
+            features = data.get("feature_names", [])
+            st.write(f"- Feature count: {len(features)}")
+            if features:
+                with st.popover("View features"):
+                    for f in features:
+                        st.write(f"- {f}")
+
+            label_spec = data.get("label_spec", {})
+            thresholds = label_spec.get("thresholds", {})
+            if thresholds:
+                st.markdown("**Thresholds**")
+                for horizon, thresh in thresholds.items():
+                    st.write(f"- {horizon}d: weak={thresh.get('weak')}, strong={thresh.get('strong')}")
+
+        # Models section
+        models = data.get("models", [])
+        st.markdown(f"**Models using this dataset ({len(models)})**")
+        if models:
+            model_data = [
+                {
+                    "Name": m["name"],
+                    "Version": m["version"],
+                    "Algorithm": m.get("algorithm", "-"),
+                    "Created": m.get("created_at", "-"),
+                }
+                for m in models
+            ]
+            st.dataframe(model_data, use_container_width=True, hide_index=True)
+        else:
+            st.info("No models trained on this dataset yet.")
+
+
 def render_ml():
     """Render the ML pipeline page."""
     st.title("🧠 ML Pipeline")
@@ -342,7 +420,7 @@ def render_dataset_section():
         st.info("No datasets found. Build one above.")
     else:
         for ds in datasets:
-            col1, col2, col3 = st.columns([3, 2, 1])
+            col1, col2, col3, col4 = st.columns([3, 2, 0.5, 0.5])
 
             with col1:
                 universe = ds.get("universe", {})
@@ -365,6 +443,10 @@ def render_dataset_section():
                     st.caption(f"🔗 {model_count} model(s)")
 
             with col3:
+                if st.button("🔍", key=f"inspect_{ds['id']}", help="Inspect dataset"):
+                    st.session_state[f"inspecting_{ds['id']}"] = True
+
+            with col4:
                 if ds.get("model_count", 0) > 0:
                     st.button(
                         "🗑️",
@@ -395,8 +477,15 @@ def render_dataset_section():
                         else:
                             st.error(f"Delete failed: {result.stderr or result.stdout}")
 
+            # Show inspection panel if toggled
+            if st.session_state.get(f"inspecting_{ds['id']}", False):
+                _render_dataset_inspection(ds)
+                if st.button("Close", key=f"close_inspect_{ds['id']}"):
+                    st.session_state[f"inspecting_{ds['id']}"] = False
+                    st.rerun()
+
         # Show CLI command
-        st.code("g2 ml dataset-delete --name <name> --version <version>", language="bash")
+        st.code("g2 ml dataset-inspect --name <name> --version <version>", language="bash")
 
 
 def render_train_section():
