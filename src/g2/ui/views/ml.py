@@ -34,15 +34,26 @@ def _get_datasets() -> list[dict]:
 
         with get_connection() as conn:
             with conn.cursor() as cur:
+                # Get datasets (ml_datasets must exist for this view to be useful)
                 cur.execute("""
                     SELECT d.id, d.name, d.version, d.created_at,
-                           d.universe, d.horizons_days,
-                           (SELECT COUNT(*) FROM ml_models m WHERE m.dataset_id = d.id) as model_count
+                           d.universe, d.horizons_days
                     FROM ml_datasets d
                     ORDER BY d.created_at DESC
                     LIMIT 50
                 """)
                 rows = cur.fetchall()
+
+                # Get model counts separately - ml_models may not exist yet
+                model_counts = {}
+                try:
+                    cur.execute("""
+                        SELECT dataset_id, COUNT(*) FROM ml_models GROUP BY dataset_id
+                    """)
+                    model_counts = {r[0]: r[1] for r in cur.fetchall()}
+                except Exception:
+                    pass  # ml_models table may not exist
+
                 return [
                     {
                         "id": r[0],
@@ -51,7 +62,7 @@ def _get_datasets() -> list[dict]:
                         "created_at": r[3],
                         "universe": r[4],
                         "horizons": r[5],
-                        "model_count": r[6],
+                        "model_count": model_counts.get(r[0], 0),
                     }
                     for r in rows
                 ]

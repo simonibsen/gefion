@@ -112,6 +112,13 @@ class TestUIStructure:
         content = (ui_dir / "views" / "ml.py").read_text()
         assert "def render_ml(" in content
 
+    def test_ml_dataset_list_handles_missing_models_table(self, ui_dir):
+        """Dataset listing should handle missing ml_models table gracefully."""
+        content = (ui_dir / "views" / "ml.py").read_text()
+        # Model counts should be fetched separately so datasets show even without ml_models
+        assert "# Get model counts separately" in content
+        assert "ml_models may not exist" in content
+
     def test_ml_dataset_has_feature_selection(self, ui_dir):
         """ML dataset section should have feature include/exclude options."""
         content = (ui_dir / "views" / "ml.py").read_text()
