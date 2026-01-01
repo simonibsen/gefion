@@ -521,9 +521,9 @@ def render_train_section():
 
     if cuda_available:
         gpu_name = device_info.get("cuda_device_name", "GPU")
-        st.success(f"🚀 **GPU Available:** {gpu_name} — Training will use CUDA acceleration")
+        st.success(f"🚀 **GPU Detected:** {gpu_name} — Training will use CUDA acceleration")
     else:
-        st.info("💻 **CPU Mode** — All algorithms work on CPU. GPU acceleration available with CUDA-capable hardware.")
+        st.warning("⚠️ **No GPU Detected** — Training will use CPU. All algorithms work fine on CPU.")
 
     st.caption("""
     💡 **Training** builds quantile regression (q10/q50/q90) or classification models.

@@ -125,8 +125,8 @@ class TestUIStructure:
         # Should have device detection
         assert "_detect_device" in content
         # Should show device status
-        assert "GPU Available" in content
-        assert "CPU Mode" in content
+        assert "GPU Detected" in content
+        assert "No GPU Detected" in content
         # Should pass device to training command
         assert '"--device"' in content
 
