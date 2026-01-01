@@ -113,6 +113,12 @@ class TestUIStructure:
         content = (ui_dir / "views" / "ml.py").read_text()
         assert "delete" in content.lower() or "Delete" in content
 
+    def test_ml_dataset_build_exports_files(self, ui_dir):
+        """ML dataset build should include --export flag to create feature files."""
+        content = (ui_dir / "views" / "ml.py").read_text()
+        # The dataset build command must include --export for training to work
+        assert '"--export"' in content, "Dataset build must include --export flag"
+
     def test_backtest_has_render_function(self, ui_dir):
         """Backtest view should have render_backtest function."""
         content = (ui_dir / "views" / "backtest.py").read_text()
