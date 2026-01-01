@@ -13,14 +13,16 @@ import pytest
 
 @pytest.fixture
 def db_conn():
-    """Get real database connection."""
+    """Get real database connection with required schema initialized."""
     if os.getenv("ENABLE_DB_TESTS", "0") != "1":
         pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
 
-    from g2.cli_helpers import db_connection
+    from g2.cli_helpers import db_connection, init_schema_tables
 
     url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
     with db_connection(url) as conn:
+        # Ensure required tables exist (same as CLI does)
+        init_schema_tables(conn, ["stocks", "feature_definitions", "computed_features", "ml_datasets"])
         yield conn
 
 
