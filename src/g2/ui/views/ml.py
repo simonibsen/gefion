@@ -248,6 +248,7 @@ def render_dataset_section():
             "--strong-thresholds", strong_str,
             "--format", export_format,
             "--export",
+            "--force",
             "--json",
         ]
 
@@ -265,7 +266,7 @@ def render_dataset_section():
         # Show equivalent CLI command
         cli_cmd = (f"g2 ml dataset-build --name {dataset_name} --version {dataset_version} "
                    f"--exchange {exchange} --limit {limit} --horizons {horizons_str} "
-                   f"--format {export_format} --export{cli_features}")
+                   f"--format {export_format} --export --force{cli_features}")
         st.code(cli_cmd, language="bash")
 
         with st.status("Building dataset...", expanded=True) as status:

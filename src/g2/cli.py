@@ -539,6 +539,7 @@ def ml_dataset_build(
     format: str = typer.Option("csv", help="Export format: csv (default) or parquet"),
     out_dir: Path = typer.Option(Path("datasets"), help="Output directory for dataset manifest"),
     export: bool = typer.Option(False, "--export/--no-export", help="Export dataset artifacts (requires DB data)"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing dataset if it exists"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
@@ -646,6 +647,21 @@ def ml_dataset_build(
 
     with db_connection(db_url) as conn:
         init_schema_tables(conn, ["ml_datasets"])
+
+        # Check if dataset already exists
+        if not force:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM ml_datasets WHERE name = %s AND version = %s",
+                    (name, version),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    emit_error(
+                        f"Dataset '{name}' version '{version}' already exists. "
+                        "Use --force to overwrite.",
+                        json_output=json_output,
+                    )
 
         # If exporting and no feature_names specified, discover available features
         if export and not feature_list:
