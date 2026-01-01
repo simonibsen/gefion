@@ -1,0 +1,19 @@
+{
+  "name": "indicator_sma",
+  "version": "2.0",
+  "status": "active",
+  "description": "Simple Moving Average (SMA) using TA-Lib. Trend-following indicator showing average price over a period. Common periods: 20 (short), 50 (medium), 200 (long-term trend).",
+  "language": "python",
+  "function_body": "import pandas as pd\nimport numpy as np\nimport talib\n\ndef compute(rows, specs):\n    \"\"\"\n    Compute SMA using TA-Lib.\n    \n    Args:\n        rows: Price data with 'date', 'close' or 'adjusted_close'\n        specs: List of specs, each with optional 'period' param (default: 20)\n    \n    Returns:\n        List of dicts with date and sma_{period} values\n    \"\"\"\n    if not rows:\n        return []\n    \n    df = pd.DataFrame(rows)\n    if df.empty:\n        return []\n    \n    df = df.sort_values('date').reset_index(drop=True)\n    \n    # Use adjusted_close if available, otherwise close\n    close_col = 'adjusted_close' if 'adjusted_close' in df.columns and df['adjusted_close'].notna().any() else 'close'\n    close = pd.to_numeric(df[close_col], errors='coerce').values\n    \n    # Handle specs - can be list or single dict\n    if isinstance(specs, dict):\n        specs = [specs]\n    \n    # Compute all requested SMAs\n    for spec in specs:\n        params = spec.get('params', spec)\n        period = params.get('period', 20)\n        col_name = f'sma_{period}'\n        df[col_name] = talib.SMA(close, timeperiod=period)\n    \n    results = []\n    for i, row in df.iterrows():\n        result = {'date': row['date']}\n        for spec in specs:\n            params = spec.get('params', spec)\n            period = params.get('period', 20)\n            col_name = f'sma_{period}'\n            val = row[col_name]\n            if pd.notna(val):\n                result[col_name] = float(val)\n        \n        if len(result) > 1:\n            results.append(result)\n    \n    return results\n",
+  "inputs": null,
+  "output_name": "value",
+  "output_type": "double precision",
+  "param_schema": null,
+  "defaults": null,
+  "dependencies": null,
+  "checksum": null,
+  "tags": null,
+  "min_app_version": null,
+  "enabled": true,
+  "created_by": "g2"
+}
