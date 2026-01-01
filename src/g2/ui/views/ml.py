@@ -423,6 +423,9 @@ def render_train_section():
 
         st.caption(f"Training on: `{dataset_name}` version `{dataset_version}`")
 
+        # Get horizons from selected dataset
+        dataset_horizons = datasets[selected_idx].get("horizons") or [7, 30, 90]
+
     with col2:
         algorithm = st.selectbox(
             "Algorithm",
@@ -442,6 +445,14 @@ def render_train_section():
             value=datetime.now().strftime("%Y%m%d"),
             key="train_model_version",
         )
+
+        # Horizon selection for classifier (trains one horizon at a time)
+        if model_type == "Trend Classifier":
+            horizon = st.selectbox(
+                "Horizon (days)",
+                options=dataset_horizons,
+                help="Classifier trains one horizon at a time",
+            )
 
     if st.button("🎯 Train Model", type="primary", use_container_width=True):
         env = os.environ.copy()
@@ -466,6 +477,7 @@ def render_train_section():
                 "--model-name", model_name,
                 "--model-version", model_version,
                 "--algorithm", algorithm,
+                "--horizon", str(horizon),
                 "--json",
             ]
             cli_subcommand = "train-classifier"
@@ -474,6 +486,8 @@ def render_train_section():
         cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
                    f"--dataset-version {dataset_version} --model-name {model_name} "
                    f"--model-version {model_version} --algorithm {algorithm}")
+        if model_type == "Trend Classifier":
+            cli_cmd += f" --horizon {horizon}"
         st.code(cli_cmd, language="bash")
 
         with st.status("Training model...", expanded=True) as status:
