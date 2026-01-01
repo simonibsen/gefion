@@ -2,10 +2,55 @@
 Shared test fixtures and helpers.
 """
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional, List
 
+import pytest
+
 from g2.cli_helpers import upsert_feature_function
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """
+    Re-import feature definitions and functions after test session completes.
+
+    This ensures that any features/functions deleted during testing are restored.
+    Only runs if ENABLE_DB_TESTS=1 (i.e., database tests were enabled).
+    """
+    if os.getenv("ENABLE_DB_TESTS") != "1":
+        return
+
+    # Only restore if tests actually ran (not just collected)
+    if session.testscollected == 0:
+        return
+
+    print("\n\nRestoring feature definitions and functions after tests...")
+
+    env = os.environ.copy()
+    env["OTEL_ENABLED"] = "false"
+
+    # Re-import feature definitions
+    result = subprocess.run(
+        [sys.executable, "-m", "g2.cli", "feat-def-import"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode == 0:
+        print(f"  {result.stdout.strip()}")
+
+    # Re-import feature functions
+    result = subprocess.run(
+        [sys.executable, "-m", "g2.cli", "feat-fx-import"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode == 0:
+        print(f"  {result.stdout.strip()}")
 
 
 def create_test_function(conn, name: str = "test_func", returns_value: str = "close") -> None:
