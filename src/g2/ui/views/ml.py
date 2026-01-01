@@ -59,6 +59,40 @@ def _get_datasets() -> list[dict]:
         return []
 
 
+@st.cache_data(ttl=30)
+def _get_models() -> list[dict]:
+    """Get list of trained models from database."""
+    try:
+        from g2.ui.components.database import get_connection
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT m.id, m.name, m.version, m.model_type, m.algorithm,
+                           m.created_at, d.name as dataset_name, d.version as dataset_version
+                    FROM ml_models m
+                    LEFT JOIN ml_datasets d ON d.id = m.dataset_id
+                    ORDER BY m.created_at DESC
+                    LIMIT 50
+                """)
+                rows = cur.fetchall()
+                return [
+                    {
+                        "id": r[0],
+                        "name": r[1],
+                        "version": r[2],
+                        "model_type": r[3],
+                        "algorithm": r[4],
+                        "created_at": r[5],
+                        "dataset_name": r[6],
+                        "dataset_version": r[7],
+                    }
+                    for r in rows
+                ]
+    except Exception:
+        return []
+
+
 def render_ml():
     """Render the ML pipeline page."""
     st.title("🧠 ML Pipeline")
@@ -360,6 +394,14 @@ def render_train_section():
     on your prepared dataset. Models are saved locally and registered in the database.
     """)
 
+    # Get available datasets for selection
+    datasets = _get_datasets()
+    dataset_options = [f"{ds['name']} ({ds['version']})" for ds in datasets]
+
+    if not datasets:
+        st.warning("No datasets available. Build a dataset first in the Dataset tab.")
+        return
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -369,17 +411,17 @@ def render_train_section():
             help="Quantile predicts price ranges, Classifier predicts trend direction",
         )
 
-        dataset_name = st.text_input(
-            "Dataset Name",
-            value="training",
-            key="train_dataset_name",
+        selected_dataset = st.selectbox(
+            "Dataset",
+            options=dataset_options,
+            help="Select a dataset to train on",
         )
+        # Parse selected dataset
+        selected_idx = dataset_options.index(selected_dataset)
+        dataset_name = datasets[selected_idx]["name"]
+        dataset_version = datasets[selected_idx]["version"]
 
-        dataset_version = st.text_input(
-            "Dataset Version",
-            value=datetime.now().strftime("%Y%m%d"),
-            key="train_dataset_version",
-        )
+        st.caption(f"Training on: `{dataset_name}` version `{dataset_version}`")
 
     with col2:
         algorithm = st.selectbox(
@@ -499,32 +541,29 @@ def render_predict_section():
     """)
 
     # Get available models
-    try:
-        from g2.ui.components.database import get_models
-        models = get_models()
-        model_options = [f"{m['name']} v{m['version']}" for m in models]
-    except Exception:
-        models = []
-        model_options = []
+    models = _get_models()
+
+    if not models:
+        st.warning("No models available. Train a model first in the Train tab.")
+        return
+
+    model_options = [f"{m['name']} ({m['version']})" for m in models]
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if model_options:
-            selected_model = st.selectbox(
-                "Model",
-                model_options,
-                help="Select a trained model",
-            )
-            # Parse model name and version
-            if selected_model:
-                parts = selected_model.rsplit(" v", 1)
-                model_name = parts[0]
-                model_version = parts[1] if len(parts) > 1 else ""
-        else:
-            st.warning("No models found. Train a model first.")
-            model_name = st.text_input("Model Name", key="pred_model_name")
-            model_version = st.text_input("Model Version", key="pred_model_version")
+        selected_model = st.selectbox(
+            "Model",
+            model_options,
+            help="Select a trained model",
+        )
+        # Get selected model details
+        selected_idx = model_options.index(selected_model)
+        model_name = models[selected_idx]["name"]
+        model_version = models[selected_idx]["version"]
+        model_type = models[selected_idx].get("model_type", "quantile")
+
+        st.caption(f"Using: `{model_name}` version `{model_version}` ({model_type})")
 
         prediction_date = st.date_input(
             "Prediction Date",
@@ -700,28 +739,29 @@ def render_evaluate_section():
     and pinball loss.
     """)
 
-    try:
-        from g2.ui.components.database import get_models
-        models = get_models()
-        model_options = [f"{m['name']} v{m['version']}" for m in models]
-    except Exception:
-        model_options = []
+    # Get available models
+    models = _get_models()
+
+    if not models:
+        st.warning("No models available. Train a model first in the Train tab.")
+        return
+
+    model_options = [f"{m['name']} ({m['version']})" for m in models]
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if model_options:
-            selected_model = st.selectbox(
-                "Model to Evaluate",
-                model_options,
-                key="eval_model",
-            )
-            parts = selected_model.rsplit(" v", 1)
-            model_name = parts[0]
-            model_version = parts[1] if len(parts) > 1 else ""
-        else:
-            model_name = st.text_input("Model Name", key="eval_model_name")
-            model_version = st.text_input("Model Version", key="eval_model_version")
+        selected_model = st.selectbox(
+            "Model to Evaluate",
+            model_options,
+            key="eval_model",
+        )
+        # Get selected model details
+        selected_idx = model_options.index(selected_model)
+        model_name = models[selected_idx]["name"]
+        model_version = models[selected_idx]["version"]
+
+        st.caption(f"Evaluating: `{model_name}` version `{model_version}`")
 
     with col2:
         end_date = st.date_input(
