@@ -102,6 +102,17 @@ class TestUIStructure:
         content = (ui_dir / "views" / "ml.py").read_text()
         assert "def render_ml(" in content
 
+    def test_ml_dataset_has_feature_selection(self, ui_dir):
+        """ML dataset section should have feature include/exclude options."""
+        content = (ui_dir / "views" / "ml.py").read_text()
+        assert "--features" in content or "feature_include" in content
+        assert "--exclude-features" in content or "feature_exclude" in content
+
+    def test_ml_has_dataset_delete(self, ui_dir):
+        """ML view should have dataset delete functionality."""
+        content = (ui_dir / "views" / "ml.py").read_text()
+        assert "delete" in content.lower() or "Delete" in content
+
     def test_backtest_has_render_function(self, ui_dir):
         """Backtest view should have render_backtest function."""
         content = (ui_dir / "views" / "backtest.py").read_text()

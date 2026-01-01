@@ -8,6 +8,57 @@ import os
 from datetime import datetime, date, timedelta
 
 
+@st.cache_data(ttl=60)
+def _get_available_features() -> list[str]:
+    """Get list of available feature names from database."""
+    try:
+        from g2.ui.components.database import get_connection
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT name FROM feature_definitions
+                    WHERE active = true
+                    ORDER BY name
+                """)
+                return [row[0] for row in cur.fetchall()]
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=30)
+def _get_datasets() -> list[dict]:
+    """Get list of datasets from database."""
+    try:
+        from g2.ui.components.database import get_connection
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT d.id, d.name, d.version, d.created_at,
+                           d.universe, d.horizons_days,
+                           (SELECT COUNT(*) FROM ml_models m WHERE m.dataset_id = d.id) as model_count
+                    FROM ml_datasets d
+                    ORDER BY d.created_at DESC
+                    LIMIT 50
+                """)
+                rows = cur.fetchall()
+                return [
+                    {
+                        "id": r[0],
+                        "name": r[1],
+                        "version": r[2],
+                        "created_at": r[3],
+                        "universe": r[4],
+                        "horizons": r[5],
+                        "model_count": r[6],
+                    }
+                    for r in rows
+                ]
+    except Exception:
+        return []
+
+
 def render_ml():
     """Render the ML pipeline page."""
     st.title("🧠 ML Pipeline")
@@ -108,6 +159,42 @@ def render_dataset_section():
             help="Threshold for strong_up/strong_down labels",
         )
 
+    # Feature selection
+    with st.expander("🔧 Feature Selection (optional)"):
+        available_features = _get_available_features()
+
+        if not available_features:
+            st.warning("No features found. Run data update first to compute features.")
+            feature_include = []
+            feature_exclude = []
+        else:
+            st.caption(f"{len(available_features)} features available")
+
+            feature_mode = st.radio(
+                "Selection mode",
+                ["Use all features", "Include only specific features", "Exclude specific features"],
+                horizontal=True,
+                help="Choose how to filter features for the dataset",
+            )
+
+            if feature_mode == "Include only specific features":
+                feature_include = st.multiselect(
+                    "Features to include",
+                    available_features,
+                    help="Only these features will be included in the dataset",
+                )
+                feature_exclude = []
+            elif feature_mode == "Exclude specific features":
+                feature_exclude = st.multiselect(
+                    "Features to exclude",
+                    available_features,
+                    help="These features will be excluded from the dataset",
+                )
+                feature_include = []
+            else:
+                feature_include = []
+                feature_exclude = []
+
     if st.button("🔨 Build Dataset", type="primary", use_container_width=True):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
@@ -129,10 +216,21 @@ def render_dataset_section():
             "--json",
         ]
 
+        # Add feature selection if specified
+        cli_features = ""
+        if feature_include:
+            features_str = ",".join(feature_include)
+            cmd.extend(["--features", features_str])
+            cli_features = f" \\\n    --features {features_str}"
+        elif feature_exclude:
+            exclude_str = ",".join(feature_exclude)
+            cmd.extend(["--exclude-features", exclude_str])
+            cli_features = f" \\\n    --exclude-features {exclude_str}"
+
         # Show equivalent CLI command
         cli_cmd = (f"g2 ml dataset-build --name {dataset_name} --version {dataset_version} "
                    f"--exchange {exchange} --limit {limit} --horizons {horizons_str} "
-                   f"--format {export_format}")
+                   f"--format {export_format}{cli_features}")
         st.code(cli_cmd, language="bash")
 
         with st.status("Building dataset...", expanded=True) as status:
@@ -180,6 +278,72 @@ def render_dataset_section():
             except Exception as e:
                 status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
+
+    # Dataset management
+    st.markdown("---")
+    st.subheader("Manage Datasets")
+
+    datasets = _get_datasets()
+
+    if not datasets:
+        st.info("No datasets found. Build one above.")
+    else:
+        for ds in datasets:
+            col1, col2, col3 = st.columns([3, 2, 1])
+
+            with col1:
+                universe = ds.get("universe", {})
+                if isinstance(universe, dict):
+                    universe_str = universe.get("exchange", "") or ", ".join(universe.get("symbols", [])[:3])
+                else:
+                    universe_str = str(universe)[:20]
+                horizons = ds.get("horizons", [])
+                horizons_str = ", ".join(str(h) for h in horizons) if horizons else "?"
+
+                st.markdown(f"**{ds['name']}** `{ds['version']}`")
+                st.caption(f"{universe_str} | Horizons: {horizons_str}d")
+
+            with col2:
+                created = ds.get("created_at")
+                created_str = created.strftime("%Y-%m-%d") if created else "?"
+                model_count = ds.get("model_count", 0)
+                st.caption(f"Created: {created_str}")
+                if model_count > 0:
+                    st.caption(f"🔗 {model_count} model(s)")
+
+            with col3:
+                if ds.get("model_count", 0) > 0:
+                    st.button(
+                        "🗑️",
+                        key=f"del_{ds['id']}",
+                        disabled=True,
+                        help=f"Cannot delete: {ds['model_count']} model(s) depend on this dataset",
+                    )
+                else:
+                    if st.button("🗑️", key=f"del_{ds['id']}", help="Delete dataset"):
+                        # Run delete command
+                        env = os.environ.copy()
+                        env["OTEL_ENABLED"] = "false"
+                        result = subprocess.run(
+                            [
+                                sys.executable, "-m", "g2.cli", "ml", "dataset-delete",
+                                "--name", ds["name"],
+                                "--version", ds["version"],
+                                "--json",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            env=env,
+                        )
+                        if result.returncode == 0:
+                            st.success(f"Deleted {ds['name']} {ds['version']}")
+                            _get_datasets.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"Delete failed: {result.stderr or result.stdout}")
+
+        # Show CLI command
+        st.code("g2 ml dataset-delete --name <name> --version <version>", language="bash")
 
 
 def render_train_section():

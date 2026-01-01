@@ -691,6 +691,115 @@ def ml_dataset_build(
     )
 
 
+@ml_app.command("dataset-delete")
+def ml_dataset_delete(
+    name: str = typer.Option(..., help="Dataset name to delete"),
+    version: str = typer.Option(..., help="Dataset version to delete"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Delete a dataset and its artifacts.
+
+    Will refuse to delete if models or runs depend on the dataset.
+    Delete dependent models first before deleting the dataset.
+
+    Examples:
+        # Delete a dataset
+        g2 ml dataset-delete --name training --version 20250101
+
+        # Check what depends on a dataset first
+        g2 ml dataset-delete --name training --version 20250101
+        # Error: Cannot delete dataset. 2 model(s) depend on it:
+        #   - my_model v1 (trained 2025-01-15)
+        #   - my_model v2 (trained 2025-01-20)
+        # Delete these models first with: g2 ml model-delete --name <name> --version <version>
+    """
+    import shutil
+
+    with db_connection(db_url) as conn:
+        with conn.cursor() as cur:
+            # Find the dataset
+            cur.execute(
+                "SELECT id, artifact_uri FROM ml_datasets WHERE name = %s AND version = %s",
+                (name, version),
+            )
+            row = cur.fetchone()
+
+            if not row:
+                emit_error(
+                    f"Dataset not found: {name} {version}",
+                    json_output=json_output,
+                )
+                return
+
+            dataset_id, artifact_uri = row
+
+            # Check for dependent models
+            cur.execute(
+                """
+                SELECT m.name, m.version, m.created_at
+                FROM ml_models m
+                WHERE m.dataset_id = %s
+                ORDER BY m.created_at DESC
+                """,
+                (dataset_id,),
+            )
+            dependent_models = cur.fetchall()
+
+            if dependent_models:
+                model_list = "\n".join(
+                    f"  - {m[0]} {m[1]} (trained {m[2].strftime('%Y-%m-%d') if m[2] else 'unknown'})"
+                    for m in dependent_models
+                )
+                emit_error(
+                    f"Cannot delete dataset '{name} {version}'. "
+                    f"{len(dependent_models)} model(s) depend on it:\n{model_list}\n\n"
+                    f"Delete these models first with:\n"
+                    f"  g2 ml model-delete --name <model_name> --version <model_version>",
+                    json_output=json_output,
+                )
+                return
+
+            # Check for dependent runs
+            cur.execute(
+                "SELECT COUNT(*) FROM ml_runs WHERE dataset_id = %s",
+                (dataset_id,),
+            )
+            run_count = cur.fetchone()[0]
+
+            # Delete from database (runs will be deleted by cascade if configured, otherwise warn)
+            if run_count > 0:
+                # Delete runs first
+                cur.execute("DELETE FROM ml_runs WHERE dataset_id = %s", (dataset_id,))
+                emit(f"Deleted {run_count} associated run record(s)", json_output=json_output)
+
+            cur.execute("DELETE FROM ml_datasets WHERE id = %s", (dataset_id,))
+            conn.commit()
+
+            # Delete artifact files
+            files_deleted = False
+            if artifact_uri:
+                artifact_path = Path(artifact_uri)
+                # artifact_uri points to manifest.json, get parent directory
+                dataset_dir = artifact_path.parent
+                if dataset_dir.exists() and dataset_dir.is_dir():
+                    shutil.rmtree(dataset_dir)
+                    files_deleted = True
+
+            emit(
+                f"Deleted dataset: {name} {version}"
+                + (f" (removed {dataset_dir})" if files_deleted else ""),
+                data={
+                    "deleted": True,
+                    "name": name,
+                    "version": version,
+                    "files_removed": files_deleted,
+                },
+                json_output=json_output,
+            )
+
+
 @ml_app.command("train")
 def ml_train(
     dataset_name: str = typer.Option(..., help="Dataset name to train on"),
