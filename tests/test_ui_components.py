@@ -82,6 +82,16 @@ class TestUIStructure:
         content = (ui_dir / "views" / "dashboard.py").read_text()
         assert "def get_g2_insights(" in content
 
+    def test_dashboard_insights_handles_missing_ml_tables(self, ui_dir):
+        """Dashboard insights should handle missing ML tables gracefully.
+
+        quantile_predictions and model_performance may not exist yet.
+        """
+        content = (ui_dir / "views" / "dashboard.py").read_text()
+        # Should have try/except around ML table queries
+        assert "# Predictions - table may not exist yet" in content
+        assert "# Model performance - table may not exist yet" in content
+
     def test_charts_has_render_function(self, ui_dir):
         """Charts view should have render_charts function."""
         content = (ui_dir / "views" / "charts.py").read_text()

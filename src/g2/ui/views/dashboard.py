@@ -108,36 +108,42 @@ def get_g2_insights() -> Optional[G2Insights]:
 
         with get_connection() as conn:
             with conn.cursor() as cur:
-                # Predictions
-                cur.execute("""
-                    SELECT COUNT(*), MAX(prediction_date)
-                    FROM quantile_predictions
-                    WHERE prediction_date >= CURRENT_DATE - INTERVAL '7 days'
-                """)
-                pred_count, pred_date = cur.fetchone()
-                insights.pred_count = pred_count or 0
-                insights.pred_date = str(pred_date) if pred_date else None
-
-                if insights.pred_count > 0:
+                # Predictions - table may not exist yet
+                try:
                     cur.execute("""
-                        SELECT symbol, q50, q90, horizon_days
+                        SELECT COUNT(*), MAX(prediction_date)
                         FROM quantile_predictions
-                        WHERE prediction_date = (SELECT MAX(prediction_date) FROM quantile_predictions)
-                          AND horizon_days = 7
-                        ORDER BY q50 DESC
+                        WHERE prediction_date >= CURRENT_DATE - INTERVAL '7 days'
+                    """)
+                    pred_count, pred_date = cur.fetchone()
+                    insights.pred_count = pred_count or 0
+                    insights.pred_date = str(pred_date) if pred_date else None
+
+                    if insights.pred_count > 0:
+                        cur.execute("""
+                            SELECT symbol, q50, q90, horizon_days
+                            FROM quantile_predictions
+                            WHERE prediction_date = (SELECT MAX(prediction_date) FROM quantile_predictions)
+                              AND horizon_days = 7
+                            ORDER BY q50 DESC
+                            LIMIT 3
+                        """)
+                        insights.bullish = list(cur.fetchall())
+                except Exception:
+                    pass  # Table may not exist
+
+                # Model performance - table may not exist yet
+                try:
+                    cur.execute("""
+                        SELECT model_name, horizon_days,
+                               q50_calibration, quantile_loss
+                        FROM model_performance
+                        ORDER BY updated_at DESC
                         LIMIT 3
                     """)
-                    insights.bullish = list(cur.fetchall())
-
-                # Model performance
-                cur.execute("""
-                    SELECT model_name, horizon_days,
-                           q50_calibration, quantile_loss
-                    FROM model_performance
-                    ORDER BY updated_at DESC
-                    LIMIT 3
-                """)
-                insights.models = list(cur.fetchall())
+                    insights.models = list(cur.fetchall())
+                except Exception:
+                    pass  # Table may not exist
 
                 # Feature coverage
                 cur.execute("""
