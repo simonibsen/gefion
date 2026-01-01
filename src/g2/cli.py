@@ -698,7 +698,12 @@ def ml_dataset_build(
         if export:
             from g2.ml.dataset import export_dataset_artifacts
 
-            export_dataset_artifacts(conn, manifest=manifest, out_dir=dataset_dir)
+            export_dataset_artifacts(
+                conn,
+                manifest=manifest,
+                out_dir=dataset_dir,
+                on_progress=lambda msg: emit(msg, json_output=json_output),
+            )
 
     emit(
         f"Dataset registered: {name} {version}",

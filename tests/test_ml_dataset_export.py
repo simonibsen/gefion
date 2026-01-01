@@ -72,3 +72,30 @@ def test_export_dataset_artifacts_writes_csvs(tmp_path):
     assert _read_csv_header(feats)[:3] == ["symbol", "date", "feature_name"]
     assert _read_csv_header(labels)[:3] == ["symbol", "date", "horizon_days"]
 
+
+def test_export_dataset_artifacts_emits_progress(tmp_path):
+    """Export should call progress callback with status updates."""
+    progress_calls = []
+
+    def on_progress(message: str):
+        progress_calls.append(message)
+
+    manifest = {
+        "universe": {"symbols": ["IBM"]},
+        "horizons_days": [1],
+        "label_spec": {
+            "thresholds": {
+                "1": {"weak": 0.02, "strong": 0.05},
+            }
+        },
+    }
+    export_dataset_artifacts(
+        _FakeConn(), manifest=manifest, out_dir=tmp_path, on_progress=on_progress
+    )
+
+    # Should have progress updates for each phase
+    assert len(progress_calls) >= 3, f"Expected at least 3 progress calls, got {progress_calls}"
+    assert any("price" in msg.lower() for msg in progress_calls)
+    assert any("feature" in msg.lower() for msg in progress_calls)
+    assert any("label" in msg.lower() for msg in progress_calls)
+

@@ -222,7 +222,7 @@ def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
 
     import g2.ml.dataset as ds
 
-    def fake_export(conn, *, manifest, out_dir):
+    def fake_export(conn, *, manifest, out_dir, on_progress=None):
         called["export"] += 1
 
     monkeypatch.setattr(ds, "export_dataset_artifacts", fake_export)

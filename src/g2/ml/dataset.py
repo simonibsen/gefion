@@ -47,7 +47,13 @@ def _stream_to_csv(cursor, path: Path, header: List[str], row_mapper) -> int:
     return count
 
 
-def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -> None:
+def export_dataset_artifacts(
+    conn,
+    *,
+    manifest: Dict[str, Any],
+    out_dir: Path,
+    on_progress: Any = None,
+) -> None:
     """
     Export dataset artifacts.
 
@@ -57,7 +63,13 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
       - labels (forward returns + 5-class labels per horizon)
 
     Supports CSV (default) and Parquet formats via manifest['format'].
+
+    Args:
+        on_progress: Optional callback(message: str) for progress updates.
     """
+    def emit_progress(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -114,6 +126,7 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
             symbols = [row[0] for row in cur.fetchall()]
 
     # Export prices - stream directly for CSV, load for parquet
+    emit_progress(f"Exporting prices for {len(symbols)} symbols...")
     price_rows: list[dict[str, Any]] = []
     price_count = 0
     try:
@@ -163,7 +176,10 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     except Exception:
         _write_to_file([], prices_path, prices_header, export_format)
 
+    emit_progress(f"Exported {price_count:,} price records")
+
     # Export features - stream directly for CSV, load for parquet
+    emit_progress("Exporting features...")
     feature_rows: list[dict[str, Any]] = []
     try:
         with conn.cursor() as cur:
@@ -215,8 +231,11 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     except Exception:
         _write_to_file([], features_path, features_header, export_format)
 
+    emit_progress("Features exported")
+
     # Compute labels from prices
     if price_count > 0 and horizons_days:
+        emit_progress(f"Computing labels for {len(horizons_days)} horizons...")
         try:
             import numpy as np
             import pandas as pd
@@ -269,5 +288,6 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
                         labels_df.to_parquet(labels_path, index=False)
                     else:
                         labels_df.to_csv(labels_path, index=False)
+                    emit_progress(f"Labels computed: {len(labels_df):,} records")
         except Exception:
             return
