@@ -70,6 +70,18 @@ class TestUIStructure:
         assert "AI Prompts" in content
         assert "AI Assistant" not in content
 
+    def test_dashboard_has_cached_market_data(self, ui_dir):
+        """Dashboard should cache market overview data."""
+        content = (ui_dir / "views" / "dashboard.py").read_text()
+        assert "@st.cache_data" in content
+        assert "def get_market_movers(" in content
+        assert "ttl=" in content
+
+    def test_dashboard_has_cached_insights_data(self, ui_dir):
+        """Dashboard should cache g2 insights data."""
+        content = (ui_dir / "views" / "dashboard.py").read_text()
+        assert "def get_g2_insights(" in content
+
     def test_charts_has_render_function(self, ui_dir):
         """Charts view should have render_charts function."""
         content = (ui_dir / "views" / "charts.py").read_text()
@@ -197,6 +209,18 @@ class TestStatusComponentStructure:
         """Should have render_system_status function."""
         content = status_module_path.read_text()
         assert "def render_system_status(" in content
+
+    def test_has_cached_status_data(self, status_module_path):
+        """Should have cached function for status data."""
+        content = status_module_path.read_text()
+        assert "@st.cache_data" in content
+        assert "def get_system_stats(" in content
+
+    def test_has_smart_cache_invalidation(self, status_module_path):
+        """Should invalidate cache when data date changes."""
+        content = status_module_path.read_text()
+        assert "def get_latest_data_date(" in content
+        assert "get_system_stats.clear()" in content
 
 
 class TestCLICommandDisplay:
@@ -335,6 +359,34 @@ class TestBackgroundProcessPersistence:
         content = (views_dir / "data.py").read_text()
         # Should have refresh mechanism
         assert 'st.rerun()' in content
+
+    def test_process_state_has_performance_metrics(self, views_dir):
+        """ProcessState should track performance metrics."""
+        content = (views_dir / "data.py").read_text()
+        assert 'rate_per_sec' in content
+        assert 'eta_seconds' in content
+        assert 'successes' in content
+        assert 'last_ok_inserted' in content
+
+    def test_process_state_has_output_lines(self, views_dir):
+        """ProcessState should store CLI output lines."""
+        content = (views_dir / "data.py").read_text()
+        assert 'output_lines' in content
+        # Should store output in background thread
+        assert 'state.output_lines.append' in content
+
+    def test_render_process_status_shows_cli_output(self, views_dir):
+        """Process status display should show CLI output log."""
+        content = (views_dir / "data.py").read_text()
+        assert 'CLI Output' in content
+        assert 'st.expander' in content
+
+    def test_render_process_status_uses_getattr_for_backwards_compat(self, views_dir):
+        """Process status should use getattr for old session state objects."""
+        content = (views_dir / "data.py").read_text()
+        # Should handle old session state objects that don't have new fields
+        assert "getattr(state, 'rate_per_sec'" in content
+        assert "getattr(state, 'output_lines'" in content
 
 
 class TestFeaturesView:

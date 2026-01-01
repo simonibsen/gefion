@@ -32,6 +32,38 @@ class ProcessState:
     error_message: str = ""
     completed: bool = False
     success: bool = False
+    # Performance metrics
+    rate_per_sec: float = 0.0
+    eta_seconds: float = 0.0
+    successes: int = 0
+    last_ok_inserted: int = 0
+
+
+@st.cache_data(ttl=60)
+def _get_symbol_coverage() -> list:
+    """Get symbol coverage stats with 60-second cache."""
+    try:
+        from g2.ui.components.database import get_connection
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT
+                        s.symbol,
+                        s.sector,
+                        COUNT(o.date) as days,
+                        MIN(o.date) as first_date,
+                        MAX(o.date) as last_date
+                    FROM stocks s
+                    LEFT JOIN stock_ohlcv o ON s.id = o.data_id
+                    WHERE s.status = 'Active'
+                    GROUP BY s.id, s.symbol, s.sector
+                    ORDER BY days DESC
+                    LIMIT 50
+                """)
+                return cur.fetchall()
+    except Exception:
+        return []
 
 
 def get_process_state(key: str) -> ProcessState:
@@ -39,6 +71,18 @@ def get_process_state(key: str) -> ProcessState:
     state_key = f"process_{key}"
     if state_key not in st.session_state:
         st.session_state[state_key] = ProcessState()
+    else:
+        # Migrate old ProcessState objects that don't have new fields
+        old_state = st.session_state[state_key]
+        if not hasattr(old_state, 'rate_per_sec'):
+            # Create new state and copy over existing fields
+            new_state = ProcessState()
+            for field in ['process', 'is_running', 'phase', 'progress', 'done', 'total',
+                          'inserted', 'errors', 'last_ok', 'workers', 'writer_workers',
+                          'mode', 'error_message', 'completed', 'success']:
+                if hasattr(old_state, field):
+                    setattr(new_state, field, getattr(old_state, field))
+            st.session_state[state_key] = new_state
     return st.session_state[state_key]
 
 
@@ -105,6 +149,12 @@ def start_background_process(key: str, cmd: list, env: dict):
                 line = line.strip()
                 if not line or len(line) < 3:
                     continue
+
+                # Store raw output (keep last 50 lines)
+                state.output_lines.append(line)
+                if len(state.output_lines) > 50:
+                    state.output_lines.pop(0)
+
                 try:
                     data = json.loads(line)
                     if not isinstance(data, dict):
@@ -122,6 +172,11 @@ def start_background_process(key: str, cmd: list, env: dict):
                     state.workers = data.get("workers", state.workers)
                     state.writer_workers = data.get("writer_workers", state.writer_workers)
                     state.mode = data.get("mode", state.mode)
+                    # Performance metrics
+                    state.rate_per_sec = data.get("rate_per_sec", state.rate_per_sec)
+                    state.eta_seconds = data.get("eta_seconds", state.eta_seconds)
+                    state.successes = data.get("successes", state.successes)
+                    state.last_ok_inserted = data.get("last_ok_inserted", state.last_ok_inserted)
                 except json.JSONDecodeError:
                     pass
 
@@ -181,25 +236,83 @@ def render_process_status(key: str, title: str):
         status_state = "error"
 
     with st.status(status_label, expanded=True, state=status_state):
-        # Phase and progress
+        # Phase and progress bar
         if state.phase:
-            st.write(f"Phase: **{state.phase.title()}**")
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Progress", f"{state.done}/{state.total}")
-        col2.metric("Inserted", f"{state.inserted:,}")
-        col3.metric("Errors", str(state.errors))
-        if state.workers:
-            col4.metric("Workers", str(state.workers))
+            phase_emoji = "📊" if state.phase == "prices" else "🧮" if state.phase == "features" else "⚙️"
+            st.write(f"{phase_emoji} Phase: **{state.phase.title()}**")
 
         if state.progress > 0:
             st.progress(min(1.0, state.progress / 100.0))
 
+        # Get performance metrics (with defaults for old session state objects)
+        rate_per_sec = getattr(state, 'rate_per_sec', 0.0)
+        eta_seconds = getattr(state, 'eta_seconds', 0.0)
+        successes = getattr(state, 'successes', 0)
+        last_ok_inserted = getattr(state, 'last_ok_inserted', 0)
+
+        # Main metrics row
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Progress", f"{state.done}/{state.total}", f"{state.progress:.0f}%")
+        col2.metric("Inserted", f"{state.inserted:,}", f"+{last_ok_inserted}" if last_ok_inserted else None)
+        col3.metric("Errors", str(state.errors))
+
+        # ETA display
+        if eta_seconds > 0:
+            if eta_seconds < 60:
+                eta_str = f"{eta_seconds:.0f}s"
+            elif eta_seconds < 3600:
+                eta_str = f"{eta_seconds / 60:.1f}m"
+            else:
+                eta_str = f"{eta_seconds / 3600:.1f}h"
+            col4.metric("ETA", eta_str)
+        elif state.workers:
+            col4.metric("Workers", str(state.workers))
+
+        # Performance row
+        if rate_per_sec > 0 or state.workers:
+            col1, col2, col3, col4 = st.columns(4)
+            if rate_per_sec > 0:
+                col1.metric("Rate", f"{rate_per_sec:.1f}/s")
+            if successes > 0:
+                col2.metric("Successes", str(successes))
+            if state.workers:
+                col3.metric("Workers", str(state.workers))
+            if state.mode:
+                col4.metric("Mode", state.mode)
+
         if state.last_ok:
-            st.write(f"Last: **{state.last_ok}**")
+            st.caption(f"Last processed: **{state.last_ok}**")
 
         if state.error_message:
             st.error(state.error_message)
+
+        # Show CLI output log
+        output_lines = getattr(state, 'output_lines', [])
+        if output_lines:
+            with st.expander("📜 CLI Output", expanded=False):
+                # Parse JSON objects from output (may span multiple lines)
+                buffer = ""
+                json_objects = []
+                for line in output_lines:
+                    buffer += line + "\n"
+                    try:
+                        data = json.loads(buffer)
+                        json_objects.append(data)
+                        buffer = ""
+                    except json.JSONDecodeError:
+                        # Incomplete JSON, continue accumulating
+                        pass
+
+                # Show last few parsed JSON objects
+                for data in json_objects[-3:]:
+                    # Skip verbose meta blocks
+                    if "_meta" in data:
+                        continue
+                    # Truncate long symbol lists
+                    if "symbols" in data and len(data.get("symbols", [])) > 5:
+                        data = data.copy()
+                        data["symbols"] = data["symbols"][:5] + [f"... ({len(data['symbols'])} total)"]
+                    st.json(data)
 
         # Control buttons
         col1, col2 = st.columns(2)
@@ -225,11 +338,12 @@ def render_update_section():
     if state.is_running or state.completed:
         render_process_status("data_update", "Data Update")
 
-        # Auto-refresh while running (uses fragment-based approach)
+        # Auto-refresh while running
         if state.is_running:
-            time.sleep(1)  # Brief pause before refresh
+            st.caption("🔄 Auto-refreshing...")
+            time.sleep(1.5)
             st.rerun()
-        return  # Don't show form while process is active/completed
+        return  # Don't show update form while process is active
 
     st.info("""
     **Data Update** runs two phases:
@@ -386,6 +500,7 @@ g2 feat-compute --symbols {symbol.upper()} --all-features""", language="bash")
 
                 # Step 2: Compute features for this symbol
                 phase_display.write("Phase: **Features**")
+                phase_metric.metric("Feature Values", "0")
                 status_text.write(f"Computing features for {symbol.upper()}...")
 
                 feat_cmd = [sys.executable, "-m", "g2.cli", "feat-compute",
@@ -415,6 +530,7 @@ g2 feat-compute --symbols {symbol.upper()} --all-features""", language="bash")
                         # Only update if this is a progress message with inserted_total
                         if "inserted_total" in data or "inserted" in data:
                             feature_inserted = data.get("inserted_total", data.get("inserted", 0))
+                            phase_metric.metric("Feature Values", f"{feature_inserted:,}")
                             status_text.write(f"Computed {feature_inserted:,} feature values...")
                     except json.JSONDecodeError:
                         # Skip JSON fragments and partial lines
@@ -444,67 +560,51 @@ def render_status_section():
     st.subheader("Data Status")
 
     if st.button("🔄 Refresh Status", use_container_width=True):
+        # Clear caches and rerun
+        from g2.ui.components.status import get_system_stats, get_latest_data_date
+        get_system_stats.clear()
+        get_latest_data_date.clear()
+        _get_symbol_coverage.clear()
         st.rerun()
 
     try:
-        from g2.ui.components.database import get_connection
+        # Use cached stats from status component
+        from g2.ui.components.status import get_system_stats, _check_cache_invalidation
 
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                # Overall stats
-                cur.execute("""
-                    SELECT
-                        (SELECT COUNT(*) FROM stocks) as total_stocks,
-                        (SELECT COUNT(*) FROM stocks WHERE status = 'Active') as active_stocks,
-                        (SELECT COUNT(*) FROM stock_ohlcv) as ohlcv_rows,
-                        (SELECT COUNT(*) FROM computed_features) as feature_rows,
-                        (SELECT MIN(date) FROM stock_ohlcv) as min_date,
-                        (SELECT MAX(date) FROM stock_ohlcv) as max_date
-                """)
-                stats = cur.fetchone()
+        _check_cache_invalidation()
+        stats = get_system_stats()
 
-                col1, col2, col3 = st.columns(3)
+        if stats is None:
+            st.error("Could not load data status")
+            return
 
-                with col1:
-                    st.metric("Total Stocks", stats[0])
-                    st.metric("Active Stocks", stats[1])
+        col1, col2, col3 = st.columns(3)
 
-                with col2:
-                    st.metric("Price Records", f"{stats[2]:,}")
-                    st.metric("Feature Records", f"{stats[3]:,}")
+        with col1:
+            st.metric("Total Stocks", stats.total_stocks)
+            st.metric("Active Stocks", stats.active_stocks)
 
-                with col3:
-                    st.metric("Data Start", str(stats[4]) if stats[4] else "N/A")
-                    st.metric("Data End", str(stats[5]) if stats[5] else "N/A")
+        with col2:
+            st.metric("Price Records", f"{stats.ohlcv_rows:,}")
+            st.metric("Feature Records", f"{stats.feature_rows:,}")
 
-                st.markdown("---")
+        with col3:
+            st.metric("Data Start", str(stats.date_start) if stats.date_start else "N/A")
+            st.metric("Data End", str(stats.date_end) if stats.date_end else "N/A")
 
-                # Per-symbol stats
-                st.subheader("Coverage by Symbol")
+        st.markdown("---")
 
-                cur.execute("""
-                    SELECT
-                        s.symbol,
-                        s.sector,
-                        COUNT(o.date) as days,
-                        MIN(o.date) as first_date,
-                        MAX(o.date) as last_date
-                    FROM stocks s
-                    LEFT JOIN stock_ohlcv o ON s.id = o.data_id
-                    WHERE s.status = 'Active'
-                    GROUP BY s.id, s.symbol, s.sector
-                    ORDER BY days DESC
-                    LIMIT 50
-                """)
-                coverage = cur.fetchall()
+        # Per-symbol stats
+        st.subheader("Coverage by Symbol")
 
-                if coverage:
-                    import pandas as pd
-                    df = pd.DataFrame(
-                        coverage,
-                        columns=["Symbol", "Sector", "Days", "First Date", "Last Date"]
-                    )
-                    st.dataframe(df, use_container_width=True)
+        coverage = _get_symbol_coverage()
+        if coverage:
+            import pandas as pd
+            df = pd.DataFrame(
+                coverage,
+                columns=["Symbol", "Sector", "Days", "First Date", "Last Date"]
+            )
+            st.dataframe(df, use_container_width=True)
 
     except Exception as e:
         st.error(f"Error loading status: {e}")
@@ -594,11 +694,61 @@ def render_maintenance_section():
                 env["OTEL_ENABLED"] = "false"
 
                 with st.status("Trimming data...", expanded=True) as status:
+                    phase_display = st.empty()
+                    col1, col2 = st.columns(2)
+                    prices_metric = col1.empty()
+                    features_metric = col2.empty()
                     status_text = st.empty()
-                    status_text.write("Running trim operation...")
+
                     try:
-                        # Run the command and collect all output
-                        # (prices-trim outputs pretty-printed JSON, not line-by-line)
+                        # Step 1: Estimate rows to delete
+                        phase_display.write("Phase: **Estimating**")
+                        status_text.write("Counting rows to delete...")
+
+                        from g2.ui.components.database import get_connection
+                        with get_connection() as conn:
+                            with conn.cursor() as cur:
+                                # Build date conditions
+                                date_conds = []
+                                params = []
+                                if before_date:
+                                    date_conds.append("date < %s")
+                                    params.append(str(before_date))
+                                if after_date:
+                                    date_conds.append("date > %s")
+                                    params.append(str(after_date))
+                                date_where = " AND ".join(date_conds) if date_conds else "1=1"
+
+                                # Count prices
+                                if symbols_filter:
+                                    sym_list = [s.strip().upper() for s in symbols_filter.split(",")]
+                                    sym_placeholders = ",".join(["%s"] * len(sym_list))
+                                    cur.execute(f"""
+                                        SELECT COUNT(*) FROM stock_ohlcv o
+                                        JOIN stocks s ON o.data_id = s.id
+                                        WHERE ({date_where}) AND s.symbol IN ({sym_placeholders})
+                                    """, params + sym_list)
+                                else:
+                                    cur.execute(f"SELECT COUNT(*) FROM stock_ohlcv WHERE {date_where}", params)
+                                price_count = cur.fetchone()[0]
+                                prices_metric.metric("Price Rows", f"~{price_count:,}")
+
+                                if trim_features:
+                                    if symbols_filter:
+                                        cur.execute(f"""
+                                            SELECT COUNT(*) FROM computed_features cf
+                                            JOIN stocks s ON cf.data_id = s.id
+                                            WHERE ({date_where.replace('date', 'cf.date')}) AND s.symbol IN ({sym_placeholders})
+                                        """, params + sym_list)
+                                    else:
+                                        cur.execute(f"SELECT COUNT(*) FROM computed_features WHERE {date_where}", params)
+                                    feature_count = cur.fetchone()[0]
+                                    features_metric.metric("Feature Rows", f"~{feature_count:,}")
+
+                        # Step 2: Delete prices
+                        phase_display.write("Phase: **Deleting Prices**")
+                        status_text.write("Deleting price rows...")
+
                         result = subprocess.run(
                             cmd,
                             capture_output=True,
@@ -612,6 +762,10 @@ def render_maintenance_section():
                                 data = json.loads(result.stdout)
                                 deleted = data.get("deleted_prices", 0)
                                 deleted_features = data.get("deleted_features", 0)
+                                prices_metric.metric("Price Rows", f"{deleted:,}", "deleted")
+                                if trim_features:
+                                    features_metric.metric("Feature Rows", f"{deleted_features:,}", "deleted")
+                                phase_display.write("Phase: **Complete**")
                                 status.update(label="✅ Trim complete!", state="complete")
                                 st.success(
                                     f"Deleted {deleted:,} price rows"

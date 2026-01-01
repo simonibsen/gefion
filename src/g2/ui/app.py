@@ -64,7 +64,7 @@ def main():
         st.title("📈 g2 Trading")
         st.markdown("---")
 
-        # Navigation buttons instead of radio for reliable navigation
+        # Navigation buttons
         for page in PAGES:
             is_current = st.session_state.current_page == page
             if st.button(
@@ -75,16 +75,6 @@ def main():
             ):
                 st.session_state.current_page = page
                 st.rerun()
-
-        st.markdown("---")
-
-        # Quick status
-        st.markdown("### System Status")
-        try:
-            from g2.ui.components.status import render_quick_status
-            render_quick_status()
-        except Exception as e:
-            st.error(f"Status unavailable: {e}")
 
         st.markdown("---")
         st.caption("g2 Trading Analysis v1.0")

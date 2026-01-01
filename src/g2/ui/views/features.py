@@ -209,7 +209,7 @@ def render_edit_definition(defn: dict):
         col_save, col_cancel = st.columns(2)
 
         with col_save:
-            if st.button("💾 Save & Import", key=f"save_edit_{name}", type="primary"):
+            if st.button("💾 Save", key=f"save_edit_{name}", type="primary"):
                 try:
                     params = json.loads(params_str) if params_str else {}
 
@@ -562,7 +562,7 @@ def render_edit_function(func: dict):
     col_save, col_cancel = st.columns(2)
 
     with col_save:
-        if st.button("💾 Save & Import", key=f"save_func_{func_key}", type="primary"):
+        if st.button("💾 Save", key=f"save_func_{func_key}", type="primary"):
             try:
                 param_schema = json.loads(param_schema_str) if param_schema_str.strip() else None
                 tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
