@@ -13,6 +13,10 @@ build/
 # Database files
 db/
 
+# ML artifacts (generated output)
+datasets/
+models/
+
 # OS noise
 .DS_Store
 
