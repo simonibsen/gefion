@@ -3436,6 +3436,244 @@ def _db_tune_impl(db_url, chunk_days, compress_after_days, show_chunk_ranges, js
     )
 
 
+@app.command("backup")
+def backup_data(
+    output: Path = typer.Option(..., "-o", "--output", help="Output directory path"),
+    data_types: str = typer.Option(
+        "all",
+        "--data-types",
+        help="Comma-separated data types: ohlcv, features, definitions, functions, all",
+    ),
+    start_date: Optional[str] = typer.Option(None, "--start-date", "--after", help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", "--before", help="End date (YYYY-MM-DD)"),
+    symbols: Optional[str] = typer.Option(None, "--symbols", help="Comma-separated symbols to backup"),
+    incremental: bool = typer.Option(False, "--incremental", help="Only backup data since last backup"),
+    compress: bool = typer.Option(True, "--compress/--no-compress", help="Compress output files"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show size estimate without creating backup"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Backup database data to parquet files.
+
+    Creates a backup directory with parquet files for each table
+    and a manifest.json with metadata.
+
+    Examples:
+
+        # Full backup
+        g2 backup --output ./backups/full_backup
+
+        # Backup only OHLCV data for specific symbols
+        g2 backup -o ./backups/prices --data-types ohlcv --symbols AAPL,MSFT
+
+        # Backup with date range
+        g2 backup -o ./backups/2024 --start-date 2024-01-01 --end-date 2024-12-31
+
+        # Show size estimate without creating backup
+        g2 backup -o ./backups/test --dry-run
+
+        # Incremental backup (only new data since last backup)
+        g2 backup -o ./backups/incremental --incremental
+    """
+    with create_span("cli.backup", data_types=data_types, dry_run=dry_run):
+        _backup_impl(
+            output, data_types, start_date, end_date, symbols,
+            incremental, compress, dry_run, db_url, json_output
+        )
+
+
+def _backup_impl(
+    output, data_types, start_date, end_date, symbols,
+    incremental, compress, dry_run, db_url, json_output
+):
+    """Implementation of backup command."""
+    from datetime import datetime
+    from g2.backup import (
+        estimate_backup_size, check_disk_space, create_backup,
+        get_last_backup_info
+    )
+
+    url = _db_url(db_url)
+
+    # Parse data types
+    types_list = [t.strip() for t in data_types.split(",")]
+
+    # Parse dates
+    parsed_start = None
+    parsed_end = None
+    if start_date:
+        parsed_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    if end_date:
+        parsed_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    # Parse symbols
+    symbols_list = None
+    if symbols:
+        symbols_list = [s.strip().upper() for s in symbols.split(",")]
+
+    # Get last backup info for incremental
+    last_backup_date = None
+    if incremental:
+        last_info = get_last_backup_info(str(output.parent) if output.parent.exists() else str(output))
+        if last_info:
+            last_backup_date = last_info.get("created_at")
+            if not json_output:
+                typer.echo(f"Last backup: {last_backup_date}")
+
+    try:
+        with psycopg.connect(url) as conn:
+            # Estimate size
+            estimate = estimate_backup_size(
+                conn,
+                data_types=types_list,
+                start_date=parsed_start,
+                end_date=parsed_end,
+                symbols=symbols_list,
+            )
+
+            if dry_run:
+                # Just show estimate
+                size_mb = estimate["total_bytes"] / (1024 * 1024)
+                emit(
+                    f"Backup estimate: {estimate['total_rows']:,} rows, {size_mb:.1f} MB",
+                    data={"estimate": estimate, "dry_run": True},
+                    json_output=json_output,
+                )
+                return
+
+            # Check disk space
+            if not check_disk_space(str(output), estimate["total_bytes"]):
+                emit_error(
+                    f"Insufficient disk space. Need ~{estimate['total_bytes'] / (1024*1024):.1f} MB",
+                    json_output=json_output,
+                )
+                return
+
+            # Create backup
+            result = create_backup(
+                conn=conn,
+                output_path=str(output),
+                data_types=types_list,
+                start_date=parsed_start,
+                end_date=parsed_end,
+                symbols=symbols_list,
+                incremental=incremental,
+                last_backup_date=last_backup_date,
+                compress=compress,
+            )
+
+            size_mb = result["total_bytes"] / (1024 * 1024)
+            emit(
+                f"Backup complete: {result['total_rows']:,} rows, {size_mb:.1f} MB",
+                data=result,
+                json_output=json_output,
+            )
+
+    except Exception as exc:
+        emit_error(f"Backup failed: {exc}", json_output=json_output)
+
+
+@app.command("restore")
+def restore_data(
+    input_path: Path = typer.Option(..., "-i", "--input", help="Input backup directory path"),
+    mode: str = typer.Option("merge", "--mode", help="Restore mode: merge (skip conflicts) or replace"),
+    data_types: Optional[str] = typer.Option(None, "--data-types", help="Filter data types to restore"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be restored without restoring"),
+    verify: bool = typer.Option(True, "--verify/--no-verify", help="Verify backup integrity before restoring"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Restore database data from a backup.
+
+    Reads parquet files from a backup directory and imports them
+    into the database.
+
+    Examples:
+
+        # Restore all data (merge mode - skip conflicts)
+        g2 restore --input ./backups/full_backup
+
+        # Restore with replace mode (overwrite existing)
+        g2 restore -i ./backups/full_backup --mode replace
+
+        # Restore only OHLCV data
+        g2 restore -i ./backups/full_backup --data-types ohlcv
+
+        # Preview what would be restored
+        g2 restore -i ./backups/full_backup --dry-run
+    """
+    with create_span("cli.restore", mode=mode, dry_run=dry_run):
+        _restore_impl(input_path, mode, data_types, dry_run, verify, db_url, json_output)
+
+
+def _restore_impl(input_path, mode, data_types, dry_run, verify, db_url, json_output):
+    """Implementation of restore command."""
+    from g2.backup import restore_backup, verify_backup
+    import json as json_lib
+
+    url = _db_url(db_url)
+
+    # Verify backup if requested
+    if verify:
+        verify_result = verify_backup(str(input_path))
+        if not verify_result.get("valid"):
+            emit_error(
+                f"Backup verification failed: {verify_result.get('error', 'Unknown error')}",
+                data=verify_result,
+                json_output=json_output,
+            )
+            return
+
+        if not json_output:
+            typer.echo("Backup verified successfully")
+
+    # Read manifest for dry run info
+    manifest_path = input_path / "manifest.json"
+    if manifest_path.exists():
+        with open(manifest_path) as f:
+            manifest = json_lib.load(f)
+    else:
+        emit_error("No manifest.json found in backup directory", json_output=json_output)
+        return
+
+    if dry_run:
+        # Show what would be restored
+        tables_info = manifest.get("tables", {})
+        total_rows = sum(t.get("rows", 0) for t in tables_info.values())
+
+        emit(
+            f"Would restore {total_rows:,} rows from {len(tables_info)} tables",
+            data={"tables": tables_info, "mode": mode, "dry_run": True},
+            json_output=json_output,
+        )
+        return
+
+    # Parse data types filter
+    types_list = None
+    if data_types:
+        types_list = [t.strip() for t in data_types.split(",")]
+
+    try:
+        with psycopg.connect(url) as conn:
+            result = restore_backup(
+                conn=conn,
+                input_path=str(input_path),
+                mode=mode,
+                data_types=types_list,
+            )
+
+            emit(
+                f"Restore complete: {result['total_rows']:,} rows restored",
+                data=result,
+                json_output=json_output,
+            )
+
+    except Exception as exc:
+        emit_error(f"Restore failed: {exc}", json_output=json_output)
+
+
 def _normalize_feature_definition(payload: dict) -> dict:
     """
     Ensure feature definition has defaults and rejects legacy source table.
@@ -4931,6 +5169,8 @@ def _update_all_impl(
     price_reporter = ProgressReporter(total=len(price_symbols), json_output=json_output, enabled=progress)
     price_reporter.skipped = price_skipped
     price_reporter.workers = price_fetch
+    price_reporter.writer_workers = price_writer
+    price_reporter.phase = "prices"
     price_reporter.mode = "api"
     price_live: Optional[Live] = None
     if progress and not json_output:
@@ -5027,6 +5267,8 @@ def _update_all_impl(
         # Compute all active features using generic dispatcher
         feature_reporter = ProgressReporter(total=len(all_symbols), json_output=json_output, enabled=progress)
         feature_reporter.workers = feature_fetch
+        feature_reporter.writer_workers = feature_writer
+        feature_reporter.phase = "features"
         feature_reporter.mode = "local"
         if progress and not json_output:
             feat_live = feature_reporter.start_live()

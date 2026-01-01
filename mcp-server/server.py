@@ -1204,6 +1204,53 @@ async def list_tools() -> List[Tool]:
                 "required": ["symbol", "features"],
             },
         ),
+
+        # Backup/Restore Tools
+        Tool(
+            name="backup",
+            description=(
+                "Backup database data to parquet files. "
+                "Creates backup directory with parquet files for each table and manifest. "
+                "Supports filtering by data type (ohlcv, features, definitions, functions, all), "
+                "date range, and symbols. Use --dry-run to estimate size without creating backup. "
+                "Supports incremental backups to only capture new data since last backup."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "output": {"type": "string", "description": "Output directory path (required)"},
+                    "data_types": {"type": "string", "description": "Data types to backup: ohlcv, features, definitions, functions, all", "default": "all"},
+                    "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                    "symbols": {"type": "string", "description": "Comma-separated symbols to backup"},
+                    "incremental": {"type": "boolean", "description": "Only backup data since last backup", "default": False},
+                    "compress": {"type": "boolean", "description": "Compress output files", "default": True},
+                    "dry_run": {"type": "boolean", "description": "Show size estimate without creating backup", "default": False},
+                },
+                "required": ["output"],
+            },
+        ),
+        Tool(
+            name="restore",
+            description=(
+                "Restore database data from a backup. "
+                "Reads parquet files from backup directory and imports into database. "
+                "Supports merge mode (skip conflicts) or replace mode (overwrite existing). "
+                "Use --dry-run to preview what would be restored. "
+                "Verifies backup integrity before restoring by default."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "input": {"type": "string", "description": "Input backup directory path (required)"},
+                    "mode": {"type": "string", "description": "Restore mode: merge (skip conflicts) or replace", "default": "merge"},
+                    "data_types": {"type": "string", "description": "Filter data types to restore"},
+                    "dry_run": {"type": "boolean", "description": "Show what would be restored without restoring", "default": False},
+                    "verify": {"type": "boolean", "description": "Verify backup integrity before restoring", "default": True},
+                },
+                "required": ["input"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -1319,6 +1366,11 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _chart_predictions(arguments)
         elif name == "chart_features":
             result = await _chart_features(arguments)
+        # Backup/Restore tools
+        elif name == "backup":
+            result = await _backup(arguments)
+        elif name == "restore":
+            result = await _restore(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -1916,6 +1968,52 @@ async def _data_update(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd.extend(['--timeframe', args['timeframe']])
     if args.get('limit'):
         cmd.extend(['--limit', str(args['limit'])])
+
+    return await executor.run(*cmd)
+
+
+async def _backup(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Backup database data to parquet files."""
+    output = args.get('output')
+    if not output:
+        return {'success': False, 'error': 'output is required'}
+
+    cmd = ['backup', '--output', output]
+
+    if args.get('data_types'):
+        cmd.extend(['--data-types', args['data_types']])
+    if args.get('start_date'):
+        cmd.extend(['--start-date', args['start_date']])
+    if args.get('end_date'):
+        cmd.extend(['--end-date', args['end_date']])
+    if args.get('symbols'):
+        cmd.extend(['--symbols', args['symbols']])
+    if args.get('incremental'):
+        cmd.append('--incremental')
+    if args.get('compress') is False:
+        cmd.append('--no-compress')
+    if args.get('dry_run'):
+        cmd.append('--dry-run')
+
+    return await executor.run(*cmd)
+
+
+async def _restore(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Restore database data from a backup."""
+    input_path = args.get('input')
+    if not input_path:
+        return {'success': False, 'error': 'input is required'}
+
+    cmd = ['restore', '--input', input_path]
+
+    if args.get('mode'):
+        cmd.extend(['--mode', args['mode']])
+    if args.get('data_types'):
+        cmd.extend(['--data-types', args['data_types']])
+    if args.get('dry_run'):
+        cmd.append('--dry-run')
+    if args.get('verify') is False:
+        cmd.append('--no-verify')
 
     return await executor.run(*cmd)
 

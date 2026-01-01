@@ -46,6 +46,7 @@ class ProgressReporter:
         self.failed_features: Deque[tuple[str, str]] = deque(maxlen=max_examples)  # (symbol, failed features)
         self.console = Console()
         self.live: Optional[Live] = None
+        self.phase: Optional[str] = None  # "prices", "features", etc.
         self.queue_depth: Optional[int] = None
         self.fetch_completed: Optional[int] = None
         self.write_latencies: Deque[float] = deque(maxlen=100)
@@ -143,6 +144,9 @@ class ProgressReporter:
                 table.add_row(label, str(self.workers))
         if hasattr(self, "writer_workers") and self.writer_workers:
             table.add_row("Writers", f"[magenta]{self.writer_workers}[/magenta]")
+        if self.phase:
+            phase_color = "cyan" if self.phase == "prices" else "magenta"
+            table.add_row("Phase", f"[{phase_color}]{self.phase}[/{phase_color}]")
         if hasattr(self, "mode") and self.mode:
             table.add_row("Mode", f"[blue]{self.mode}[/blue]")
         if hasattr(self, "batch_size") and self.batch_size:
@@ -206,6 +210,8 @@ class ProgressReporter:
             "queue_depth": self.queue_depth,
             "fetch_completed": self.fetch_completed,
             "avg_write_latency_ms": round(self.avg_write_latency * 1000, 1) if self.avg_write_latency > 0 else None,
+            "phase": self.phase,
+            "mode": getattr(self, "mode", None),
         }
         if hasattr(self, "workers"):
             payload["workers"] = getattr(self, "workers", None)

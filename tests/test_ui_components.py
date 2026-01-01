@@ -47,6 +47,7 @@ class TestUIStructure:
             "charts.py",
             "assistant.py",
             "data.py",
+            "features.py",
             "ml.py",
             "backtest.py",
             "experiments.py",
@@ -287,6 +288,128 @@ class TestJSONParsingRobustness:
     def test_data_view_filters_json_fragments(self, views_dir):
         """Data view should filter out JSON fragments like } from display."""
         content = (views_dir / "data.py").read_text()
-        # Should skip short lines and JSON bracket lines
+        # Should skip short lines and non-dict JSON with robust handling
         assert 'len(line) < 3' in content
-        assert "startswith(('{', '}'" in content
+        # Uses try/except JSONDecodeError and isinstance check instead of startswith
+        assert 'JSONDecodeError' in content
+        assert 'isinstance(data, dict)' in content
+
+
+class TestBackgroundProcessPersistence:
+    """Test that long-running processes persist across page navigation."""
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+
+    def test_data_view_has_process_state_class(self, views_dir):
+        """Data view should have ProcessState dataclass for tracking."""
+        content = (views_dir / "data.py").read_text()
+        assert '@dataclass' in content
+        assert 'class ProcessState:' in content
+        assert 'is_running: bool' in content
+        assert 'completed: bool' in content
+
+    def test_data_view_has_start_background_process(self, views_dir):
+        """Data view should have background process launcher."""
+        content = (views_dir / "data.py").read_text()
+        assert 'def start_background_process(' in content
+        assert 'threading.Thread(' in content
+        assert 'daemon=True' in content
+
+    def test_data_view_has_stop_process(self, views_dir):
+        """Data view should have process stop function."""
+        content = (views_dir / "data.py").read_text()
+        assert 'def stop_process(' in content
+        assert '.terminate()' in content
+
+    def test_data_view_update_uses_background_process(self, views_dir):
+        """Data update should use background process, not synchronous."""
+        content = (views_dir / "data.py").read_text()
+        # Should call start_background_process in render_update_section
+        assert 'start_background_process("data_update"' in content
+
+    def test_data_view_has_auto_refresh(self, views_dir):
+        """Data view should auto-refresh while process runs."""
+        content = (views_dir / "data.py").read_text()
+        # Should have refresh mechanism
+        assert 'st.rerun()' in content
+
+
+class TestFeaturesView:
+    """Test the Features management view."""
+
+    @pytest.fixture
+    def ui_dir(self):
+        """Get the UI source directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+
+    def test_features_view_exists(self, ui_dir):
+        """Features view file should exist."""
+        features_file = ui_dir / "views" / "features.py"
+        assert features_file.exists()
+
+    def test_features_has_render_function(self, ui_dir):
+        """Features view should have render_features function."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "def render_features(" in content
+
+    def test_features_has_three_tabs(self, ui_dir):
+        """Features view should have Definitions, Functions, and Coverage tabs."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "Definitions" in content
+        assert "Functions" in content
+        assert "Coverage" in content
+        assert "st.tabs(" in content
+
+    def test_features_has_definitions_section(self, ui_dir):
+        """Features view should have definitions management."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        # Should have list, add, delete capabilities
+        assert "render_definitions_tab" in content
+        assert "feature_definitions" in content.lower()
+
+    def test_features_has_functions_section(self, ui_dir):
+        """Features view should have functions display."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "render_functions_tab" in content
+        assert "feature_functions" in content.lower()
+
+    def test_features_has_coverage_section(self, ui_dir):
+        """Features view should have coverage/data section."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "render_coverage_tab" in content
+
+    def test_features_in_navigation(self, ui_dir):
+        """Features should be in the app navigation."""
+        content = (ui_dir / "app.py").read_text()
+        assert "Features" in content
+        assert "render_features" in content
+
+    def test_features_shows_cli_commands(self, ui_dir):
+        """Features view should show equivalent CLI commands."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert 'st.code(' in content
+        assert 'language="bash"' in content
+
+    def test_features_has_edit_definition(self, ui_dir):
+        """Features view should have edit definition capability."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "render_edit_definition" in content
+        # Should write to JSON file
+        assert "feature-definitions" in content
+
+    def test_features_has_edit_function(self, ui_dir):
+        """Features view should have edit function capability."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "render_edit_function" in content
+        # Should write to JSON file
+        assert "feature-functions" in content
+
+    def test_features_has_save_to_json(self, ui_dir):
+        """Features view should save edits to JSON files."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        # Should have JSON file write functionality
+        assert "save_definition_to_json" in content or "export" in content.lower()
+        assert "json.dumps" in content

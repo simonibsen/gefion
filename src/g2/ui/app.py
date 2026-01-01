@@ -37,6 +37,7 @@ st.markdown("""
 PAGES = [
     "🏠 Dashboard",
     "📁 Data Management",
+    "🔧 Features",
     "🧠 ML Pipeline",
     "📈 Backtesting",
     "🧪 Experiments",
@@ -103,6 +104,9 @@ def main():
     elif current_page == "📁 Data Management":
         from g2.ui.views.data import render_data
         render_data()
+    elif current_page == "🔧 Features":
+        from g2.ui.views.features import render_features
+        render_features()
     elif current_page == "🧠 ML Pipeline":
         from g2.ui.views.ml import render_ml
         render_ml()

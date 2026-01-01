@@ -5,7 +5,144 @@ import subprocess
 import sys
 import json
 import os
+import threading
+import time
 from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Optional, List
+from queue import Queue, Empty
+
+
+@dataclass
+class ProcessState:
+    """Track state of a background process."""
+    process: Optional[subprocess.Popen] = None
+    is_running: bool = False
+    phase: str = ""
+    progress: float = 0.0
+    done: int = 0
+    total: int = 0
+    inserted: int = 0
+    errors: int = 0
+    last_ok: str = ""
+    workers: Optional[int] = None
+    writer_workers: Optional[int] = None
+    mode: str = ""
+    output_lines: List[str] = field(default_factory=list)
+    error_message: str = ""
+    completed: bool = False
+    success: bool = False
+
+
+def get_process_state(key: str) -> ProcessState:
+    """Get or create process state for a key."""
+    state_key = f"process_{key}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = ProcessState()
+    return st.session_state[state_key]
+
+
+def clear_process_state(key: str):
+    """Clear process state."""
+    state_key = f"process_{key}"
+    if state_key in st.session_state:
+        st.session_state[state_key] = ProcessState()
+
+
+def stop_process(key: str):
+    """Stop a running process."""
+    state = get_process_state(key)
+    if state.process and state.is_running:
+        try:
+            state.process.terminate()
+            state.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            state.process.kill()
+        state.is_running = False
+        state.error_message = "Stopped by user"
+
+
+def start_background_process(key: str, cmd: list, env: dict):
+    """Start a background process with state tracking."""
+    state = get_process_state(key)
+
+    # Don't start if already running
+    if state.is_running:
+        return False
+
+    state.is_running = True
+    state.completed = False
+    state.success = False
+    state.error_message = ""
+    state.output_lines = []
+    state.progress = 0
+    state.done = 0
+    state.total = 0
+    state.inserted = 0
+    state.errors = 0
+    state.phase = ""
+    state.last_ok = ""
+
+    def run_in_thread():
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+            state.process = process
+
+            # Read output line by line
+            for line in process.stdout:
+                # Check if stop requested
+                if not state.is_running:
+                    process.terminate()
+                    break
+
+                line = line.strip()
+                if not line or len(line) < 3:
+                    continue
+                try:
+                    data = json.loads(line)
+                    if not isinstance(data, dict):
+                        continue
+                    if "_meta" in data or "summary" in data:
+                        continue
+                    # Update state from progress data
+                    state.phase = data.get("phase", state.phase)
+                    state.progress = data.get("percent", state.progress)
+                    state.done = data.get("done", state.done)
+                    state.total = data.get("total", state.total)
+                    state.inserted = data.get("inserted_total", state.inserted)
+                    state.errors = data.get("errors", state.errors)
+                    state.last_ok = data.get("last_ok", state.last_ok)
+                    state.workers = data.get("workers", state.workers)
+                    state.writer_workers = data.get("writer_workers", state.writer_workers)
+                    state.mode = data.get("mode", state.mode)
+                except json.JSONDecodeError:
+                    pass
+
+            returncode = process.wait()
+            state.completed = True
+            state.success = returncode == 0
+            if returncode != 0:
+                stderr = process.stderr.read()
+                if stderr:
+                    state.error_message = stderr
+
+        except Exception as e:
+            state.error_message = str(e)
+            state.completed = True
+            state.success = False
+        finally:
+            state.is_running = False
+
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
+    return True
 
 
 def render_data():
@@ -25,13 +162,80 @@ def render_data():
         render_maintenance_section()
 
 
+def render_process_status(key: str, title: str):
+    """Render status for a running/completed process."""
+    state = get_process_state(key)
+
+    if not state.is_running and not state.completed:
+        return False  # No active process
+
+    # Show status container
+    if state.is_running:
+        status_label = f"Running: {title}"
+        status_state = "running"
+    elif state.completed and state.success:
+        status_label = f"Completed: {title}"
+        status_state = "complete"
+    else:
+        status_label = f"Failed: {title}"
+        status_state = "error"
+
+    with st.status(status_label, expanded=True, state=status_state):
+        # Phase and progress
+        if state.phase:
+            st.write(f"Phase: **{state.phase.title()}**")
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Progress", f"{state.done}/{state.total}")
+        col2.metric("Inserted", f"{state.inserted:,}")
+        col3.metric("Errors", str(state.errors))
+        if state.workers:
+            col4.metric("Workers", str(state.workers))
+
+        if state.progress > 0:
+            st.progress(min(1.0, state.progress / 100.0))
+
+        if state.last_ok:
+            st.write(f"Last: **{state.last_ok}**")
+
+        if state.error_message:
+            st.error(state.error_message)
+
+        # Control buttons
+        col1, col2 = st.columns(2)
+        if state.is_running:
+            if col1.button("⏹ Stop", key=f"stop_{key}", type="secondary"):
+                stop_process(key)
+                st.rerun()
+        if state.completed:
+            if col1.button("Clear", key=f"clear_{key}", type="secondary"):
+                clear_process_state(key)
+                st.rerun()
+
+    return True  # Has active/completed process
+
+
 def render_update_section():
     """Render the data update section."""
     st.subheader("Update Market Data")
 
+    state = get_process_state("data_update")
+
+    # If process is running or completed, show status
+    if state.is_running or state.completed:
+        render_process_status("data_update", "Data Update")
+
+        # Auto-refresh while running (uses fragment-based approach)
+        if state.is_running:
+            time.sleep(1)  # Brief pause before refresh
+            st.rerun()
+        return  # Don't show form while process is active/completed
+
     st.info("""
-    💡 **Data Update** fetches the latest prices from AlphaVantage and computes
-    all active technical indicators (RSI, MACD, Bollinger Bands, etc.)
+    **Data Update** runs two phases:
+    1. **Prices** - Fetches OHLCV data from AlphaVantage
+    2. **Features** - Computes all active feature definitions (technical indicators,
+       cross-sectional rankings, sector comparisons, etc.)
     """)
 
     col1, col2 = st.columns(2)
@@ -73,6 +277,15 @@ def render_update_section():
             help="Re-fetch and overwrite existing data points",
         )
 
+    # Show equivalent CLI command
+    cli_parts = ["g2", "data-update", "--exchange", exchange]
+    if limit:
+        cli_parts.extend(["--limit", str(limit)])
+    cli_parts.extend(["--timeframe", timeframe])
+    if refresh:
+        cli_parts.append("--refresh")
+    st.code(" ".join(cli_parts), language="bash")
+
     if st.button("🚀 Start Update", type="primary", use_container_width=True):
         # Build command
         cmd = [sys.executable, "-m", "g2.cli", "data-update", "--json"]
@@ -87,109 +300,9 @@ def render_update_section():
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
-        # Show equivalent CLI command
-        cli_parts = ["g2", "data-update", "--exchange", exchange]
-        if limit:
-            cli_parts.extend(["--limit", str(limit)])
-        cli_parts.extend(["--timeframe", timeframe])
-        if refresh:
-            cli_parts.append("--refresh")
-        st.code(" ".join(cli_parts), language="bash")
-
-        with st.status("Updating data...", expanded=True) as status:
-            # Create metrics display
-            col1, col2, col3, col4 = st.columns(4)
-            progress_metric = col1.empty()
-            inserted_metric = col2.empty()
-            errors_metric = col3.empty()
-            rate_metric = col4.empty()
-
-            # Progress bar
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-
-            try:
-                # Start process with streaming output
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    env=env,
-                )
-
-                last_data = {}
-
-                # Stream output line by line
-                for line in process.stdout:
-                    line = line.strip()
-                    if not line or len(line) < 3:  # Skip empty/trivial lines
-                        continue
-
-                    try:
-                        data = json.loads(line)
-                        # Only process dict objects with progress data
-                        if not isinstance(data, dict):
-                            continue  # Skip non-dict JSON
-
-                        last_data = data
-
-                        # Update progress bar
-                        pct = data.get("percent", 0)
-                        progress_bar.progress(min(1.0, pct / 100.0))
-
-                        # Update metrics
-                        done = data.get("done", 0)
-                        total = data.get("total", 0)
-                        progress_metric.metric("Progress", f"{done}/{total}")
-                        inserted_metric.metric("Inserted", f"{data.get('inserted_total', 0):,}")
-                        errors_metric.metric("Errors", f"{data.get('errors', 0)}")
-
-                        rate = data.get("rate_per_sec", 0)
-                        eta = data.get("eta_seconds")
-                        if eta and eta > 0:
-                            rate_metric.metric("ETA", f"{eta:.0f}s")
-                        else:
-                            rate_metric.metric("Rate", f"{rate:.1f}/s")
-
-                        # Update status text
-                        label = data.get("label", "")
-                        last_ok = data.get("last_ok", "")
-                        if label:
-                            status_text.write(f"Processing: **{label}**")
-                        elif last_ok:
-                            status_text.write(f"Last completed: **{last_ok}**")
-
-                    except json.JSONDecodeError:
-                        # Only show meaningful status messages
-                        if not line.startswith(('{', '}', '[', ']')):
-                            status_text.write(line)
-
-                # Wait for process to complete
-                returncode = process.wait()
-
-                if returncode == 0:
-                    progress_bar.progress(1.0)
-                    status.update(label="✅ Update completed!", state="complete")
-
-                    # Show final summary
-                    if last_data:
-                        st.success(
-                            f"Completed: {last_data.get('successes', 0)} symbols, "
-                            f"{last_data.get('inserted_total', 0):,} records inserted, "
-                            f"{last_data.get('errors', 0)} errors"
-                        )
-                else:
-                    stderr = process.stderr.read()
-                    status.update(label="❌ Update failed", state="error")
-                    st.error("Update failed")
-                    if stderr:
-                        st.code(stderr)
-
-            except Exception as e:
-                status.update(label="❌ Error", state="error")
-                st.error(f"Error: {e}")
+        # Start background process
+        start_background_process("data_update", cmd, env)
+        st.rerun()  # Refresh to show status
 
     st.markdown("---")
 
@@ -199,21 +312,43 @@ def render_update_section():
     symbol = st.text_input(
         "Symbol",
         placeholder="AAPL",
-        help="Enter a symbol to fetch/update",
+        help="Enter a symbol to fetch prices and compute features",
     )
 
     if st.button("Update Symbol", use_container_width=True) and symbol:
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
-        # Show equivalent CLI command
-        st.code(f"g2 prices-ingest --symbol {symbol.upper()} --timeframe full", language="bash")
+        # Show equivalent CLI commands
+        st.code(f"""# Fetch prices
+g2 prices-ingest --symbol {symbol.upper()} --timeframe full
+
+# Compute features
+g2 feat-compute --symbols {symbol.upper()} --all-features""", language="bash")
 
         with st.status(f"Updating {symbol.upper()}...", expanded=True) as status:
+            # Phase indicator
+            phase_display = st.empty()
+
+            # Metrics
+            col1, col2, col3 = st.columns(3)
+            progress_metric = col1.empty()
+            inserted_metric = col2.empty()
+            phase_metric = col3.empty()
+
+            status_text = st.empty()
+
             try:
+                # For single symbol, we need to ensure it's in the database first
+                # Use prices-ingest to add/update the symbol, then data-update for features
+
+                # Step 1: Ingest prices for the specific symbol
+                phase_display.write("Phase: **Prices**")
+                ingest_cmd = [sys.executable, "-m", "g2.cli", "prices-ingest",
+                              "--symbol", symbol.upper(), "--timeframe", "full", "--json"]
+
                 process = subprocess.Popen(
-                    [sys.executable, "-m", "g2.cli", "prices-ingest",
-                     "--symbol", symbol.upper(), "--timeframe", "full", "--json"],
+                    ingest_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -221,35 +356,82 @@ def render_update_section():
                     env=env,
                 )
 
-                status_text = st.empty()
-                last_data = {}
-
+                price_inserted = 0
                 for line in process.stdout:
                     line = line.strip()
-                    if not line or len(line) < 3:  # Skip empty/trivial lines like }
+                    if not line or len(line) < 3:
                         continue
                     try:
                         data = json.loads(line)
                         if not isinstance(data, dict):
-                            continue  # Skip non-dict JSON (strings, etc.)
-                        last_data = data
-                        inserted = data.get("inserted_total", data.get("inserted", 0))
-                        status_text.write(f"Fetched {inserted:,} records...")
+                            continue
+                        # Skip meta/summary blocks
+                        if "_meta" in data or "summary" in data:
+                            continue
+                        if "inserted_total" in data or "inserted" in data:
+                            price_inserted = data.get("inserted_total", data.get("inserted", 0))
+                            status_text.write(f"Fetched {price_inserted:,} price records...")
                     except json.JSONDecodeError:
-                        # Only show meaningful status messages
-                        if not line.startswith(('{', '}', '[', ']')):
-                            status_text.write(line)
+                        # Skip JSON fragments and partial lines
+                        pass
+
+                returncode = process.wait()
+                if returncode != 0:
+                    stderr = process.stderr.read()
+                    status.update(label=f"❌ Price fetch failed", state="error")
+                    st.error(f"Failed: {stderr}")
+                    raise Exception("Price fetch failed")
+
+                inserted_metric.metric("Price Records", f"{price_inserted:,}")
+
+                # Step 2: Compute features for this symbol
+                phase_display.write("Phase: **Features**")
+                status_text.write(f"Computing features for {symbol.upper()}...")
+
+                feat_cmd = [sys.executable, "-m", "g2.cli", "feat-compute",
+                            "--symbols", symbol.upper(), "--all-features", "--json"]
+
+                process = subprocess.Popen(
+                    feat_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                )
+
+                feature_inserted = 0
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line or len(line) < 3:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if not isinstance(data, dict):
+                            continue
+                        # Skip meta/summary blocks, only process progress updates
+                        if "_meta" in data or "summary" in data:
+                            continue
+                        # Only update if this is a progress message with inserted_total
+                        if "inserted_total" in data or "inserted" in data:
+                            feature_inserted = data.get("inserted_total", data.get("inserted", 0))
+                            status_text.write(f"Computed {feature_inserted:,} feature values...")
+                    except json.JSONDecodeError:
+                        # Skip JSON fragments and partial lines
+                        pass
 
                 returncode = process.wait()
 
                 if returncode == 0:
                     status.update(label=f"✅ {symbol.upper()} updated!", state="complete")
-                    inserted = last_data.get("inserted_total", last_data.get("inserted", 0)) if isinstance(last_data, dict) else 0
-                    if inserted:
-                        st.success(f"Inserted {inserted:,} records for {symbol.upper()}")
+                    st.success(
+                        f"Updated {symbol.upper()}: "
+                        f"{price_inserted:,} price records, "
+                        f"{feature_inserted:,} feature values"
+                    )
                 else:
                     stderr = process.stderr.read()
-                    status.update(label=f"❌ Failed", state="error")
+                    status.update(label=f"❌ Feature compute failed", state="error")
                     st.error(f"Failed: {stderr}")
 
             except Exception as e:
@@ -337,16 +519,114 @@ def render_maintenance_section():
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("### Trim Old Data")
-        st.markdown("Remove price data older than specified date.")
+        st.markdown("### Trim Data by Date")
+        st.markdown("Remove price and feature data outside a date range.")
 
-        trim_date = st.date_input(
-            "Keep data after",
-            help="Data before this date will be deleted",
+        trim_mode = st.radio(
+            "Trim mode",
+            ["Delete old data", "Delete recent data", "Keep date range"],
+            horizontal=True,
+            help="Choose which data to remove",
+        )
+
+        if trim_mode == "Delete old data":
+            before_date = st.date_input(
+                "Delete data before this date",
+                help="All data BEFORE this date will be deleted (keeps this date and later)",
+            )
+            after_date = None
+        elif trim_mode == "Delete recent data":
+            before_date = None
+            after_date = st.date_input(
+                "Delete data after this date",
+                help="All data AFTER this date will be deleted (keeps this date and earlier)",
+            )
+        else:  # Keep date range
+            st.caption("Keep only data within this range, delete everything outside:")
+            before_date = st.date_input(
+                "Start date (delete before this)",
+                key="trim_before",
+                help="Data BEFORE this date will be deleted",
+            )
+            after_date = st.date_input(
+                "End date (delete after this)",
+                key="trim_after",
+                help="Data AFTER this date will be deleted",
+            )
+
+        trim_features = st.checkbox(
+            "Also trim features",
+            value=True,
+            help="Remove computed_features for the same date range",
+        )
+
+        symbols_filter = st.text_input(
+            "Symbols (optional)",
+            placeholder="AAPL,MSFT",
+            help="Comma-separated symbols to trim (leave empty for all)",
         )
 
         if st.button("🗑️ Trim Data", type="secondary"):
-            st.warning("Not implemented in UI for safety. Use CLI: `g2 prices-trim`")
+            if not before_date and not after_date:
+                st.error("Please select at least one date boundary")
+            else:
+                # Build command
+                cmd = [sys.executable, "-m", "g2.cli", "prices-trim", "--json"]
+                cli_parts = ["g2", "prices-trim"]
+
+                if before_date:
+                    cmd.extend(["--before", str(before_date)])
+                    cli_parts.extend(["--before", str(before_date)])
+                if after_date:
+                    cmd.extend(["--after", str(after_date)])
+                    cli_parts.extend(["--after", str(after_date)])
+                if symbols_filter:
+                    cmd.extend(["--symbols", symbols_filter.upper()])
+                    cli_parts.extend(["--symbols", symbols_filter.upper()])
+                if not trim_features:
+                    cmd.append("--no-trim-features")
+                    cli_parts.append("--no-trim-features")
+
+                # Show CLI command
+                st.code(" ".join(cli_parts), language="bash")
+
+                env = os.environ.copy()
+                env["OTEL_ENABLED"] = "false"
+
+                with st.status("Trimming data...", expanded=True) as status:
+                    status_text = st.empty()
+                    status_text.write("Running trim operation...")
+                    try:
+                        # Run the command and collect all output
+                        # (prices-trim outputs pretty-printed JSON, not line-by-line)
+                        result = subprocess.run(
+                            cmd,
+                            capture_output=True,
+                            text=True,
+                            env=env,
+                        )
+
+                        if result.returncode == 0:
+                            # Parse the complete JSON output
+                            try:
+                                data = json.loads(result.stdout)
+                                deleted = data.get("deleted_prices", 0)
+                                deleted_features = data.get("deleted_features", 0)
+                                status.update(label="✅ Trim complete!", state="complete")
+                                st.success(
+                                    f"Deleted {deleted:,} price rows"
+                                    + (f", {deleted_features:,} feature rows" if trim_features else "")
+                                )
+                            except json.JSONDecodeError:
+                                status.update(label="✅ Trim complete!", state="complete")
+                                st.info(result.stdout)
+                        else:
+                            status.update(label="❌ Trim failed", state="error")
+                            st.error(f"Failed: {result.stderr}")
+
+                    except Exception as e:
+                        status.update(label="❌ Error", state="error")
+                        st.error(f"Error: {e}")
 
     with col2:
         st.markdown("### Vacuum Database")
@@ -367,19 +647,292 @@ def render_maintenance_section():
 
     st.markdown("---")
 
-    # Feature definitions
-    st.subheader("Feature Definitions")
+    # Backup/Restore Section
+    st.subheader("Backup & Restore")
 
-    try:
-        from g2.ui.components.database import get_feature_definitions
+    backup_tab, restore_tab = st.tabs(["💾 Backup", "📥 Restore"])
 
-        features = get_feature_definitions()
+    with backup_tab:
+        render_backup_section()
 
-        if features:
-            import pandas as pd
-            df = pd.DataFrame(features)
-            st.dataframe(df, use_container_width=True)
+    with restore_tab:
+        render_restore_section()
 
-            st.caption(f"Total: {len(features)} features ({sum(1 for f in features if f['active'])} active)")
-    except Exception as e:
-        st.error(f"Error loading features: {e}")
+
+def render_backup_section():
+    """Render backup controls."""
+    st.markdown("Create a backup of database tables to Parquet files.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        backup_path = st.text_input(
+            "Output Directory",
+            value="",
+            placeholder="/path/to/backup",
+            help="Directory to save backup files (will be created if needed)",
+        )
+
+        data_types = st.multiselect(
+            "Data Types",
+            ["ohlcv", "features", "definitions", "functions"],
+            default=["ohlcv", "features", "definitions", "functions"],
+            help="Select which data types to backup",
+        )
+
+        symbols = st.text_input(
+            "Symbols (optional)",
+            placeholder="AAPL,MSFT",
+            help="Comma-separated symbols to backup (leave empty for all)",
+            key="backup_symbols",
+        )
+
+    with col2:
+        start_date = st.date_input(
+            "Start Date (optional)",
+            value=None,
+            help="Only backup data after this date",
+            key="backup_start",
+        )
+
+        end_date = st.date_input(
+            "End Date (optional)",
+            value=None,
+            help="Only backup data before this date",
+            key="backup_end",
+        )
+
+        col2a, col2b = st.columns(2)
+        with col2a:
+            incremental = st.checkbox(
+                "Incremental",
+                help="Only backup data since last backup",
+            )
+        with col2b:
+            compress = st.checkbox(
+                "Compress",
+                value=True,
+                help="Compress output files",
+            )
+
+    # Build CLI command preview
+    cli_parts = ["g2", "backup", "--output", backup_path or "<path>"]
+    if data_types and set(data_types) != {"ohlcv", "features", "definitions", "functions"}:
+        cli_parts.extend(["--data-types", ",".join(data_types)])
+    if symbols:
+        cli_parts.extend(["--symbols", symbols.upper()])
+    if start_date:
+        cli_parts.extend(["--start-date", str(start_date)])
+    if end_date:
+        cli_parts.extend(["--end-date", str(end_date)])
+    if incremental:
+        cli_parts.append("--incremental")
+    if not compress:
+        cli_parts.append("--no-compress")
+
+    st.code(" ".join(cli_parts), language="bash")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("📊 Estimate Size", use_container_width=True):
+            if not backup_path:
+                st.error("Please specify an output directory")
+            else:
+                _run_backup(backup_path, data_types, symbols, start_date, end_date, incremental, compress, dry_run=True)
+
+    with col2:
+        if st.button("💾 Create Backup", type="primary", use_container_width=True):
+            if not backup_path:
+                st.error("Please specify an output directory")
+            else:
+                _run_backup(backup_path, data_types, symbols, start_date, end_date, incremental, compress, dry_run=False)
+
+
+def _run_backup(backup_path, data_types, symbols, start_date, end_date, incremental, compress, dry_run):
+    """Execute backup command."""
+    cmd = [sys.executable, "-m", "g2.cli", "backup", "--output", backup_path, "--json"]
+
+    if data_types:
+        cmd.extend(["--data-types", ",".join(data_types)])
+    if symbols:
+        cmd.extend(["--symbols", symbols.upper()])
+    if start_date:
+        cmd.extend(["--start-date", str(start_date)])
+    if end_date:
+        cmd.extend(["--end-date", str(end_date)])
+    if incremental:
+        cmd.append("--incremental")
+    if not compress:
+        cmd.append("--no-compress")
+    if dry_run:
+        cmd.append("--dry-run")
+
+    env = os.environ.copy()
+    env["OTEL_ENABLED"] = "false"
+
+    action = "Estimating size" if dry_run else "Creating backup"
+    with st.status(f"{action}...", expanded=True) as status:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=600)
+
+            if result.returncode == 0:
+                try:
+                    data = json.loads(result.stdout)
+                    if dry_run:
+                        status.update(label="✅ Size estimate", state="complete")
+                        # Show estimate details
+                        if "estimate" in data:
+                            est = data["estimate"]
+                            st.metric("Total Rows", f"{est.get('total_rows', 0):,}")
+                            st.metric("Estimated Size", _format_bytes(est.get("total_bytes", 0)))
+                            if "tables" in est:
+                                st.markdown("**By Table:**")
+                                for table, info in est["tables"].items():
+                                    st.caption(f"  • {table}: {info.get('rows', 0):,} rows ({_format_bytes(info.get('estimated_bytes', 0))})")
+                        else:
+                            st.json(data)
+                    else:
+                        status.update(label="✅ Backup complete!", state="complete")
+                        st.success(f"Backup saved to: {data.get('output_dir', backup_path)}")
+                        if "tables" in data:
+                            for table, info in data["tables"].items():
+                                st.caption(f"  • {table}: {info.get('rows', 0):,} rows")
+                except json.JSONDecodeError:
+                    status.update(label="✅ Complete", state="complete")
+                    st.info(result.stdout)
+            else:
+                status.update(label="❌ Failed", state="error")
+                st.error(result.stderr or result.stdout)
+
+        except subprocess.TimeoutExpired:
+            status.update(label="❌ Timeout", state="error")
+            st.error("Backup timed out after 10 minutes")
+        except Exception as e:
+            status.update(label="❌ Error", state="error")
+            st.error(f"Error: {e}")
+
+
+def render_restore_section():
+    """Render restore controls."""
+    st.markdown("Restore database from a backup directory.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        restore_path = st.text_input(
+            "Backup Directory",
+            value="",
+            placeholder="/path/to/backup",
+            help="Directory containing backup files and manifest.json",
+        )
+
+        restore_mode = st.radio(
+            "Restore Mode",
+            ["merge", "replace"],
+            horizontal=True,
+            help="merge: skip conflicts, replace: overwrite existing data",
+        )
+
+    with col2:
+        data_types_filter = st.multiselect(
+            "Data Types (optional filter)",
+            ["ohlcv", "features", "definitions", "functions"],
+            default=[],
+            help="Filter which data types to restore (leave empty for all)",
+        )
+
+        col2a, col2b = st.columns(2)
+        with col2a:
+            verify = st.checkbox(
+                "Verify integrity",
+                value=True,
+                help="Check backup integrity before restoring",
+            )
+        with col2b:
+            dry_run_restore = st.checkbox(
+                "Dry run",
+                help="Preview what would be restored",
+            )
+
+    # Build CLI command preview
+    cli_parts = ["g2", "restore", "--input", restore_path or "<path>"]
+    cli_parts.extend(["--mode", restore_mode])
+    if data_types_filter:
+        cli_parts.extend(["--data-types", ",".join(data_types_filter)])
+    if not verify:
+        cli_parts.append("--no-verify")
+    if dry_run_restore:
+        cli_parts.append("--dry-run")
+
+    st.code(" ".join(cli_parts), language="bash")
+
+    if st.button("📥 Restore Backup", type="primary", use_container_width=True):
+        if not restore_path:
+            st.error("Please specify the backup directory")
+        else:
+            _run_restore(restore_path, restore_mode, data_types_filter, verify, dry_run_restore)
+
+
+def _run_restore(restore_path, mode, data_types_filter, verify, dry_run):
+    """Execute restore command."""
+    cmd = [sys.executable, "-m", "g2.cli", "restore", "--input", restore_path, "--json"]
+    cmd.extend(["--mode", mode])
+
+    if data_types_filter:
+        cmd.extend(["--data-types", ",".join(data_types_filter)])
+    if not verify:
+        cmd.append("--no-verify")
+    if dry_run:
+        cmd.append("--dry-run")
+
+    env = os.environ.copy()
+    env["OTEL_ENABLED"] = "false"
+
+    action = "Previewing restore" if dry_run else "Restoring backup"
+    with st.status(f"{action}...", expanded=True) as status:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=600)
+
+            if result.returncode == 0:
+                try:
+                    data = json.loads(result.stdout)
+                    if dry_run:
+                        status.update(label="✅ Restore preview", state="complete")
+                        st.markdown("**Would restore:**")
+                        if "tables" in data:
+                            for table, info in data["tables"].items():
+                                st.caption(f"  • {table}: {info.get('rows', 0):,} rows")
+                        else:
+                            st.json(data)
+                    else:
+                        status.update(label="✅ Restore complete!", state="complete")
+                        st.success("Database restored successfully!")
+                        if "tables" in data:
+                            for table, info in data["tables"].items():
+                                st.caption(f"  • {table}: {info.get('restored', info.get('rows', 0)):,} rows restored")
+                except json.JSONDecodeError:
+                    status.update(label="✅ Complete", state="complete")
+                    st.info(result.stdout)
+            else:
+                status.update(label="❌ Failed", state="error")
+                st.error(result.stderr or result.stdout)
+
+        except subprocess.TimeoutExpired:
+            status.update(label="❌ Timeout", state="error")
+            st.error("Restore timed out after 10 minutes")
+        except Exception as e:
+            status.update(label="❌ Error", state="error")
+            st.error(f"Error: {e}")
+
+
+def _format_bytes(size_bytes):
+    """Format bytes as human-readable string."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
