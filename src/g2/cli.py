@@ -4059,6 +4059,7 @@ def features_fx_export(
     dir: Optional[Path] = typer.Option(None, "--dir", help="Directory to write feature files (default: feature-functions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     functions: Optional[str] = typer.Option(None, "--functions", help="Comma-separated list of function names to export"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
     Export feature_functions to individual JSON files (one per function).
@@ -4074,9 +4075,13 @@ def features_fx_export(
             init_schema_tables(conn, ["feature_functions"])
             exported_count = export_functions_to_directory(conn, target_dir, fx_filter)
 
-        emit(f"Exported {exported_count} function(s) to {target_dir}")
+        emit(
+            f"Exported {exported_count} function(s) to {target_dir}",
+            data={"exported_count": exported_count, "target_dir": str(target_dir)},
+            json_output=json_output,
+        )
     except Exception as exc:
-        emit_error(f"Export failed: {exc}")
+        emit_error(f"Export failed: {exc}", json_output=json_output)
 
 
 def _upsert_feature_function(conn: psycopg.Connection, payload: dict) -> None:
@@ -4106,6 +4111,7 @@ def features_fx_import(
     dir: Optional[Path] = typer.Option(None, "--dir", help="Directory containing feature JSON files (default: feature-functions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     functions: Optional[str] = typer.Option(None, "--functions", help="Comma-separated list of function names to import"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
     Import feature_functions from individual JSON files.
@@ -4122,11 +4128,15 @@ def features_fx_import(
             imported_count = import_functions_from_directory(conn, src_dir, fx_filter)
 
         if imported_count == 0:
-            emit(f"No functions found in {src_dir}")
+            emit(f"No functions found in {src_dir}", json_output=json_output)
         else:
-            emit(f"Imported {imported_count} function(s) from {src_dir}")
+            emit(
+                f"Imported {imported_count} function(s) from {src_dir}",
+                data={"imported_count": imported_count, "source_dir": str(src_dir)},
+                json_output=json_output,
+            )
     except Exception as exc:
-        emit_error(f"Import failed: {exc}")
+        emit_error(f"Import failed: {exc}", json_output=json_output)
 
 
 @app.command("feat-def-export")
@@ -4134,6 +4144,7 @@ def feat_def_export(
     dir: Optional[Path] = typer.Option(None, "--dir", help="Directory to write feature definition files (default: feature-definitions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     features: Optional[str] = typer.Option(None, "--features", help="Comma-separated list of feature names to export"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
     Export feature_definitions to individual JSON files (one per feature).
@@ -4149,9 +4160,13 @@ def feat_def_export(
             init_schema_tables(conn, ["feature_definitions"])
             exported_count = export_definitions_to_directory(conn, target_dir, feat_filter)
 
-        emit(f"Exported {exported_count} definition(s) to {target_dir}")
+        emit(
+            f"Exported {exported_count} definition(s) to {target_dir}",
+            data={"exported_count": exported_count, "target_dir": str(target_dir)},
+            json_output=json_output,
+        )
     except Exception as exc:
-        emit_error(f"Export failed: {exc}")
+        emit_error(f"Export failed: {exc}", json_output=json_output)
 
 
 @app.command("feat-def-import")
@@ -4159,6 +4174,7 @@ def feat_def_import(
     dir: Optional[Path] = typer.Option(None, "--dir", help="Directory containing feature definition JSON files (default: feature-definitions)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     features: Optional[str] = typer.Option(None, "--features", help="Comma-separated list of feature names to import"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
     Import feature_definitions from individual JSON files.
@@ -4175,11 +4191,15 @@ def feat_def_import(
             imported_count = import_definitions_from_directory(conn, src_dir, feat_filter)
 
         if imported_count == 0:
-            emit(f"No definitions found in {src_dir}")
+            emit(f"No definitions found in {src_dir}", json_output=json_output)
         else:
-            emit(f"Imported {imported_count} definition(s) from {src_dir}")
+            emit(
+                f"Imported {imported_count} definition(s) from {src_dir}",
+                data={"imported_count": imported_count, "source_dir": str(src_dir)},
+                json_output=json_output,
+            )
     except Exception as exc:
-        emit_error(f"Import failed: {exc}")
+        emit_error(f"Import failed: {exc}", json_output=json_output)
 
 
 @app.command("feat-trim")
