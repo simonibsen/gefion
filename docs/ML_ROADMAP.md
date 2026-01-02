@@ -430,7 +430,155 @@ g2 ml tune --dataset-name mvp --dataset-version v1 --timeout 300
 - ✅ 5.4 Hyperparameter tuning with Optuna (2025-12-28)
 
 ### Future
-All planned ML features have been implemented.
+
+#### 6.1 Live & Paper Trading
+
+**Status**: Planned
+
+**Goal**: Execute strategies in real-time with broker integration.
+
+**Architecture**:
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Strategy Engine                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐  │
+│  │  Strategy   │───▶│   Signal    │───▶│   Order Router      │  │
+│  │  Classes    │    │  Generator  │    │  (paper/live mode)  │  │
+│  └─────────────┘    └─────────────┘    └──────────┬──────────┘  │
+│        ▲                                          │              │
+│        │                                          ▼              │
+│  ┌─────────────┐                       ┌─────────────────────┐  │
+│  │  Features   │                       │   Broker Adapter    │  │
+│  │  + Prices   │                       │  (Alpaca, IBKR)     │  │
+│  └─────────────┘                       └─────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Components**:
+
+1. **Order Router** - Routes signals to paper or live execution
+   ```python
+   class OrderRouter:
+       def __init__(self, mode: str = "paper"):  # "paper" or "live"
+           self.mode = mode
+           self.broker = self._init_broker()
+
+       def execute(self, signals: List[Dict]) -> List[OrderResult]:
+           """Execute signals via broker or paper account."""
+   ```
+
+2. **Broker Adapters** - Abstract broker-specific APIs
+   - Alpaca (commission-free, good API)
+   - Interactive Brokers (professional, complex API)
+   - Paper trading (simulated execution)
+
+3. **Position Manager** - Track and reconcile positions
+   ```python
+   class PositionManager:
+       def sync_with_broker(self) -> Dict[str, Position]:
+           """Reconcile local state with broker positions."""
+
+       def get_portfolio(self) -> Portfolio:
+           """Get current portfolio for strategy input."""
+   ```
+
+4. **Real-time Data Feed** - Live price updates
+   - WebSocket connections to data providers
+   - Integration with existing `stock_ohlcv` pipeline
+   - Intraday bar aggregation
+
+**CLI Commands**:
+```bash
+# Paper trading (simulated)
+g2 trade run --strategy momentum --mode paper --capital 100000
+
+# Live trading (real money - requires confirmation)
+g2 trade run --strategy momentum --mode live --broker alpaca
+
+# Check positions
+g2 trade positions
+
+# View order history
+g2 trade orders --limit 50
+
+# Emergency: flatten all positions
+g2 trade flatten --confirm
+```
+
+**Database Tables**:
+```sql
+-- Track all orders (paper and live)
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    strategy_name TEXT,
+    symbol TEXT,
+    side TEXT,  -- 'buy' or 'sell'
+    quantity INTEGER,
+    order_type TEXT,  -- 'market', 'limit'
+    limit_price NUMERIC(18,6),
+    status TEXT,  -- 'pending', 'filled', 'cancelled', 'rejected'
+    filled_quantity INTEGER,
+    filled_price NUMERIC(18,6),
+    broker TEXT,  -- 'paper', 'alpaca', 'ibkr'
+    broker_order_id TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    filled_at TIMESTAMPTZ
+);
+
+-- Track positions
+CREATE TABLE positions (
+    id SERIAL PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    avg_price NUMERIC(18,6),
+    current_price NUMERIC(18,6),
+    unrealized_pnl NUMERIC(18,6),
+    broker TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(symbol, broker)
+);
+
+-- Trading sessions
+CREATE TABLE trading_sessions (
+    id SERIAL PRIMARY KEY,
+    strategy_name TEXT,
+    mode TEXT,  -- 'paper' or 'live'
+    started_at TIMESTAMPTZ,
+    ended_at TIMESTAMPTZ,
+    initial_capital NUMERIC(18,6),
+    final_capital NUMERIC(18,6),
+    total_trades INTEGER,
+    pnl NUMERIC(18,6)
+);
+```
+
+**Safety Features**:
+- Paper mode by default (must explicitly enable live)
+- Daily loss limits
+- Position size limits
+- Confirmation prompts for live trading
+- Emergency flatten command
+- Audit logging of all orders
+
+**Strategy Reuse**:
+The same strategy classes used for backtesting work for live trading:
+```python
+# Backtest
+engine = BacktestEngine(strategy=MomentumStrategy())
+results = engine.run()
+
+# Live trading (same strategy class)
+router = OrderRouter(mode="live", broker="alpaca")
+trader = LiveTrader(strategy=MomentumStrategy(), router=router)
+trader.run()
+```
+
+**Implementation Priority**:
+1. Paper trading infrastructure
+2. Alpaca integration (simplest API)
+3. Position reconciliation
+4. Real-time data feeds
+5. Interactive Brokers (optional, more complex)
 
 ## Contributing
 
