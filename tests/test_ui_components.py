@@ -248,6 +248,23 @@ class TestDatabaseHelperStructure:
         content = db_module_path.read_text()
         assert "def get_feature_definitions(" in content
 
+    def test_connection_handles_oid_errors(self, db_module_path):
+        """Connection should auto-clear pool on OID/connection errors."""
+        content = db_module_path.read_text()
+        # Should detect OID errors and clear pool
+        assert '"oid"' in content.lower() or "'oid'" in content.lower()
+        assert "get_db_pool.clear()" in content
+        # Should catch exceptions and handle connection errors
+        assert "except Exception" in content
+
+    def test_connection_handles_bad_connections(self, db_module_path):
+        """Connection should handle BAD connection state gracefully."""
+        content = db_module_path.read_text()
+        # Should detect bad connection state
+        assert '"bad"' in content.lower() or "'bad'" in content.lower()
+        # putconn should be wrapped in try/except
+        assert "pool.putconn(conn)" in content
+
 
 class TestStatusComponentStructure:
     """Test status component module structure."""

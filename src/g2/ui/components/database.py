@@ -32,8 +32,22 @@ def get_connection():
     conn = pool.getconn()
     try:
         yield conn
+    except Exception as e:
+        # On OID or connection errors, try to reset the connection
+        error_msg = str(e).lower()
+        if "oid" in error_msg or "connection" in error_msg or "bad" in error_msg:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            # Clear the cached pool to force fresh connections
+            get_db_pool.clear()
+        raise
     finally:
-        pool.putconn(conn)
+        try:
+            pool.putconn(conn)
+        except Exception:
+            pass  # Connection may already be closed
 
 
 def get_symbols(status: str = "Active") -> List[str]:
