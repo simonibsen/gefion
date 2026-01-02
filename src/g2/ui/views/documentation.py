@@ -263,6 +263,7 @@ def render_backtest_docs():
         "CLI Parameters",
         "Performance Metrics",
         "Built-in Strategies",
+        "ML Signal Strategy",
         "Data Requirements",
         "Programmatic Usage",
         "Best Practices",
@@ -271,7 +272,7 @@ def render_backtest_docs():
 
     for section in key_sections:
         if section in sections:
-            expanded = section == "Quick Start"
+            expanded = section == "Quick Start" or section == "ML Signal Strategy"
             with st.expander(f"**{section}**", expanded=expanded):
                 st.markdown(sections[section])
 
@@ -279,15 +280,29 @@ def render_backtest_docs():
     st.markdown("---")
     st.markdown("### Available Strategies")
 
-    strategies = {
-        "momentum": "Buy top performers over lookback period",
-        "mean_reversion": "Buy oversold stocks (RSI-based)",
-        "ma_crossover": "Follow moving average crossovers",
-        "breakout": "Buy on price breakouts with volume confirmation",
-    }
+    col1, col2 = st.columns(2)
 
-    for name, desc in strategies.items():
-        st.markdown(f"- **{name}**: {desc}")
+    with col1:
+        st.markdown("#### Rule-Based")
+        strategies = {
+            "momentum": "Buy top performers over lookback period",
+            "mean_reversion": "Buy oversold stocks (RSI-based)",
+            "ma_crossover": "Follow moving average crossovers",
+            "breakout": "Buy on price breakouts with volume",
+        }
+        for name, desc in strategies.items():
+            st.markdown(f"- **{name}**: {desc}")
+
+    with col2:
+        st.markdown("#### ML-Integrated")
+        ml_strategies = {
+            "ml_signal": "Trade based on quantile/classifier predictions",
+            "ml_filter": "Filter rule-based signals through ML",
+        }
+        for name, desc in ml_strategies.items():
+            st.markdown(f"- **{name}**: {desc}")
+
+        st.caption("Uses D-1 predictions to avoid look-ahead bias")
 
 
 def render_experiments_docs():

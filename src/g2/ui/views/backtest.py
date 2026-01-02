@@ -209,12 +209,6 @@ def render_run_section():
         with col1:
             ml_horizon = st.selectbox("Prediction Horizon", [7, 30, 90], index=0)
             ml_prediction_type = st.selectbox("Prediction Type", ["quantile", "classifier"])
-            ml_prediction_source = st.selectbox(
-                "Prediction Source",
-                ["database", "live"],
-                help="'database': Use stored predictions (queries previous day to avoid look-ahead). "
-                     "'live': Compute predictions on-the-fly from price data."
-            )
         with col2:
             ml_return_threshold = st.number_input(
                 "Return Threshold",
@@ -315,7 +309,6 @@ def render_run_section():
                 "--model-version", ml_model_version,
                 "--horizon-days", str(ml_horizon),
                 "--prediction-type", ml_prediction_type,
-                "--prediction-source", ml_prediction_source,
                 "--return-threshold", str(ml_return_threshold),
                 "--max-positions", str(ml_max_positions),
             ])

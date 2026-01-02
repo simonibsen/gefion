@@ -6624,7 +6624,8 @@ def backtest_run(
     prediction_source: str = typer.Option(
         "database",
         "--prediction-source",
-        help="Prediction source: 'database' (stored predictions) or 'live' (compute on-the-fly)"
+        help="(Deprecated) Only 'database' mode is supported",
+        hidden=True,  # Hide deprecated option from help
     ),
     json_output: bool = typer.Option(
         False,

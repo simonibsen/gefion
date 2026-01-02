@@ -2,13 +2,11 @@
 ML Signal Strategy.
 
 Generates trading signals based on ML model predictions (quantile regression
-or trend classifier). Supports two prediction sources:
+or trend classifier) stored in the database.
 
-1. "database" - Uses pre-computed predictions stored in the database
-   (queries previous day's predictions to avoid look-ahead bias)
-
-2. "live" - Computes predictions on-the-fly using loaded model artifacts
-   (simpler workflow, no need to pre-generate predictions)
+Look-ahead bias protection:
+- Queries predictions from PREVIOUS day (D-1) to avoid look-ahead
+- Predictions generated on day D are only used for trading on day D+1
 
 This bridges the ML pipeline with the backtesting system.
 """
@@ -17,7 +15,6 @@ from __future__ import annotations
 import os
 import logging
 from datetime import date, timedelta
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import psycopg
@@ -144,9 +141,8 @@ class MLSignalStrategy:
     """
     Trading strategy based on ML model predictions.
 
-    Supports two prediction sources:
-    - "database": Uses stored predictions (queries previous day to avoid look-ahead)
-    - "live": Computes predictions on-the-fly from price data
+    Uses predictions stored in the database. Queries PREVIOUS day's predictions
+    to avoid look-ahead bias (predictions made on day D are used on day D+1).
 
     Supports two prediction types:
     - "quantile": Uses quantile regression predictions (q10, q50, q90)
@@ -159,7 +155,6 @@ class MLSignalStrategy:
         model_version: str = "latest",
         horizon_days: int = 7,
         prediction_type: str = "quantile",
-        prediction_source: str = "database",  # "database" or "live"
         # Quantile strategy params
         return_threshold: float = 0.02,
         downside_limit: float = -0.05,
@@ -170,10 +165,11 @@ class MLSignalStrategy:
         position_size: float = 0.1,
         max_positions: int = 10,
         rebalance_days: int = 1,
-        # Model path for live predictions
-        model_path: Optional[str] = None,
         # Database
         db_url: Optional[str] = None,
+        # Deprecated - kept for backwards compatibility
+        prediction_source: str = "database",
+        model_path: Optional[str] = None,
     ):
         """
         Initialize ML Signal Strategy.
@@ -183,7 +179,6 @@ class MLSignalStrategy:
             model_version: Version of model to use
             horizon_days: Prediction horizon (7, 30, 90 days)
             prediction_type: "quantile" or "classifier"
-            prediction_source: "database" (stored predictions) or "live" (compute on-the-fly)
             return_threshold: Min expected return for buy (quantile mode)
             downside_limit: Max acceptable q10 downside (quantile mode)
             trend_classes: Classes that trigger buy (classifier mode)
@@ -191,14 +186,12 @@ class MLSignalStrategy:
             position_size: Fraction of capital per position (0-1)
             max_positions: Maximum concurrent positions
             rebalance_days: Days between signal evaluation
-            model_path: Path to model artifacts (for live predictions)
             db_url: Database connection URL
         """
         self.model_name = model_name
         self.model_version = model_version
         self.horizon_days = horizon_days
         self.prediction_type = prediction_type
-        self.prediction_source = prediction_source
 
         # Quantile params
         self.return_threshold = return_threshold
@@ -213,17 +206,15 @@ class MLSignalStrategy:
         self.max_positions = max_positions
         self.rebalance_days = rebalance_days
 
-        # Model for live predictions
-        self.model_path = model_path
-        self._loaded_model = None
-        self._model_loaded = False
-        self._feature_names: Optional[List[str]] = None
-
         # Database
         self.db_url = db_url or os.environ.get(
             "DATABASE_URL",
             "postgresql://g2:g2pass@localhost:6432/g2"
         )
+
+        # Backwards compatibility - ignore these params but accept them
+        self.prediction_source = "database"  # Always database
+        _ = prediction_source, model_path  # Suppress unused warnings
 
         # State
         self.last_signal_date: Optional[date] = None
@@ -259,11 +250,8 @@ class MLSignalStrategy:
         # Get current positions
         positions = self._get_positions(portfolio)
 
-        # Get predictions (from database or computed live)
-        if self.prediction_source == "live":
-            predictions = self._compute_live_predictions(price_data, current_date)
-        else:
-            predictions = self._get_database_predictions(current_date)
+        # Get predictions from database (using D-1 to avoid look-ahead)
+        predictions = self._get_database_predictions(current_date)
 
         if not predictions:
             return []
@@ -309,160 +297,6 @@ class MLSignalStrategy:
                 prediction_date,
                 self.horizon_days,
             )
-
-    def _compute_live_predictions(
-        self,
-        price_data: Dict[str, List[Dict[str, Any]]],
-        current_date: date,
-    ) -> Dict[str, Dict[str, float]]:
-        """
-        Compute predictions on-the-fly from price data.
-
-        Uses loaded model artifacts to generate fresh predictions.
-        This avoids needing to pre-generate predictions for all historical dates.
-        """
-        # Lazy load model if not already loaded
-        if not self._model_loaded:
-            self._load_model()
-
-        if self._loaded_model is None:
-            logger.warning("No model loaded for live predictions")
-            return {}
-
-        predictions = {}
-
-        try:
-            for symbol, history in price_data.items():
-                # Get data up to current date (point-in-time correct)
-                relevant = [p for p in history if p["date"] <= current_date]
-                if len(relevant) < 20:  # Need minimum history for features
-                    continue
-
-                # Compute features from price history
-                features = self._compute_features_from_prices(relevant)
-                if features is None:
-                    continue
-
-                # Generate prediction
-                pred = self._loaded_model.predict([features])
-
-                if self.prediction_type == "quantile":
-                    # Assume model outputs [q10, q50, q90]
-                    if len(pred[0]) >= 3:
-                        predictions[symbol] = {
-                            "q10": float(pred[0][0]),
-                            "q50": float(pred[0][1]),
-                            "q90": float(pred[0][2]),
-                        }
-                else:
-                    # Classifier output
-                    classes = ["strong_down", "weak_down", "neutral", "weak_up", "strong_up"]
-                    probs = pred[0] if hasattr(pred[0], '__iter__') else [pred[0]]
-                    max_idx = max(range(len(probs)), key=lambda i: probs[i])
-                    predictions[symbol] = {
-                        "predicted_class": classes[max_idx],
-                        **{f"p_{c}": float(probs[i]) for i, c in enumerate(classes) if i < len(probs)},
-                        "margin": float(max(probs) - sorted(probs)[-2]) if len(probs) > 1 else 1.0,
-                    }
-
-        except Exception as e:
-            logger.warning(f"Error computing live predictions: {e}")
-
-        return predictions
-
-    def _load_model(self) -> None:
-        """Load model artifacts for live predictions."""
-        try:
-            import joblib
-
-            # Determine model path
-            if self.model_path:
-                model_dir = Path(self.model_path)
-            else:
-                # Default path based on model name/version
-                model_dir = Path("models") / f"{self.model_name}_{self.model_version}_h{self.horizon_days}"
-
-            model_file = model_dir / "model.joblib"
-            metadata_file = model_dir / "metadata.json"
-
-            if model_file.exists():
-                self._loaded_model = joblib.load(model_file)
-                logger.info(f"Loaded model from {model_file}")
-
-                # Load feature names if available
-                if metadata_file.exists():
-                    import json
-                    with open(metadata_file) as f:
-                        metadata = json.load(f)
-                        self._feature_names = metadata.get("feature_names", [])
-
-                self._model_loaded = True
-            else:
-                logger.warning(f"Model file not found: {model_file}")
-
-        except Exception as e:
-            logger.warning(f"Failed to load model: {e}")
-            self._model_loaded = True  # Don't retry
-
-    def _compute_features_from_prices(
-        self,
-        price_history: List[Dict[str, Any]],
-    ) -> Optional[List[float]]:
-        """
-        Compute basic features from price history for live predictions.
-
-        This is a simplified feature set for demonstration.
-        For production, use the full feature computation pipeline.
-        """
-        try:
-            import numpy as np
-
-            # Sort by date
-            sorted_prices = sorted(price_history, key=lambda x: x["date"])
-            closes = np.array([p["close"] for p in sorted_prices])
-
-            if len(closes) < 20:
-                return None
-
-            # Basic features (simplified)
-            features = []
-
-            # Returns
-            returns_1d = (closes[-1] - closes[-2]) / closes[-2]
-            returns_5d = (closes[-1] - closes[-5]) / closes[-5] if len(closes) >= 5 else 0
-            returns_20d = (closes[-1] - closes[-20]) / closes[-20] if len(closes) >= 20 else 0
-            features.extend([returns_1d, returns_5d, returns_20d])
-
-            # Volatility
-            if len(closes) >= 20:
-                volatility = np.std(np.diff(closes[-20:]) / closes[-21:-1])
-            else:
-                volatility = 0
-            features.append(volatility)
-
-            # Simple RSI approximation
-            if len(closes) >= 14:
-                gains = np.maximum(np.diff(closes[-15:]), 0)
-                losses = np.maximum(-np.diff(closes[-15:]), 0)
-                avg_gain = np.mean(gains)
-                avg_loss = np.mean(losses)
-                rs = avg_gain / avg_loss if avg_loss > 0 else 100
-                rsi = 100 - (100 / (1 + rs))
-            else:
-                rsi = 50
-            features.append(rsi / 100)  # Normalize
-
-            # Moving average ratios
-            ma_5 = np.mean(closes[-5:]) if len(closes) >= 5 else closes[-1]
-            ma_20 = np.mean(closes[-20:]) if len(closes) >= 20 else closes[-1]
-            features.append(closes[-1] / ma_5 - 1)
-            features.append(closes[-1] / ma_20 - 1)
-
-            return features
-
-        except Exception as e:
-            logger.debug(f"Feature computation error: {e}")
-            return None
 
     def _generate_quantile_signals_from_predictions(
         self,

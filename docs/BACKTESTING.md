@@ -722,41 +722,21 @@ Uses predictions from trend classification models:
 - **BUY** when `predicted_class` in `trend_classes` AND probability > `confidence_threshold`
 - **SELL** when `predicted_class` is bearish with high confidence
 
-### Prediction Sources
+### Look-Ahead Bias Protection
 
-The ML Signal Strategy supports two prediction sources:
+The ML Signal Strategy automatically queries predictions from the **previous day**
+(`current_date - 1 day`). This ensures that predictions made on day D are only
+used for trading on day D+1, avoiding look-ahead bias.
 
-#### Database Mode (Default)
+**Why this matters:**
+- ML predictions are generated after market close on day D
+- In production, these predictions inform trades on day D+1 (next open)
+- Backtesting must replicate this timing to get realistic performance estimates
 
-Uses pre-computed predictions stored in the database.
-
-```bash
-g2 backtest run --strategy ml_signal --prediction-source database ...
-```
-
-**Advantages:**
-- Faster backtesting (no model inference)
-- Consistent with production (same predictions used in live trading)
-- Can verify predictions before running backtest
-
-**Look-ahead bias protection:** When using database mode, the strategy automatically queries predictions from the **previous day** (`current_date - 1 day`). This ensures that predictions made on day D are only used for trading on day D+1, avoiding look-ahead bias.
-
-#### Live Mode
-
-Computes predictions on-the-fly from price data during backtesting.
-
-```bash
-g2 backtest run --strategy ml_signal --prediction-source live ...
-```
-
-**Advantages:**
-- Simpler workflow (no need to pre-generate predictions)
-- Automatically uses point-in-time data (only prices up to current_date)
-- Easier experimentation with different models
-
-**Requirements:**
-- Model artifacts must be available in the `models/` directory
-- Loads model once and reuses for all prediction days
+**Workflow:**
+1. Train model on historical data
+2. Generate predictions for backtest period using `g2 ml predict`
+3. Run backtest - strategy automatically uses D-1 predictions
 
 ### Quick Start
 
@@ -833,7 +813,6 @@ jq '.metrics.sharpe_ratio' ml_results.json momentum_results.json
 | `--model-version` | `latest` | Model version to use |
 | `--horizon-days` | `7` | Prediction horizon (7, 30, 90) |
 | `--prediction-type` | `quantile` | `quantile` or `classifier` |
-| `--prediction-source` | `database` | `database` (stored predictions) or `live` (compute on-the-fly) |
 
 #### Quantile Strategy Parameters
 
@@ -919,6 +898,46 @@ psql $DATABASE_URL -c "
   GROUP BY prediction_date
   ORDER BY prediction_date;
 "
+```
+
+### Caveats and Limitations
+
+**Important considerations when using ML strategies:**
+
+1. **Train/Test Contamination**: Ensure your backtest period does NOT overlap with
+   training data. If you trained on 2020-2024 data, backtest on 2025+ only, otherwise
+   you're testing on data the model has already seen.
+
+2. **Weekend/Holiday Gaps**: The D-1 prediction lookup doesn't skip non-trading days.
+   If `current_date` is Monday, D-1 is Sunday (likely no predictions available).
+   Ensure predictions exist for all business days in your backtest period.
+
+3. **Position Sizing is Naive**: All qualifying signals get the same allocation
+   (`position_size` fraction). A q50=0.15 prediction gets the same size as q50=0.05.
+   Consider scaling by prediction magnitude or uncertainty (q90-q10 spread).
+
+4. **No Walk-Forward Validation**: True ML backtesting should use rolling windows
+   (train months 1-12, test month 13, then train 2-13, test 14, etc.). Our current
+   approach uses a single train/test split.
+
+**Recommended workflow to avoid these pitfalls:**
+
+```bash
+# 1. Build dataset with temporal split
+g2 ml dataset-build --name full --version v1 --exchange NASDAQ --limit 100
+
+# 2. Train on first 80% of data (adjust dates manually)
+# Check dataset dates: look at datasets/full_v1_manifest.json
+
+# 3. Generate predictions for test period ONLY
+g2 ml predict --model-name my_model --model-version v1 \
+  --start-date 2024-06-01 --end-date 2024-12-31 \
+  --exchange NASDAQ --limit 100
+
+# 4. Backtest on test period only
+g2 backtest run --strategy ml_signal \
+  --start-date 2024-06-01 --end-date 2024-12-31 \
+  --model-name my_model --model-version v1
 ```
 
 ### Programmatic Usage
