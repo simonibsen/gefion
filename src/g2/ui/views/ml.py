@@ -722,7 +722,7 @@ def render_dataset_section():
 
             with col2:
                 created = ds.get("created_at")
-                created_str = created.strftime("%Y-%m-%d") if created else "?"
+                created_str = created.strftime("%Y-%m-%d %H:%M") if created else "?"
                 model_count = ds.get("model_count", 0)
                 st.caption(f"Created: {created_str}")
                 if model_count > 0:
@@ -1142,7 +1142,7 @@ def render_train_section():
 
             with col2:
                 created = model.get("created_at")
-                created_str = created.strftime("%Y-%m-%d") if created else "?"
+                created_str = created.strftime("%Y-%m-%d %H:%M") if created else "?"
                 st.caption(f"Created: {created_str}")
 
             with col3:
