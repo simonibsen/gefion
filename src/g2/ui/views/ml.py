@@ -78,7 +78,9 @@ def _get_datasets() -> list[dict]:
                     }
                     for r in rows
                 ]
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to get datasets: {e}")
         return []
 
 
@@ -639,6 +641,8 @@ def render_dataset_section():
                 if returncode == 0:
                     status.update(label="✅ Dataset built!", state="complete")
                     st.success(f"Dataset {dataset_name} v{dataset_version} built successfully!")
+                    # Clear cache so new dataset shows up immediately
+                    _get_datasets.clear()
                 else:
                     stderr = process.stderr.read()
                     status.update(label="❌ Build failed", state="error")
@@ -652,7 +656,13 @@ def render_dataset_section():
 
     # Dataset management
     st.markdown("---")
-    st.subheader("Manage Datasets")
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        st.subheader("Manage Datasets")
+    with col2:
+        if st.button("🔄", key="refresh_datasets", help="Refresh dataset list"):
+            _get_datasets.clear()
+            st.rerun()
 
     datasets = _get_datasets()
 
@@ -876,6 +886,9 @@ def render_train_section():
     warm_start = False
     base_model_path = None
 
+    # Get existing models for warm-start selection
+    models = _get_models()
+
     if model_type == "Quantile Regression" and algorithm in ["xgboost", "lightgbm"]:
         with st.expander("🚀 Warm-Start Training (Advanced)", expanded=False):
             st.info("""
@@ -1046,6 +1059,8 @@ def render_train_section():
                 if returncode == 0:
                     status.update(label="✅ Model trained!", state="complete")
                     st.success(f"Model {model_name} v{model_version} trained successfully!")
+                    # Clear cache so new model shows up immediately
+                    _get_models.clear()
                 else:
                     stderr = process.stderr.read()
                     status.update(label="❌ Training failed", state="error")
