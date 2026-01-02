@@ -602,7 +602,16 @@ def render_dataset_section():
         st.code(cli_cmd, language="bash")
 
         with st.status("Building dataset...", expanded=True) as status:
-            status_text = st.empty()
+            # Create placeholders for each step
+            step_discover = st.empty()
+            step_prices = st.empty()
+            step_features = st.empty()
+            step_labels = st.empty()
+            step_register = st.empty()
+            warnings_container = st.empty()
+
+            steps_completed = []
+            warnings_list = []
 
             try:
                 process = subprocess.Popen(
@@ -614,7 +623,6 @@ def render_dataset_section():
                     env=env,
                 )
 
-                last_data = {}
                 json_buffer = []
                 for line in process.stdout:
                     line = line.strip()
@@ -627,11 +635,39 @@ def render_dataset_section():
                         json_buffer = []  # Reset buffer on successful parse
                         if not isinstance(data, dict):
                             continue
-                        last_data = data
-                        # Show status message if present
                         msg = data.get("message", "")
-                        if msg:
-                            status_text.write(msg)
+                        if not msg:
+                            continue
+
+                        # Track warnings
+                        if "WARNING" in msg or "⚠️" in msg:
+                            warnings_list.append(msg)
+                            warnings_container.warning("\n".join(warnings_list))
+                            continue
+
+                        # Update step indicators based on message content
+                        if "Discovered" in msg and "features" in msg:
+                            step_discover.markdown(f"✅ {msg}")
+                            steps_completed.append("discover")
+                        elif "Exporting prices" in msg:
+                            step_prices.markdown(f"⏳ {msg}")
+                        elif "Exported" in msg and "price" in msg:
+                            step_prices.markdown(f"✅ {msg}")
+                            steps_completed.append("prices")
+                        elif "Exporting features" in msg:
+                            step_features.markdown(f"⏳ {msg}")
+                        elif "Features exported" in msg:
+                            step_features.markdown(f"✅ {msg}")
+                            steps_completed.append("features")
+                        elif "Computing labels" in msg:
+                            step_labels.markdown(f"⏳ {msg}")
+                        elif "Labels computed" in msg:
+                            step_labels.markdown(f"✅ {msg}")
+                            steps_completed.append("labels")
+                        elif "Dataset registered" in msg:
+                            step_register.markdown(f"✅ {msg}")
+                            steps_completed.append("register")
+
                     except json.JSONDecodeError:
                         # Not yet complete JSON, keep buffering
                         pass
