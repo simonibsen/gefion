@@ -1319,11 +1319,15 @@ def _render_tune_section(datasets: list):
         if model_type == "quantile":
             cmd.extend(["--quantile", str(quantile)])
 
-        # Show CLI command
-        cli_cmd = " ".join(cmd[2:]).replace("g2.cli", "g2")
+        # Show CLI command (skip python -u -m g2.cli prefix)
+        cli_cmd = " ".join(cmd[4:]).replace("g2.cli", "g2")
+        cli_cmd = "g2 " + cli_cmd
         st.code(cli_cmd, language="bash")
 
         with st.status("Tuning hyperparameters...", expanded=True) as status:
+            # Progress placeholders
+            trial_progress = st.empty()
+            best_score_display = st.empty()
             status_text = st.empty()
             metrics_container = st.empty()
 
@@ -1339,6 +1343,7 @@ def _render_tune_section(datasets: list):
 
                 last_data = {}
                 json_buffer = []
+                all_trials = []
                 for line in process.stdout:
                     line = line.strip()
                     if not line:
@@ -1350,18 +1355,25 @@ def _render_tune_section(datasets: list):
                         if not isinstance(data, dict):
                             continue
                         last_data = data
-                        # Show progress
                         msg = data.get("message", "")
-                        if msg:
+
+                        # Show trial progress (e.g., "Trial 7/50 (14%) - Best score: 0.074847")
+                        if "Trial" in msg and "Best score" in msg:
+                            trial_progress.markdown(f"**{msg}**")
+                            all_trials.append(msg)
+                        elif msg:
                             status_text.write(msg)
-                        # Show best score if available
+
+                        # Show best score metric
                         best_score = data.get("best_score")
                         trial_num = data.get("trial")
+                        n_trials_total = data.get("n_trials", n_trials)
                         if best_score is not None and trial_num:
-                            metrics_container.metric(
-                                "Best Score",
-                                f"{best_score:.4f}",
-                                delta=f"Trial {trial_num}",
+                            pct = int(100 * trial_num / n_trials_total)
+                            best_score_display.metric(
+                                f"Best Score (Trial {trial_num}/{n_trials_total})",
+                                f"{best_score:.6f}",
+                                delta=f"{pct}% complete",
                             )
                     except json.JSONDecodeError:
                         pass
