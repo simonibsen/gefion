@@ -871,7 +871,7 @@ def render_backup_section():
 
     # Build CLI command preview
     cli_parts = ["g2", "backup", "--output", backup_path or "<path>"]
-    if data_types and set(data_types) != {"ohlcv", "features", "definitions", "functions"}:
+    if data_types and data_types != ["all"]:
         cli_parts.extend(["--data-types", ",".join(data_types)])
     if symbols:
         cli_parts.extend(["--symbols", symbols.upper()])

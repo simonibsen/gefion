@@ -181,6 +181,17 @@ def export_dataset_artifacts(
     # Export features - stream directly for CSV, load for parquet
     emit_progress("Exporting features...")
     feature_rows: list[dict[str, Any]] = []
+    feature_count = 0
+    try:
+        # First check if computed_features has any data
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM computed_features LIMIT 1")
+            total_features = cur.fetchone()[0]
+            if total_features == 0:
+                emit_progress("⚠️  WARNING: computed_features table is empty. Run 'g2 feat-compute' first.")
+    except Exception:
+        pass  # Table might not exist yet
+
     try:
         with conn.cursor() as cur:
             # Build WHERE clause based on feature selection
@@ -222,16 +233,20 @@ def export_dataset_artifacts(
 
             if export_format == "csv":
                 # Stream directly to CSV - much lower memory usage
-                _stream_to_csv(cur, features_path, features_header, feature_mapper)
+                feature_count = _stream_to_csv(cur, features_path, features_header, feature_mapper)
             else:
                 # For parquet, need all data in memory
                 for row in cur:
                     feature_rows.append(feature_mapper(row))
+                feature_count = len(feature_rows)
                 _write_to_file(feature_rows, features_path, features_header, export_format)
     except Exception:
         _write_to_file([], features_path, features_header, export_format)
 
-    emit_progress("Features exported")
+    if feature_count == 0:
+        emit_progress("⚠️  WARNING: No features exported. Training will fail without features.")
+    else:
+        emit_progress(f"Features exported: {feature_count:,} records")
 
     # Compute labels from prices
     if price_count > 0 and horizons_days:
@@ -291,6 +306,10 @@ def export_dataset_artifacts(
                     else:
                         labels_df.to_csv(labels_path, index=False)
                     emit_progress(f"Labels computed: {len(labels_df):,} records")
+                else:
+                    emit_progress("⚠️  WARNING: No labels computed (insufficient price history for horizons).")
+            else:
+                emit_progress("⚠️  WARNING: No labels computed. Check label_spec thresholds in manifest.")
         except Exception as e:
-            emit_progress(f"Warning: Failed to compute labels: {e}")
+            emit_progress(f"⚠️  WARNING: Failed to compute labels: {e}")
             return
