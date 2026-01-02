@@ -183,6 +183,60 @@ def render_run_section():
         with col4:
             expansion_threshold = st.slider("Expansion Threshold", value=0.1, min_value=0.05, max_value=0.25, step=0.01)
 
+    elif strategy == "ml_signal":
+        st.info("ML Signal Strategy uses predictions from trained ML models to generate trading signals.")
+
+        # Get available models from database
+        from g2.ui.components.database import get_models
+        available_models = get_models()
+
+        if not available_models:
+            st.warning("No ML models found. Train a model first using the ML Pipeline page.")
+            ml_model_name = st.text_input("Model Name", value="quantile")
+            ml_model_version = st.text_input("Model Version", value="latest")
+        else:
+            model_options = [f"{m['name']} / {m['version']}" for m in available_models]
+            selected_model = st.selectbox("Select Model", model_options)
+            if selected_model:
+                parts = selected_model.split(" / ")
+                ml_model_name = parts[0]
+                ml_model_version = parts[1] if len(parts) > 1 else "latest"
+            else:
+                ml_model_name = "quantile"
+                ml_model_version = "latest"
+
+        col1, col2 = st.columns(2)
+        with col1:
+            ml_horizon = st.selectbox("Prediction Horizon", [7, 30, 90], index=0)
+            ml_prediction_type = st.selectbox("Prediction Type", ["quantile", "classifier"])
+        with col2:
+            ml_return_threshold = st.number_input(
+                "Return Threshold",
+                value=0.02,
+                min_value=0.0,
+                max_value=0.20,
+                step=0.01,
+                help="Min expected return (q50) to buy"
+            )
+            ml_max_positions = st.number_input("Max Positions", value=10, min_value=1, max_value=50, key="ml_max_pos")
+
+        if ml_prediction_type == "classifier":
+            ml_trend_classes = st.multiselect(
+                "Trend Classes (buy signals)",
+                ["strong_up", "weak_up", "neutral", "weak_down", "strong_down"],
+                default=["strong_up", "weak_up"]
+            )
+            ml_confidence = st.slider("Confidence Threshold", value=0.5, min_value=0.3, max_value=0.9, step=0.05)
+        else:
+            ml_downside_limit = st.number_input(
+                "Downside Limit (q10)",
+                value=-0.05,
+                min_value=-0.20,
+                max_value=0.0,
+                step=0.01,
+                help="Max acceptable downside risk"
+            )
+
     # Validate symbols selection
     if symbol_mode == "Selected" and not selected_symbols:
         st.warning("⚠️ Please select at least one symbol to backtest.")
@@ -249,6 +303,24 @@ def render_run_section():
                 "--squeeze-threshold", str(squeeze_threshold),
                 "--expansion-threshold", str(expansion_threshold),
             ])
+        elif strategy == "ml_signal":
+            cmd.extend([
+                "--model-name", ml_model_name,
+                "--model-version", ml_model_version,
+                "--horizon-days", str(ml_horizon),
+                "--prediction-type", ml_prediction_type,
+                "--return-threshold", str(ml_return_threshold),
+                "--max-positions", str(ml_max_positions),
+            ])
+            if ml_prediction_type == "classifier":
+                cmd.extend([
+                    "--trend-classes", ",".join(ml_trend_classes),
+                    "--confidence-threshold", str(ml_confidence),
+                ])
+            else:
+                cmd.extend([
+                    "--downside-limit", str(ml_downside_limit),
+                ])
 
         if symbol_mode == "Selected":
             cmd.extend(["--symbols", ",".join(selected_symbols)])

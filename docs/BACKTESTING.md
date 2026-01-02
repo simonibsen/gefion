@@ -643,10 +643,377 @@ Strategies are designed to be reusable for live trading. The `generate_signals()
 
 See [ML_ROADMAP.md](ML_ROADMAP.md#61-live--paper-trading) for the planned live trading architecture.
 
+## ML Signal Strategy
+
+The ML Signal Strategy bridges g2's machine learning pipeline with the backtesting system, allowing you to validate whether ML predictions translate into profitable trading decisions.
+
+### Theory: Why ML for Trading Signals?
+
+Traditional rule-based strategies (momentum, mean reversion) use fixed thresholds:
+- "Buy when RSI < 30" (oversold)
+- "Buy when price breaks 20-day high" (breakout)
+
+These rules are **brittle** - they don't adapt to changing market conditions and ignore the uncertainty inherent in price movements.
+
+**ML-based approaches offer key advantages:**
+
+1. **Probabilistic predictions**: Instead of "buy/don't buy", ML models output probability distributions (q10/q50/q90) that quantify uncertainty
+
+2. **Multi-horizon forecasts**: Same model predicts 7-day, 30-day, and 90-day returns, enabling horizon-appropriate strategies
+
+3. **Feature learning**: Models learn which technical indicators matter, rather than relying on hand-crafted rules
+
+4. **Calibrated confidence**: Quantile models are calibrated so q10 predictions contain ~10% of actual outcomes below that value
+
+### How It Works
+
+```
+┌──────────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
+│   ML Pipeline        │     │   Predictions DB     │     │   MLSignalStrategy   │
+├──────────────────────┤     ├──────────────────────┤     ├──────────────────────┤
+│ • Train models       │────▶│ quantile_predictions │────▶│ • Query predictions  │
+│ • Generate forecasts │     │ trend_class_pred...  │     │ • Apply thresholds   │
+│                      │     │                      │     │ • Generate signals   │
+└──────────────────────┘     └──────────────────────┘     └──────────────────────┘
+                                                                    │
+                                                                    ▼
+                                                          ┌──────────────────────┐
+                                                          │   BacktestEngine     │
+                                                          ├──────────────────────┤
+                                                          │ • Execute trades     │
+                                                          │ • Track portfolio    │
+                                                          │ • Calculate metrics  │
+                                                          └──────────────────────┘
+```
+
+The strategy reads historical ML predictions from the database and uses them to decide what to buy/sell on each trading day.
+
+### Prediction Types
+
+#### Quantile Predictions (Default)
+
+Uses predictions from quantile regression models:
+
+| Field | Description | Usage |
+|-------|-------------|-------|
+| `q10` | 10th percentile return | Downside risk limit |
+| `q50` | Median expected return | Primary signal |
+| `q90` | 90th percentile return | Upside potential |
+
+**Signal logic:**
+- **BUY** when `q50 > return_threshold` AND `q10 > downside_limit`
+- **SELL** when `q50 < -return_threshold` (negative outlook)
+
+This approach balances expected return (q50) against tail risk (q10).
+
+#### Classifier Predictions
+
+Uses predictions from trend classification models:
+
+| Class | Description |
+|-------|-------------|
+| `strong_up` | Expected return > +5% |
+| `weak_up` | Expected return +2% to +5% |
+| `neutral` | Expected return -2% to +2% |
+| `weak_down` | Expected return -5% to -2% |
+| `strong_down` | Expected return < -5% |
+
+**Signal logic:**
+- **BUY** when `predicted_class` in `trend_classes` AND probability > `confidence_threshold`
+- **SELL** when `predicted_class` is bearish with high confidence
+
+### Quick Start
+
+#### Step 1: Generate Predictions
+
+First, ensure you have ML predictions in the database:
+
+```bash
+# Train a quantile model (if not already done)
+g2 ml train \
+  --dataset-name my_dataset \
+  --dataset-version v1 \
+  --model-name quantile \
+  --model-version 20260101
+
+# Generate predictions for historical dates
+for date in 2024-01-02 2024-01-03 2024-01-04 ... ; do
+  g2 ml predict \
+    --model-name quantile \
+    --model-version 20260101 \
+    --prediction-date $date \
+    --exchange NASDAQ \
+    --limit 50
+done
+```
+
+#### Step 2: Run ML Backtest
+
+```bash
+g2 backtest run \
+  --strategy ml_signal \
+  --symbols AAPL,MSFT,GOOGL,AMZN,NVDA \
+  --start-date 2024-01-01 \
+  --end-date 2024-12-31 \
+  --model-name quantile \
+  --model-version 20260101 \
+  --horizon-days 7 \
+  --return-threshold 0.02 \
+  --max-positions 10
+```
+
+#### Step 3: Compare to Traditional Strategy
+
+```bash
+# ML strategy
+g2 backtest run \
+  --strategy ml_signal \
+  --symbols AAPL,MSFT,GOOGL,AMZN,NVDA \
+  --start-date 2024-01-01 \
+  --end-date 2024-12-31 \
+  --model-name quantile \
+  --model-version 20260101 \
+  --json > ml_results.json
+
+# Traditional momentum
+g2 backtest run \
+  --strategy momentum \
+  --symbols AAPL,MSFT,GOOGL,AMZN,NVDA \
+  --start-date 2024-01-01 \
+  --end-date 2024-12-31 \
+  --json > momentum_results.json
+
+# Compare Sharpe ratios
+jq '.metrics.sharpe_ratio' ml_results.json momentum_results.json
+```
+
+### Parameters Reference
+
+#### Model Selection
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--model-name` | `quantile` | Name of ML model in database |
+| `--model-version` | `latest` | Model version to use |
+| `--horizon-days` | `7` | Prediction horizon (7, 30, 90) |
+| `--prediction-type` | `quantile` | `quantile` or `classifier` |
+
+#### Quantile Strategy Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--return-threshold` | `0.02` | Min expected return (q50) to buy |
+| `--downside-limit` | `-0.05` | Max acceptable downside (q10) |
+
+#### Classifier Strategy Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--trend-classes` | `strong_up,weak_up` | Classes that trigger buy |
+| `--confidence-threshold` | `0.5` | Min probability to act |
+
+#### Position Management
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--position-size` | `0.1` | Fraction of capital per position |
+| `--max-positions` | `10` | Maximum concurrent positions |
+| `--rebalance-days` | `1` | Days between signal evaluation |
+
+### Example: Full Workflow
+
+```bash
+# 1. Build training dataset
+g2 ml dataset-build \
+  --name backtest_data \
+  --version v1 \
+  --exchange NASDAQ \
+  --limit 100
+
+# 2. Train quantile model
+g2 ml train \
+  --dataset-name backtest_data \
+  --dataset-version v1 \
+  --model-name quantile_v1 \
+  --model-version 20260101 \
+  --algorithm lightgbm
+
+# 3. Generate predictions for backtest period
+# (In production, use a script to iterate over dates)
+g2 ml predict \
+  --model-name quantile_v1 \
+  --model-version 20260101 \
+  --prediction-date 2024-06-01 \
+  --exchange NASDAQ \
+  --limit 100
+
+# 4. Run backtest using predictions
+g2 backtest run \
+  --strategy ml_signal \
+  --exchange NASDAQ \
+  --limit 50 \
+  --start-date 2024-01-01 \
+  --end-date 2024-12-31 \
+  --model-name quantile_v1 \
+  --model-version 20260101 \
+  --horizon-days 7 \
+  --return-threshold 0.03 \
+  --downside-limit -0.02 \
+  --max-positions 15
+```
+
+### Interpreting Results
+
+When evaluating ML strategy performance, consider:
+
+1. **Information ratio**: Does ML outperform a naive momentum baseline?
+2. **Prediction coverage**: Were predictions available for most trading days?
+3. **Signal density**: How often did the model generate actionable signals?
+4. **Regime sensitivity**: Does performance vary across market conditions?
+
+```bash
+# Check prediction coverage
+psql $DATABASE_URL -c "
+  SELECT prediction_date, COUNT(*) as symbols
+  FROM quantile_predictions qp
+  JOIN ml_models m ON qp.model_id = m.id
+  WHERE m.name = 'quantile_v1'
+    AND prediction_date BETWEEN '2024-01-01' AND '2024-12-31'
+  GROUP BY prediction_date
+  ORDER BY prediction_date;
+"
+```
+
+### Programmatic Usage
+
+```python
+from datetime import date
+from g2.backtest.engine import BacktestEngine
+from g2.backtest.data_loader import load_price_data_for_backtest
+from g2.strategies.ml_signal import MLSignalStrategy
+from g2.config import load_settings
+
+settings = load_settings()
+
+# Load price data
+price_data = load_price_data_for_backtest(
+    db_url=settings.database_url,
+    symbols=["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"],
+    start_date=date(2024, 1, 1),
+    end_date=date(2024, 12, 31),
+)
+
+# Create ML Signal Strategy
+strategy = MLSignalStrategy(
+    model_name="quantile_v1",
+    model_version="20260101",
+    horizon_days=7,
+    prediction_type="quantile",
+    return_threshold=0.03,
+    downside_limit=-0.02,
+    max_positions=10,
+    db_url=settings.database_url,
+)
+
+# Wrapper for backtest engine
+def strategy_fn(current_date, portfolio, prices):
+    return strategy.generate_signals(
+        current_date=current_date,
+        portfolio=portfolio,
+        price_data=prices,
+        initial_cash=100000.0,
+    )
+
+# Run backtest
+engine = BacktestEngine(
+    price_data=price_data,
+    strategy=strategy_fn,
+    initial_cash=100000.0,
+    start_date=date(2024, 1, 1),
+    end_date=date(2024, 12, 31),
+)
+
+results = engine.run()
+
+print(f"ML Strategy Results:")
+print(f"  Total Return: {results['metrics']['total_return']:.2%}")
+print(f"  Sharpe Ratio: {results['metrics']['sharpe_ratio']:.3f}")
+print(f"  Max Drawdown: {results['metrics']['max_drawdown']:.2%}")
+print(f"  Total Trades: {len(results['trades'])}")
+```
+
+### Common Issues
+
+#### "No signals generated"
+
+**Causes:**
+- No predictions in database for the backtest dates
+- All predictions below `return_threshold`
+- Model/version mismatch
+
+**Debug:**
+```bash
+# Check if predictions exist
+psql $DATABASE_URL -c "
+  SELECT COUNT(*), MIN(prediction_date), MAX(prediction_date)
+  FROM quantile_predictions qp
+  JOIN ml_models m ON qp.model_id = m.id
+  WHERE m.name = 'your_model_name';
+"
+```
+
+#### "Model not found"
+
+Ensure the model is registered and active:
+```bash
+psql $DATABASE_URL -c "
+  SELECT name, version, active
+  FROM ml_models
+  WHERE name = 'your_model_name';
+"
+```
+
+### ML Filter Strategy (Hybrid Approach)
+
+Beyond pure ML signals, you can use ML predictions to **filter** signals from traditional strategies. This hybrid approach:
+
+1. Runs a traditional strategy (e.g., momentum)
+2. Only executes buy signals where ML prediction confirms upside
+3. Vetoes trades with poor ML outlook
+
+```python
+# Conceptual example
+class MLFilteredMomentum:
+    def __init__(self):
+        self.momentum = MomentumStrategy()
+        self.ml_filter = MLSignalStrategy()
+
+    def generate_signals(self, ...):
+        # Get momentum signals
+        momentum_signals = self.momentum.generate_signals(...)
+
+        # Filter through ML predictions
+        ml_predictions = self.ml_filter._get_predictions(current_date)
+
+        filtered = []
+        for signal in momentum_signals:
+            if signal["action"] == "buy":
+                pred = ml_predictions.get(signal["symbol"])
+                if pred and pred["q50"] > 0:  # ML confirms upside
+                    filtered.append(signal)
+            else:
+                filtered.append(signal)  # Keep sell signals
+
+        return filtered
+```
+
+This approach is being implemented as `MLFilterStrategy` - see strategy registry for availability.
+
 ## Next Steps
 
-- **Try ML-based strategies**: Use `g2 ml predict` to generate predictions and build strategies on quantile forecasts
-- **Compare multiple strategies**: Run backtests for different approaches and parameters
+- **Compare ML vs traditional**: Run backtests with both approaches on the same data
+- **Tune thresholds**: Experiment with `return_threshold` and `confidence_threshold`
+- **Multi-horizon strategies**: Use different horizons for entry (7d) vs exit (30d)
 - **Production deployment**: See [USER_GUIDE.md](USER_GUIDE.md) for automation workflows
 
 ## Related Documentation

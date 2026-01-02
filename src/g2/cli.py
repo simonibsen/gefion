@@ -6473,7 +6473,7 @@ def backtest_run(
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
-        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', or 'volatility_contraction'"
+        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', 'volatility_contraction', or 'ml_signal'"
     ),
     start_date: str = typer.Option(
         ...,
@@ -6580,6 +6580,47 @@ def backtest_run(
         "--expansion-threshold",
         help="Band width threshold for expansion detection (volatility_contraction strategy)"
     ),
+    # ML Signal Strategy parameters
+    model_name: Optional[str] = typer.Option(
+        None,
+        "--model-name",
+        help="ML model name for ml_signal strategy"
+    ),
+    model_version: Optional[str] = typer.Option(
+        None,
+        "--model-version",
+        help="ML model version for ml_signal strategy"
+    ),
+    horizon_days: int = typer.Option(
+        7,
+        "--horizon-days",
+        help="Prediction horizon in days: 7, 30, or 90 (ml_signal strategy)"
+    ),
+    prediction_type: str = typer.Option(
+        "quantile",
+        "--prediction-type",
+        help="Prediction type: 'quantile' or 'classifier' (ml_signal strategy)"
+    ),
+    return_threshold: float = typer.Option(
+        0.02,
+        "--return-threshold",
+        help="Min expected return (q50) to generate buy signal (ml_signal strategy)"
+    ),
+    downside_limit: float = typer.Option(
+        -0.05,
+        "--downside-limit",
+        help="Max acceptable downside (q10) for buy signal (ml_signal strategy)"
+    ),
+    trend_classes: Optional[str] = typer.Option(
+        None,
+        "--trend-classes",
+        help="Comma-separated trend classes that trigger buy: strong_up,weak_up (ml_signal classifier)"
+    ),
+    confidence_threshold: float = typer.Option(
+        0.5,
+        "--confidence-threshold",
+        help="Min probability threshold for classifier signals (ml_signal strategy)"
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -6615,6 +6656,7 @@ def backtest_run(
     from g2.strategies.pairs_trading import PairsTradingStrategy
     from g2.strategies.rsi_divergence import RSIDivergenceStrategy
     from g2.strategies.volatility_contraction import VolatilityContractionStrategy
+    from g2.strategies.ml_signal import MLSignalStrategy
 
     url = os.getenv("DATABASE_URL", SETTINGS.database_url)
 
@@ -6739,9 +6781,43 @@ def backtest_run(
             position_size=position_size,
             max_positions=max_positions,
         )
+    elif strategy == "ml_signal":
+        # Validate ML strategy parameters
+        if not model_name:
+            emit_error(
+                "ML Signal strategy requires --model-name parameter",
+                json_output=json_output
+            )
+            raise typer.Exit(1)
+        if not model_version:
+            emit_error(
+                "ML Signal strategy requires --model-version parameter",
+                json_output=json_output
+            )
+            raise typer.Exit(1)
+
+        # Parse trend classes if provided
+        parsed_trend_classes = None
+        if trend_classes:
+            parsed_trend_classes = [c.strip() for c in trend_classes.split(",")]
+
+        strat = MLSignalStrategy(
+            model_name=model_name,
+            model_version=model_version,
+            horizon_days=horizon_days,
+            prediction_type=prediction_type,
+            return_threshold=return_threshold,
+            downside_limit=downside_limit,
+            trend_classes=parsed_trend_classes,
+            confidence_threshold=confidence_threshold,
+            position_size=position_size,
+            max_positions=max_positions,
+            rebalance_days=rebalance_days,
+            db_url=url,
+        )
     else:
         emit_error(
-            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', 'volatility_contraction'",
+            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', 'volatility_contraction', 'ml_signal'",
             json_output=json_output
         )
         raise typer.Exit(1)

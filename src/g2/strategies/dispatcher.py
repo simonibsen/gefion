@@ -65,6 +65,34 @@ BUILTIN_STRATEGIES: Dict[str, Dict[str, Any]] = {
         "default_params": {"bb_period": 20, "bb_std_dev": 2.0, "squeeze_threshold": 0.05},
         "tags": ["volatility", "bollinger-bands"],
     },
+    "ml_signal": {
+        "module_path": "g2.strategies.ml_signal",
+        "class_name": "MLSignalStrategy",
+        "description": "ML-based strategy using quantile or classifier predictions",
+        "default_params": {
+            "model_name": "quantile",
+            "model_version": "latest",
+            "horizon_days": 7,
+            "prediction_type": "quantile",
+            "return_threshold": 0.02,
+            "max_positions": 10,
+        },
+        "tags": ["ml", "quantile-regression", "classifier", "predictions"],
+    },
+    "ml_filter": {
+        "module_path": "g2.strategies.ml_filter",
+        "class_name": "MLFilterStrategy",
+        "description": "Hybrid strategy: filters base strategy signals through ML predictions",
+        "default_params": {
+            "model_name": "quantile",
+            "model_version": "latest",
+            "horizon_days": 7,
+            "filter_mode": "confirm",
+            "prediction_type": "quantile",
+            "min_q50": 0.0,
+        },
+        "tags": ["ml", "hybrid", "filter", "wrapper"],
+    },
 }
 
 
