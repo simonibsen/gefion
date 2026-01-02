@@ -2536,6 +2536,7 @@ def ml_train_classifier(
         # Save model artifact
         out_dir.mkdir(parents=True, exist_ok=True)
         model_path = out_dir / f"{model_name}_{model_version}_h{horizon}_classifier"
+        model_path.mkdir(parents=True, exist_ok=True)
         joblib.dump(model_artifacts, model_path / "classifier.pkl")
         (model_path / "metadata.json").write_text(
             json.dumps({
