@@ -15,6 +15,31 @@ import g2.cli as cli
 runner = CliRunner()
 
 
+# Pipeline wrappers at module level so they can be pickled
+class XGBTestPipeline:
+    """XGBoost pipeline wrapper for testing (must be at module level for pickling)."""
+    def __init__(self, imputer, model):
+        self.named_steps = {'imputer': imputer, 'model': model}
+        self.imputer = imputer
+        self.model = model
+
+    def predict(self, X):
+        X_imputed = self.imputer.transform(X)
+        return self.model.predict(X_imputed)
+
+
+class LGBTestPipeline:
+    """LightGBM pipeline wrapper for testing (must be at module level for pickling)."""
+    def __init__(self, imputer, model):
+        self.named_steps = {'imputer': imputer, 'model': model}
+        self.imputer = imputer
+        self.model = model
+
+    def predict(self, X):
+        X_imputed = self.imputer.transform(X)
+        return self.model.predict(X_imputed)
+
+
 class TestFeatureImportanceCLI:
     """Tests for g2 ml feature-importance CLI command."""
 
@@ -78,18 +103,8 @@ class TestFeatureImportanceComputation:
         )
         model.fit(X_imputed, y)
 
-        # Create pipeline wrapper
-        class XGBPipeline:
-            def __init__(self, imputer, model):
-                self.named_steps = {'imputer': imputer, 'model': model}
-                self.imputer = imputer
-                self.model = model
-
-            def predict(self, X):
-                X_imputed = self.imputer.transform(X)
-                return self.model.predict(X_imputed)
-
-        pipeline = XGBPipeline(imputer, model)
+        # Create pipeline wrapper (using module-level class for pickling)
+        pipeline = XGBTestPipeline(imputer, model)
 
         # Save model artifact
         import joblib
@@ -213,17 +228,8 @@ class TestFeatureImportanceWithLightGBM:
         )
         model.fit(X_imputed, y)
 
-        class LGBPipeline:
-            def __init__(self, imputer, model):
-                self.named_steps = {'imputer': imputer, 'model': model}
-                self.imputer = imputer
-                self.model = model
-
-            def predict(self, X):
-                X_imputed = self.imputer.transform(X)
-                return self.model.predict(X_imputed)
-
-        pipeline = LGBPipeline(imputer, model)
+        # Create pipeline wrapper (using module-level class for pickling)
+        pipeline = LGBTestPipeline(imputer, model)
 
         import joblib
         artifact_dir = tmp_path / "lgb_model_v1_h7"
