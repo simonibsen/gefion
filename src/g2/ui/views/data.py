@@ -829,9 +829,9 @@ def render_backup_section():
 
         data_types = st.multiselect(
             "Data Types",
-            ["ohlcv", "features", "definitions", "functions"],
-            default=["ohlcv", "features", "definitions", "functions"],
-            help="Select which data types to backup",
+            ["all", "ohlcv", "features", "definitions", "functions", "strategies", "ml", "predictions", "experiments", "meta"],
+            default=["all"],
+            help="Select which data types to backup ('all' includes everything)",
         )
 
         symbols = st.text_input(
@@ -991,7 +991,7 @@ def render_restore_section():
     with col2:
         data_types_filter = st.multiselect(
             "Data Types (optional filter)",
-            ["ohlcv", "features", "definitions", "functions"],
+            ["ohlcv", "features", "definitions", "functions", "strategies", "ml", "predictions", "experiments", "meta"],
             default=[],
             help="Filter which data types to restore (leave empty for all)",
         )
