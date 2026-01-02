@@ -997,12 +997,13 @@ def render_train_section():
     if st.button("🎯 Train Model", type="primary", use_container_width=True):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
+        env["PYTHONUNBUFFERED"] = "1"  # Real-time output
 
         if model_type == "Quantile Regression":
             # Use detected device (cuda if available, else cpu)
             train_device = device if algorithm != "quantile_regression" else "cpu"
             cmd = [
-                sys.executable, "-m", "g2.cli", "ml", "train",
+                sys.executable, "-u", "-m", "g2.cli", "ml", "train",
                 "--dataset-name", dataset_name,
                 "--dataset-version", dataset_version,
                 "--model-name", model_name,
@@ -1026,7 +1027,7 @@ def render_train_section():
         elif model_type == "Trend Classifier":
             train_device = device
             cmd = [
-                sys.executable, "-m", "g2.cli", "ml", "train-classifier",
+                sys.executable, "-u", "-m", "g2.cli", "ml", "train-classifier",
                 "--dataset-name", dataset_name,
                 "--dataset-version", dataset_version,
                 "--model-name", model_name,
@@ -1044,7 +1045,7 @@ def render_train_section():
         else:  # Ensemble
             algos_str = ",".join(ensemble_algos)
             cmd = [
-                sys.executable, "-m", "g2.cli", "ml", "train-ensemble",
+                sys.executable, "-u", "-m", "g2.cli", "ml", "train-ensemble",
                 "--dataset-name", dataset_name,
                 "--dataset-version", dataset_version,
                 "--model-name", model_name,
@@ -1300,9 +1301,10 @@ def _render_tune_section(datasets: list):
     if st.button("🔍 Start Tuning", type="primary", key="tune_start"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
+        env["PYTHONUNBUFFERED"] = "1"  # Real-time output
 
         cmd = [
-            sys.executable, "-m", "g2.cli", "ml", "tune",
+            sys.executable, "-u", "-m", "g2.cli", "ml", "tune",
             "--dataset-name", dataset_name,
             "--dataset-version", dataset_version,
             "--algorithm", algorithm,
@@ -1528,6 +1530,7 @@ def render_predict_section():
     if st.button("🔮 Generate Predictions", type="primary", use_container_width=True):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
+        env["PYTHONUNBUFFERED"] = "1"  # Real-time output
 
         # Select correct predict command based on model type
         if model_type == "ensemble":
@@ -1538,7 +1541,7 @@ def render_predict_section():
             predict_cmd = "predict"
 
         cmd = [
-            sys.executable, "-m", "g2.cli", "ml", predict_cmd,
+            sys.executable, "-u", "-m", "g2.cli", "ml", predict_cmd,
         ]
 
         # Classifier uses --model-path, others use --model-name/--model-version
@@ -1821,9 +1824,10 @@ def render_evaluate_section():
     if st.button("📊 Evaluate", type="primary", use_container_width=True):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
+        env["PYTHONUNBUFFERED"] = "1"  # Real-time output
 
         cmd = [
-            sys.executable, "-m", "g2.cli", "ml", "eval",
+            sys.executable, "-u", "-m", "g2.cli", "ml", "eval",
             "--model-name", model_name,
             "--model-version", model_version,
             "--start-date", str(start_date),
