@@ -274,11 +274,12 @@ CREATE TABLE IF NOT EXISTS prediction_outcomes (
 );
 SELECT create_hypertable('prediction_outcomes', 'prediction_date', if_not_exists => TRUE);
 
--- Model performance metrics
+-- Model performance metrics (one row per model+horizon combination)
 CREATE TABLE IF NOT EXISTS model_performance (
-    model_id INTEGER PRIMARY KEY REFERENCES ml_models(id),
+    model_id INTEGER NOT NULL REFERENCES ml_models(id),
     model_name TEXT NOT NULL,
     horizon_days INTEGER NOT NULL,
+    PRIMARY KEY (model_id, horizon_days),
     q10_calibration NUMERIC(5,2),
     q50_calibration NUMERIC(5,2),
     q90_calibration NUMERIC(5,2),
