@@ -245,3 +245,135 @@ class TestMLSignalStrategyRegistration:
         assert "horizon_days" in defaults
         assert "return_threshold" in defaults
         assert "max_positions" in defaults
+
+
+class TestMLSignalLookAheadProtection:
+    """Test that strategy avoids look-ahead bias."""
+
+    @patch("g2.strategies.ml_signal.get_predictions_for_date")
+    def test_queries_previous_day_predictions(self, mock_get_preds):
+        """Strategy should query predictions from PREVIOUS day to avoid look-ahead."""
+        from g2.strategies.ml_signal import MLSignalStrategy
+        from datetime import timedelta
+
+        mock_get_preds.return_value = {}
+
+        strategy = MLSignalStrategy(
+            model_name="test",
+            model_version="v1",
+            prediction_source="database",  # Use stored predictions
+        )
+
+        current = date(2024, 1, 15)
+        price_data = {"AAPL": [{"date": current, "close": 100.0}]}
+
+        strategy.generate_signals(
+            current_date=current,
+            portfolio={},
+            price_data=price_data,
+            initial_cash=100000,
+        )
+
+        # Should have queried for previous day, not current day
+        call_args = mock_get_preds.call_args
+        queried_date = call_args[0][3]  # 4th positional arg is prediction_date
+        expected_date = current - timedelta(days=1)
+        assert queried_date == expected_date, \
+            f"Expected to query {expected_date}, got {queried_date}"
+
+    def test_has_prediction_source_parameter(self):
+        """Strategy should have prediction_source parameter."""
+        from g2.strategies.ml_signal import MLSignalStrategy
+
+        strategy = MLSignalStrategy(prediction_source="live")
+        assert strategy.prediction_source == "live"
+
+        strategy = MLSignalStrategy(prediction_source="database")
+        assert strategy.prediction_source == "database"
+
+
+class TestMLSignalLivePredictions:
+    """Test on-the-fly prediction computation."""
+
+    def test_live_mode_computes_predictions(self):
+        """Live mode should compute predictions from price data."""
+        from g2.strategies.ml_signal import MLSignalStrategy
+        from unittest.mock import MagicMock, patch
+        import numpy as np
+
+        # Create strategy with mock model
+        strategy = MLSignalStrategy(
+            model_name="test",
+            model_version="v1",
+            prediction_source="live",
+            return_threshold=0.01,  # Lower threshold so q50=0.05 passes
+        )
+
+        # Mock the model loading and feature computation
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([[0.02, 0.05, 0.10]])  # q10, q50, q90
+        strategy._loaded_model = mock_model
+        strategy._model_loaded = True
+
+        # Mock the feature computation to return valid features
+        with patch.object(strategy, '_compute_features_from_prices') as mock_features:
+            mock_features.return_value = [0.01, 0.02, 0.03, 0.02, 0.5, 0.01, 0.02]
+
+            # Price data with enough history
+            price_data = {
+                "AAPL": [
+                    {"date": date(2024, 1, i), "close": 100.0 + i, "volume": 1000000}
+                    for i in range(1, 31)  # 30 days of data
+                ],
+            }
+
+            signals = strategy.generate_signals(
+                current_date=date(2024, 1, 30),
+                portfolio={},
+                price_data=price_data,
+                initial_cash=100000,
+            )
+
+            # Model should have been called
+            assert mock_model.predict.called
+            # Should generate a buy signal since q50=0.05 > threshold=0.01
+            assert len(signals) >= 1
+
+    def test_live_mode_uses_point_in_time_data(self):
+        """Live mode should only use data up to current_date (no look-ahead)."""
+        from g2.strategies.ml_signal import MLSignalStrategy
+        from unittest.mock import MagicMock, patch
+
+        strategy = MLSignalStrategy(
+            model_name="test",
+            model_version="v1",
+            prediction_source="live",
+        )
+
+        strategy._loaded_model = MagicMock()
+        strategy._model_loaded = True
+
+        # Track which dates were used in feature computation
+        dates_used = []
+
+        def capture_features(price_history):
+            dates_used.extend([p["date"] for p in price_history])
+            return None  # Return None to skip this symbol
+
+        with patch.object(strategy, '_compute_features_from_prices', side_effect=capture_features):
+            price_data = {
+                "AAPL": [
+                    {"date": date(2024, 1, i), "close": 100.0}
+                    for i in range(1, 31)
+                ],
+            }
+
+            strategy.generate_signals(
+                current_date=date(2024, 1, 15),  # Mid-month
+                portfolio={},
+                price_data=price_data,
+                initial_cash=100000,
+            )
+
+            # Should only have used dates up to Jan 15
+            assert all(d <= date(2024, 1, 15) for d in dates_used)

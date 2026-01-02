@@ -8,11 +8,15 @@ Use cases:
 - Filter momentum signals through ML to avoid false breakouts
 - Confirm mean reversion entries with ML upside prediction
 - Veto trades with poor ML outlook while keeping strategy logic
+
+Look-ahead bias protection:
+- Uses predictions from PREVIOUS day to avoid look-ahead bias
+- Predictions made on day D are only used for trading on day D+1
 """
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Type
 
 from g2.strategies.ml_signal import get_predictions_for_date, get_classifier_predictions_for_date
@@ -119,12 +123,15 @@ class MLFilterStrategy:
             return []
 
         # Get ML predictions for filtering
+        # IMPORTANT: Use previous day's predictions to avoid look-ahead bias
+        prediction_date = current_date - timedelta(days=1)
+
         if self.prediction_type == "classifier":
             predictions = get_classifier_predictions_for_date(
                 self.db_url,
                 self.model_name,
                 self.model_version,
-                current_date,
+                prediction_date,
                 self.horizon_days,
             )
         else:
@@ -132,7 +139,7 @@ class MLFilterStrategy:
                 self.db_url,
                 self.model_name,
                 self.model_version,
-                current_date,
+                prediction_date,
                 self.horizon_days,
             )
 

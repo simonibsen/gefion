@@ -722,6 +722,42 @@ Uses predictions from trend classification models:
 - **BUY** when `predicted_class` in `trend_classes` AND probability > `confidence_threshold`
 - **SELL** when `predicted_class` is bearish with high confidence
 
+### Prediction Sources
+
+The ML Signal Strategy supports two prediction sources:
+
+#### Database Mode (Default)
+
+Uses pre-computed predictions stored in the database.
+
+```bash
+g2 backtest run --strategy ml_signal --prediction-source database ...
+```
+
+**Advantages:**
+- Faster backtesting (no model inference)
+- Consistent with production (same predictions used in live trading)
+- Can verify predictions before running backtest
+
+**Look-ahead bias protection:** When using database mode, the strategy automatically queries predictions from the **previous day** (`current_date - 1 day`). This ensures that predictions made on day D are only used for trading on day D+1, avoiding look-ahead bias.
+
+#### Live Mode
+
+Computes predictions on-the-fly from price data during backtesting.
+
+```bash
+g2 backtest run --strategy ml_signal --prediction-source live ...
+```
+
+**Advantages:**
+- Simpler workflow (no need to pre-generate predictions)
+- Automatically uses point-in-time data (only prices up to current_date)
+- Easier experimentation with different models
+
+**Requirements:**
+- Model artifacts must be available in the `models/` directory
+- Loads model once and reuses for all prediction days
+
 ### Quick Start
 
 #### Step 1: Generate Predictions
@@ -797,6 +833,7 @@ jq '.metrics.sharpe_ratio' ml_results.json momentum_results.json
 | `--model-version` | `latest` | Model version to use |
 | `--horizon-days` | `7` | Prediction horizon (7, 30, 90) |
 | `--prediction-type` | `quantile` | `quantile` or `classifier` |
+| `--prediction-source` | `database` | `database` (stored predictions) or `live` (compute on-the-fly) |
 
 #### Quantile Strategy Parameters
 

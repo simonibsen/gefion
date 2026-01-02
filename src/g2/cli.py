@@ -6621,6 +6621,11 @@ def backtest_run(
         "--confidence-threshold",
         help="Min probability threshold for classifier signals (ml_signal strategy)"
     ),
+    prediction_source: str = typer.Option(
+        "database",
+        "--prediction-source",
+        help="Prediction source: 'database' (stored predictions) or 'live' (compute on-the-fly)"
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -6806,6 +6811,7 @@ def backtest_run(
             model_version=model_version,
             horizon_days=horizon_days,
             prediction_type=prediction_type,
+            prediction_source=prediction_source,
             return_threshold=return_threshold,
             downside_limit=downside_limit,
             trend_classes=parsed_trend_classes,
