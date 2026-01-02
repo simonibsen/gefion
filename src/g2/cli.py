@@ -4143,6 +4143,19 @@ def _db_init_impl(db_url, json_output):
                     json_output=json_output
                 )
 
+        # Run migrations to ensure schema is up-to-date
+        # This handles existing databases that may be missing new columns
+        from g2.db.migrate import run_migrations
+        migrations_dir = package_dir / "sql" / "migrations"
+        if migrations_dir.exists():
+            with db_connection(url) as conn:
+                result = run_migrations(conn, migrations_dir, dry_run=False)
+                if result['applied'] > 0:
+                    emit(
+                        f"Applied {result['applied']} migration(s)",
+                        json_output=json_output
+                    )
+
     except Exception as exc:
         emit_error(f"Initialization failed: {exc}", json_output=json_output)
 
@@ -4500,7 +4513,7 @@ def backup_data(
     data_types: str = typer.Option(
         "all",
         "--data-types",
-        help="Comma-separated data types: ohlcv, features, definitions, functions, all",
+        help="Comma-separated data types: ohlcv, features, definitions, functions, strategies, ml, predictions, experiments, meta, all",
     ),
     start_date: Optional[str] = typer.Option(None, "--start-date", "--after", help="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = typer.Option(None, "--end-date", "--before", help="End date (YYYY-MM-DD)"),
@@ -6473,7 +6486,7 @@ def backtest_run(
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
-        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', 'volatility_contraction', or 'ml_signal'"
+        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', 'volatility_contraction', 'ml_signal', or 'ml_filter'"
     ),
     start_date: str = typer.Option(
         ...,
@@ -6626,6 +6639,27 @@ def backtest_run(
         "--prediction-source",
         help="(Deprecated) Only 'database' mode is supported",
         hidden=True,  # Hide deprecated option from help
+    ),
+    # ML Filter Strategy parameters
+    base_strategy: Optional[str] = typer.Option(
+        None,
+        "--base-strategy",
+        help="Base strategy to filter: momentum, mean_reversion, ma_crossover, breakout (ml_filter)"
+    ),
+    filter_mode: str = typer.Option(
+        "confirm",
+        "--filter-mode",
+        help="Filter mode: 'confirm' (require positive ML) or 'veto' (block negative) (ml_filter)"
+    ),
+    filter_min_q50: float = typer.Option(
+        0.0,
+        "--filter-min-q50",
+        help="Min q50 to pass filter (ml_filter strategy)"
+    ),
+    filter_max_q10: float = typer.Option(
+        -0.10,
+        "--filter-max-q10",
+        help="Block if q10 below this (ml_filter strategy)"
     ),
     json_output: bool = typer.Option(
         False,
@@ -6822,9 +6856,75 @@ def backtest_run(
             rebalance_days=rebalance_days,
             db_url=url,
         )
+    elif strategy == "ml_filter":
+        from g2.strategies.ml_filter import MLFilterStrategy
+
+        # Validate required parameters
+        if not base_strategy:
+            emit_error(
+                "ML Filter strategy requires --base-strategy parameter",
+                json_output=json_output
+            )
+            raise typer.Exit(1)
+        if not model_name:
+            emit_error(
+                "ML Filter strategy requires --model-name parameter",
+                json_output=json_output
+            )
+            raise typer.Exit(1)
+        if not model_version:
+            emit_error(
+                "ML Filter strategy requires --model-version parameter",
+                json_output=json_output
+            )
+            raise typer.Exit(1)
+
+        # Create base strategy
+        if base_strategy == "momentum":
+            base_strat = MomentumStrategy(
+                lookback_days=lookback_days,
+                top_n=top_n,
+                rebalance_days=rebalance_days,
+            )
+        elif base_strategy == "mean_reversion":
+            base_strat = MeanReversionStrategy(
+                rsi_oversold=rsi_oversold,
+                rsi_overbought=rsi_overbought,
+                position_size=position_size,
+                max_positions=max_positions,
+            )
+        elif base_strategy == "ma_crossover":
+            base_strat = MovingAverageCrossoverStrategy(
+                fast_period=fast_period,
+                slow_period=slow_period,
+                max_positions=max_positions,
+            )
+        elif base_strategy == "breakout":
+            base_strat = BreakoutStrategy(
+                lookback_days=lookback_days,
+                volume_threshold=volume_threshold,
+            )
+        else:
+            emit_error(
+                f"Unknown base strategy: {base_strategy}. Supported: momentum, mean_reversion, ma_crossover, breakout",
+                json_output=json_output
+            )
+            raise typer.Exit(1)
+
+        # Create ML filter wrapper
+        strat = MLFilterStrategy(
+            base_strategy=base_strat,
+            model_name=model_name,
+            model_version=model_version,
+            horizon_days=horizon_days,
+            filter_mode=filter_mode,
+            min_q50=filter_min_q50,
+            max_q10=filter_max_q10,
+            db_url=url,
+        )
     else:
         emit_error(
-            f"Unknown strategy: {strategy}. Supported strategies: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', 'volatility_contraction', 'ml_signal'",
+            f"Unknown strategy: {strategy}. Supported: momentum, mean_reversion, ma_crossover, breakout, pairs_trading, rsi_divergence, volatility_contraction, ml_signal, ml_filter",
             json_output=json_output
         )
         raise typer.Exit(1)

@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS feature_functions (
     min_app_version TEXT,
     enabled BOOLEAN DEFAULT TRUE,
     created_by TEXT,
+    called_by TEXT,                -- parent meta-function for plugin architecture
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(name, version)
@@ -177,6 +178,15 @@ CREATE INDEX IF NOT EXISTS computed_features_feature_data_date_idx
 CREATE INDEX IF NOT EXISTS idx_feature_definitions_active_function
     ON feature_definitions(active, function_name)
     WHERE active = TRUE;
+
+-- Ensure called_by column exists (for upgrades from older schema)
+ALTER TABLE feature_functions ADD COLUMN IF NOT EXISTS called_by TEXT;
+
+-- Feature functions index for plugin discovery
+-- Optimizes: WHERE called_by = 'meta_function' AND enabled = TRUE AND status = 'active'
+CREATE INDEX IF NOT EXISTS idx_feature_functions_called_by_enabled_status
+    ON feature_functions (called_by, enabled, status)
+    WHERE called_by IS NOT NULL;
 
 -- Strategy registry indexes
 CREATE INDEX IF NOT EXISTS idx_strategy_registry_enabled

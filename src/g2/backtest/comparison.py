@@ -89,8 +89,9 @@ def compare_strategies(
         #   - Others: expect flat list prices, dict for portfolio
         def make_strategy_fn(strat, cash, strat_name):
             def strategy_fn(current_date, portfolio, prices):
-                # MomentumStrategy expects dict format, others expect flat list
-                if strat_name == "momentum":
+                # These strategies expect dict format prices and Portfolio object
+                dict_format_strategies = {"momentum", "ml_signal", "ml_filter"}
+                if strat_name in dict_format_strategies:
                     price_data = prices  # Keep dict format
                     port_data = portfolio  # Keep Portfolio object
                 else:

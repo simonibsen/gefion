@@ -26,6 +26,19 @@ BYTES_PER_ROW = {
     "feature_definitions": 500,  # JSON params, text fields
     "feature_functions": 2000,  # function_body can be large
     "stocks": 200,  # symbol, name, sector, industry, etc.
+    "strategy_registry": 500,
+    "strategy_configs": 300,
+    "ml_datasets": 500,
+    "ml_runs": 1000,
+    "ml_models": 500,
+    "quantile_predictions": 100,
+    "prediction_outcomes": 80,
+    "model_performance": 200,
+    "trend_class_predictions": 150,
+    "volatility_thresholds": 100,
+    "experiments": 2000,
+    "experiment_trials": 500,
+    "schema_migrations": 100,
 }
 
 # Data type to table mapping
@@ -34,7 +47,19 @@ DATA_TYPE_TABLES = {
     "features": ["computed_features"],
     "definitions": ["feature_definitions"],
     "functions": ["feature_functions"],
-    "all": ["stocks", "stock_ohlcv", "computed_features", "feature_definitions", "feature_functions"],
+    "strategies": ["strategy_registry", "strategy_configs"],
+    "ml": ["ml_datasets", "ml_runs", "ml_models"],
+    "predictions": ["quantile_predictions", "prediction_outcomes", "model_performance", "trend_class_predictions"],
+    "experiments": ["experiments", "experiment_trials"],
+    "meta": ["schema_migrations", "volatility_thresholds"],
+    "all": [
+        "stocks", "stock_ohlcv", "computed_features", "feature_definitions", "feature_functions",
+        "strategy_registry", "strategy_configs",
+        "ml_datasets", "ml_runs", "ml_models",
+        "quantile_predictions", "prediction_outcomes", "model_performance", "trend_class_predictions",
+        "volatility_thresholds", "experiments", "experiment_trials",
+        "schema_migrations",
+    ],
 }
 
 
@@ -66,6 +91,17 @@ def estimate_backup_size(
 
     with conn.cursor() as cur:
         for table in tables:
+            # Check if table exists
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = %s
+                )
+            """, (table,))
+            if not cur.fetchone()[0]:
+                # Table doesn't exist, skip it
+                continue
+
             # Build count query with filters
             query = f"SELECT COUNT(*) FROM {table}"
             params = []
@@ -266,6 +302,17 @@ def create_backup(
 
     with conn.cursor() as cur:
         for table in sorted(tables):
+            # Check if table exists
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = %s
+                )
+            """, (table,))
+            if not cur.fetchone()[0]:
+                # Table doesn't exist, skip it
+                continue
+
             table_result = _backup_table(
                 cur=cur,
                 table=table,
@@ -480,14 +527,30 @@ def restore_backup(
     else:
         tables_to_restore = tables_in_backup
 
-    # Restore order matters (stocks before ohlcv/features)
-    restore_order = ["stocks", "feature_definitions", "feature_functions", "stock_ohlcv", "computed_features"]
+    # Restore order matters (parent tables before children with foreign keys)
+    restore_order = [
+        "schema_migrations",  # Meta first
+        "stocks",  # Base data
+        "feature_definitions", "feature_functions",
+        "stock_ohlcv", "computed_features",
+        "strategy_registry", "strategy_configs",
+        "ml_datasets", "ml_models", "ml_runs",
+        "quantile_predictions", "trend_class_predictions",
+        "prediction_outcomes", "model_performance",
+        "volatility_thresholds",
+        "experiments", "experiment_trials",
+    ]
     tables_to_restore = sorted(tables_to_restore, key=lambda t: restore_order.index(t) if t in restore_order else 99)
 
     with conn.cursor() as cur:
         for table in tables_to_restore:
             parquet_file = input_dir / f"{table}.parquet"
             if not parquet_file.exists():
+                # Check if this was an empty table (no file expected)
+                table_info = manifest.get("tables", {}).get(table, {})
+                if table_info.get("rows", 0) == 0:
+                    results["tables"][table] = {"rows_restored": 0, "rows_skipped": 0}
+                    continue
                 results["tables"][table] = {"error": "File not found", "rows": 0}
                 continue
 
@@ -530,20 +593,31 @@ def _restore_table(
     columns = list(df.columns)
 
     # Build insert query based on mode
+    # Define conflict columns for each table (unique constraints)
+    conflict_map = {
+        "stocks": ["symbol"],
+        "stock_ohlcv": ["data_id", "date"],
+        "computed_features": ["feature_id", "data_id", "date"],
+        "feature_definitions": ["name"],
+        "feature_functions": ["name", "version"],
+        "strategy_registry": ["name"],
+        "strategy_configs": ["name"],
+        "ml_datasets": ["name", "version"],
+        "ml_models": ["name", "version"],
+        "ml_runs": ["id"],
+        "quantile_predictions": ["model_id", "symbol", "prediction_date", "horizon_days"],
+        "trend_class_predictions": ["model_id", "symbol", "prediction_date", "horizon_days"],
+        "prediction_outcomes": ["prediction_id"],
+        "model_performance": ["model_id", "evaluation_date", "horizon_days"],
+        "volatility_thresholds": ["symbol", "horizon_days", "calculated_date"],
+        "experiments": ["id"],
+        "experiment_trials": ["id"],
+        "schema_migrations": ["version"],
+    }
+
     if mode == "replace":
         # Use ON CONFLICT DO UPDATE
-        if table == "stocks":
-            conflict_cols = ["symbol"]
-        elif table == "stock_ohlcv":
-            conflict_cols = ["data_id", "date"]
-        elif table == "computed_features":
-            conflict_cols = ["feature_id", "data_id", "date"]
-        elif table == "feature_definitions":
-            conflict_cols = ["name"]
-        elif table == "feature_functions":
-            conflict_cols = ["name", "version"]
-        else:
-            conflict_cols = ["id"]
+        conflict_cols = conflict_map.get(table, ["id"])
 
         update_cols = [c for c in columns if c not in conflict_cols and c != "id"]
         update_clause = ", ".join([f"{c} = EXCLUDED.{c}" for c in update_cols])
@@ -565,18 +639,7 @@ def _restore_table(
             """
     else:
         # Merge mode - skip conflicts
-        if table == "stocks":
-            conflict_cols = ["symbol"]
-        elif table == "stock_ohlcv":
-            conflict_cols = ["data_id", "date"]
-        elif table == "computed_features":
-            conflict_cols = ["feature_id", "data_id", "date"]
-        elif table == "feature_definitions":
-            conflict_cols = ["name"]
-        elif table == "feature_functions":
-            conflict_cols = ["name", "version"]
-        else:
-            conflict_cols = ["id"]
+        conflict_cols = conflict_map.get(table, ["id"])
 
         placeholders = ", ".join(["%s"] * len(columns))
         insert_cols = ", ".join(columns)
@@ -656,7 +719,12 @@ def verify_backup(backup_path: str) -> Dict[str, Any]:
     for table, info in manifest.get("tables", {}).items():
         parquet_file = backup_dir / f"{table}.parquet"
 
+        # Empty tables don't have files - that's valid
+        expected_rows = info.get("rows", 0)
         if not parquet_file.exists():
+            if expected_rows == 0:
+                results["tables"][table] = {"valid": True, "rows": 0, "expected_rows": 0}
+                continue
             results["tables"][table] = {"valid": False, "error": "File missing"}
             results["valid"] = False
             continue

@@ -237,6 +237,88 @@ def render_run_section():
                 help="Max acceptable downside risk"
             )
 
+    elif strategy == "ml_filter":
+        st.info("ML Filter wraps a base strategy and filters its buy signals through ML predictions.")
+
+        # Base strategy selection (exclude ml_signal and ml_filter)
+        base_strategies = ["momentum", "mean_reversion", "ma_crossover", "breakout"]
+        base_strategy = st.selectbox("Base Strategy", base_strategies, key="filter_base")
+
+        # Base strategy parameters
+        st.markdown("**Base Strategy Parameters**")
+        if base_strategy == "momentum":
+            col1, col2 = st.columns(2)
+            with col1:
+                base_lookback = st.number_input("Lookback Days", value=20, min_value=5, max_value=60, key="fb_lookback")
+            with col2:
+                base_top_n = st.number_input("Top N Stocks", value=5, min_value=1, max_value=20, key="fb_topn")
+        elif base_strategy == "mean_reversion":
+            col1, col2 = st.columns(2)
+            with col1:
+                base_rsi_oversold = st.number_input("RSI Oversold", value=30, min_value=10, max_value=40, key="fb_oversold")
+            with col2:
+                base_rsi_overbought = st.number_input("RSI Overbought", value=70, min_value=60, max_value=90, key="fb_overbought")
+        elif base_strategy == "ma_crossover":
+            col1, col2 = st.columns(2)
+            with col1:
+                base_fast = st.number_input("Fast MA", value=50, min_value=5, max_value=100, key="fb_fast")
+            with col2:
+                base_slow = st.number_input("Slow MA", value=200, min_value=50, max_value=300, key="fb_slow")
+        elif base_strategy == "breakout":
+            col1, col2 = st.columns(2)
+            with col1:
+                base_lookback = st.number_input("Lookback Days", value=20, min_value=5, max_value=60, key="fb_bo_lookback")
+            with col2:
+                base_volume = st.slider("Volume Threshold", value=1.5, min_value=1.0, max_value=3.0, key="fb_volume")
+
+        st.markdown("---")
+        st.markdown("**ML Filter Settings**")
+
+        # ML model selection
+        from g2.ui.components.database import get_models
+        available_models = get_models()
+
+        if not available_models:
+            st.warning("No ML models found. Train a model first.")
+            filter_model_name = st.text_input("Model Name", value="quantile", key="fm_name")
+            filter_model_version = st.text_input("Model Version", value="latest", key="fm_version")
+        else:
+            model_options = [f"{m['name']} / {m['version']}" for m in available_models]
+            selected_model = st.selectbox("Select Model", model_options, key="fm_select")
+            if selected_model:
+                parts = selected_model.split(" / ")
+                filter_model_name = parts[0]
+                filter_model_version = parts[1] if len(parts) > 1 else "latest"
+            else:
+                filter_model_name = "quantile"
+                filter_model_version = "latest"
+
+        col1, col2 = st.columns(2)
+        with col1:
+            filter_horizon = st.selectbox("Prediction Horizon", [7, 30, 90], index=0, key="fm_horizon")
+            filter_mode = st.selectbox(
+                "Filter Mode",
+                ["confirm", "veto"],
+                help="confirm: require positive ML outlook. veto: only block strongly negative."
+            )
+        with col2:
+            filter_min_q50 = st.number_input(
+                "Min q50",
+                value=0.0,
+                min_value=-0.10,
+                max_value=0.20,
+                step=0.01,
+                help="Minimum expected return to pass filter"
+            )
+            filter_max_q10 = st.number_input(
+                "Max q10 (downside limit)",
+                value=-0.10,
+                min_value=-0.30,
+                max_value=0.0,
+                step=0.01,
+                help="Block if q10 below this"
+            )
+
     # Validate symbols selection
     if symbol_mode == "Selected" and not selected_symbols:
         st.warning("⚠️ Please select at least one symbol to backtest.")
@@ -320,6 +402,37 @@ def render_run_section():
             else:
                 cmd.extend([
                     "--downside-limit", str(ml_downside_limit),
+                ])
+        elif strategy == "ml_filter":
+            cmd.extend([
+                "--base-strategy", base_strategy,
+                "--model-name", filter_model_name,
+                "--model-version", filter_model_version,
+                "--horizon-days", str(filter_horizon),
+                "--filter-mode", filter_mode,
+                "--filter-min-q50", str(filter_min_q50),
+                "--filter-max-q10", str(filter_max_q10),
+            ])
+            # Add base strategy parameters
+            if base_strategy == "momentum":
+                cmd.extend([
+                    "--lookback-days", str(base_lookback),
+                    "--top-n", str(base_top_n),
+                ])
+            elif base_strategy == "mean_reversion":
+                cmd.extend([
+                    "--rsi-oversold", str(base_rsi_oversold),
+                    "--rsi-overbought", str(base_rsi_overbought),
+                ])
+            elif base_strategy == "ma_crossover":
+                cmd.extend([
+                    "--fast-period", str(base_fast),
+                    "--slow-period", str(base_slow),
+                ])
+            elif base_strategy == "breakout":
+                cmd.extend([
+                    "--lookback-days", str(base_lookback),
+                    "--volume-threshold", str(base_volume),
                 ])
 
         if symbol_mode == "Selected":
@@ -494,28 +607,49 @@ def render_help_section():
     st.subheader("Strategy Guide")
 
     st.markdown("""
-    ### Momentum
+    ### Rule-Based Strategies
+
+    #### Momentum
     Buys top performing stocks over the lookback period.
     - **Lookback**: Days to measure momentum (default: 20)
     - **Top N**: Number of stocks to hold (default: 10)
     - **Rebalance**: Days between portfolio rebalancing (default: 5)
 
-    ### Mean Reversion
+    #### Mean Reversion
     Buys oversold stocks expecting bounce back.
     - **RSI Oversold**: Buy when RSI below this (default: 30)
     - **RSI Overbought**: Sell when RSI above this (default: 70)
     - **Position Size**: Fraction of portfolio per trade (default: 0.2)
 
-    ### MA Crossover
+    #### MA Crossover
     Follows moving average crossover signals.
     - **Fast Period**: Fast MA period in days (default: 50)
     - **Slow Period**: Slow MA period in days (default: 200)
     - Buy on golden cross, sell on death cross
 
-    ### Breakout
+    #### Breakout
     Buys when price breaks above recent highs.
     - **Lookback**: Days for range calculation (default: 20)
     - **Volume Threshold**: Volume multiplier for confirmation (default: 1.5)
+
+    ---
+
+    ### ML-Integrated Strategies
+
+    #### ML Signal
+    Pure ML-driven strategy using stored predictions.
+    - **Model**: Select trained quantile or classifier model
+    - **Horizon**: Prediction horizon (7, 30, or 90 days)
+    - **Return Threshold**: Min expected return (q50) to buy
+    - Uses **D-1 predictions** to avoid look-ahead bias
+
+    #### ML Filter
+    Wraps a base strategy and filters signals through ML predictions.
+    - **Base Strategy**: Rule-based strategy to use (momentum, mean_reversion, etc.)
+    - **Filter Mode**: 'confirm' requires positive outlook, 'veto' only blocks strongly negative
+    - **Min q50**: Minimum expected return to pass filter
+    - **Max q10**: Block trades with downside risk below this
+    - Uses **D-1 predictions** to avoid look-ahead bias
     """)
 
     st.markdown("---")

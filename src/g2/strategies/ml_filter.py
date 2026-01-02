@@ -36,7 +36,7 @@ class MLFilterStrategy:
 
     def __init__(
         self,
-        base_strategy: Any,
+        base_strategy: Any = None,
         model_name: str = "quantile",
         model_version: str = "latest",
         horizon_days: int = 7,
@@ -55,7 +55,7 @@ class MLFilterStrategy:
         Initialize ML Filter Strategy.
 
         Args:
-            base_strategy: The underlying strategy instance to filter
+            base_strategy: The underlying strategy instance to filter (defaults to MomentumStrategy)
             model_name: ML model name for predictions
             model_version: ML model version
             horizon_days: Prediction horizon (7, 30, 90)
@@ -67,6 +67,10 @@ class MLFilterStrategy:
             min_confidence: Minimum probability for class (classifier mode)
             db_url: Database connection URL
         """
+        # Default to MomentumStrategy if no base strategy provided
+        if base_strategy is None:
+            from g2.strategies.momentum import MomentumStrategy
+            base_strategy = MomentumStrategy()
         self.base_strategy = base_strategy
         self.model_name = model_name
         self.model_version = model_version
