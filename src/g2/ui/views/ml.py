@@ -5,6 +5,7 @@ import subprocess
 import sys
 import json
 import os
+import re
 from datetime import datetime, date, timedelta
 from typing import Dict, Any
 
@@ -90,8 +91,9 @@ def _get_models() -> list[dict]:
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT m.id, m.name, m.version, m.model_type, m.algorithm,
-                           m.created_at, d.name as dataset_name, d.version as dataset_version
+                    SELECT m.id, m.name, m.version, m.algorithm, m.active,
+                           m.created_at, m.artifact_uri,
+                           d.name as dataset_name, d.version as dataset_version
                     FROM ml_models m
                     LEFT JOIN ml_datasets d ON d.id = m.dataset_id
                     ORDER BY m.created_at DESC
@@ -103,11 +105,12 @@ def _get_models() -> list[dict]:
                         "id": r[0],
                         "name": r[1],
                         "version": r[2],
-                        "model_type": r[3],
-                        "algorithm": r[4],
+                        "algorithm": r[3],
+                        "active": r[4],
                         "created_at": r[5],
-                        "dataset_name": r[6],
-                        "dataset_version": r[7],
+                        "artifact_uri": r[6],
+                        "dataset_name": r[7],
+                        "dataset_version": r[8],
                     }
                     for r in rows
                 ]
@@ -193,6 +196,174 @@ def _render_dataset_inspection(ds: dict):
             st.info("No models trained on this dataset yet.")
 
 
+def _render_feature_importance(model: dict, model_data: dict):
+    """Render feature importance for a model."""
+    # Get horizons from model data
+    predictions = model_data.get("predictions", [])
+    horizons = sorted(set(p.get("horizon_days") for p in predictions if p.get("horizon_days")))
+
+    if not horizons:
+        return
+
+    st.markdown("**Feature Importance**")
+
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        horizon = st.selectbox(
+            "Horizon",
+            options=horizons,
+            format_func=lambda x: f"{x}d",
+            key=f"fi_horizon_{model['id']}",
+        )
+    with col2:
+        quantile = st.selectbox(
+            "Quantile",
+            options=["q50", "q10", "q90"],
+            key=f"fi_quantile_{model['id']}",
+        )
+    with col3:
+        top_k = st.number_input(
+            "Top K",
+            min_value=5,
+            max_value=50,
+            value=15,
+            key=f"fi_topk_{model['id']}",
+        )
+
+    if st.button("📊 Compute", key=f"fi_compute_{model['id']}"):
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "g2.cli", "ml", "feature-importance",
+                "--model-name", model["name"],
+                "--model-version", model["version"],
+                "--horizon", str(horizon),
+                "--quantile", quantile,
+                "--top-k", str(top_k),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        if result.returncode == 0:
+            try:
+                data = json.loads(result.stdout)
+                features = data.get("features", [])
+                if features:
+                    import pandas as pd
+                    df = pd.DataFrame(features)
+                    if "importance" in df.columns:
+                        df["importance"] = df["importance"].apply(lambda x: f"{x:.4f}")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No feature importance data available.")
+            except json.JSONDecodeError:
+                st.code(result.stdout)
+        else:
+            st.error(f"Failed: {result.stderr or result.stdout}")
+
+
+def _render_model_inspection(model: dict):
+    """Render model inspection panel with details and predictions."""
+    env = os.environ.copy()
+    env["OTEL_ENABLED"] = "false"
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "g2.cli", "ml", "model-inspect",
+            "--name", model["name"],
+            "--version", model["version"],
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    if result.returncode != 0:
+        st.error(f"Failed to inspect model: {result.stderr}")
+        return
+
+    try:
+        data = json.loads(result.stdout)
+        if isinstance(data, str):
+            st.warning(data)
+            return
+        data = data.get("data", data)
+    except json.JSONDecodeError:
+        st.error("Invalid response from model-inspect")
+        return
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Model Info**")
+        st.write(f"- Algorithm: {data.get('algorithm', '-')}")
+        st.write(f"- Active: {'Yes' if data.get('active') else 'No'}")
+        st.write(f"- Created: {data.get('created_at', '-')}")
+        st.write(f"- Artifact: `{data.get('artifact_uri', '-')}`")
+
+        dataset = data.get("dataset")
+        if dataset:
+            st.write(f"- Dataset: {dataset.get('name')} {dataset.get('version')}")
+
+    with col2:
+        hyperparams = data.get("hyperparams", {})
+        if hyperparams:
+            st.markdown("**Hyperparameters**")
+            for k, v in hyperparams.items():
+                st.write(f"- {k}: {v}")
+
+        metrics = data.get("metrics", {})
+        if metrics:
+            st.markdown("**Training Metrics**")
+            for k, v in metrics.items():
+                if isinstance(v, float):
+                    st.write(f"- {k}: {v:.4f}")
+                else:
+                    st.write(f"- {k}: {v}")
+
+    # Predictions section
+    predictions = data.get("predictions", [])
+    total_preds = sum(p.get("count", 0) for p in predictions)
+    st.markdown(f"**Predictions ({total_preds:,} total)**")
+    if predictions:
+        pred_data = [
+            {
+                "Horizon": f"{p['horizon_days']}d",
+                "Count": f"{p['count']:,}",
+                "Date Range": p.get("date_range", "-"),
+            }
+            for p in predictions
+        ]
+        st.dataframe(pred_data, use_container_width=True, hide_index=True)
+    else:
+        st.info("No predictions generated yet.")
+
+    # Performance section
+    performance = data.get("performance", [])
+    if performance:
+        st.markdown("**Performance Metrics**")
+        perf_data = [
+            {
+                "Horizon": f"{p['horizon_days']}d",
+                "Q10 Calib": f"{p['q10_calibration']:.1f}%" if p.get('q10_calibration') else "-",
+                "Q50 Calib": f"{p['q50_calibration']:.1f}%" if p.get('q50_calibration') else "-",
+                "Q90 Calib": f"{p['q90_calibration']:.1f}%" if p.get('q90_calibration') else "-",
+                "Loss": f"{p['quantile_loss']:.4f}" if p.get('quantile_loss') else "-",
+            }
+            for p in performance
+        ]
+        st.dataframe(perf_data, use_container_width=True, hide_index=True)
+
+    # Feature importance section
+    _render_feature_importance(model, data)
+
+
 def render_ml():
     """Render the ML pipeline page."""
     st.title("🧠 ML Pipeline")
@@ -218,6 +389,24 @@ def render_ml():
         render_evaluate_section()
 
 
+def _get_next_version(name: str, base_version: str) -> str:
+    """Get next available version for a dataset name."""
+    datasets = _get_datasets()
+    existing_versions = {ds["version"] for ds in datasets if ds["name"] == name}
+
+    if base_version not in existing_versions:
+        return base_version
+
+    # Try incrementing with suffix: 20260101-1, 20260101-2, etc.
+    for i in range(1, 100):
+        candidate = f"{base_version}-{i}"
+        if candidate not in existing_versions:
+            return candidate
+
+    # Fallback: use timestamp
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
 def render_dataset_section():
     """Render dataset building section."""
     st.subheader("Build Training Dataset")
@@ -233,13 +422,23 @@ def render_dataset_section():
         dataset_name = st.text_input(
             "Dataset Name",
             value="training",
+            key="ds_build_name",
             help="Name for the dataset (e.g., 'nasdaq_v1')",
         )
 
+        # Track name changes to auto-update version
+        prev_name = st.session_state.get("_ds_prev_name", "")
+        base_version = datetime.now().strftime("%Y%m%d")
+
+        # Auto-update version when name changes or on first load
+        if prev_name != dataset_name or "ds_build_version" not in st.session_state:
+            st.session_state["_ds_prev_name"] = dataset_name
+            st.session_state["ds_build_version"] = _get_next_version(dataset_name, base_version)
+
         dataset_version = st.text_input(
             "Version",
-            value=datetime.now().strftime("%Y%m%d"),
-            help="Version identifier (e.g., date stamp)",
+            key="ds_build_version",
+            help="Version identifier. Auto-updates when name changes to avoid conflicts.",
         )
 
         exchange = st.selectbox(
@@ -262,6 +461,14 @@ def render_dataset_section():
             [7, 14, 30, 60, 90],
             default=[7, 30, 90],
             help="Forward-looking periods for labels",
+        )
+
+        lookback_days = st.number_input(
+            "Lookback Days",
+            min_value=50,
+            max_value=500,
+            value=200,
+            help="Rolling window for feature computation. Longer = more history but fewer samples.",
         )
 
         export_format = st.selectbox(
@@ -331,17 +538,27 @@ def render_dataset_section():
 
     # Check if dataset already exists
     dataset_exists = False
-    existing_dataset_key = f"{dataset_name}_{dataset_version}"
     for ds in _get_datasets():
         if ds["name"] == dataset_name and ds["version"] == dataset_version:
             dataset_exists = True
             break
 
-    # Show warning if dataset exists
+    # Show info and confirm checkbox if dataset exists
+    confirm_overwrite = True
     if dataset_exists:
-        st.warning(f"⚠️ Dataset `{dataset_name}` version `{dataset_version}` already exists and will be overwritten.")
+        st.info(f"ℹ️ Dataset `{dataset_name}` version `{dataset_version}` already exists.")
+        confirm_overwrite = st.checkbox(
+            "Overwrite existing dataset",
+            value=False,
+            help="Check to confirm you want to replace the existing dataset.",
+        )
 
-    if st.button("🔨 Build Dataset", type="primary", use_container_width=True):
+    if st.button(
+        "🔨 Build Dataset",
+        type="primary",
+        use_container_width=True,
+        disabled=(dataset_exists and not confirm_overwrite),
+    ):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
@@ -356,6 +573,7 @@ def render_dataset_section():
             "--exchange", exchange,
             "--limit", str(limit),
             "--horizons", horizons_str,
+            "--lookback-days", str(lookback_days),
             "--weak-thresholds", weak_str,
             "--strong-thresholds", strong_str,
             "--format", export_format,
@@ -378,7 +596,7 @@ def render_dataset_section():
         # Show equivalent CLI command
         cli_cmd = (f"g2 ml dataset-build --name {dataset_name} --version {dataset_version} "
                    f"--exchange {exchange} --limit {limit} --horizons {horizons_str} "
-                   f"--format {export_format} --export --force{cli_features}")
+                   f"--lookback-days {lookback_days} --format {export_format} --export --force{cli_features}")
         st.code(cli_cmd, language="bash")
 
         with st.status("Building dataset...", expanded=True) as status:
@@ -525,9 +743,11 @@ def render_train_section():
     else:
         st.warning("⚠️ **No GPU Detected** — Training will use CPU. All algorithms work fine on CPU.")
 
-    st.caption("""
-    💡 **Training** builds quantile regression (q10/q50/q90) or classification models.
-    LightGBM and XGBoost support GPU acceleration. Quantile Regression (sklearn) is CPU-only.
+    st.info("""
+    💡 **Training** builds ML models from your dataset:
+    - **Quantile Regression**: Predicts price ranges (q10=downside, q50=median, q90=upside)
+    - **Trend Classifier**: Predicts direction (strong_down → strong_up)
+    - **Ensemble**: Combines multiple algorithms for better accuracy
     """)
 
     # Get available datasets for selection
@@ -543,14 +763,18 @@ def render_train_section():
     with col1:
         model_type = st.selectbox(
             "Model Type",
-            ["Quantile Regression", "Trend Classifier"],
-            help="Quantile predicts price ranges, Classifier predicts trend direction",
+            ["Quantile Regression", "Trend Classifier", "Ensemble"],
+            help=(
+                "**Quantile Regression**: Predicts q10/q50/q90 return ranges. Best for risk assessment. "
+                "**Trend Classifier**: Predicts 5 categories (strong_down to strong_up). Good for signals. "
+                "**Ensemble**: Combines multiple algorithms. More robust but slower to train."
+            ),
         )
 
         selected_dataset = st.selectbox(
             "Dataset",
             options=dataset_options,
-            help="Select a dataset to train on",
+            help="Dataset containing features and labels. Build one in the Dataset tab if none available.",
         )
         # Parse selected dataset
         selected_idx = dataset_options.index(selected_dataset)
@@ -565,20 +789,72 @@ def render_train_section():
     with col2:
         if model_type == "Quantile Regression":
             algo_options = ["lightgbm", "xgboost", "quantile_regression"]
-            algo_help = "LightGBM/XGBoost: GPU-accelerated. Quantile Regression (sklearn): CPU-only"
-        else:
+            algorithm = st.selectbox(
+                "Algorithm",
+                algo_options,
+                help=(
+                    "**LightGBM**: Fast, GPU-accelerated, great for large datasets. "
+                    "**XGBoost**: Robust, GPU-accelerated, slightly slower. "
+                    "**Quantile Regression**: Simple sklearn model, CPU-only, good baseline."
+                ),
+            )
+        elif model_type == "Trend Classifier":
             algo_options = ["xgboost", "lightgbm"]
-            algo_help = "Both support GPU acceleration when available"
+            algorithm = st.selectbox(
+                "Algorithm",
+                algo_options,
+                help=(
+                    "**XGBoost**: Industry standard for classification. "
+                    "**LightGBM**: Faster training, similar accuracy."
+                ),
+            )
+        else:  # Ensemble
+            ensemble_algos = st.multiselect(
+                "Algorithms",
+                ["xgboost", "lightgbm", "quantile_regression"],
+                default=["xgboost", "lightgbm"],
+                help=(
+                    "Select 2+ algorithms to combine. Ensemble averages predictions from each. "
+                    "More diverse algorithms = more robust predictions."
+                ),
+            )
+            if len(ensemble_algos) < 2:
+                st.warning("Select at least 2 algorithms for ensemble")
 
-        algorithm = st.selectbox(
-            "Algorithm",
-            algo_options,
-            help=algo_help,
-        )
+            # Ensemble weights (optional)
+            use_custom_weights = st.checkbox(
+                "Custom weights",
+                value=False,
+                help="By default, all algorithms are weighted equally. Enable to set custom weights.",
+            )
+            ensemble_weights = None
+            if use_custom_weights and len(ensemble_algos) >= 2:
+                st.caption(f"Set weights for each algorithm (must sum to 1.0)")
+                weight_cols = st.columns(len(ensemble_algos))
+                weights = []
+                default_weight = round(1.0 / len(ensemble_algos), 2)
+                for i, algo in enumerate(ensemble_algos):
+                    with weight_cols[i]:
+                        w = st.number_input(
+                            algo,
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=default_weight,
+                            step=0.05,
+                            key=f"weight_{algo}",
+                        )
+                        weights.append(w)
+                weight_sum = sum(weights)
+                if abs(weight_sum - 1.0) > 0.01:
+                    st.warning(f"Weights sum to {weight_sum:.2f}, should be 1.0")
+                else:
+                    ensemble_weights = weights
 
         model_name = st.text_input(
             "Model Name",
-            value="quantile" if model_type == "Quantile Regression" else "classifier",
+            value="quantile" if model_type == "Quantile Regression" else (
+                "classifier" if model_type == "Trend Classifier" else "ensemble"
+            ),
             key="train_model_name",
         )
 
@@ -596,14 +872,71 @@ def render_train_section():
                 help="Classifier trains one horizon at a time",
             )
 
+    # Warm-start option (only for Quantile Regression with xgboost/lightgbm)
+    warm_start = False
+    base_model_path = None
+
+    if model_type == "Quantile Regression" and algorithm in ["xgboost", "lightgbm"]:
+        with st.expander("🚀 Warm-Start Training (Advanced)", expanded=False):
+            st.info("""
+            **Warm-start** continues training from an existing model instead of starting fresh.
+            This is **10-100x faster** for incremental updates (e.g., new day of data).
+
+            **Requirements:**
+            - Base model must use same algorithm ({})
+            - Base model must have same features
+            """.format(algorithm))
+
+            warm_start = st.checkbox(
+                "Enable warm-start",
+                value=False,
+                key="train_warm_start",
+                help="Continue training from a base model for faster incremental updates",
+            )
+
+            if warm_start:
+                # Get models with matching algorithm for base model selection
+                base_model_candidates = [
+                    m for m in models
+                    if m.get("algorithm", "").lower() == algorithm.lower()
+                ]
+
+                if not base_model_candidates:
+                    st.warning(f"No existing {algorithm} models found to use as base.")
+                    warm_start = False
+                else:
+                    base_model_options = [
+                        f"{m['name']} ({m['version']})" for m in base_model_candidates
+                    ]
+                    selected_base = st.selectbox(
+                        "Base Model",
+                        base_model_options,
+                        key="train_base_model",
+                        help="Model to continue training from. Must use same algorithm.",
+                    )
+
+                    # Get artifact path for selected base model
+                    base_idx = base_model_options.index(selected_base)
+                    base_model_path = base_model_candidates[base_idx].get("artifact_uri")
+
+                    if base_model_path:
+                        st.caption(f"Base model: `{base_model_path}`")
+                    else:
+                        st.warning("Base model artifact path not found.")
+                        warm_start = False
+
+    # Validate ensemble has enough algorithms
+    if model_type == "Ensemble" and len(ensemble_algos) < 2:
+        st.error("Select at least 2 algorithms for ensemble training")
+        return
+
     if st.button("🎯 Train Model", type="primary", use_container_width=True):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
-        # Use detected device (cuda if available, else cpu)
-        train_device = device if algorithm != "quantile_regression" else "cpu"
-
         if model_type == "Quantile Regression":
+            # Use detected device (cuda if available, else cpu)
+            train_device = device if algorithm != "quantile_regression" else "cpu"
             cmd = [
                 sys.executable, "-m", "g2.cli", "ml", "train",
                 "--dataset-name", dataset_name,
@@ -614,8 +947,20 @@ def render_train_section():
                 "--device", train_device,
                 "--json",
             ]
+
+            # Add warm-start flags if enabled
+            warm_start_cli = ""
+            if warm_start and base_model_path:
+                cmd.extend(["--warm-start", "--base-model", base_model_path])
+                warm_start_cli = f" \\\n    --warm-start --base-model {base_model_path}"
+
             cli_subcommand = "train"
-        else:
+            cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
+                       f"--dataset-version {dataset_version} --model-name {model_name} "
+                       f"--model-version {model_version} --algorithm {algorithm} "
+                       f"--device {train_device}{warm_start_cli}")
+        elif model_type == "Trend Classifier":
+            train_device = device
             cmd = [
                 sys.executable, "-m", "g2.cli", "ml", "train-classifier",
                 "--dataset-name", dataset_name,
@@ -628,14 +973,34 @@ def render_train_section():
                 "--json",
             ]
             cli_subcommand = "train-classifier"
+            cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
+                       f"--dataset-version {dataset_version} --model-name {model_name} "
+                       f"--model-version {model_version} --algorithm {algorithm} "
+                       f"--device {train_device} --horizon {horizon}")
+        else:  # Ensemble
+            algos_str = ",".join(ensemble_algos)
+            cmd = [
+                sys.executable, "-m", "g2.cli", "ml", "train-ensemble",
+                "--dataset-name", dataset_name,
+                "--dataset-version", dataset_version,
+                "--model-name", model_name,
+                "--model-version", model_version,
+                "--algorithms", algos_str,
+                "--json",
+            ]
 
-        # Show equivalent CLI command
-        cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
-                   f"--dataset-version {dataset_version} --model-name {model_name} "
-                   f"--model-version {model_version} --algorithm {algorithm} "
-                   f"--device {train_device}")
-        if model_type == "Trend Classifier":
-            cli_cmd += f" --horizon {horizon}"
+            # Add weights if specified
+            weights_cli = ""
+            if ensemble_weights:
+                weights_str = ",".join(str(w) for w in ensemble_weights)
+                cmd.extend(["--weights", weights_str])
+                weights_cli = f" --weights {weights_str}"
+
+            cli_subcommand = "train-ensemble"
+            cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
+                       f"--dataset-version {dataset_version} --model-name {model_name} "
+                       f"--model-version {model_version} --algorithms {algos_str}{weights_cli}")
+
         st.code(cli_cmd, language="bash")
 
         with st.status("Training model...", expanded=True) as status:
@@ -692,6 +1057,269 @@ def render_train_section():
                 status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
+    # Model management
+    st.markdown("---")
+    st.subheader("Manage Models")
+
+    models = _get_models()
+
+    if not models:
+        st.info("No models found. Train one above.")
+    else:
+        for model in models:
+            col1, col2, col3, col4 = st.columns([3, 2, 0.5, 0.5])
+
+            with col1:
+                algo = model.get("algorithm", "-")
+                active_badge = "✅" if model.get("active") else "⏸️"
+                st.markdown(f"**{model['name']}** `{model['version']}` {active_badge}")
+                st.caption(f"{algo} | Dataset: {model.get('dataset_name', '?')} {model.get('dataset_version', '')}")
+
+            with col2:
+                created = model.get("created_at")
+                created_str = created.strftime("%Y-%m-%d") if created else "?"
+                st.caption(f"Created: {created_str}")
+
+            with col3:
+                if st.button("🔍", key=f"inspect_model_{model['id']}", help="Inspect model"):
+                    st.session_state[f"inspecting_model_{model['id']}"] = True
+
+            with col4:
+                if st.button("🗑️", key=f"del_model_{model['id']}", help="Delete model"):
+                    # Run delete command
+                    env = os.environ.copy()
+                    env["OTEL_ENABLED"] = "false"
+                    result = subprocess.run(
+                        [
+                            sys.executable, "-m", "g2.cli", "ml", "model-delete",
+                            "--name", model["name"],
+                            "--version", model["version"],
+                            "--json",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                    )
+                    if result.returncode == 0:
+                        st.success(f"Deleted {model['name']} {model['version']}")
+                        _get_models.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"Delete failed: {result.stderr or result.stdout}")
+
+            # Show inspection panel if toggled
+            if st.session_state.get(f"inspecting_model_{model['id']}", False):
+                with st.expander(f"📋 Model Details: {model['name']} {model['version']}", expanded=True):
+                    _render_model_inspection(model)
+                if st.button("Close", key=f"close_inspect_model_{model['id']}"):
+                    st.session_state[f"inspecting_model_{model['id']}"] = False
+                    st.rerun()
+
+        # Show CLI command
+        st.code("g2 ml model-inspect --name <name> --version <version>", language="bash")
+
+    # Hyperparameter Tuning
+    st.markdown("---")
+    with st.expander("🔧 Hyperparameter Tuning", expanded=False):
+        _render_tune_section(datasets)
+
+
+def _render_tune_section(datasets: list):
+    """Render hyperparameter tuning section."""
+    st.info("""
+    💡 **Hyperparameter Tuning** uses Optuna (Bayesian optimization) to find optimal model settings.
+
+    **How it works:**
+    1. Runs multiple trials with different parameter combinations
+    2. Uses time-series cross-validation to prevent data leakage
+    3. Optimizes for pinball loss (quantile) or accuracy (classifier)
+    4. Returns best parameters to use when training
+    """)
+
+    if not datasets:
+        st.warning("No datasets available. Build a dataset first.")
+        return
+
+    # Filter datasets that have exported files
+    from pathlib import Path
+    datasets_with_files = []
+    for ds in datasets:
+        manifest_path = Path("datasets") / f"{ds['name']}_{ds['version']}" / "manifest.json"
+        if manifest_path.exists():
+            datasets_with_files.append(ds)
+
+    if not datasets_with_files:
+        st.warning(
+            "No datasets with exported files found. "
+            "Build a dataset with `--export` flag first."
+        )
+        st.code("g2 ml dataset-build --name <name> --version <version> --export", language="bash")
+        return
+
+    dataset_options = [f"{ds['name']} ({ds['version']})" for ds in datasets_with_files]
+    datasets = datasets_with_files  # Use filtered list
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        selected_dataset = st.selectbox(
+            "Dataset",
+            options=dataset_options,
+            key="tune_dataset",
+            help="Dataset with exported files (features.parquet, labels.parquet).",
+        )
+        selected_idx = dataset_options.index(selected_dataset)
+        dataset_name = datasets[selected_idx]["name"]
+        dataset_version = datasets[selected_idx]["version"]
+        dataset_horizons = datasets[selected_idx].get("horizons") or [7, 30, 90]
+
+        algorithm = st.selectbox(
+            "Algorithm",
+            ["xgboost", "lightgbm"],
+            key="tune_algo",
+            help="Algorithm to tune. sklearn quantile regression not supported (no hyperparameters).",
+        )
+
+        model_type = st.selectbox(
+            "Model Type",
+            ["quantile", "classifier"],
+            key="tune_model_type",
+            help="Quantile optimizes pinball loss. Classifier optimizes accuracy.",
+        )
+
+    with col2:
+        horizon = st.selectbox(
+            "Horizon (days)",
+            options=dataset_horizons,
+            key="tune_horizon",
+            help="Prediction horizon to optimize for. Tune each horizon separately.",
+        )
+
+        if model_type == "quantile":
+            quantile = st.selectbox(
+                "Quantile",
+                options=[0.5, 0.1, 0.9],
+                format_func=lambda x: f"q{int(x*100)}",
+                key="tune_quantile",
+                help="q50 (median) is most important. Tune q10/q90 separately if needed.",
+            )
+
+        n_trials = st.number_input(
+            "Number of Trials",
+            min_value=10,
+            max_value=500,
+            value=50,
+            key="tune_trials",
+            help="More trials = better results but slower",
+        )
+
+        cv_splits = st.number_input(
+            "CV Splits",
+            min_value=2,
+            max_value=10,
+            value=5,
+            key="tune_cv_splits",
+            help="Number of time-series cross-validation folds. More = more robust but slower.",
+        )
+
+        timeout = st.number_input(
+            "Timeout (seconds)",
+            min_value=60,
+            max_value=3600,
+            value=300,
+            key="tune_timeout",
+            help="Stop after this many seconds",
+        )
+
+    if st.button("🔍 Start Tuning", type="primary", key="tune_start"):
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        cmd = [
+            sys.executable, "-m", "g2.cli", "ml", "tune",
+            "--dataset-name", dataset_name,
+            "--dataset-version", dataset_version,
+            "--algorithm", algorithm,
+            "--model-type", model_type,
+            "--horizon", str(horizon),
+            "--n-trials", str(n_trials),
+            "--cv-splits", str(cv_splits),
+            "--timeout", str(timeout),
+            "--json",
+        ]
+
+        if model_type == "quantile":
+            cmd.extend(["--quantile", str(quantile)])
+
+        # Show CLI command
+        cli_cmd = " ".join(cmd[2:]).replace("g2.cli", "g2")
+        st.code(cli_cmd, language="bash")
+
+        with st.status("Tuning hyperparameters...", expanded=True) as status:
+            status_text = st.empty()
+            metrics_container = st.empty()
+
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                )
+
+                last_data = {}
+                json_buffer = []
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    json_buffer.append(line)
+                    try:
+                        data = json.loads("\n".join(json_buffer))
+                        json_buffer = []
+                        if not isinstance(data, dict):
+                            continue
+                        last_data = data
+                        # Show progress
+                        msg = data.get("message", "")
+                        if msg:
+                            status_text.write(msg)
+                        # Show best score if available
+                        best_score = data.get("best_score")
+                        trial_num = data.get("trial")
+                        if best_score is not None and trial_num:
+                            metrics_container.metric(
+                                "Best Score",
+                                f"{best_score:.4f}",
+                                delta=f"Trial {trial_num}",
+                            )
+                    except json.JSONDecodeError:
+                        pass
+
+                returncode = process.wait()
+
+                if returncode == 0:
+                    status.update(label="✅ Tuning complete!", state="complete")
+
+                    # Show best hyperparameters
+                    best_params = last_data.get("best_params", {})
+                    if best_params:
+                        st.success("**Best Hyperparameters Found:**")
+                        st.json(best_params)
+                        st.info("💡 Use these parameters when training your model.")
+                else:
+                    stderr = process.stderr.read()
+                    status.update(label="❌ Tuning failed", state="error")
+                    st.error("Tuning failed")
+                    if stderr:
+                        st.code(stderr)
+
+            except Exception as e:
+                status.update(label="❌ Error", state="error")
+                st.error(f"Error: {e}")
+
 
 def render_predict_section():
     """Render prediction generation section."""
@@ -723,15 +1351,69 @@ def render_predict_section():
         selected_idx = model_options.index(selected_model)
         model_name = models[selected_idx]["name"]
         model_version = models[selected_idx]["version"]
-        model_type = models[selected_idx].get("model_type", "quantile")
+        algorithm = models[selected_idx].get("algorithm", "")
 
-        st.caption(f"Using: `{model_name}` version `{model_version}` ({model_type})")
+        # Determine model type from algorithm
+        if "ensemble" in algorithm.lower() or "ensemble" in model_name.lower():
+            model_type = "ensemble"
+        elif "classifier" in model_name.lower():
+            model_type = "classifier"
+        else:
+            model_type = "quantile"
 
-        prediction_date = st.date_input(
-            "Prediction Date",
-            value=date.today(),
-            help="Date to generate predictions for",
+        st.caption(f"Using: `{model_name}` version `{model_version}` ({algorithm}, {model_type})")
+
+        # Get latest date with features
+        latest_feature_date = None
+        try:
+            from g2.ui.components.database import get_connection
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT MAX(date) FROM computed_features")
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        latest_feature_date = row[0]
+        except Exception:
+            pass
+
+        # Date selection mode
+        date_mode = st.radio(
+            "Date Selection",
+            ["Single Date", "Date Range"],
+            horizontal=True,
+            help="Single date for one-off predictions, date range for batch backfill",
         )
+
+        if date_mode == "Single Date":
+            prediction_date = st.date_input(
+                "Prediction Date",
+                value=latest_feature_date or date.today(),
+                help="Date to generate predictions for. Must have computed features.",
+            )
+            pred_start_date = None
+            pred_end_date = None
+
+            # Warn if date is in the future or after latest features
+            if latest_feature_date and prediction_date > latest_feature_date:
+                st.warning(f"⚠️ Latest features are from **{latest_feature_date}**. "
+                          f"Run `g2 data-update` to compute features for more recent dates.")
+        else:
+            pred_end_date = st.date_input(
+                "End Date",
+                value=latest_feature_date or date.today(),
+                key="pred_range_end",
+                help="End of date range (inclusive)",
+            )
+            pred_start_date = st.date_input(
+                "Start Date",
+                value=pred_end_date - timedelta(days=30),
+                key="pred_range_start",
+                help="Start of date range (inclusive)",
+            )
+            prediction_date = None
+
+            if latest_feature_date and pred_end_date > latest_feature_date:
+                st.warning(f"⚠️ Latest features are from **{latest_feature_date}**.")
 
     with col2:
         from g2.ui.components.database import get_symbols
@@ -768,13 +1450,28 @@ def render_predict_section():
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
+        # Select correct predict command based on model type
+        if model_type == "ensemble":
+            predict_cmd = "predict-ensemble"
+        elif model_type == "classifier":
+            predict_cmd = "predict-classifier"
+        else:
+            predict_cmd = "predict"
+
         cmd = [
-            sys.executable, "-m", "g2.cli", "ml", "predict",
+            sys.executable, "-m", "g2.cli", "ml", predict_cmd,
             "--model-name", model_name,
             "--model-version", model_version,
-            "--prediction-date", str(prediction_date),
             "--json",
         ]
+
+        # Add date arguments based on mode
+        if date_mode == "Single Date":
+            cmd.extend(["--prediction-date", str(prediction_date)])
+            date_arg = f"--prediction-date {prediction_date}"
+        else:
+            cmd.extend(["--start-date", str(pred_start_date), "--end-date", str(pred_end_date)])
+            date_arg = f"--start-date {pred_start_date} --end-date {pred_end_date}"
 
         if predict_mode == "Selected Symbols":
             cmd.extend(["--symbols", ",".join(selected_symbols)])
@@ -784,8 +1481,8 @@ def render_predict_section():
             symbols_arg = f"--exchange {exchange} --limit {pred_limit}"
 
         # Show equivalent CLI command
-        cli_cmd = (f"g2 ml predict --model-name {model_name} --model-version {model_version} "
-                   f"--prediction-date {prediction_date} {symbols_arg}")
+        cli_cmd = (f"g2 ml {predict_cmd} --model-name {model_name} --model-version {model_version} "
+                   f"{date_arg} {symbols_arg}")
         st.code(cli_cmd, language="bash")
 
         with st.status("Generating predictions...", expanded=True) as status:
@@ -818,25 +1515,40 @@ def render_predict_section():
                         if not isinstance(data, dict):
                             continue
                         last_data = data
-                        # Update metrics if available
-                        done = data.get("done", 0)
-                        total = data.get("total", 0)
-                        if total > 0:
-                            progress_metric.metric("Progress", f"{done}/{total}")
-                        symbols = data.get("symbols_processed", done)
-                        symbols_metric.metric("Symbols", symbols)
-                        preds = data.get("predictions_generated", 0)
-                        predictions_metric.metric("Predictions", preds)
-                        # Status message
-                        label = data.get("label", data.get("symbol", ""))
-                        if label:
-                            status_text.write(f"Processing: **{label}**")
+
+                        # Update metrics based on what the CLI emits
+                        msg = data.get("message", "")
+
+                        # Parse "Generating predictions for X symbols" message
+                        if "symbols on" in msg:
+                            match = re.search(r"(\d+) symbols", msg)
+                            if match:
+                                symbols_metric.metric("Symbols", int(match.group(1)))
+
+                        # Parse "Stored X predictions for Y-day horizon" message
+                        if "Stored" in msg and "predictions" in msg:
+                            status_text.write(msg)
+
+                        # Final data contains total_predictions
+                        total_preds = data.get("total_predictions", 0)
+                        if total_preds:
+                            predictions_metric.metric("Predictions", total_preds)
+
+                        # Show horizon progress
+                        horizons = data.get("horizons", [])
+                        if horizons:
+                            progress_metric.metric("Horizons", len(horizons))
+
                     except json.JSONDecodeError:
                         pass
 
                 returncode = process.wait()
 
                 if returncode == 0:
+                    # Show final totals from last_data
+                    total_preds = last_data.get("total_predictions", 0)
+                    if total_preds:
+                        predictions_metric.metric("Predictions", total_preds)
                     status.update(label="✅ Predictions generated!", state="complete")
                     st.success("Predictions generated successfully!")
                 else:
@@ -857,10 +1569,71 @@ def render_predict_section():
 
     try:
         from g2.ui.components.database import get_connection
+        import pandas as pd
 
         with get_connection() as conn:
             with conn.cursor() as cur:
+                # Get filter options
                 cur.execute("""
+                    SELECT DISTINCT m.name, m.version
+                    FROM quantile_predictions qp
+                    JOIN ml_models m ON qp.model_id = m.id
+                    ORDER BY m.name, m.version DESC
+                """)
+                model_opts = [f"{r[0]} {r[1]}" for r in cur.fetchall()]
+
+                cur.execute("""
+                    SELECT DISTINCT prediction_date
+                    FROM quantile_predictions
+                    ORDER BY prediction_date DESC
+                    LIMIT 30
+                """)
+                date_opts = [str(r[0]) for r in cur.fetchall()]
+
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filter_model = st.selectbox(
+                "Model",
+                ["All"] + model_opts,
+                key="pred_filter_model",
+            )
+        with col2:
+            filter_date = st.selectbox(
+                "Date",
+                ["All"] + date_opts,
+                key="pred_filter_date",
+            )
+        with col3:
+            filter_symbol = st.text_input(
+                "Symbol",
+                placeholder="e.g., AAPL",
+                key="pred_filter_symbol",
+            )
+
+        # Build query with filters
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                conditions = []
+                params = []
+
+                if filter_model != "All":
+                    parts = filter_model.rsplit(" ", 1)
+                    if len(parts) == 2:
+                        conditions.append("m.name = %s AND m.version = %s")
+                        params.extend(parts)
+
+                if filter_date != "All":
+                    conditions.append("qp.prediction_date = %s")
+                    params.append(filter_date)
+
+                if filter_symbol:
+                    conditions.append("s.symbol ILIKE %s")
+                    params.append(f"%{filter_symbol}%")
+
+                where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+                cur.execute(f"""
                     SELECT
                         s.symbol,
                         qp.prediction_date,
@@ -868,24 +1641,42 @@ def render_predict_section():
                         qp.q10,
                         qp.q50,
                         qp.q90,
-                        m.name as model
+                        m.name || ' ' || m.version as model
                     FROM quantile_predictions qp
                     JOIN stocks s ON qp.data_id = s.id
                     JOIN ml_models m ON qp.model_id = m.id
-                    ORDER BY qp.prediction_date DESC, s.symbol
-                    LIMIT 100
-                """)
+                    {where_clause}
+                    ORDER BY qp.prediction_date DESC, s.symbol, qp.horizon_days
+                    LIMIT 200
+                """, params)
                 predictions = cur.fetchall()
 
                 if predictions:
-                    import pandas as pd
                     df = pd.DataFrame(
                         predictions,
                         columns=["Symbol", "Date", "Horizon", "Q10", "Q50", "Q90", "Model"]
                     )
-                    st.dataframe(df, use_container_width=True)
+
+                    # Format percentages
+                    df["Q10"] = df["Q10"].apply(lambda x: f"{float(x):.1%}" if x else "-")
+                    df["Q50"] = df["Q50"].apply(lambda x: f"{float(x):.1%}" if x else "-")
+                    df["Q90"] = df["Q90"].apply(lambda x: f"{float(x):.1%}" if x else "-")
+                    df["Horizon"] = df["Horizon"].apply(lambda x: f"{x}d")
+
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+
+                    # Quick inspect
+                    unique_symbols = df["Symbol"].unique().tolist()
+                    if unique_symbols:
+                        inspect_symbol = st.selectbox(
+                            "Inspect symbol",
+                            ["Select..."] + unique_symbols,
+                            key="pred_inspect_symbol",
+                        )
+                        if inspect_symbol != "Select...":
+                            st.code(f"g2 ml predict-inspect --symbol {inspect_symbol}", language="bash")
                 else:
-                    st.info("No predictions found. Generate some predictions first.")
+                    st.info("No predictions found matching filters.")
 
     except Exception as e:
         st.error(f"Error loading predictions: {e}")
@@ -957,7 +1748,6 @@ def render_evaluate_section():
 
         with st.status("Evaluating model...", expanded=True) as status:
             status_text = st.empty()
-            results_container = st.container()
 
             try:
                 process = subprocess.Popen(
@@ -985,11 +1775,6 @@ def render_evaluate_section():
                         msg = data.get("message", "")
                         if msg:
                             status_text.write(msg)
-                        # Show horizon results as they come in
-                        horizon = data.get("horizon")
-                        if horizon and "q50_coverage" in data:
-                            with results_container:
-                                st.write(f"**Horizon {horizon}d**: Q50={data.get('q50_coverage', 0):.1%}")
                     except json.JSONDecodeError:
                         pass
 
@@ -1024,15 +1809,16 @@ def render_evaluate_section():
                         m.name,
                         m.version,
                         mp.horizon_days,
-                        mp.q10_coverage,
-                        mp.q50_coverage,
-                        mp.q90_coverage,
-                        mp.pinball_loss,
-                        mp.evaluated_at
+                        mp.q10_calibration,
+                        mp.q50_calibration,
+                        mp.q90_calibration,
+                        mp.quantile_loss,
+                        mp.num_predictions,
+                        mp.eval_start_date,
+                        mp.eval_end_date
                     FROM model_performance mp
                     JOIN ml_models m ON mp.model_id = m.id
-                    ORDER BY mp.evaluated_at DESC
-                    LIMIT 50
+                    ORDER BY m.name, m.version, mp.horizon_days
                 """)
                 performance = cur.fetchall()
 
@@ -1040,13 +1826,23 @@ def render_evaluate_section():
                     import pandas as pd
                     df = pd.DataFrame(
                         performance,
-                        columns=["Model", "Version", "Horizon", "Q10 Cov", "Q50 Cov", "Q90 Cov", "Pinball", "Evaluated"]
+                        columns=["Model", "Version", "Horizon", "Q10 Cal", "Q50 Cal", "Q90 Cal", "Quantile Loss", "Samples", "Start", "End"]
                     )
-                    st.dataframe(df, use_container_width=True)
+                    # Format horizon as "Xd"
+                    df["Horizon"] = df["Horizon"].apply(lambda x: f"{x}d")
+                    # Format calibration as percentages
+                    for col in ["Q10 Cal", "Q50 Cal", "Q90 Cal"]:
+                        df[col] = df[col].apply(lambda x: f"{float(x):.1f}%" if x else "-")
+                    # Format quantile loss
+                    df["Quantile Loss"] = df["Quantile Loss"].apply(lambda x: f"{float(x):.4f}" if x else "-")
+                    # Format samples with commas
+                    df["Samples"] = df["Samples"].apply(lambda x: f"{x:,}" if x else "-")
+
+                    st.dataframe(df, use_container_width=True, hide_index=True)
 
                     st.caption("""
-                    **Target coverages:** Q10=10%, Q50=50%, Q90=90%
-                    Lower pinball loss = better calibration
+                    **Calibration:** Ideal values are Q10=10%, Q50=50%, Q90=90% (fraction of actuals below prediction).
+                    **Quantile Loss:** Lower = better calibrated predictions.
                     """)
                 else:
                     st.info("No performance data. Run evaluations to populate.")

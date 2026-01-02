@@ -537,3 +537,125 @@ class TestFeaturesView:
         # Should have JSON file write functionality
         assert "save_definition_to_json" in content or "export" in content.lower()
         assert "json.dumps" in content
+
+
+class TestBacktestStrategies:
+    """Test backtest view strategy support."""
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+
+    def test_backtest_loads_strategies_from_database(self, views_dir):
+        """Backtest should load strategies from database, not hardcoded list."""
+        content = (views_dir / "backtest.py").read_text()
+        assert "def get_strategies(" in content
+        assert "strategy_registry" in content
+
+    def test_backtest_has_momentum_parameters(self, views_dir):
+        """Backtest should have momentum strategy parameters."""
+        content = (views_dir / "backtest.py").read_text()
+        assert 'strategy == "momentum"' in content
+        assert "Lookback Days" in content
+        assert "Top N" in content
+        assert "Rebalance" in content
+
+    def test_backtest_has_mean_reversion_parameters(self, views_dir):
+        """Backtest should have mean_reversion strategy parameters."""
+        content = (views_dir / "backtest.py").read_text()
+        assert 'strategy == "mean_reversion"' in content
+        assert "RSI Oversold" in content
+        assert "RSI Overbought" in content
+
+    def test_backtest_has_ma_crossover_parameters(self, views_dir):
+        """Backtest should have ma_crossover strategy parameters."""
+        content = (views_dir / "backtest.py").read_text()
+        assert 'strategy == "ma_crossover"' in content
+        assert "Fast MA Period" in content or "Fast Period" in content
+        assert "Slow MA Period" in content or "Slow Period" in content
+
+    def test_backtest_has_breakout_parameters(self, views_dir):
+        """Backtest should have breakout strategy parameters."""
+        content = (views_dir / "backtest.py").read_text()
+        assert 'strategy == "breakout"' in content
+        assert "Volume Threshold" in content
+
+    def test_backtest_has_pairs_trading_parameters(self, views_dir):
+        """Backtest should have pairs_trading strategy parameters."""
+        content = (views_dir / "backtest.py").read_text()
+        assert 'strategy == "pairs_trading"' in content
+        assert "Entry Z-Score" in content
+        assert "Exit Z-Score" in content
+
+    def test_backtest_has_rsi_divergence_parameters(self, views_dir):
+        """Backtest should have rsi_divergence strategy parameters."""
+        content = (views_dir / "backtest.py").read_text()
+        assert 'strategy == "rsi_divergence"' in content
+        assert "RSI Period" in content
+        assert "Divergence Lookback" in content
+
+    def test_backtest_has_volatility_contraction_parameters(self, views_dir):
+        """Backtest should have volatility_contraction strategy parameters."""
+        content = (views_dir / "backtest.py").read_text()
+        assert 'strategy == "volatility_contraction"' in content
+        assert "Bollinger Period" in content
+        assert "Squeeze Threshold" in content
+
+    def test_backtest_compare_uses_database_strategies(self, views_dir):
+        """Backtest compare section should load strategies from database."""
+        content = (views_dir / "backtest.py").read_text()
+        # Compare section should use get_strategies()
+        assert content.count("get_strategies()") >= 2  # Run + Compare sections
+
+
+class TestMLAdvancedFeatures:
+    """Test ML view advanced features."""
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+
+    def test_ml_has_feature_importance(self, views_dir):
+        """ML view should have feature importance functionality."""
+        content = (views_dir / "ml.py").read_text()
+        assert "_render_feature_importance" in content
+        assert "feature-importance" in content
+        assert "Top K" in content or "top_k" in content
+
+    def test_ml_has_hyperparameter_tuning(self, views_dir):
+        """ML view should have hyperparameter tuning section."""
+        content = (views_dir / "ml.py").read_text()
+        assert "_render_tune_section" in content or "Hyperparameter Tuning" in content
+        assert "tune" in content.lower()
+        assert "n-trials" in content or "n_trials" in content
+
+    def test_ml_tune_has_optuna_params(self, views_dir):
+        """ML tune section should have Optuna parameters."""
+        content = (views_dir / "ml.py").read_text()
+        assert "Number of Trials" in content
+        assert "Timeout" in content
+        assert "CV" in content or "cv-splits" in content or "cross-validation" in content.lower()
+
+    def test_ml_inspect_shows_performance_metrics(self, views_dir):
+        """Model inspection should show performance metrics."""
+        content = (views_dir / "ml.py").read_text()
+        assert "Performance Metrics" in content
+        assert "q10_calibration" in content or "Q10 Cal" in content
+        assert "q50_calibration" in content or "Q50 Cal" in content
+        assert "q90_calibration" in content or "Q90 Cal" in content
+
+    def test_ml_train_supports_ensemble(self, views_dir):
+        """ML train should support ensemble model type."""
+        content = (views_dir / "ml.py").read_text()
+        assert "Ensemble" in content
+        assert "train-ensemble" in content
+        assert "ensemble_algos" in content or "algorithms" in content.lower()
+
+    def test_ml_predict_uses_correct_command_by_type(self, views_dir):
+        """ML predict should use correct command based on model type."""
+        content = (views_dir / "ml.py").read_text()
+        assert "predict-ensemble" in content
+        assert "predict-classifier" in content
+        assert "predict_cmd" in content or "model_type" in content
