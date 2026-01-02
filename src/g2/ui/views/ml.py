@@ -872,7 +872,21 @@ def render_train_section():
             "Model Version",
             value=datetime.now().strftime("%Y%m%d"),
             key="train_model_version",
+            help="Use a unique version to avoid overwriting. Tip: add a suffix like -2, -exp1, etc.",
         )
+
+        # Check if model already exists and warn user
+        existing_models = _get_models()
+        existing_match = next(
+            (m for m in existing_models if m["name"] == model_name and m["version"] == model_version),
+            None
+        )
+        if existing_match:
+            st.warning(
+                f"⚠️ **Model `{model_name}` v`{model_version}` already exists** "
+                f"(algorithm: {existing_match.get('algorithm', 'unknown')}).\n\n"
+                "Training will **overwrite** it. To keep both, change the name or version."
+            )
 
         # Horizon selection for classifier (trains one horizon at a time)
         if model_type == "Trend Classifier":
@@ -1368,15 +1382,28 @@ def render_predict_section():
         model_version = models[selected_idx]["version"]
         algorithm = models[selected_idx].get("algorithm", "")
 
-        # Determine model type from algorithm
-        if "ensemble" in algorithm.lower() or "ensemble" in model_name.lower():
+        # Determine model type from algorithm (not name - algorithm is authoritative)
+        algorithm_lower = algorithm.lower() if algorithm else ""
+        if algorithm_lower == "ensemble" or "ensemble" in model_name.lower():
             model_type = "ensemble"
-        elif "classifier" in model_name.lower():
+        elif algorithm_lower.startswith("classifier_"):
             model_type = "classifier"
         else:
             model_type = "quantile"
 
-        st.caption(f"Using: `{model_name}` version `{model_version}` ({algorithm}, {model_type})")
+        # Get artifact_uri for classifier models (they need --model-path)
+        artifact_uri = models[selected_idx].get("artifact_uri", "")
+
+        # Show model type with explanation
+        if model_type == "classifier":
+            st.info(f"🏷️ **Classifier Model**: `{model_name}` v`{model_version}` ({algorithm})\n\n"
+                   "Predicts trend direction (strong_up, weak_up, flat, weak_down, strong_down)")
+        elif model_type == "ensemble":
+            st.info(f"🎯 **Ensemble Model**: `{model_name}` v`{model_version}` ({algorithm})\n\n"
+                   "Combines multiple algorithms for improved predictions")
+        else:
+            st.info(f"📊 **Quantile Model**: `{model_name}` v`{model_version}` ({algorithm or 'unknown'})\n\n"
+                   "Predicts price ranges (q10/q50/q90 quantiles)")
 
         # Get latest date with features
         latest_feature_date = None
@@ -1475,10 +1502,18 @@ def render_predict_section():
 
         cmd = [
             sys.executable, "-m", "g2.cli", "ml", predict_cmd,
-            "--model-name", model_name,
-            "--model-version", model_version,
-            "--json",
         ]
+
+        # Classifier uses --model-path, others use --model-name/--model-version
+        if model_type == "classifier":
+            if not artifact_uri:
+                st.error("Classifier model missing artifact_uri. Cannot generate predictions.")
+                st.stop()
+            cmd.extend(["--model-path", artifact_uri])
+        else:
+            cmd.extend(["--model-name", model_name, "--model-version", model_version])
+
+        cmd.append("--json")
 
         # Add date arguments based on mode
         if date_mode == "Single Date":
@@ -1496,8 +1531,11 @@ def render_predict_section():
             symbols_arg = f"--exchange {exchange} --limit {pred_limit}"
 
         # Show equivalent CLI command
-        cli_cmd = (f"g2 ml {predict_cmd} --model-name {model_name} --model-version {model_version} "
-                   f"{date_arg} {symbols_arg}")
+        if model_type == "classifier":
+            model_arg = f"--model-path {artifact_uri}"
+        else:
+            model_arg = f"--model-name {model_name} --model-version {model_version}"
+        cli_cmd = f"g2 ml {predict_cmd} {model_arg} {date_arg} {symbols_arg}"
         st.code(cli_cmd, language="bash")
 
         with st.status("Generating predictions...", expanded=True) as status:

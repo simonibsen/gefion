@@ -1476,6 +1476,24 @@ def ml_predict(
 
             model_id, dataset_id, artifact_uri, algorithm = row[0], row[1], row[2], row[3]
 
+        # Check if this is a classifier model - redirect to predict-classifier
+        if algorithm and algorithm.startswith("classifier_"):
+            emit_error(
+                f"Model '{model_name}/{model_version}' is a classifier (algorithm={algorithm}).\n"
+                f"Use 'g2 ml predict-classifier --model-path {artifact_uri}' instead.",
+                json_output=json_output,
+            )
+            return
+
+        # Check if this is an ensemble model - redirect to predict-ensemble
+        if algorithm == "ensemble":
+            emit_error(
+                f"Model '{model_name}/{model_version}' is an ensemble.\n"
+                f"Use 'g2 ml predict-ensemble --model-name {model_name} --model-version {model_version}' instead.",
+                json_output=json_output,
+            )
+            return
+
         # Get dataset to know which features and horizons to use
         dataset = get_ml_dataset(conn, name="", version="")  # Need to query by dataset_id
         with conn.cursor() as cur:
@@ -2439,6 +2457,14 @@ def ml_tune(
         emit(f"Tuning {algorithm} {model_type} model with {len(X)} samples...", json_output=json_output)
         emit(f"Running {n_trials} trials with {cv_splits}-fold time-series CV...", json_output=json_output)
 
+        # Progress callback for displaying trial progress
+        def progress_callback(trial_num: int, total_trials: int, best_value: float) -> None:
+            pct = (trial_num / total_trials) * 100
+            emit(
+                f"Trial {trial_num}/{total_trials} ({pct:.0f}%) - Best score: {best_value:.6f}",
+                json_output=json_output
+            )
+
         # Run tuning
         if model_type == "quantile":
             result = tune_quantile_model(
@@ -2449,6 +2475,7 @@ def ml_tune(
                 n_trials=n_trials,
                 cv_splits=cv_splits,
                 timeout=timeout,
+                progress_callback=progress_callback,
             )
         else:
             result = tune_classifier(
@@ -2458,6 +2485,7 @@ def ml_tune(
                 n_trials=n_trials,
                 cv_splits=cv_splits,
                 timeout=timeout,
+                progress_callback=progress_callback,
             )
 
         # Save results
@@ -2546,6 +2574,7 @@ def ml_train_classifier(
                 "dataset_name": dataset_name,
                 "dataset_version": dataset_version,
                 "algorithm": algorithm,
+                "feature_names": dataset["feature_names"],
                 "train_metrics": model_artifacts["train_metrics"],
                 "eval_metrics": eval_metrics,
             }, indent=2)
@@ -2754,8 +2783,10 @@ def ml_predict_classifier(
 
         emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
 
-        # Generate predictions
+        # Generate predictions (preserve data_id from features index)
         predictions = predict_classifier(model_artifacts, features_wide)
+        # Set predictions index to match features_wide data_ids
+        predictions.index = features_wide.index
 
         # Get or create model record
         with conn.cursor() as cur:
@@ -2784,24 +2815,44 @@ def ml_predict_classifier(
             for data_id in predictions.index:
                 pred_row = predictions.loc[data_id]
                 predicted_class = pred_row["predicted_class"]
-                confidence = float(pred_row["confidence"])
 
-                # Get class probabilities
-                prob_cols = [c for c in predictions.columns if c.startswith("prob_")]
-                class_probs = {c.replace("prob_", ""): float(pred_row[c]) for c in prob_cols}
+                # Get class probabilities (columns start with "probability_")
+                prob_cols = [c for c in predictions.columns if c.startswith("probability_")]
+                class_probs = {c.replace("probability_", ""): float(pred_row[c]) for c in prob_cols}
+
+                # Extract individual probabilities for table columns
+                p_strong_up = class_probs.get("strong_up", 0.0)
+                p_weak_up = class_probs.get("weak_up", 0.0)
+                p_neutral = class_probs.get("flat", 0.0)
+                p_weak_down = class_probs.get("weak_down", 0.0)
+                p_strong_down = class_probs.get("strong_down", 0.0)
+
+                # Calculate margin (difference between top 2 probabilities)
+                sorted_probs = sorted(class_probs.values(), reverse=True)
+                margin = sorted_probs[0] - sorted_probs[1] if len(sorted_probs) > 1 else sorted_probs[0]
+
+                # Calculate entropy: -sum(p * log(p)) for non-zero p
+                import math
+                entropy = -sum(p * math.log(p) for p in class_probs.values() if p > 0)
 
                 cur.execute(
                     """
                     INSERT INTO trend_class_predictions
-                      (model_id, data_id, prediction_date, horizon_days, predicted_class, confidence, class_probabilities, model_version)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                      (model_id, data_id, prediction_date, horizon_days, predicted_class,
+                       p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin, entropy)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (model_id, data_id, prediction_date, horizon_days) DO UPDATE SET
                       predicted_class = EXCLUDED.predicted_class,
-                      confidence = EXCLUDED.confidence,
-                      class_probabilities = EXCLUDED.class_probabilities,
-                      model_version = EXCLUDED.model_version;
+                      p_strong_up = EXCLUDED.p_strong_up,
+                      p_weak_up = EXCLUDED.p_weak_up,
+                      p_neutral = EXCLUDED.p_neutral,
+                      p_weak_down = EXCLUDED.p_weak_down,
+                      p_strong_down = EXCLUDED.p_strong_down,
+                      margin = EXCLUDED.margin,
+                      entropy = EXCLUDED.entropy;
                     """,
-                    (model_id, int(data_id), prediction_date, horizon, predicted_class, confidence, Json(class_probs), model_version),
+                    (model_id, int(data_id), prediction_date, horizon, predicted_class,
+                     p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin, entropy),
                 )
                 total_predictions += 1
 

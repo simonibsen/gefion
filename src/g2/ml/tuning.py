@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -148,6 +148,7 @@ def tune_quantile_model(
     cv_splits: int = 5,
     custom_space: Optional[Dict[str, Dict[str, Any]]] = None,
     timeout: Optional[int] = None,
+    progress_callback: Optional[Callable[[int, int, float], None]] = None,
 ) -> Dict[str, Any]:
     """
     Tune hyperparameters for a quantile regression model.
@@ -163,6 +164,8 @@ def tune_quantile_model(
         cv_splits: Number of time-series CV splits
         custom_space: Optional custom search space
         timeout: Optional timeout in seconds
+        progress_callback: Optional callback(trial_num, n_trials, best_value)
+            called after each trial
 
     Returns:
         Dict with best_params, best_score, n_trials, etc.
@@ -212,7 +215,22 @@ def tune_quantile_model(
                 return float('inf')
 
         study = create_study(direction="minimize")
-        study.optimize(objective, n_trials=n_trials, timeout=timeout, show_progress_bar=False)
+
+        # Create Optuna callback for progress reporting
+        callbacks = []
+        if progress_callback:
+            def optuna_callback(study, trial):
+                best_val = study.best_value if study.best_trial else float('inf')
+                progress_callback(trial.number + 1, n_trials, best_val)
+            callbacks.append(optuna_callback)
+
+        study.optimize(
+            objective,
+            n_trials=n_trials,
+            timeout=timeout,
+            show_progress_bar=False,
+            callbacks=callbacks if callbacks else None,
+        )
 
         return {
             "best_params": study.best_params,
@@ -277,6 +295,7 @@ def tune_classifier(
     cv_splits: int = 5,
     custom_space: Optional[Dict[str, Dict[str, Any]]] = None,
     timeout: Optional[int] = None,
+    progress_callback: Optional[Callable[[int, int, float], None]] = None,
 ) -> Dict[str, Any]:
     """
     Tune hyperparameters for a classification model.
@@ -291,6 +310,8 @@ def tune_classifier(
         cv_splits: Number of time-series CV splits
         custom_space: Optional custom search space
         timeout: Optional timeout in seconds
+        progress_callback: Optional callback(trial_num, n_trials, best_value)
+            called after each trial
 
     Returns:
         Dict with best_params, best_score, n_trials, etc.
@@ -344,7 +365,22 @@ def tune_classifier(
                 return 0.0
 
         study = create_study(direction="maximize")  # Maximize accuracy
-        study.optimize(objective, n_trials=n_trials, timeout=timeout, show_progress_bar=False)
+
+        # Create Optuna callback for progress reporting
+        callbacks = []
+        if progress_callback:
+            def optuna_callback(study, trial):
+                best_val = study.best_value if study.best_trial else 0.0
+                progress_callback(trial.number + 1, n_trials, best_val)
+            callbacks.append(optuna_callback)
+
+        study.optimize(
+            objective,
+            n_trials=n_trials,
+            timeout=timeout,
+            show_progress_bar=False,
+            callbacks=callbacks if callbacks else None,
+        )
 
         return {
             "best_params": study.best_params,
