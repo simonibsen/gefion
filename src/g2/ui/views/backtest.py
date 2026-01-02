@@ -134,14 +134,21 @@ def render_run_section():
         with col2:
             rsi_overbought = st.number_input("RSI Overbought", value=70, min_value=60, max_value=90)
         with col3:
+            rsi_period = st.number_input("RSI Period", value=14, min_value=5, max_value=30, key="mr_rsi_period")
+        col4, col5 = st.columns(2)
+        with col4:
             position_size = st.slider("Position Size", value=0.2, min_value=0.05, max_value=0.5)
+        with col5:
+            max_positions = st.number_input("Max Positions", value=5, min_value=1, max_value=20, key="mr_max_pos")
 
     elif strategy == "ma_crossover":
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             fast_period = st.number_input("Fast MA Period", value=50, min_value=5, max_value=100)
         with col2:
             slow_period = st.number_input("Slow MA Period", value=200, min_value=50, max_value=300)
+        with col3:
+            max_positions = st.number_input("Max Positions", value=5, min_value=1, max_value=20, key="mac_max_pos")
 
     elif strategy == "breakout":
         col1, col2 = st.columns(2)
@@ -165,15 +172,27 @@ def render_run_section():
             divergence_lookback = st.number_input("Divergence Lookback", value=10, min_value=3, max_value=30)
 
     elif strategy == "volatility_contraction":
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             bb_period = st.number_input("Bollinger Period", value=20, min_value=10, max_value=50)
         with col2:
             bb_std_dev = st.number_input("Std Dev Multiplier", value=2.0, min_value=1.0, max_value=3.0, step=0.1)
+        col3, col4 = st.columns(2)
         with col3:
             squeeze_threshold = st.slider("Squeeze Threshold", value=0.05, min_value=0.01, max_value=0.15, step=0.01)
+        with col4:
+            expansion_threshold = st.slider("Expansion Threshold", value=0.1, min_value=0.05, max_value=0.25, step=0.01)
+
+    # Validate symbols selection
+    if symbol_mode == "Selected" and not selected_symbols:
+        st.warning("⚠️ Please select at least one symbol to backtest.")
 
     if st.button("🚀 Run Backtest", type="primary", use_container_width=True):
+        # Validate before running
+        if symbol_mode == "Selected" and not selected_symbols:
+            st.error("No symbols selected. Please select at least one symbol.")
+            st.stop()
+
         # Build command
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
@@ -198,12 +217,15 @@ def render_run_section():
             cmd.extend([
                 "--rsi-oversold", str(rsi_oversold),
                 "--rsi-overbought", str(rsi_overbought),
+                "--rsi-period", str(rsi_period),
                 "--position-size", str(position_size),
+                "--max-positions", str(max_positions),
             ])
         elif strategy == "ma_crossover":
             cmd.extend([
                 "--fast-period", str(fast_period),
                 "--slow-period", str(slow_period),
+                "--max-positions", str(max_positions),
             ])
         elif strategy == "breakout":
             cmd.extend([
@@ -225,6 +247,7 @@ def render_run_section():
                 "--bb-period", str(bb_period),
                 "--bb-std-dev", str(bb_std_dev),
                 "--squeeze-threshold", str(squeeze_threshold),
+                "--expansion-threshold", str(expansion_threshold),
             ])
 
         if symbol_mode == "Selected":
@@ -232,9 +255,9 @@ def render_run_section():
         else:
             cmd.extend(["--exchange", exchange, "--limit", str(bt_limit)])
 
-        # Show equivalent CLI command
-        cli_cmd = " ".join(cmd[2:])  # Skip python -m prefix
-        st.code(f"g2 {cli_cmd[8:]}", language="bash")  # Skip "g2.cli " prefix
+        # Show equivalent CLI command (skip "python -m g2.cli" prefix)
+        cli_args = cmd[3:]  # Skip [python, -m, g2.cli]
+        st.code(f"g2 {' '.join(cli_args)}", language="bash")
 
         with st.status("Running backtest...", expanded=True) as status:
             try:
@@ -352,9 +375,9 @@ def render_compare_section():
             "--json",
         ]
 
-        # Show equivalent CLI command
-        cli_cmd = " ".join(cmd[2:])  # Skip python -m prefix
-        st.code(f"g2 {cli_cmd[8:]}", language="bash")  # Skip "g2.cli " prefix
+        # Show equivalent CLI command (skip "python -m g2.cli" prefix)
+        cli_args = cmd[3:]  # Skip [python, -m, g2.cli]
+        st.code(f"g2 {' '.join(cli_args)}", language="bash")
 
         with st.status("Comparing strategies...", expanded=True) as status:
             try:

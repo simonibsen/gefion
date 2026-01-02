@@ -618,6 +618,29 @@ class TestBacktestStrategies:
         assert 'strategy == "volatility_contraction"' in content
         assert "Bollinger Period" in content
         assert "Squeeze Threshold" in content
+        assert "Expansion Threshold" in content
+
+    def test_backtest_cli_command_format(self, views_dir):
+        """Backtest should format CLI command correctly without truncation bugs."""
+        content = (views_dir / "backtest.py").read_text()
+        # Should use cmd[3:] to skip [python, -m, g2.cli] - not buggy string slicing
+        assert "cli_args = cmd[3:]" in content
+        # Should join with space and prefix with g2
+        assert '"g2 {' in content and "' '.join(cli_args)" in content
+
+    def test_backtest_validates_empty_symbols(self, views_dir):
+        """Backtest should validate that symbols are selected."""
+        content = (views_dir / "backtest.py").read_text()
+        # Should warn if no symbols selected
+        assert "Please select at least one symbol" in content
+        # Should stop execution if trying to run without symbols
+        assert "st.stop()" in content
+
+    def test_backtest_mean_reversion_has_max_positions(self, views_dir):
+        """Mean reversion strategy should have max_positions parameter."""
+        content = (views_dir / "backtest.py").read_text()
+        assert '"--max-positions"' in content
+        assert "Max Positions" in content
 
     def test_backtest_compare_uses_database_strategies(self, views_dir):
         """Backtest compare section should load strategies from database."""
