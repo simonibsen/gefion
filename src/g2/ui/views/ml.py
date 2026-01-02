@@ -563,13 +563,14 @@ def render_dataset_section():
     ):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
+        env["PYTHONUNBUFFERED"] = "1"  # Ensure real-time output
 
         horizons_str = ",".join(str(h) for h in horizons)
         weak_str = ",".join([f"{weak_threshold/100:.2f}"] * len(horizons))
         strong_str = ",".join([f"{strong_threshold/100:.2f}"] * len(horizons))
 
         cmd = [
-            sys.executable, "-m", "g2.cli", "ml", "dataset-build",
+            sys.executable, "-u", "-m", "g2.cli", "ml", "dataset-build",
             "--name", dataset_name,
             "--version", dataset_version,
             "--exchange", exchange,
