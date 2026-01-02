@@ -121,11 +121,12 @@ def get_g2_insights() -> Optional[G2Insights]:
 
                     if insights.pred_count > 0:
                         cur.execute("""
-                            SELECT symbol, q50, q90, horizon_days
-                            FROM quantile_predictions
-                            WHERE prediction_date = (SELECT MAX(prediction_date) FROM quantile_predictions)
-                              AND horizon_days = 7
-                            ORDER BY q50 DESC
+                            SELECT s.symbol, qp.q50, qp.q90, qp.horizon_days
+                            FROM quantile_predictions qp
+                            JOIN stocks s ON qp.data_id = s.id
+                            WHERE qp.prediction_date = (SELECT MAX(prediction_date) FROM quantile_predictions)
+                              AND qp.horizon_days = 7
+                            ORDER BY qp.q50 DESC
                             LIMIT 3
                         """)
                         insights.bullish = list(cur.fetchall())
