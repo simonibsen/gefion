@@ -21,6 +21,10 @@ def db_conn():
 
     url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
     with db_connection(url) as conn:
+        # Drop ml_datasets to ensure fresh schema (backup may have old JSONB schema)
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS ml_datasets CASCADE")
+        conn.commit()
         # Ensure required tables exist (same as CLI does)
         init_schema_tables(conn, ["stocks", "feature_definitions", "computed_features", "ml_datasets"])
         yield conn
