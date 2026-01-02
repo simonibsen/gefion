@@ -25,17 +25,45 @@ def render_backtest():
         render_help_section()
 
 
+def get_strategies():
+    """Get available strategies from database."""
+    try:
+        from g2.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT name, description
+                    FROM strategy_registry
+                    WHERE enabled = true
+                    ORDER BY name
+                """)
+                return [(row[0], row[1]) for row in cur.fetchall()]
+    except Exception:
+        # Fallback to built-in list
+        return [
+            ("momentum", "Momentum-based strategy"),
+            ("mean_reversion", "Mean reversion using RSI"),
+            ("ma_crossover", "Moving average crossover"),
+            ("breakout", "Breakout with volume confirmation"),
+        ]
+
+
 def render_run_section():
     """Render backtest execution section."""
     st.subheader("Run Backtest")
 
     col1, col2 = st.columns(2)
 
+    strategies = get_strategies()
+    strategy_names = [s[0] for s in strategies]
+    strategy_descriptions = {s[0]: s[1] for s in strategies}
+
     with col1:
         strategy = st.selectbox(
             "Strategy",
-            ["momentum", "mean_reversion", "ma_crossover", "breakout"],
-            help="Select trading strategy to backtest",
+            strategy_names,
+            help=strategy_descriptions.get(strategy_names[0], "") if strategy_names else "",
+            format_func=lambda x: f"{x} - {strategy_descriptions.get(x, '')}"[:50],
         )
 
         end_date = st.date_input(
@@ -122,6 +150,29 @@ def render_run_section():
         with col2:
             volume_threshold = st.slider("Volume Threshold", value=1.5, min_value=1.0, max_value=3.0)
 
+    elif strategy == "pairs_trading":
+        col1, col2 = st.columns(2)
+        with col1:
+            entry_zscore = st.number_input("Entry Z-Score", value=2.0, min_value=1.0, max_value=4.0, step=0.1)
+        with col2:
+            exit_zscore = st.number_input("Exit Z-Score", value=0.5, min_value=0.0, max_value=2.0, step=0.1)
+
+    elif strategy == "rsi_divergence":
+        col1, col2 = st.columns(2)
+        with col1:
+            rsi_period = st.number_input("RSI Period", value=14, min_value=5, max_value=30)
+        with col2:
+            divergence_lookback = st.number_input("Divergence Lookback", value=10, min_value=3, max_value=30)
+
+    elif strategy == "volatility_contraction":
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            bb_period = st.number_input("Bollinger Period", value=20, min_value=10, max_value=50)
+        with col2:
+            bb_std_dev = st.number_input("Std Dev Multiplier", value=2.0, min_value=1.0, max_value=3.0, step=0.1)
+        with col3:
+            squeeze_threshold = st.slider("Squeeze Threshold", value=0.05, min_value=0.01, max_value=0.15, step=0.01)
+
     if st.button("🚀 Run Backtest", type="primary", use_container_width=True):
         # Build command
         env = os.environ.copy()
@@ -158,6 +209,22 @@ def render_run_section():
             cmd.extend([
                 "--lookback-days", str(lookback),
                 "--volume-threshold", str(volume_threshold),
+            ])
+        elif strategy == "pairs_trading":
+            cmd.extend([
+                "--entry-zscore", str(entry_zscore),
+                "--exit-zscore", str(exit_zscore),
+            ])
+        elif strategy == "rsi_divergence":
+            cmd.extend([
+                "--rsi-period", str(rsi_period),
+                "--divergence-lookback", str(divergence_lookback),
+            ])
+        elif strategy == "volatility_contraction":
+            cmd.extend([
+                "--bb-period", str(bb_period),
+                "--bb-std-dev", str(bb_std_dev),
+                "--squeeze-threshold", str(squeeze_threshold),
             ])
 
         if symbol_mode == "Selected":
@@ -234,11 +301,15 @@ def render_compare_section():
 
     col1, col2 = st.columns(2)
 
+    # Load strategies from database
+    available_strategies = get_strategies()
+    strategy_names = [s[0] for s in available_strategies]
+
     with col1:
         strategies = st.multiselect(
             "Strategies to Compare",
-            ["momentum", "mean_reversion", "ma_crossover", "breakout"],
-            default=["momentum", "mean_reversion"],
+            strategy_names,
+            default=strategy_names[:2] if len(strategy_names) >= 2 else strategy_names,
         )
 
         end_date = st.date_input(

@@ -371,10 +371,281 @@ g2 data-update --exchange NASDAQ --limit 50 --timeframe full
 - Add transaction cost modeling (future work)
 - Implement better risk management (position sizing, stop losses)
 
+## Creating Custom Strategies
+
+This section covers how to implement and register new trading strategies.
+
+### Strategy Interface
+
+Strategies are Python classes that implement a `generate_signals()` method. No base class inheritance is required (duck typing):
+
+```python
+class MyStrategy:
+    def __init__(self, param1: int = 10, param2: float = 0.5):
+        """Initialize with configurable parameters."""
+        self.param1 = param1
+        self.param2 = param2
+
+    def generate_signals(
+        self,
+        current_date: date,
+        portfolio: Dict[str, Dict[str, Any]],
+        price_data: List[Dict[str, Any]],
+        initial_cash: float,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate trading signals for the current date.
+
+        Args:
+            current_date: The current date in the backtest
+            portfolio: Current holdings {symbol: {shares, avg_price}}
+            price_data: Historical OHLCV data up to current_date
+            initial_cash: Starting capital for position sizing
+
+        Returns:
+            List of signal dicts, each with:
+              - action: "buy" or "sell"
+              - symbol: Stock symbol (e.g., "AAPL")
+              - shares: Number of shares to trade
+              - reason: (optional) Explanation for the signal
+        """
+        signals = []
+        # Your strategy logic here...
+        return signals
+```
+
+### Step 1: Create the Strategy File
+
+Create a new file in `src/g2/strategies/`:
+
+```python
+# src/g2/strategies/my_strategy.py
+"""
+My Custom Trading Strategy.
+
+Brief description of how the strategy works.
+"""
+from __future__ import annotations
+
+from datetime import date
+from typing import Any, Dict, List
+
+
+class MyCustomStrategy:
+    """
+    Custom strategy implementation.
+
+    Describe the strategy logic and when it generates signals.
+    """
+
+    def __init__(
+        self,
+        threshold: float = 0.05,
+        max_positions: int = 5,
+        position_size: float = 0.2,
+    ):
+        """
+        Initialize strategy parameters.
+
+        Args:
+            threshold: Signal threshold (default: 0.05)
+            max_positions: Maximum concurrent positions (default: 5)
+            position_size: Fraction of capital per position (default: 0.2)
+        """
+        self.threshold = threshold
+        self.max_positions = max_positions
+        self.position_size = position_size
+
+    def generate_signals(
+        self,
+        current_date: date,
+        portfolio: Dict[str, Dict[str, Any]],
+        price_data: List[Dict[str, Any]],
+        initial_cash: float,
+    ) -> List[Dict[str, Any]]:
+        """Generate buy/sell signals based on strategy logic."""
+        signals = []
+
+        # Get unique symbols from price data
+        symbols = sorted(set(row["symbol"] for row in price_data))
+
+        for symbol in symbols:
+            # Filter price data for this symbol up to current_date
+            symbol_prices = [
+                row for row in price_data
+                if row["symbol"] == symbol and row["date"] <= current_date
+            ]
+
+            if len(symbol_prices) < 2:
+                continue
+
+            # Sort by date and get current price
+            symbol_prices.sort(key=lambda x: x["date"])
+            current_price = symbol_prices[-1]["close"]
+
+            # Example: Calculate a simple metric
+            prev_price = symbol_prices[-2]["close"]
+            change = (current_price - prev_price) / prev_price
+
+            # Generate buy signal if condition met
+            if change > self.threshold and symbol not in portfolio:
+                position_value = initial_cash * self.position_size
+                shares = int(position_value / current_price)
+
+                if shares > 0 and len(portfolio) < self.max_positions:
+                    signals.append({
+                        "action": "buy",
+                        "symbol": symbol,
+                        "shares": shares,
+                        "reason": f"signal triggered (change: {change:.2%})",
+                    })
+
+            # Generate sell signal if condition met
+            elif change < -self.threshold and symbol in portfolio:
+                signals.append({
+                    "action": "sell",
+                    "symbol": symbol,
+                    "shares": portfolio[symbol]["shares"],
+                    "reason": f"exit signal (change: {change:.2%})",
+                })
+
+        return signals
+```
+
+### Step 2: Register the Strategy
+
+Add your strategy to `BUILTIN_STRATEGIES` in `src/g2/strategies/dispatcher.py`:
+
+```python
+BUILTIN_STRATEGIES: Dict[str, Dict[str, Any]] = {
+    # ... existing strategies ...
+
+    "my_strategy": {
+        "module_path": "g2.strategies.my_strategy",
+        "class_name": "MyCustomStrategy",
+        "description": "My custom trading strategy",
+        "default_params": {
+            "threshold": 0.05,
+            "max_positions": 5,
+            "position_size": 0.2,
+        },
+        "tags": ["custom", "example"],
+    },
+}
+```
+
+### Step 3: Seed the Database
+
+Run db-init to register the strategy in the database:
+
+```bash
+g2 db-init
+```
+
+This calls `seed_builtin_strategies()` which inserts your strategy into `strategy_registry`.
+
+### Step 4: Test Your Strategy
+
+Run a backtest to verify it works:
+
+```bash
+# Basic test
+g2 backtest run \
+  --strategy my_strategy \
+  --symbols AAPL,MSFT,GOOGL \
+  --start-date 2024-01-01 \
+  --end-date 2024-12-31 \
+  --initial-cash 100000
+
+# With custom parameters
+g2 backtest run \
+  --strategy my_strategy \
+  --symbols AAPL,MSFT,GOOGL \
+  --start-date 2024-01-01 \
+  --end-date 2024-12-31 \
+  --threshold 0.03 \
+  --max-positions 10
+```
+
+### Creating Strategy Configs
+
+Strategy configs are named, parameterized instances of strategies stored in the database:
+
+```bash
+# Create an aggressive version of your strategy
+g2 strategy-create-config \
+  --name my_strategy_aggressive \
+  --strategy my_strategy \
+  --params '{"threshold": 0.02, "max_positions": 10}'
+
+# Create a conservative version
+g2 strategy-create-config \
+  --name my_strategy_conservative \
+  --strategy my_strategy \
+  --params '{"threshold": 0.10, "max_positions": 3}'
+
+# List all configs
+g2 strategy-configs
+```
+
+Configs merge parameters: `default_params` (from registry) + `config_params` (overrides).
+
+### Strategy Design Tips
+
+1. **No look-ahead bias**: Only use data up to `current_date`
+2. **Handle missing data**: Check for sufficient price history
+3. **Position sizing**: Use `initial_cash` and `position_size` for consistent sizing
+4. **Idempotent signals**: Same inputs should produce same outputs
+5. **Clear reasons**: Include `reason` field for debugging
+
+### Example: Using ML Predictions
+
+You can build strategies that use g2's ML predictions:
+
+```python
+class MLPredictionStrategy:
+    """Strategy that trades based on quantile predictions."""
+
+    def __init__(self, min_expected_return: float = 0.05, horizon: int = 7):
+        self.min_expected_return = min_expected_return
+        self.horizon = horizon
+
+    def generate_signals(self, current_date, portfolio, price_data, initial_cash):
+        signals = []
+
+        # Query predictions from database (pseudo-code)
+        # predictions = get_predictions(current_date, self.horizon)
+
+        # Buy stocks where q50 prediction > threshold
+        # for pred in predictions:
+        #     if pred["q50"] > self.min_expected_return:
+        #         signals.append({"action": "buy", ...})
+
+        return signals
+```
+
+### File Locations
+
+| File | Purpose |
+|------|---------|
+| `src/g2/strategies/*.py` | Strategy implementations |
+| `src/g2/strategies/dispatcher.py` | Registry and loading logic |
+| `src/g2/strategies/__init__.py` | Package exports |
+| `tests/test_strategy_*.py` | Strategy tests |
+
+### Future: Live Trading
+
+Strategies are designed to be reusable for live trading. The `generate_signals()` interface produces broker-agnostic signals that can be routed to:
+
+- **Backtesting** (current) - Simulated execution on historical data
+- **Paper trading** (planned) - Simulated execution on live data
+- **Live trading** (planned) - Real execution via broker APIs
+
+See [ML_ROADMAP.md](ML_ROADMAP.md#61-live--paper-trading) for the planned live trading architecture.
+
 ## Next Steps
 
 - **Try ML-based strategies**: Use `g2 ml predict` to generate predictions and build strategies on quantile forecasts
-- **Implement custom strategies**: See `src/g2/strategies/momentum.py` for example
 - **Compare multiple strategies**: Run backtests for different approaches and parameters
 - **Production deployment**: See [USER_GUIDE.md](USER_GUIDE.md) for automation workflows
 

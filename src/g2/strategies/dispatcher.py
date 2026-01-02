@@ -323,7 +323,7 @@ def create_strategy_config(
     return config_id
 
 
-def seed_builtin_strategies(conn: psycopg.Connection) -> None:
+def seed_builtin_strategies(conn: psycopg.Connection) -> int:
     """
     Seed the database with built-in strategies.
 
@@ -334,6 +334,9 @@ def seed_builtin_strategies(conn: psycopg.Connection) -> None:
 
     Args:
         conn: Database connection
+
+    Returns:
+        Number of strategies seeded
     """
     with conn.cursor() as cur:
         # Seed strategy_registry
@@ -375,6 +378,7 @@ def seed_builtin_strategies(conn: psycopg.Connection) -> None:
             )
 
     conn.commit()
+    return len(BUILTIN_STRATEGIES)
 
 
 # Backwards compatibility - keep old function names as aliases
