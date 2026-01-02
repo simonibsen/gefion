@@ -948,6 +948,299 @@ def ml_dataset_inspect(
                 console.print("  (no models)")
 
 
+@ml_app.command("model-inspect")
+def ml_model_inspect(
+    name: str = typer.Option(..., help="Model name"),
+    version: str = typer.Option(..., help="Model version"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Inspect a model's metadata, training info, and predictions.
+
+    Displays model configuration, algorithm, hyperparameters, training metrics,
+    dataset used, and prediction statistics.
+
+    Examples:
+        # Inspect a model
+        g2 ml model-inspect --name quantile --version 20260101
+
+        # Get JSON output for programmatic use
+        g2 ml model-inspect --name quantile --version 20260101 --json
+    """
+    with db_connection(db_url) as conn:
+        init_schema_tables(conn, ["ml_models", "ml_datasets", "quantile_predictions", "model_performance"])
+
+        with conn.cursor() as cur:
+            # Fetch model info with dataset join
+            cur.execute(
+                """
+                SELECT m.id, m.name, m.version, m.created_at,
+                       m.algorithm, m.hyperparams, m.metrics, m.artifact_uri,
+                       m.active, d.id, d.name, d.version
+                FROM ml_models m
+                LEFT JOIN ml_datasets d ON d.id = m.dataset_id
+                WHERE m.name = %s AND m.version = %s
+                """,
+                (name, version),
+            )
+            row = cur.fetchone()
+
+            if not row:
+                emit_error(
+                    f"Model not found: {name} {version}",
+                    json_output=json_output,
+                )
+                return
+
+            model_id = row[0]
+            model_info = {
+                "id": row[0],
+                "name": row[1],
+                "version": row[2],
+                "created_at": str(row[3]) if row[3] else None,
+                "algorithm": row[4],
+                "hyperparams": row[5] or {},
+                "metrics": row[6] or {},
+                "artifact_uri": row[7],
+                "active": row[8],
+                "dataset": {
+                    "id": row[9],
+                    "name": row[10],
+                    "version": row[11],
+                } if row[9] else None,
+            }
+
+            # Fetch prediction counts by horizon
+            try:
+                cur.execute(
+                    """
+                    SELECT horizon_days, COUNT(*), MIN(prediction_date), MAX(prediction_date)
+                    FROM quantile_predictions
+                    WHERE model_id = %s
+                    GROUP BY horizon_days
+                    ORDER BY horizon_days
+                    """,
+                    (model_id,),
+                )
+                predictions = [
+                    {
+                        "horizon_days": p[0],
+                        "count": p[1],
+                        "date_range": f"{p[2]} to {p[3]}" if p[2] else None,
+                    }
+                    for p in cur.fetchall()
+                ]
+                model_info["predictions"] = predictions
+            except Exception:
+                model_info["predictions"] = []
+
+            # Fetch performance metrics
+            try:
+                cur.execute(
+                    """
+                    SELECT horizon_days, q10_calibration, q50_calibration, q90_calibration,
+                           quantile_loss, updated_at
+                    FROM model_performance
+                    WHERE model_id = %s
+                    ORDER BY horizon_days
+                    """,
+                    (model_id,),
+                )
+                performance = [
+                    {
+                        "horizon_days": p[0],
+                        "q10_calibration": float(p[1]) if p[1] else None,
+                        "q50_calibration": float(p[2]) if p[2] else None,
+                        "q90_calibration": float(p[3]) if p[3] else None,
+                        "quantile_loss": float(p[4]) if p[4] else None,
+                        "updated_at": str(p[5]) if p[5] else None,
+                    }
+                    for p in cur.fetchall()
+                ]
+                model_info["performance"] = performance
+            except Exception:
+                model_info["performance"] = []
+
+        # Output
+        if json_output:
+            emit(
+                f"Model: {name} {version}",
+                data=model_info,
+                json_output=json_output,
+            )
+        else:
+            # Pretty print for CLI
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            console.print(f"\n[bold]Model: {name} {version}[/bold]")
+            console.print(f"  Created: {model_info['created_at']}")
+            console.print(f"  Algorithm: {model_info['algorithm']}")
+            console.print(f"  Active: {model_info['active']}")
+            console.print(f"  Artifact: {model_info['artifact_uri']}")
+
+            if model_info["dataset"]:
+                ds = model_info["dataset"]
+                console.print(f"  Dataset: {ds['name']} {ds['version']}")
+
+            if model_info["hyperparams"]:
+                console.print("  Hyperparameters:")
+                for k, v in model_info["hyperparams"].items():
+                    console.print(f"    {k}: {v}")
+
+            if model_info["metrics"]:
+                console.print("  Training Metrics:")
+                for k, v in model_info["metrics"].items():
+                    if isinstance(v, float):
+                        console.print(f"    {k}: {v:.4f}")
+                    else:
+                        console.print(f"    {k}: {v}")
+
+            # Predictions table
+            predictions = model_info.get("predictions", [])
+            console.print(f"\n[bold]Predictions ({sum(p['count'] for p in predictions)} total):[/bold]")
+            if predictions:
+                table = Table(show_header=True)
+                table.add_column("Horizon")
+                table.add_column("Count", justify="right")
+                table.add_column("Date Range")
+                for p in predictions:
+                    table.add_row(
+                        f"{p['horizon_days']}d",
+                        f"{p['count']:,}",
+                        p["date_range"] or "-",
+                    )
+                console.print(table)
+            else:
+                console.print("  (no predictions)")
+
+            # Performance table
+            performance = model_info.get("performance", [])
+            if performance:
+                console.print(f"\n[bold]Performance Metrics:[/bold]")
+                table = Table(show_header=True)
+                table.add_column("Horizon")
+                table.add_column("Q10 Calib", justify="right")
+                table.add_column("Q50 Calib", justify="right")
+                table.add_column("Q90 Calib", justify="right")
+                table.add_column("Loss", justify="right")
+                for p in performance:
+                    table.add_row(
+                        f"{p['horizon_days']}d",
+                        f"{p['q10_calibration']:.1f}%" if p['q10_calibration'] else "-",
+                        f"{p['q50_calibration']:.1f}%" if p['q50_calibration'] else "-",
+                        f"{p['q90_calibration']:.1f}%" if p['q90_calibration'] else "-",
+                        f"{p['quantile_loss']:.4f}" if p['quantile_loss'] else "-",
+                    )
+                console.print(table)
+
+
+@ml_app.command("model-delete")
+def ml_model_delete(
+    name: str = typer.Option(..., help="Model name to delete"),
+    version: str = typer.Option(..., help="Model version to delete"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Delete a model and its artifacts.
+
+    Deletes the model's database record, associated predictions, and artifact files.
+
+    Examples:
+        # Delete a model
+        g2 ml model-delete --name quantile --version 20260101
+    """
+    import shutil
+
+    with db_connection(db_url) as conn:
+        init_schema_tables(conn, ["ml_models", "quantile_predictions", "trend_predictions", "model_performance"])
+
+        with conn.cursor() as cur:
+            # Find the model
+            cur.execute(
+                "SELECT id, artifact_uri FROM ml_models WHERE name = %s AND version = %s",
+                (name, version),
+            )
+            row = cur.fetchone()
+
+            if not row:
+                emit_error(
+                    f"Model not found: {name} {version}",
+                    json_output=json_output,
+                )
+                return
+
+            model_id, artifact_uri = row
+
+            # Count predictions to report
+            prediction_count = 0
+            try:
+                cur.execute(
+                    "SELECT COUNT(*) FROM quantile_predictions WHERE model_id = %s",
+                    (model_id,),
+                )
+                prediction_count += cur.fetchone()[0]
+            except Exception:
+                pass
+
+            try:
+                cur.execute(
+                    "SELECT COUNT(*) FROM trend_predictions WHERE model_id = %s",
+                    (model_id,),
+                )
+                prediction_count += cur.fetchone()[0]
+            except Exception:
+                pass
+
+            # Delete predictions
+            try:
+                cur.execute("DELETE FROM quantile_predictions WHERE model_id = %s", (model_id,))
+            except Exception:
+                pass
+
+            try:
+                cur.execute("DELETE FROM trend_predictions WHERE model_id = %s", (model_id,))
+            except Exception:
+                pass
+
+            # Delete performance records
+            try:
+                cur.execute("DELETE FROM model_performance WHERE model_id = %s", (model_id,))
+            except Exception:
+                pass
+
+            # Delete model record
+            cur.execute("DELETE FROM ml_models WHERE id = %s", (model_id,))
+            conn.commit()
+
+            # Delete artifact files
+            files_deleted = False
+            if artifact_uri:
+                artifact_path = Path(artifact_uri)
+                # artifact_uri might point to a file or directory
+                model_dir = artifact_path if artifact_path.is_dir() else artifact_path.parent
+                if model_dir.exists() and model_dir.is_dir():
+                    shutil.rmtree(model_dir)
+                    files_deleted = True
+
+            emit(
+                f"Deleted model: {name} {version}"
+                + (f" ({prediction_count} predictions removed)" if prediction_count else "")
+                + (f" (removed {model_dir})" if files_deleted else ""),
+                data={
+                    "deleted": True,
+                    "name": name,
+                    "version": version,
+                    "predictions_removed": prediction_count,
+                    "files_removed": files_deleted,
+                },
+                json_output=json_output,
+            )
+
+
 @ml_app.command("train")
 def ml_train(
     dataset_name: str = typer.Option(..., help="Dataset name to train on"),
@@ -1129,7 +1422,9 @@ def ml_train(
 def ml_predict(
     model_name: str = typer.Option(..., help="Model name to use for predictions"),
     model_version: str = typer.Option(..., help="Model version"),
-    prediction_date: Optional[str] = typer.Option(None, help="Date to generate predictions for (YYYY-MM-DD). Auto-detects latest date with features if not provided."),
+    prediction_date: Optional[str] = typer.Option(None, "--prediction-date", "-d", help="Single date (YYYY-MM-DD). Auto-detects if not provided."),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="Start of date range (YYYY-MM-DD). Use with --end-date."),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="End of date range (YYYY-MM-DD). Use with --start-date."),
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
@@ -1139,6 +1434,9 @@ def ml_predict(
     """
     Generate predictions using a trained model.
 
+    Supports single date or date range. Date-smart: automatically skips
+    weekends and dates without computed features.
+
     Examples:
         # Generate predictions for specific symbols (auto-detect date)
         g2 ml predict --model-name tech_qr --model-version v1 --symbols AAPL,MSFT,GOOGL
@@ -1146,6 +1444,10 @@ def ml_predict(
         # Generate predictions for NASDAQ universe with explicit date
         g2 ml predict --model-name nasdaq_xgb --model-version v1 \\
             --prediction-date 2025-01-15 --exchange NASDAQ --limit 50
+
+        # Generate predictions for a date range (date-smart)
+        g2 ml predict --model-name quantile --model-version v1 \\
+            --start-date 2025-11-01 --end-date 2025-12-31 --symbols AAPL,MSFT
     """
     import pandas as pd
     from g2.ml.models import load_model_artifact, predict_quantiles
@@ -1221,10 +1523,71 @@ def ml_predict(
 
         data_ids = [u[0] for u in universe]
 
-        # Auto-detect prediction date if not provided
-        if not prediction_date:
+        # Validate date options
+        if (start_date and not end_date) or (end_date and not start_date):
+            emit_error("Both --start-date and --end-date must be provided for date range", json_output=json_output)
+            return
+
+        if prediction_date and (start_date or end_date):
+            emit_error("Cannot use --prediction-date with --start-date/--end-date", json_output=json_output)
+            return
+
+        # Determine dates to process
+        dates_to_process = []
+
+        if start_date and end_date:
+            # Date range mode - find all dates with features in range
+            from datetime import datetime as dt
+            start_dt = dt.strptime(start_date, "%Y-%m-%d").date()
+            end_dt = dt.strptime(end_date, "%Y-%m-%d").date()
+
+            if start_dt > end_dt:
+                emit_error("--start-date must be before --end-date", json_output=json_output)
+                return
+
             with conn.cursor() as cur:
-                # Find the latest date that has features for these symbols
+                # Find all dates with features for these symbols in range
+                cur.execute(
+                    """
+                    SELECT DISTINCT cf.date
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND fd.name = ANY(%s)
+                      AND cf.date >= %s
+                      AND cf.date <= %s
+                      AND EXTRACT(DOW FROM cf.date) NOT IN (0, 6)  -- Skip weekends
+                    ORDER BY cf.date;
+                    """,
+                    (data_ids, feature_names, start_date, end_date),
+                )
+                dates_to_process = [row[0].isoformat() for row in cur.fetchall()]
+
+            if not dates_to_process:
+                emit_error(
+                    f"No trading days with features found between {start_date} and {end_date}. "
+                    f"Run 'g2 data-update' to compute features.",
+                    json_output=json_output,
+                )
+                return
+
+            # Calculate skipped dates for reporting
+            from datetime import timedelta
+            total_days = (end_dt - start_dt).days + 1
+            skipped = total_days - len(dates_to_process)
+
+            emit(
+                f"Date range: {start_date} to {end_date} "
+                f"({len(dates_to_process)} trading days, skipped {skipped} days without features)",
+                json_output=json_output,
+            )
+
+        elif prediction_date:
+            # Single date mode
+            dates_to_process = [prediction_date]
+        else:
+            # Auto-detect latest date
+            with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT MAX(cf.date)
@@ -1239,46 +1602,25 @@ def ml_predict(
                 if not row or not row[0]:
                     emit_error(f"No features found for symbols. Ensure data-update has been run.", json_output=json_output)
                     return
-                prediction_date = row[0].isoformat()
-                emit(f"Auto-detected prediction date: {prediction_date}", json_output=json_output)
+                dates_to_process = [row[0].isoformat()]
+                emit(f"Auto-detected prediction date: {dates_to_process[0]}", json_output=json_output)
 
-        emit(f"Generating predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
+        # Process each date
+        grand_total_predictions = 0
+        dates_processed = 0
+        dates_skipped = 0
 
-        # Fetch features for all symbols on prediction_date
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT cf.data_id, fd.name, cf.value
-                FROM computed_features cf
-                JOIN feature_definitions fd ON cf.feature_id = fd.id
-                WHERE cf.data_id = ANY(%s)
-                  AND cf.date = %s
-                  AND fd.name = ANY(%s);
-                """,
-                (data_ids, prediction_date, feature_names),
-            )
-            features_data = cur.fetchall()
-
-        if not features_data:
-            emit_error(f"No features found for {prediction_date}", json_output=json_output)
-            return
-
-        # Convert to DataFrame and pivot to wide format
-        features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
-        features_wide = features_df.pivot_table(
-            index="data_id",
-            columns="feature_name",
-            values="value",
-            aggfunc="first"
-        )
-
-        emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
-
-        # Generate predictions for each horizon
+        # Import required modules for prediction loop
         from psycopg.types.json import Json
         from decimal import Decimal
 
-        # Create run record
+        # Pre-load models (same for all dates)
+        horizon_models = {}
+        for horizon in horizons:
+            horizon_model_path = Path(f"{artifact_uri}_h{horizon}")
+            horizon_models[horizon] = load_model_artifact(horizon_model_path)
+
+        # Create run record for batch
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -1292,7 +1634,7 @@ def ml_predict(
                         {
                             "model_name": model_name,
                             "model_version": model_version,
-                            "prediction_date": prediction_date,
+                            "dates": dates_to_process if len(dates_to_process) > 1 else dates_to_process[0],
                             "universe": {"symbols": sym_list} if sym_list else {"exchange": exchange},
                         }
                     ),
@@ -1300,45 +1642,108 @@ def ml_predict(
             )
             run_id = int(cur.fetchone()[0])
 
-        total_predictions = 0
-        for horizon in horizons:
-            emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
+        for date_idx, current_date in enumerate(dates_to_process, 1):
+            if len(dates_to_process) > 1:
+                emit(
+                    f"[{date_idx}/{len(dates_to_process)}] Processing {current_date}...",
+                    data={"date_idx": date_idx, "total_dates": len(dates_to_process), "current_date": current_date},
+                    json_output=json_output,
+                )
+            else:
+                emit(f"Generating predictions for {len(universe)} symbols on {current_date}", json_output=json_output)
 
-            # Load model for this horizon
-            # Model artifacts are saved as {artifact_uri}_h{horizon} (sibling dirs, not subdirs)
-            horizon_model_path = Path(f"{artifact_uri}_h{horizon}")
-            model_data = load_model_artifact(horizon_model_path)
-
-            # Generate predictions
-            predictions = predict_quantiles(model_data, features_wide)
-
-            # Insert predictions into database
+            # Fetch features for all symbols on current_date
             with conn.cursor() as cur:
-                for data_id in predictions.index:
-                    q10 = Decimal(str(predictions.loc[data_id, "q10"]))
-                    q50 = Decimal(str(predictions.loc[data_id, "q50"]))
-                    q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+                cur.execute(
+                    """
+                    SELECT cf.data_id, fd.name, cf.value
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND cf.date = %s
+                      AND fd.name = ANY(%s);
+                    """,
+                    (data_ids, current_date, feature_names),
+                )
+                features_data = cur.fetchall()
 
-                    cur.execute(
-                        """
-                        INSERT INTO quantile_predictions
-                          (model_id, data_id, prediction_date, horizon_days, q10, q50, q90,
-                           model_version, run_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
-                        DO UPDATE SET
-                          q10 = EXCLUDED.q10,
-                          q50 = EXCLUDED.q50,
-                          q90 = EXCLUDED.q90,
-                          model_version = EXCLUDED.model_version,
-                          run_id = EXCLUDED.run_id,
-                          created_at = NOW();
-                        """,
-                        (model_id, int(data_id), prediction_date, horizon, q10, q50, q90, model_version, run_id),
-                    )
-                    total_predictions += 1
+            if not features_data:
+                # Skip dates without features in batch mode
+                if len(dates_to_process) > 1:
+                    dates_skipped += 1
+                    continue
+                else:
+                    # Single date mode - show helpful error
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT MAX(date) FROM computed_features WHERE data_id = ANY(%s)",
+                            (data_ids,),
+                        )
+                        row = cur.fetchone()
+                        latest_date = row[0] if row else None
 
-            emit(f"  Stored {len(predictions)} predictions for {horizon}-day horizon", json_output=json_output)
+                    if latest_date:
+                        emit_error(
+                            f"No features found for {current_date}. "
+                            f"Latest available: {latest_date}. "
+                            f"Run 'g2 data-update' to compute features for more recent dates.",
+                            json_output=json_output,
+                        )
+                    else:
+                        emit_error(
+                            f"No features found for {current_date}. "
+                            f"Run 'g2 data-update' to compute features first.",
+                            json_output=json_output,
+                        )
+                    return
+
+            # Convert to DataFrame and pivot to wide format
+            features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
+            features_wide = features_df.pivot_table(
+                index="data_id",
+                columns="feature_name",
+                values="value",
+                aggfunc="first"
+            )
+
+            date_predictions = 0
+            for horizon in horizons:
+                model_data = horizon_models[horizon]
+                predictions = predict_quantiles(model_data, features_wide)
+
+                # Insert predictions into database
+                with conn.cursor() as cur:
+                    for data_id in predictions.index:
+                        q10 = Decimal(str(predictions.loc[data_id, "q10"]))
+                        q50 = Decimal(str(predictions.loc[data_id, "q50"]))
+                        q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+
+                        cur.execute(
+                            """
+                            INSERT INTO quantile_predictions
+                              (model_id, data_id, prediction_date, horizon_days, q10, q50, q90,
+                               model_version, run_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
+                            DO UPDATE SET
+                              q10 = EXCLUDED.q10,
+                              q50 = EXCLUDED.q50,
+                              q90 = EXCLUDED.q90,
+                              model_version = EXCLUDED.model_version,
+                              run_id = EXCLUDED.run_id,
+                              created_at = NOW();
+                            """,
+                            (model_id, int(data_id), current_date, horizon, q10, q50, q90, model_version, run_id),
+                        )
+                        date_predictions += 1
+                        grand_total_predictions += 1
+
+            dates_processed += 1
+
+            if len(dates_to_process) == 1:
+                for horizon in horizons:
+                    preds_per_horizon = len(features_wide)
+                    emit(f"  Stored {preds_per_horizon} predictions for {horizon}-day horizon", json_output=json_output)
 
         # Mark run as complete
         with conn.cursor() as cur:
@@ -1352,12 +1757,307 @@ def ml_predict(
 
         conn.commit()
 
-    emit(f"Generated {total_predictions} predictions", json_output=json_output)
-    emit(
-        f"Predictions generated: {model_name} {model_version} for {prediction_date}",
-        data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizons": horizons},
-        json_output=json_output,
-    )
+    # Final summary
+    if len(dates_to_process) > 1:
+        emit(
+            f"Batch complete: {grand_total_predictions} predictions across {dates_processed} dates",
+            data={
+                "model_id": model_id,
+                "run_id": run_id,
+                "total_predictions": grand_total_predictions,
+                "dates_processed": dates_processed,
+                "dates_skipped": dates_skipped,
+                "horizons": horizons,
+            },
+            json_output=json_output,
+        )
+    else:
+        emit(f"Generated {grand_total_predictions} predictions", json_output=json_output)
+        emit(
+            f"Predictions generated: {model_name} {model_version} for {dates_to_process[0]}",
+            data={
+                "model_id": model_id,
+                "run_id": run_id,
+                "prediction_date": dates_to_process[0],
+                "total_predictions": grand_total_predictions,
+                "horizons": horizons,
+            },
+            json_output=json_output,
+        )
+
+
+@ml_app.command("predict-list")
+def ml_predict_list(
+    model_name: Optional[str] = typer.Option(None, "--model-name", help="Filter by model name"),
+    model_version: Optional[str] = typer.Option(None, "--model-version", help="Filter by model version"),
+    symbol: Optional[str] = typer.Option(None, "--symbol", help="Filter by symbol"),
+    prediction_date: Optional[str] = typer.Option(None, "--date", help="Filter by prediction date (YYYY-MM-DD)"),
+    limit: int = typer.Option(50, help="Maximum number of results"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    List predictions with optional filters.
+
+    Shows prediction summaries grouped by model, date, and symbol.
+
+    Examples:
+        # List all recent predictions
+        g2 ml predict-list
+
+        # Filter by model
+        g2 ml predict-list --model-name quantile --model-version 20260101
+
+        # Filter by symbol
+        g2 ml predict-list --symbol AAPL
+    """
+    with db_connection(db_url) as conn:
+        init_schema_tables(conn, ["quantile_predictions", "ml_models", "stocks"])
+
+        with conn.cursor() as cur:
+            # Build query with optional filters
+            conditions = []
+            params = []
+
+            if model_name:
+                conditions.append("m.name = %s")
+                params.append(model_name)
+            if model_version:
+                conditions.append("m.version = %s")
+                params.append(model_version)
+            if symbol:
+                conditions.append("s.symbol = %s")
+                params.append(symbol)
+            if prediction_date:
+                conditions.append("qp.prediction_date = %s")
+                params.append(prediction_date)
+
+            where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+            params.append(limit)
+
+            cur.execute(
+                f"""
+                SELECT m.name, m.version, s.symbol, qp.prediction_date,
+                       qp.horizon_days, qp.q10, qp.q50, qp.q90
+                FROM quantile_predictions qp
+                JOIN ml_models m ON qp.model_id = m.id
+                JOIN stocks s ON qp.data_id = s.id
+                {where_clause}
+                ORDER BY qp.prediction_date DESC, s.symbol, qp.horizon_days
+                LIMIT %s
+                """,
+                params,
+            )
+            rows = cur.fetchall()
+
+            if not rows:
+                emit("No predictions found matching criteria", json_output=json_output)
+                return
+
+            predictions = [
+                {
+                    "model": f"{r[0]} {r[1]}",
+                    "symbol": r[2],
+                    "date": str(r[3]),
+                    "horizon": r[4],
+                    "q10": float(r[5]) if r[5] else None,
+                    "q50": float(r[6]) if r[6] else None,
+                    "q90": float(r[7]) if r[7] else None,
+                }
+                for r in rows
+            ]
+
+            if json_output:
+                emit(
+                    f"Found {len(predictions)} predictions",
+                    data={"predictions": predictions, "count": len(predictions)},
+                    json_output=json_output,
+                )
+            else:
+                from rich.console import Console
+                from rich.table import Table
+
+                console = Console()
+                console.print(f"\n[bold]Predictions ({len(predictions)} found):[/bold]\n")
+
+                table = Table(show_header=True)
+                table.add_column("Model")
+                table.add_column("Symbol")
+                table.add_column("Date")
+                table.add_column("Horizon")
+                table.add_column("Q10", justify="right")
+                table.add_column("Q50", justify="right")
+                table.add_column("Q90", justify="right")
+
+                for p in predictions:
+                    table.add_row(
+                        p["model"],
+                        p["symbol"],
+                        p["date"],
+                        f"{p['horizon']}d",
+                        f"{p['q10']:.2%}" if p["q10"] else "-",
+                        f"{p['q50']:.2%}" if p["q50"] else "-",
+                        f"{p['q90']:.2%}" if p["q90"] else "-",
+                    )
+
+                console.print(table)
+
+
+@ml_app.command("predict-inspect")
+def ml_predict_inspect(
+    symbol: str = typer.Option(..., "--symbol", help="Symbol to inspect"),
+    model_name: Optional[str] = typer.Option(None, "--model-name", help="Model name (uses latest if not specified)"),
+    model_version: Optional[str] = typer.Option(None, "--model-version", help="Model version"),
+    prediction_date: Optional[str] = typer.Option(None, "--date", help="Prediction date (uses latest if not specified)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Inspect predictions for a specific symbol.
+
+    Shows detailed prediction information including all horizons and price context.
+
+    Examples:
+        # Inspect latest predictions for a symbol
+        g2 ml predict-inspect --symbol AAPL
+
+        # Inspect predictions from specific model and date
+        g2 ml predict-inspect --symbol AAPL --model-name quantile --date 2025-12-03
+    """
+    with db_connection(db_url) as conn:
+        init_schema_tables(conn, ["quantile_predictions", "ml_models", "stocks", "stock_ohlcv"])
+
+        with conn.cursor() as cur:
+            # Find the stock
+            cur.execute("SELECT id FROM stocks WHERE symbol = %s", (symbol,))
+            row = cur.fetchone()
+            if not row:
+                emit_error(f"Symbol not found: {symbol}", json_output=json_output)
+                return
+            data_id = row[0]
+
+            # Build query for predictions
+            conditions = ["qp.data_id = %s"]
+            params = [data_id]
+
+            if model_name:
+                conditions.append("m.name = %s")
+                params.append(model_name)
+            if model_version:
+                conditions.append("m.version = %s")
+                params.append(model_version)
+            if prediction_date:
+                conditions.append("qp.prediction_date = %s")
+                params.append(prediction_date)
+
+            where_clause = " AND ".join(conditions)
+
+            cur.execute(
+                f"""
+                SELECT m.name, m.version, qp.prediction_date, qp.horizon_days,
+                       qp.q10, qp.q50, qp.q90, qp.created_at
+                FROM quantile_predictions qp
+                JOIN ml_models m ON qp.model_id = m.id
+                WHERE {where_clause}
+                ORDER BY qp.prediction_date DESC, qp.horizon_days
+                LIMIT 20
+                """,
+                params,
+            )
+            predictions = cur.fetchall()
+
+            if not predictions:
+                emit_error(f"No predictions found for {symbol}", json_output=json_output)
+                return
+
+            # Get latest price for context
+            cur.execute(
+                """
+                SELECT date, close, adjusted_close
+                FROM stock_ohlcv
+                WHERE data_id = %s
+                ORDER BY date DESC
+                LIMIT 1
+                """,
+                (data_id,),
+            )
+            price_row = cur.fetchone()
+            latest_price = None
+            price_date = None
+            if price_row:
+                price_date = str(price_row[0])
+                latest_price = float(price_row[2] or price_row[1])
+
+            prediction_data = [
+                {
+                    "model": f"{p[0]} {p[1]}",
+                    "model_name": p[0],
+                    "model_version": p[1],
+                    "prediction_date": str(p[2]),
+                    "horizon_days": p[3],
+                    "q10": float(p[4]) if p[4] else None,
+                    "q50": float(p[5]) if p[5] else None,
+                    "q90": float(p[6]) if p[6] else None,
+                    "created_at": str(p[7]) if p[7] else None,
+                }
+                for p in predictions
+            ]
+
+            result = {
+                "symbol": symbol,
+                "latest_price": latest_price,
+                "price_date": price_date,
+                "predictions": prediction_data,
+            }
+
+            if json_output:
+                emit(
+                    f"Predictions for {symbol}",
+                    data=result,
+                    json_output=json_output,
+                )
+            else:
+                from rich.console import Console
+                from rich.table import Table
+
+                console = Console()
+                console.print(f"\n[bold]Predictions for {symbol}[/bold]")
+                if latest_price:
+                    console.print(f"  Latest price: ${latest_price:.2f} ({price_date})")
+                console.print()
+
+                # Group by prediction date
+                dates = sorted(set(p["prediction_date"] for p in prediction_data), reverse=True)
+
+                for pred_date in dates:
+                    date_preds = [p for p in prediction_data if p["prediction_date"] == pred_date]
+                    model = date_preds[0]["model"]
+                    console.print(f"[bold]Date: {pred_date}[/bold] (Model: {model})")
+
+                    table = Table(show_header=True)
+                    table.add_column("Horizon")
+                    table.add_column("Q10 (Downside)", justify="right")
+                    table.add_column("Q50 (Median)", justify="right")
+                    table.add_column("Q90 (Upside)", justify="right")
+                    if latest_price:
+                        table.add_column("Q50 Price", justify="right")
+
+                    for p in sorted(date_preds, key=lambda x: x["horizon_days"]):
+                        row = [
+                            f"{p['horizon_days']}d",
+                            f"{p['q10']:.2%}" if p["q10"] else "-",
+                            f"{p['q50']:.2%}" if p["q50"] else "-",
+                            f"{p['q90']:.2%}" if p["q90"] else "-",
+                        ]
+                        if latest_price and p["q50"]:
+                            projected = latest_price * (1 + p["q50"])
+                            row.append(f"${projected:.2f}")
+                        elif latest_price:
+                            row.append("-")
+                        table.add_row(*row)
+
+                    console.print(table)
+                    console.print()
 
 
 @ml_app.command("eval")
@@ -1505,48 +2205,43 @@ def ml_eval(
             )
             run_id = int(cur.fetchone()[0])
 
-        # Store metrics in model_performance (one row per horizon)
-        # Note: model_performance has model_id as PRIMARY KEY, so we can only store one horizon
-        # For now, store the first horizon's metrics
+        # Store metrics in model_performance (one row per model+horizon)
         if all_metrics:
-            first_horizon = sorted(all_metrics.keys())[0]
-            first_metrics = all_metrics[first_horizon]
-
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO model_performance
-                      (model_id, model_name, horizon_days, q10_calibration, q50_calibration, q90_calibration,
-                       quantile_loss, avg_iqr, eval_start_date, eval_end_date, num_predictions, eval_run_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (model_id) DO UPDATE SET
-                      horizon_days = EXCLUDED.horizon_days,
-                      q10_calibration = EXCLUDED.q10_calibration,
-                      q50_calibration = EXCLUDED.q50_calibration,
-                      q90_calibration = EXCLUDED.q90_calibration,
-                      quantile_loss = EXCLUDED.quantile_loss,
-                      avg_iqr = EXCLUDED.avg_iqr,
-                      eval_start_date = EXCLUDED.eval_start_date,
-                      eval_end_date = EXCLUDED.eval_end_date,
-                      num_predictions = EXCLUDED.num_predictions,
-                      eval_run_id = EXCLUDED.eval_run_id,
-                      updated_at = NOW();
-                    """,
-                    (
-                        model_id,
-                        model_name,
-                        first_horizon,
-                        Decimal(str(first_metrics.get("q10_calibration", 0))),
-                        Decimal(str(first_metrics.get("q50_calibration", 0))),
-                        Decimal(str(first_metrics.get("q90_calibration", 0))),
-                        Decimal(str(first_metrics.get("quantile_loss", 0))) if "quantile_loss" in first_metrics else None,
-                        Decimal(str(first_metrics.get("avg_iqr", 0))) if "avg_iqr" in first_metrics else None,
-                        start_date,
-                        end_date,
-                        first_metrics.get("num_samples", 0),
-                        run_id,
-                    ),
-                )
+                for horizon, metrics in all_metrics.items():
+                    cur.execute(
+                        """
+                        INSERT INTO model_performance
+                          (model_id, model_name, horizon_days, q10_calibration, q50_calibration, q90_calibration,
+                           quantile_loss, avg_iqr, eval_start_date, eval_end_date, num_predictions, eval_run_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (model_id, horizon_days) DO UPDATE SET
+                          q10_calibration = EXCLUDED.q10_calibration,
+                          q50_calibration = EXCLUDED.q50_calibration,
+                          q90_calibration = EXCLUDED.q90_calibration,
+                          quantile_loss = EXCLUDED.quantile_loss,
+                          avg_iqr = EXCLUDED.avg_iqr,
+                          eval_start_date = EXCLUDED.eval_start_date,
+                          eval_end_date = EXCLUDED.eval_end_date,
+                          num_predictions = EXCLUDED.num_predictions,
+                          eval_run_id = EXCLUDED.eval_run_id,
+                          updated_at = NOW();
+                        """,
+                        (
+                            model_id,
+                            model_name,
+                            horizon,
+                            Decimal(str(metrics.get("q10_calibration", 0))),
+                            Decimal(str(metrics.get("q50_calibration", 0))),
+                            Decimal(str(metrics.get("q90_calibration", 0))),
+                            Decimal(str(metrics.get("quantile_loss", 0))) if "quantile_loss" in metrics else None,
+                            Decimal(str(metrics.get("avg_iqr", 0))) if "avg_iqr" in metrics else None,
+                            start_date,
+                            end_date,
+                            metrics.get("num_samples", 0),
+                            run_id,
+                        ),
+                    )
 
         # Mark run as complete
         with conn.cursor() as cur:
@@ -1671,12 +2366,13 @@ def ml_tune(
 
     # Load dataset
     datasets_dir = Path("datasets")
-    manifest_path = datasets_dir / dataset_name / dataset_version / "manifest.json"
+    dataset_dir = datasets_dir / f"{dataset_name}_{dataset_version}"
+    manifest_path = dataset_dir / "manifest.json"
 
     if not manifest_path.exists():
         emit_error(
             f"Dataset not found: {manifest_path}\n"
-            f"Build dataset first with: g2 ml dataset-build --name {dataset_name} --version {dataset_version}",
+            f"Build dataset first with: g2 ml dataset-build --name {dataset_name} --version {dataset_version} --export",
             json_output=json_output
         )
         return
@@ -1692,9 +2388,9 @@ def ml_tune(
             manifest = json_module.load(f)
 
         # Load features
-        features_path = datasets_dir / dataset_name / dataset_version / "features.csv"
+        features_path = dataset_dir / "features.csv"
         if not features_path.exists():
-            features_path = datasets_dir / dataset_name / dataset_version / "features.parquet"
+            features_path = dataset_dir / "features.parquet"
 
         if features_path.suffix == ".parquet":
             features_df = pd.read_parquet(features_path)
@@ -1702,9 +2398,9 @@ def ml_tune(
             features_df = pd.read_csv(features_path)
 
         # Load labels
-        labels_path = datasets_dir / dataset_name / dataset_version / "labels.csv"
+        labels_path = dataset_dir / "labels.csv"
         if not labels_path.exists():
-            labels_path = datasets_dir / dataset_name / dataset_version / "labels.parquet"
+            labels_path = dataset_dir / "labels.parquet"
 
         if labels_path.suffix == ".parquet":
             labels_df = pd.read_parquet(labels_path)
@@ -2022,7 +2718,28 @@ def ml_predict_classifier(
             features_data = cur.fetchall()
 
         if not features_data:
-            emit_error(f"No features found for {prediction_date}", json_output=json_output)
+            # Find latest available date to help user
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT MAX(date) FROM computed_features WHERE data_id = ANY(%s)",
+                    (data_ids,),
+                )
+                row = cur.fetchone()
+                latest_date = row[0] if row else None
+
+            if latest_date:
+                emit_error(
+                    f"No features found for {prediction_date}. "
+                    f"Latest available: {latest_date}. "
+                    f"Run 'g2 data-update' to compute features for more recent dates.",
+                    json_output=json_output,
+                )
+            else:
+                emit_error(
+                    f"No features found for {prediction_date}. "
+                    f"Run 'g2 data-update' to compute features first.",
+                    json_output=json_output,
+                )
             return
 
         # Convert to DataFrame and pivot to wide format
@@ -2410,7 +3127,28 @@ def ml_predict_ensemble(
             features_data = cur.fetchall()
 
         if not features_data:
-            emit_error(f"No features found for {prediction_date}", json_output=json_output)
+            # Find latest available date to help user
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT MAX(date) FROM computed_features WHERE data_id = ANY(%s)",
+                    (data_ids,),
+                )
+                row = cur.fetchone()
+                latest_date = row[0] if row else None
+
+            if latest_date:
+                emit_error(
+                    f"No features found for {prediction_date}. "
+                    f"Latest available: {latest_date}. "
+                    f"Run 'g2 data-update' to compute features for more recent dates.",
+                    json_output=json_output,
+                )
+            else:
+                emit_error(
+                    f"No features found for {prediction_date}. "
+                    f"Run 'g2 data-update' to compute features first.",
+                    json_output=json_output,
+                )
             return
 
         # Convert to DataFrame and pivot to wide format
@@ -3341,6 +4079,17 @@ def _db_init_impl(db_url, json_output):
                 f"Seeded {fx_count} feature function(s) and {def_count} feature definition(s)",
                 json_output=json_output
             )
+
+        # Seed built-in trading strategies
+        from g2.strategies.dispatcher import seed_builtin_strategies
+        with db_connection(url) as conn:
+            init_schema_tables(conn, ["strategy_registry"])
+            strat_count = seed_builtin_strategies(conn)
+            if strat_count > 0:
+                emit(
+                    f"Seeded {strat_count} trading strategy(ies)",
+                    json_output=json_output
+                )
 
     except Exception as exc:
         emit_error(f"Initialization failed: {exc}", json_output=json_output)
