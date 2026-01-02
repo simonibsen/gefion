@@ -208,12 +208,12 @@ CREATE TABLE IF NOT EXISTS ml_datasets (
     version TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
     universe JSONB,
-    feature_names JSONB,
-    lookback_days INTEGER,
-    horizons_days JSONB,
-    label_spec JSONB,
-    split_spec JSONB,
-    artifact_uri TEXT,
+    feature_names TEXT[] NOT NULL,
+    lookback_days INTEGER NOT NULL,
+    horizons_days INTEGER[] NOT NULL,
+    label_spec JSONB NOT NULL,
+    split_spec JSONB NOT NULL,
+    artifact_uri TEXT NOT NULL,
     checksum TEXT,
     UNIQUE (name, version)
 );

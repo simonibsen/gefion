@@ -173,10 +173,10 @@ def test_discovered_features_match_computed_features(db_conn):
 
 
 def test_upsert_ml_dataset_array_columns(db_conn):
-    """Test that upsert_ml_dataset properly handles array columns.
+    """Test that upsert_ml_dataset properly handles PostgreSQL array columns.
 
-    Regression test: horizons_days (integer[]) and feature_names (text[])
-    are PostgreSQL array columns and should be passed as Python lists.
+    Regression test: horizons_days (INTEGER[]) and feature_names (TEXT[])
+    are PostgreSQL array columns - pass Python lists directly.
     """
     from g2.ml.store import upsert_ml_dataset
 
