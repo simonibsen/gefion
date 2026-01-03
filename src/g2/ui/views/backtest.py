@@ -952,18 +952,48 @@ def render_compare_section():
         from g2.ui.components.database import get_symbols
         symbols = get_symbols()
 
-        selected_symbols = st.multiselect(
-            "Symbols",
-            symbols,
-            default=symbols[:10] if len(symbols) >= 10 else symbols,
-            key="cmp_symbols",
+        symbol_mode = st.radio(
+            "Symbol Selection",
+            ["Selected", "Exchange"],
+            horizontal=True,
+            key="cmp_symbol_mode",
         )
+
+        if symbol_mode == "Selected":
+            selected_symbols = st.multiselect(
+                "Select Symbols",
+                symbols,
+                default=symbols[:10] if len(symbols) >= 10 else symbols,
+                key="cmp_symbols",
+            )
+        else:
+            cmp_exchange = st.selectbox(
+                "Exchange",
+                ["NASDAQ", "NYSE"],
+                key="cmp_exchange",
+            )
+            cmp_limit = st.number_input(
+                "Limit",
+                min_value=5,
+                max_value=100,
+                value=20,
+                key="cmp_limit",
+            )
 
     if len(strategies) < 2:
         st.warning("Select at least 2 strategies to compare.")
         return
 
+    # Validate symbol selection
+    if symbol_mode == "Selected" and not selected_symbols:
+        st.warning("⚠️ Please select at least one symbol to compare.")
+
     if st.button("⚔️ Compare", type="primary", use_container_width=True):
+        # Validate before running
+        if symbol_mode == "Selected" and not selected_symbols:
+            st.error("No symbols selected. Please select at least one symbol.")
+            st.stop()
+
         # Build command
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
@@ -973,9 +1003,13 @@ def render_compare_section():
             "--strategies", ",".join(strategies),
             "--start-date", str(start_date),
             "--end-date", str(end_date),
-            "--symbols", ",".join(selected_symbols),
             "--json",
         ]
+
+        if symbol_mode == "Selected":
+            cmd.extend(["--symbols", ",".join(selected_symbols)])
+        else:
+            cmd.extend(["--exchange", cmp_exchange, "--limit", str(cmp_limit)])
 
         # Show equivalent CLI command (skip "python -m g2.cli" prefix)
         cli_args = cmd[3:]  # Skip [python, -m, g2.cli]
