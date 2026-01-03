@@ -4348,6 +4348,96 @@ def _db_init_impl(db_url, json_output):
         emit_error(f"Initialization failed: {exc}", json_output=json_output)
 
 
+@app.command("db-cleanup")
+def db_cleanup(
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be deleted without deleting"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Remove orphaned data from database tables.
+
+    Cleans up data that references non-existent stocks (e.g., after stocks table was reset).
+    This includes computed_features, stock_ohlcv, quantile_predictions, and trend_class_predictions.
+
+    Examples:
+        # Preview what would be deleted
+        g2 db-cleanup --dry-run
+
+        # Remove orphaned data
+        g2 db-cleanup
+    """
+    url = _db_url(db_url)
+
+    orphan_queries = [
+        ("computed_features", "DELETE FROM computed_features WHERE data_id NOT IN (SELECT id FROM stocks)"),
+        ("stock_ohlcv", "DELETE FROM stock_ohlcv WHERE data_id NOT IN (SELECT id FROM stocks)"),
+        ("quantile_predictions", "DELETE FROM quantile_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+        ("trend_class_predictions", "DELETE FROM trend_class_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+    ]
+
+    count_queries = [
+        ("computed_features", "SELECT COUNT(*) FROM computed_features WHERE data_id NOT IN (SELECT id FROM stocks)"),
+        ("stock_ohlcv", "SELECT COUNT(*) FROM stock_ohlcv WHERE data_id NOT IN (SELECT id FROM stocks)"),
+        ("quantile_predictions", "SELECT COUNT(*) FROM quantile_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+        ("trend_class_predictions", "SELECT COUNT(*) FROM trend_class_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+    ]
+
+    try:
+        with db_connection(url) as conn:
+            total_orphans = 0
+            results = {}
+
+            # Count orphans first
+            with conn.cursor() as cur:
+                for table_name, query in count_queries:
+                    try:
+                        cur.execute(query)
+                        count = cur.fetchone()[0]
+                        results[table_name] = count
+                        total_orphans += count
+                    except Exception:
+                        results[table_name] = 0  # Table might not exist
+
+            if total_orphans == 0:
+                emit("No orphaned data found", json_output=json_output)
+                return
+
+            # Report findings
+            emit(f"Found {total_orphans} orphaned record(s):", json_output=json_output)
+            for table_name, count in results.items():
+                if count > 0:
+                    emit(f"  {table_name}: {count}", json_output=json_output)
+
+            if dry_run:
+                emit("Dry run - no data deleted", json_output=json_output)
+                return
+
+            # Delete orphans
+            deleted = {}
+            with conn.cursor() as cur:
+                for table_name, query in orphan_queries:
+                    if results.get(table_name, 0) > 0:
+                        try:
+                            cur.execute(query)
+                            deleted[table_name] = cur.rowcount
+                        except Exception as e:
+                            emit(f"  Warning: Could not clean {table_name}: {e}", json_output=json_output)
+
+            conn.commit()
+
+            total_deleted = sum(deleted.values())
+            emit(f"Deleted {total_deleted} orphaned record(s)", json_output=json_output)
+            emit(
+                "Cleanup complete",
+                data={"deleted": deleted, "total": total_deleted},
+                json_output=json_output,
+            )
+
+    except Exception as exc:
+        emit_error(f"Cleanup failed: {exc}", json_output=json_output)
+
+
 @app.command("db-migrate")
 def db_migrate(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
