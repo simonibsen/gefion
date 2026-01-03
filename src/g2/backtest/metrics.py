@@ -5,6 +5,7 @@ Calculate returns, risk metrics, and performance statistics.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 from typing import Any, Dict, List
 
@@ -267,6 +268,100 @@ def calculate_trade_metrics(trades: List[Dict[str, Any]]) -> Dict[str, float]:
     }
 
 
+def calculate_monthly_returns(equity_curve: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Calculate monthly returns from equity curve.
+
+    Args:
+        equity_curve: List of {date, equity} points
+
+    Returns:
+        List of {month: "YYYY-MM", return: float, return_pct: float}
+    """
+    if len(equity_curve) < 2:
+        return []
+
+    from collections import defaultdict
+
+    # Group by month
+    monthly_equity = defaultdict(list)
+    for point in equity_curve:
+        d = point["date"]
+        if isinstance(d, str):
+            month_key = d[:7]  # "YYYY-MM"
+        else:
+            month_key = d.strftime("%Y-%m")
+        monthly_equity[month_key].append(point["equity"])
+
+    # Calculate return for each month
+    monthly_returns = []
+    sorted_months = sorted(monthly_equity.keys())
+
+    for i, month in enumerate(sorted_months):
+        equities = monthly_equity[month]
+        end_equity = equities[-1]
+
+        if i == 0:
+            # First month: use first equity as start
+            start_equity = equities[0]
+        else:
+            # Use last equity of previous month
+            prev_month = sorted_months[i - 1]
+            start_equity = monthly_equity[prev_month][-1]
+
+        if start_equity > 0:
+            ret = (end_equity - start_equity) / start_equity
+        else:
+            ret = 0.0
+
+        monthly_returns.append({
+            "month": month,
+            "return": round(ret, 4),
+            "return_pct": round(ret * 100, 2),
+        })
+
+    return monthly_returns
+
+
+def calculate_drawdown_series(equity_curve: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Calculate drawdown at each point in time.
+
+    Args:
+        equity_curve: List of {date, equity} points
+
+    Returns:
+        List of {date, drawdown, drawdown_pct}
+    """
+    if not equity_curve:
+        return []
+
+    drawdown_series = []
+    peak_equity = equity_curve[0]["equity"]
+
+    for point in equity_curve:
+        equity = point["equity"]
+        d = point["date"]
+
+        # Update peak
+        if equity > peak_equity:
+            peak_equity = equity
+
+        # Calculate drawdown
+        if peak_equity > 0:
+            dd = (equity - peak_equity) / peak_equity
+        else:
+            dd = 0.0
+
+        drawdown_series.append({
+            "date": str(d) if not isinstance(d, str) else d,
+            "drawdown": round(dd, 4),
+            "drawdown_pct": round(dd * 100, 2),
+        })
+
+    return drawdown_series
+
+
 def calculate_metrics_extended(
     equity_curve: List[Dict[str, Any]],
     trades: List[Dict[str, Any]],
@@ -302,4 +397,123 @@ def calculate_metrics_extended(
         "sortino_ratio": sortino,
         "calmar_ratio": calmar,
         **trade_metrics,
+    }
+
+
+def calculate_benchmark(
+    price_data: List[Dict[str, Any]],
+    initial_capital: float,
+    start_date: date,
+    end_date: date,
+) -> Dict[str, Any]:
+    """
+    Calculate buy-and-hold benchmark for comparison.
+
+    Creates an equal-weighted portfolio of all symbols at start,
+    holds through end, and returns equity curve.
+
+    Args:
+        price_data: List of price records with symbol, date, close, high, low, volume
+        initial_capital: Starting capital
+        start_date: Start date for benchmark
+        end_date: End date for benchmark
+
+    Returns:
+        Dict with:
+            - equity_curve: List of {date, equity} points
+            - total_return: Total return as fraction
+            - total_return_pct: Total return as percentage
+    """
+    if not price_data:
+        return {
+            "equity_curve": [],
+            "total_return": 0.0,
+            "total_return_pct": 0.0,
+        }
+
+    # Group prices by date and symbol
+    prices_by_date: Dict[date, Dict[str, float]] = defaultdict(dict)
+    symbols = set()
+
+    for row in price_data:
+        d = row.get("date")
+        if isinstance(d, str):
+            from datetime import datetime
+            d = datetime.strptime(d, "%Y-%m-%d").date()
+
+        if start_date <= d <= end_date:
+            symbol = row.get("symbol", "")
+            price = row.get("close", 0)
+            if symbol and price > 0:
+                prices_by_date[d][symbol] = price
+                symbols.add(symbol)
+
+    if not prices_by_date or not symbols:
+        return {
+            "equity_curve": [],
+            "total_return": 0.0,
+            "total_return_pct": 0.0,
+        }
+
+    # Sort trading dates
+    trading_dates = sorted(prices_by_date.keys())
+    if not trading_dates:
+        return {
+            "equity_curve": [],
+            "total_return": 0.0,
+            "total_return_pct": 0.0,
+        }
+
+    # Get starting prices (first available price for each symbol)
+    start_prices = {}
+    for d in trading_dates:
+        for sym in symbols:
+            if sym not in start_prices and sym in prices_by_date[d]:
+                start_prices[sym] = prices_by_date[d][sym]
+        if len(start_prices) == len(symbols):
+            break
+
+    # Calculate equal-weight positions
+    active_symbols = [s for s in symbols if s in start_prices]
+    if not active_symbols:
+        return {
+            "equity_curve": [],
+            "total_return": 0.0,
+            "total_return_pct": 0.0,
+        }
+
+    per_symbol = initial_capital / len(active_symbols)
+    positions = {sym: per_symbol / start_prices[sym] for sym in active_symbols}
+
+    # Calculate equity curve
+    equity_curve = []
+    for d in trading_dates:
+        # Calculate portfolio value at this date
+        portfolio_value = 0
+        for sym, shares in positions.items():
+            if sym in prices_by_date[d]:
+                portfolio_value += shares * prices_by_date[d][sym]
+            else:
+                # Use last known price (carry forward)
+                for prev_d in reversed(trading_dates):
+                    if prev_d < d and sym in prices_by_date[prev_d]:
+                        portfolio_value += shares * prices_by_date[prev_d][sym]
+                        break
+
+        equity_curve.append({
+            "date": d,
+            "equity": round(portfolio_value, 2),
+        })
+
+    # Calculate total return
+    if equity_curve:
+        final_equity = equity_curve[-1]["equity"]
+        total_return = (final_equity - initial_capital) / initial_capital
+    else:
+        total_return = 0.0
+
+    return {
+        "equity_curve": equity_curve,
+        "total_return": total_return,
+        "total_return_pct": total_return * 100,
     }

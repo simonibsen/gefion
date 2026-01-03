@@ -37,6 +37,7 @@ def compare_strategies(
     price_data: List[Dict[str, Any]],
     initial_capital: float = 100000.0,
     strategy_params: Dict[str, Dict[str, Any]] = None,
+    include_equity_curves: bool = False,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Compare multiple strategies on the same price data.
@@ -46,9 +47,10 @@ def compare_strategies(
         price_data: List of OHLCV price records
         initial_capital: Starting capital for each backtest
         strategy_params: Optional dict of strategy-specific parameters
+        include_equity_curves: If True, include equity curves in results
 
     Returns:
-        Dict mapping strategy name -> metrics dict
+        Dict mapping strategy name -> metrics dict (with optional equity_curve key)
 
     Raises:
         ValueError: If an unknown strategy name is provided
@@ -125,6 +127,11 @@ def compare_strategies(
             trades=trades_with_pnl,
             initial_capital=initial_capital,
         )
+
+        # Optionally include equity curve for charting
+        if include_equity_curves:
+            metrics["equity_curve"] = equity_curve
+            metrics["trades"] = trades
 
         results[strategy_name] = metrics
 

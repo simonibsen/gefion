@@ -6,6 +6,448 @@ import sys
 import json
 import os
 from datetime import date, timedelta
+import pandas as pd
+
+
+def _parse_last_json(output: str) -> dict:
+    """Parse the last JSON object from CLI output.
+
+    The CLI outputs multiple JSON objects (progress messages followed by results).
+    This function finds and parses the last complete JSON object.
+    """
+    # Try parsing the whole output first
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        pass
+
+    # Find all JSON objects by looking for opening braces at start of line
+    lines = output.strip().split('\n')
+    json_starts = []
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('{'):
+            json_starts.append(i)
+
+    # Try parsing from each JSON start, from last to first
+    for start_idx in reversed(json_starts):
+        try:
+            remaining = '\n'.join(lines[start_idx:])
+            return json.loads(remaining)
+        except json.JSONDecodeError:
+            continue
+
+    # Fallback: try to find the last complete JSON object
+    # by finding matching braces
+    brace_count = 0
+    last_start = -1
+
+    for i, char in enumerate(output):
+        if char == '{':
+            if brace_count == 0:
+                last_start = i
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0 and last_start >= 0:
+                try:
+                    return json.loads(output[last_start:i+1])
+                except json.JSONDecodeError:
+                    last_start = -1
+
+    raise json.JSONDecodeError("No valid JSON found", output, 0)
+
+
+def _render_comparison_results(data: dict) -> None:
+    """Render strategy comparison results with charts and tables."""
+    comparison = data.get("comparison", {})
+    equity_curves = data.get("equity_curves", {})
+    benchmark = data.get("benchmark", {})
+    ranking = data.get("ranking", [])
+
+    if not comparison:
+        st.warning("No comparison data found")
+        return
+
+    # How to read guide
+    with st.expander("📖 How to Read This Comparison", expanded=False):
+        st.markdown("""
+        **Comparing Strategies:**
+        - The table shows key metrics for each strategy side-by-side
+        - Strategies are ranked by the selected metric (default: Sharpe ratio)
+        - The equity curve chart shows how each strategy performed over time
+        - The benchmark (buy & hold) helps you see if active trading added value
+
+        **What to Look For:**
+        - **Consistency**: Does the strategy beat the benchmark reliably?
+        - **Risk-adjusted returns**: Higher Sharpe/Sortino = better return per unit of risk
+        - **Drawdowns**: Smaller max drawdown = less painful to hold
+        - **Trade count**: More trades = more transaction costs in real trading
+        """)
+
+    # Ranking summary
+    if ranking:
+        st.markdown("### 🏆 Ranking")
+        rank_cols = st.columns(len(ranking))
+        for i, rank_info in enumerate(ranking):
+            with rank_cols[i]:
+                strategy = rank_info.get("strategy", "")
+                # Get the ranking metric value
+                rank_value = list(rank_info.values())[1] if len(rank_info) > 1 else 0
+                medal = "🥇" if i == 0 else ("🥈" if i == 1 else ("🥉" if i == 2 else f"#{i+1}"))
+                st.metric(
+                    f"{medal} {strategy}",
+                    f"{rank_value:.2f}",
+                    help=f"Ranked #{i+1}"
+                )
+
+    # Metrics comparison table
+    st.markdown("### 📊 Performance Metrics")
+
+    # Build comparison dataframe
+    rows = []
+    for strategy_name, metrics in comparison.items():
+        rows.append({
+            "Strategy": strategy_name,
+            "Return %": f"{metrics.get('total_return', 0) * 100:.1f}%",
+            "Sharpe": f"{metrics.get('sharpe_ratio', 0):.2f}",
+            "Sortino": f"{metrics.get('sortino_ratio', 0):.2f}",
+            "Calmar": f"{metrics.get('calmar_ratio', 0):.2f}",
+            "Max DD": f"{metrics.get('max_drawdown', 0) * 100:.1f}%",
+            "Win Rate": f"{metrics.get('win_rate', 0) * 100:.0f}%",
+            "Profit Factor": f"{metrics.get('profit_factor', 0):.2f}",
+            "Trades": metrics.get('total_trades', 0),
+        })
+
+    # Add benchmark row
+    if benchmark:
+        rows.append({
+            "Strategy": f"📈 {benchmark.get('name', 'Benchmark')}",
+            "Return %": f"{benchmark.get('total_return_pct', 0):.1f}%",
+            "Sharpe": "-",
+            "Sortino": "-",
+            "Calmar": "-",
+            "Max DD": "-",
+            "Win Rate": "-",
+            "Profit Factor": "-",
+            "Trades": 0,
+        })
+
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    # Equity curves chart
+    if equity_curves:
+        st.markdown("### 📈 Equity Curves")
+        st.caption("Compare how each strategy's portfolio value changed over time. Higher = better.")
+
+        # Build combined dataframe for charting
+        combined_df = None
+
+        for strategy_name, curve in equity_curves.items():
+            if curve:
+                curve_df = pd.DataFrame(curve)
+                curve_df['date'] = pd.to_datetime(curve_df['date'])
+                curve_df = curve_df.set_index('date')
+                curve_df = curve_df.rename(columns={'equity': strategy_name})
+
+                if combined_df is None:
+                    combined_df = curve_df
+                else:
+                    combined_df = combined_df.join(curve_df, how='outer')
+
+        # Add benchmark
+        benchmark_curve = benchmark.get("equity_curve", [])
+        if benchmark_curve and combined_df is not None:
+            bench_df = pd.DataFrame(benchmark_curve)
+            bench_df['date'] = pd.to_datetime(bench_df['date'])
+            bench_df = bench_df.set_index('date')
+            bench_df = bench_df.rename(columns={'equity': 'Benchmark'})
+            combined_df = combined_df.join(bench_df, how='outer')
+
+        if combined_df is not None:
+            combined_df = combined_df.ffill()
+            st.line_chart(combined_df, use_container_width=True)
+
+            # Show alpha for each strategy vs benchmark
+            if benchmark_curve:
+                benchmark_return = benchmark.get('total_return_pct', 0)
+                st.markdown("**Alpha vs Benchmark:**")
+                alpha_cols = st.columns(len(comparison))
+                for i, (strategy_name, metrics) in enumerate(comparison.items()):
+                    with alpha_cols[i]:
+                        strategy_return = metrics.get('total_return', 0) * 100
+                        alpha = strategy_return - benchmark_return
+                        color = "green" if alpha > 0 else "red"
+                        st.markdown(f"**{strategy_name}**: :{color}[{alpha:+.1f}%]")
+
+
+def _render_backtest_results(data: dict) -> None:
+    """Render comprehensive backtest results with charts and tables."""
+    metrics = data.get("metrics", {})
+
+    # Primary metrics row
+    st.markdown("### Performance Summary")
+
+    # Quick interpretation guide
+    with st.expander("📖 How to Read These Results", expanded=False):
+        st.markdown("""
+        **Key Metrics Explained:**
+
+        | Metric | What It Measures | Good | Excellent |
+        |--------|------------------|------|-----------|
+        | **Total Return** | Profit/loss as % of initial capital | > 0% | > 20%/yr |
+        | **Sharpe Ratio** | Risk-adjusted return (return per unit of volatility) | > 1.0 | > 2.0 |
+        | **Max Drawdown** | Largest peak-to-trough decline | > -20% | > -10% |
+        | **Win Rate** | % of trades that were profitable | > 50% | > 60% |
+        | **Sortino Ratio** | Like Sharpe, but only penalizes downside moves | > 1.0 | > 2.0 |
+        | **Calmar Ratio** | Annual return ÷ max drawdown (reward/risk) | > 1.0 | > 3.0 |
+        | **Profit Factor** | Gross profits ÷ gross losses | > 1.5 | > 2.0 |
+        | **Avg Win/Loss** | Average winning trade ÷ average losing trade | > 1.0 | > 1.5 |
+
+        **Reading the Charts:**
+        - **Equity Curve**: Shows portfolio value over time. Upward slope = gains, flat = no change, downward = losses
+        - **Benchmark**: The dashed line shows buy-and-hold performance. If strategy is above, you're beating passive investing
+        - **Alpha**: Strategy return minus benchmark return. Positive alpha = strategy adds value
+        - **Drawdown**: Shows how far below the peak the portfolio fell. Deeper valleys = more painful periods
+
+        **Red Flags to Watch:**
+        - Max drawdown > 30% (hard to recover psychologically)
+        - Sharpe < 0.5 (not enough return for the risk)
+        - Win rate < 40% with avg win/loss < 1.5 (losing combination)
+        - Very few trades (results may not be statistically significant)
+        """)
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        total_return = metrics.get('total_return_pct', 0)
+        st.metric(
+            "Total Return",
+            f"{total_return:.1f}%",
+            delta=f"{'↑' if total_return > 0 else '↓'}" if total_return != 0 else None,
+            help="Total profit/loss as percentage of initial capital",
+        )
+    with col2:
+        sharpe = metrics.get('sharpe_ratio', 0)
+        # Color-code the delta based on value
+        if sharpe >= 2.0:
+            delta_text = "Excellent"
+        elif sharpe >= 1.0:
+            delta_text = "Good"
+        elif sharpe >= 0.5:
+            delta_text = "Fair"
+        else:
+            delta_text = "Poor" if sharpe > 0 else None
+        st.metric(
+            "Sharpe Ratio",
+            f"{sharpe:.2f}",
+            delta=delta_text,
+            help="Risk-adjusted return. Higher = better return per unit of risk. >1 good, >2 excellent",
+        )
+    with col3:
+        max_dd = metrics.get('max_drawdown_pct', 0)
+        st.metric(
+            "Max Drawdown",
+            f"{max_dd:.1f}%",
+            help="Largest peak-to-trough decline. This is the worst loss you would have experienced",
+        )
+    with col4:
+        win_rate = metrics.get('win_rate', 0)
+        st.metric(
+            "Win Rate",
+            f"{win_rate*100:.0f}%",
+            help="Percentage of trades that were profitable. Note: low win rate can still be profitable with high avg win/loss",
+        )
+
+    # Extended metrics row
+    col5, col6, col7, col8 = st.columns(4)
+
+    with col5:
+        sortino = metrics.get('sortino_ratio', 0)
+        st.metric(
+            "Sortino Ratio",
+            f"{sortino:.2f}",
+            help="Like Sharpe but only penalizes downside volatility. Better for asymmetric strategies",
+        )
+    with col6:
+        calmar = metrics.get('calmar_ratio', 0)
+        st.metric(
+            "Calmar Ratio",
+            f"{calmar:.2f}",
+            help="Annualized return ÷ max drawdown. Measures reward relative to worst-case risk",
+        )
+    with col7:
+        profit_factor = metrics.get('profit_factor', 0)
+        st.metric(
+            "Profit Factor",
+            f"{profit_factor:.2f}",
+            help="Total profits ÷ total losses. >1 means profitable, >2 is strong",
+        )
+    with col8:
+        avg_wl = metrics.get('avg_win_loss_ratio', 0)
+        st.metric(
+            "Avg Win/Loss",
+            f"{avg_wl:.2f}",
+            help="Average winning trade size ÷ average losing trade. >1 means wins are bigger than losses",
+        )
+
+    # Charts section
+    equity_curve = data.get("equity_curve", [])
+    drawdown_series = data.get("drawdown_series", [])
+    benchmark = data.get("benchmark", {})
+
+    if equity_curve:
+        st.markdown("### Equity Curve")
+
+        # Create equity dataframe
+        equity_df = pd.DataFrame(equity_curve)
+        if 'date' in equity_df.columns and 'equity' in equity_df.columns:
+            equity_df['date'] = pd.to_datetime(equity_df['date'])
+            equity_df = equity_df.set_index('date')
+            equity_df = equity_df.rename(columns={'equity': 'Strategy'})
+
+            # Add benchmark if available
+            benchmark_curve = benchmark.get("equity_curve", [])
+            if benchmark_curve:
+                bench_df = pd.DataFrame(benchmark_curve)
+                bench_df['date'] = pd.to_datetime(bench_df['date'])
+                bench_df = bench_df.set_index('date')
+                bench_df = bench_df.rename(columns={'equity': 'Benchmark'})
+
+                # Merge strategy and benchmark
+                combined_df = equity_df.join(bench_df, how='outer')
+                combined_df = combined_df.ffill()  # Forward fill missing values
+
+                st.line_chart(combined_df, use_container_width=True)
+
+                # Show alpha (strategy - benchmark return)
+                strategy_return = metrics.get('total_return_pct', 0)
+                benchmark_return = benchmark.get('total_return_pct', 0)
+                alpha = strategy_return - benchmark_return
+
+                st.caption(
+                    f"📊 **Strategy**: {strategy_return:.1f}% | "
+                    f"**Benchmark** ({benchmark.get('name', 'Buy & Hold')}): {benchmark_return:.1f}% | "
+                    f"**Alpha**: {alpha:+.1f}%"
+                )
+            else:
+                st.line_chart(equity_df['Strategy'], use_container_width=True)
+
+    if drawdown_series:
+        st.markdown("### Drawdown")
+        st.caption("📉 Shows how far below the peak your portfolio fell at each point. Deeper red = bigger loss from peak.")
+
+        # Create drawdown dataframe
+        dd_df = pd.DataFrame(drawdown_series)
+        if 'date' in dd_df.columns and 'drawdown_pct' in dd_df.columns:
+            dd_df['date'] = pd.to_datetime(dd_df['date'])
+            dd_df = dd_df.set_index('date')
+
+            # Display drawdown chart (negative values)
+            st.area_chart(dd_df['drawdown_pct'], use_container_width=True, color="#ff6b6b")
+
+            # Find worst drawdown period
+            if not dd_df.empty:
+                worst_idx = dd_df['drawdown_pct'].idxmin()
+                worst_dd = dd_df.loc[worst_idx, 'drawdown_pct']
+                st.caption(f"💡 Worst drawdown: **{worst_dd:.1f}%** on {worst_idx.strftime('%Y-%m-%d')}")
+
+    # Monthly returns
+    monthly_returns = data.get("monthly_returns", [])
+    if monthly_returns:
+        with st.expander("📅 Monthly Returns"):
+            st.caption("Shows return for each month. Green = profit, Red = loss. Look for consistency across months.")
+            monthly_df = pd.DataFrame(monthly_returns)
+            if not monthly_df.empty:
+                # Calculate summary stats
+                returns = [m.get('return_pct', 0) for m in monthly_returns]
+                positive_months = sum(1 for r in returns if r > 0)
+                negative_months = sum(1 for r in returns if r < 0)
+                best_month = max(returns) if returns else 0
+                worst_month = min(returns) if returns else 0
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Positive Months", positive_months)
+                with col2:
+                    st.metric("Negative Months", negative_months)
+                with col3:
+                    st.metric("Best Month", f"{best_month:+.1f}%")
+                with col4:
+                    st.metric("Worst Month", f"{worst_month:+.1f}%")
+
+                # Color the returns
+                st.dataframe(
+                    monthly_df.style.applymap(
+                        lambda x: 'color: green' if isinstance(x, (int, float)) and x > 0
+                                  else ('color: red' if isinstance(x, (int, float)) and x < 0 else ''),
+                        subset=['return_pct'] if 'return_pct' in monthly_df.columns else []
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+    # Trades table
+    trades = data.get("trades", [])
+    if trades:
+        st.markdown("### Trades")
+        st.caption("📋 Complete list of all buy/sell orders executed by the strategy.")
+
+        # Summary
+        total_trades = len(trades)
+        buys = [t for t in trades if t.get('action') == 'buy']
+        sells = [t for t in trades if t.get('action') == 'sell']
+
+        # Calculate trade statistics
+        profitable_sells = [t for t in sells if t.get('pnl', 0) > 0]
+        losing_sells = [t for t in sells if t.get('pnl', 0) < 0]
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Trades", total_trades, help="Total number of executed orders")
+        with col2:
+            st.metric("Buy Orders", len(buys), help="Number of positions opened")
+        with col3:
+            st.metric("Sell Orders", len(sells), help="Number of positions closed")
+        with col4:
+            if sells:
+                sell_win_rate = len(profitable_sells) / len(sells) * 100
+                st.metric("Sell Win Rate", f"{sell_win_rate:.0f}%", help="% of sells that were profitable")
+
+        # Trades table
+        trades_df = pd.DataFrame(trades)
+        if not trades_df.empty:
+            # Format columns for display
+            display_cols = ['date', 'action', 'symbol', 'shares', 'price', 'pnl', 'reason']
+            available_cols = [c for c in display_cols if c in trades_df.columns]
+
+            if available_cols:
+                display_df = trades_df[available_cols].copy()
+
+                # Format price and pnl
+                if 'price' in display_df.columns:
+                    display_df['price'] = display_df['price'].apply(lambda x: f"${x:.2f}" if pd.notna(x) else "")
+                if 'pnl' in display_df.columns:
+                    display_df['pnl'] = display_df['pnl'].apply(
+                        lambda x: f"${x:+,.2f}" if pd.notna(x) and x != 0 else ""
+                    )
+
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "date": st.column_config.DateColumn("Date"),
+                        "action": st.column_config.TextColumn("Action"),
+                        "symbol": st.column_config.TextColumn("Symbol"),
+                        "shares": st.column_config.NumberColumn("Shares", format="%d"),
+                        "price": st.column_config.TextColumn("Price"),
+                        "pnl": st.column_config.TextColumn("P&L"),
+                        "reason": st.column_config.TextColumn("Reason"),
+                    }
+                )
 
 
 def render_backtest():
@@ -458,37 +900,12 @@ def render_run_section():
                     status.update(label="✅ Backtest complete!", state="complete")
 
                     try:
-                        data = json.loads(result.stdout)
+                        data = _parse_last_json(result.stdout)
+                        _render_backtest_results(data)
+                    except Exception as e:
+                        st.warning(f"Could not parse results: {e}")
 
-                        if "metrics" in data:
-                            metrics = data["metrics"]
-
-                            col1, col2, col3, col4 = st.columns(4)
-
-                            with col1:
-                                st.metric(
-                                    "Total Return",
-                                    f"{metrics.get('total_return_pct', 0):.1f}%",
-                                )
-                            with col2:
-                                st.metric(
-                                    "Sharpe Ratio",
-                                    f"{metrics.get('sharpe_ratio', 0):.2f}",
-                                )
-                            with col3:
-                                st.metric(
-                                    "Max Drawdown",
-                                    f"{metrics.get('max_drawdown_pct', 0):.1f}%",
-                                )
-                            with col4:
-                                st.metric(
-                                    "Win Rate",
-                                    f"{metrics.get('win_rate', 0)*100:.0f}%",
-                                )
-                    except Exception:
-                        pass
-
-                    with st.expander("Full Output"):
+                    with st.expander("Raw JSON Output"):
                         st.code(result.stdout)
                 else:
                     status.update(label="❌ Backtest failed", state="error")
@@ -578,16 +995,12 @@ def render_compare_section():
                     status.update(label="✅ Comparison complete!", state="complete")
 
                     try:
-                        data = json.loads(result.stdout)
+                        data = _parse_last_json(result.stdout)
+                        _render_comparison_results(data)
+                    except Exception as e:
+                        st.warning(f"Could not parse results: {e}")
 
-                        if "results" in data:
-                            import pandas as pd
-                            df = pd.DataFrame(data["results"])
-                            st.dataframe(df, use_container_width=True)
-                    except Exception:
-                        pass
-
-                    with st.expander("Full Output"):
+                    with st.expander("Raw JSON Output"):
                         st.code(result.stdout)
                 else:
                     status.update(label="❌ Comparison failed", state="error")

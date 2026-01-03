@@ -1252,6 +1252,39 @@ def ml_train(
     out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
     warm_start: bool = typer.Option(False, "--warm-start", help="Continue training from base model (10-100x faster)"),
     base_model: Optional[Path] = typer.Option(None, "--base-model", help="Path to base model for warm-start (required if --warm-start)"),
+    # Hyperparameter options (use values from 'g2 ml tune' for optimal results)
+    learning_rate: Optional[float] = typer.Option(
+        None, "--learning-rate",
+        help="Learning rate (step size). Lower = more stable but slower. Range: 0.001-0.3. Default: 0.1"
+    ),
+    n_estimators: Optional[int] = typer.Option(
+        None, "--n-estimators",
+        help="Number of boosting rounds (trees). More = better fit but slower/risk overfitting. Range: 50-500. Default: 100"
+    ),
+    max_depth: Optional[int] = typer.Option(
+        None, "--max-depth",
+        help="Max tree depth. Higher = more complex patterns but risk overfitting. Range: 3-12. Default: 6"
+    ),
+    min_child_weight: Optional[float] = typer.Option(
+        None, "--min-child-weight",
+        help="Min samples per leaf. Higher = more regularization. Range: 1-10. Default: 1"
+    ),
+    subsample: Optional[float] = typer.Option(
+        None, "--subsample",
+        help="Fraction of samples per tree. Lower = more regularization. Range: 0.5-1.0. Default: 1.0"
+    ),
+    colsample_bytree: Optional[float] = typer.Option(
+        None, "--colsample-bytree",
+        help="Fraction of features per tree. Lower = more regularization. Range: 0.5-1.0. Default: 1.0"
+    ),
+    reg_alpha: Optional[float] = typer.Option(
+        None, "--reg-alpha",
+        help="L1 regularization (Lasso). Higher = sparser model. Range: 0-10. Default: 0"
+    ),
+    reg_lambda: Optional[float] = typer.Option(
+        None, "--reg-lambda",
+        help="L2 regularization (Ridge). Higher = smaller weights. Range: 0-10. Default: 1"
+    ),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
@@ -1266,6 +1299,11 @@ def ml_train(
         # Train using XGBoost algorithm
         g2 ml train --dataset-name nasdaq_50 --dataset-version 2025-01 \\
             --model-name nasdaq_xgb --model-version v1 --algorithm xgboost
+
+        # Train with tuned hyperparameters (from 'g2 ml tune')
+        g2 ml train --dataset-name nasdaq_50 --dataset-version 2025-01 \\
+            --model-name nasdaq_xgb --model-version v1 --algorithm xgboost \\
+            --learning-rate 0.05 --n-estimators 200 --max-depth 8
 
         # Warm-start from existing model (XGBoost/LightGBM only)
         g2 ml train --dataset-name nasdaq_50 --dataset-version 2025-02 \\
@@ -1285,6 +1323,25 @@ def ml_train(
         resolved_device = detect_device()
     else:
         resolved_device = device
+
+    # Build hyperparams dict from CLI options (only include if explicitly set)
+    hyperparams = {}
+    if learning_rate is not None:
+        hyperparams["learning_rate"] = learning_rate
+    if n_estimators is not None:
+        hyperparams["n_estimators"] = n_estimators
+    if max_depth is not None:
+        hyperparams["max_depth"] = max_depth
+    if min_child_weight is not None:
+        hyperparams["min_child_weight"] = min_child_weight
+    if subsample is not None:
+        hyperparams["subsample"] = subsample
+    if colsample_bytree is not None:
+        hyperparams["colsample_bytree"] = colsample_bytree
+    if reg_alpha is not None:
+        hyperparams["reg_alpha"] = reg_alpha
+    if reg_lambda is not None:
+        hyperparams["reg_lambda"] = reg_lambda
 
     # Validate warm-start options
     if warm_start and not base_model:
@@ -1309,6 +1366,8 @@ def ml_train(
         if warm_start:
             emit(f"Warm-start training {algorithm} models from {base_model}", json_output=json_output)
         emit(f"Training {algorithm} models on {resolved_device} for horizons: {horizons}", json_output=json_output)
+        if hyperparams:
+            emit(f"  Using hyperparameters: {hyperparams}", json_output=json_output)
 
         for horizon in horizons:
             emit(f"Training model for {horizon}-day horizon...", json_output=json_output)
@@ -1330,7 +1389,13 @@ def ml_train(
                     emit(f"  Warning: Base model not found at {base_model}, training from scratch", json_output=json_output)
 
             # Train quantile models (q10, q50, q90)
-            model_data = train_quantile_model(X, y, algorithm=algorithm, device=resolved_device, base_model_path=base_model_path)
+            model_data = train_quantile_model(
+                X, y,
+                algorithm=algorithm,
+                hyperparams=hyperparams if hyperparams else None,
+                device=resolved_device,
+                base_model_path=base_model_path
+            )
             if model_data.get("warm_start"):
                 emit(f"  Warm-started {len(model_data['models'])} quantile models", json_output=json_output)
             else:
@@ -1348,6 +1413,7 @@ def ml_train(
                     "horizon_days": horizon,
                     "dataset_name": dataset_name,
                     "dataset_version": dataset_version,
+                    "hyperparams": hyperparams if hyperparams else {},
                 }
             )
             emit(f"  Saved artifacts to {model_path}", json_output=json_output)
@@ -6952,10 +7018,63 @@ def backtest_run(
 
         results = engine.run()
 
-        # Extract metrics (already calculated by engine)
-        metrics = results["metrics"]
-        final_equity = results["equity_curve"][-1]["equity"] if results["equity_curve"] else initial_cash
-        trade_count = len(results["trades"])
+        # Extract data from results
+        equity_curve = results.get("equity_curve", [])
+        trades = results.get("trades", [])
+        base_metrics = results.get("metrics", {})
+
+        final_equity = equity_curve[-1]["equity"] if equity_curve else initial_cash
+        trade_count = len(trades)
+
+        # Calculate extended metrics
+        from g2.backtest.metrics import (
+            calculate_trade_metrics,
+            calculate_monthly_returns,
+            calculate_drawdown_series,
+            calculate_sortino_ratio,
+            calculate_calmar_ratio,
+            calculate_benchmark,
+        )
+
+        # Convert trades to include PnL for trade metrics
+        trades_with_pnl = []
+        for t in trades:
+            pnl = t.get("pnl", 0)
+            if pnl == 0 and t.get("action") == "sell":
+                # Estimate PnL from price difference if not provided
+                pnl = (t.get("price", 0) - t.get("avg_cost", t.get("price", 0))) * t.get("shares", 0)
+            trades_with_pnl.append({**t, "pnl": pnl})
+
+        trade_metrics = calculate_trade_metrics(trades_with_pnl)
+
+        # Calculate monthly returns from equity curve
+        monthly_returns = calculate_monthly_returns(equity_curve) if equity_curve else []
+
+        # Calculate drawdown series
+        drawdown_series = calculate_drawdown_series(equity_curve) if equity_curve else []
+
+        # Calculate risk-adjusted metrics
+        sortino_ratio = calculate_sortino_ratio(equity_curve) if equity_curve else 0
+        days_in_backtest = len(equity_curve) if equity_curve else 0
+        calmar_ratio = calculate_calmar_ratio(equity_curve, days=days_in_backtest) if equity_curve else 0
+
+        # Calculate buy-and-hold benchmark for comparison
+        benchmark_result = calculate_benchmark(price_data, initial_cash, start, end)
+
+        # Build comprehensive metrics
+        metrics = {
+            "total_return": base_metrics.get("total_return", 0),
+            "total_return_pct": base_metrics.get("total_return", 0) * 100,
+            "sharpe_ratio": base_metrics.get("sharpe_ratio", 0),
+            "sortino_ratio": sortino_ratio,
+            "calmar_ratio": calmar_ratio,
+            "max_drawdown": base_metrics.get("max_drawdown", 0),
+            "max_drawdown_pct": base_metrics.get("max_drawdown", 0) * 100,
+            "win_rate": trade_metrics.get("win_rate", 0),
+            "profit_factor": trade_metrics.get("profit_factor", 0),
+            "avg_win_loss_ratio": trade_metrics.get("avg_win_loss_ratio", 0),
+            "total_trades": trade_count,
+        }
 
         # Format and output results
         emit(
@@ -6974,12 +7093,41 @@ def backtest_run(
                 },
                 "symbols_tested": len(symbols_found),
                 "performance": {
+                    "initial_value": initial_cash,
                     "final_value": final_equity,
-                    "total_return": metrics["total_return"],
-                    "sharpe_ratio": metrics["sharpe_ratio"],
-                    "max_drawdown": metrics["max_drawdown"],
+                    "total_return": base_metrics.get("total_return", 0),
+                    "sharpe_ratio": base_metrics.get("sharpe_ratio", 0),
+                    "max_drawdown": base_metrics.get("max_drawdown", 0),
                 },
-                "trades": trade_count,
+                "metrics": metrics,
+                "trades_count": trade_count,
+                "trades": [
+                    {
+                        "date": str(t.get("date", "")),
+                        "action": t.get("action", ""),
+                        "symbol": t.get("symbol", ""),
+                        "shares": t.get("shares", 0),
+                        "price": round(t.get("price", 0), 2),
+                        "value": round(t.get("shares", 0) * t.get("price", 0), 2),
+                        "pnl": round(t.get("pnl", 0), 2),
+                    }
+                    for t in trades_with_pnl
+                ],
+                "equity_curve": [
+                    {"date": str(e["date"]), "equity": round(e["equity"], 2)}
+                    for e in equity_curve
+                ],
+                "drawdown_series": drawdown_series,
+                "monthly_returns": monthly_returns,
+                "benchmark": {
+                    "name": "Buy & Hold (Equal Weight)",
+                    "total_return": benchmark_result.get("total_return", 0),
+                    "total_return_pct": benchmark_result.get("total_return_pct", 0),
+                    "equity_curve": [
+                        {"date": str(e["date"]), "equity": round(e["equity"], 2)}
+                        for e in benchmark_result.get("equity_curve", [])
+                    ],
+                },
             },
             json_output=json_output,
         )
@@ -7118,10 +7266,14 @@ def backtest_compare(
         if symbols:
             symbol_list = [s.strip() for s in symbols.split(",")]
 
+        # Get database URL
+        db_url = os.getenv("DATABASE_URL", SETTINGS.database_url)
+
         # Load price data
         emit(f"Loading price data...", json_output=json_output)
 
         price_data = load_price_data_for_backtest(
+            db_url=db_url,
             symbols=symbol_list,
             exchange=exchange,
             limit=limit,
@@ -7139,24 +7291,60 @@ def backtest_compare(
         symbols_found = list(set(row["symbol"] for row in price_data))
         emit(f"Loaded {len(price_data)} price records for {len(symbols_found)} symbols", json_output=json_output)
 
-        # Compare strategies
+        # Compare strategies (include equity curves for charting)
         emit(f"Comparing {len(strategy_list)} strategies...", json_output=json_output)
 
         comparison = compare_strategies(
             strategies=strategy_list,
             price_data=price_data,
             initial_capital=initial_cash,
+            include_equity_curves=True,
+        )
+
+        # Calculate benchmark for comparison
+        from g2.backtest.metrics import calculate_benchmark
+        benchmark = calculate_benchmark(
+            price_data=price_data,
+            initial_capital=initial_cash,
+            start_date=date.fromisoformat(start_date),
+            end_date=date.fromisoformat(end_date),
         )
 
         # Rank strategies
         ranking = rank_strategies(comparison, metric=rank_by)
+
+        # Prepare comparison data for output (separate metrics from equity curves)
+        comparison_metrics = {}
+        equity_curves = {}
+        for strategy_name, data in comparison.items():
+            # Extract equity curve if present
+            if "equity_curve" in data:
+                equity_curves[strategy_name] = [
+                    {"date": str(e["date"]), "equity": round(e["equity"], 2)}
+                    for e in data["equity_curve"]
+                ]
+            # Copy metrics without equity curve
+            comparison_metrics[strategy_name] = {
+                k: v for k, v in data.items()
+                if k not in ("equity_curve", "trades")
+            }
 
         # Output results
         if json_output:
             emit(
                 "Comparison complete",
                 data={
-                    "comparison": comparison,
+                    "comparison": comparison_metrics,
+                    "equity_curves": equity_curves,
+                    "benchmark": {
+                        "name": "Buy & Hold (Equal Weight)",
+                        "total_return": benchmark.get("total_return", 0),
+                        "total_return_pct": benchmark.get("total_return_pct", 0),
+                        "equity_curve": [
+                            {"date": str(e["date"]), "equity": round(e["equity"], 2)}
+                            for e in benchmark.get("equity_curve", [])
+                        ],
+                    },
                     "ranking": [
                         {"strategy": name, rank_by: value}
                         for name, value in ranking
