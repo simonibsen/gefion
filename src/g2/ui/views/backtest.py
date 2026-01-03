@@ -468,7 +468,7 @@ def render_backtest():
 
 
 def get_strategies():
-    """Get available strategies from database."""
+    """Get available strategies from database or dispatcher."""
     try:
         from g2.ui.components.database import get_connection
         with get_connection() as conn:
@@ -479,14 +479,31 @@ def get_strategies():
                     WHERE enabled = true
                     ORDER BY name
                 """)
-                return [(row[0], row[1]) for row in cur.fetchall()]
+                results = [(row[0], row[1]) for row in cur.fetchall()]
+                if results:
+                    return results
     except Exception:
-        # Fallback to built-in list
+        pass
+
+    # Fallback to dispatcher's built-in strategies
+    try:
+        from g2.strategies.dispatcher import BUILTIN_STRATEGIES
+        return [
+            (name, info["description"])
+            for name, info in sorted(BUILTIN_STRATEGIES.items())
+        ]
+    except Exception:
+        # Last resort fallback
         return [
             ("momentum", "Momentum-based strategy"),
             ("mean_reversion", "Mean reversion using RSI"),
             ("ma_crossover", "Moving average crossover"),
             ("breakout", "Breakout with volume confirmation"),
+            ("pairs_trading", "Statistical arbitrage on correlated pairs"),
+            ("rsi_divergence", "RSI divergence detection"),
+            ("volatility_contraction", "Volatility squeeze and expansion"),
+            ("ml_signal", "ML-based predictions strategy"),
+            ("ml_filter", "Hybrid ML filter strategy"),
         ]
 
 
