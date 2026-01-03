@@ -775,8 +775,29 @@ def render_dataset_section():
         st.code("g2 ml dataset-inspect --name <name> --version <version>", language="bash")
 
 
+def _get_next_model_version(name: str, base_version: str) -> str:
+    """Get next available version for a model name."""
+    models = _get_models()
+    existing_versions = {m["version"] for m in models if m["name"] == name}
+
+    if base_version not in existing_versions:
+        return base_version
+
+    # Try incrementing with suffix: 20260101-1, 20260101-2, etc.
+    for i in range(1, 100):
+        candidate = f"{base_version}-{i}"
+        if candidate not in existing_versions:
+            return candidate
+
+    # Fallback: use timestamp
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
 def render_train_section():
     """Render model training section."""
+    # Get available datasets early (needed for both tuning and training)
+    datasets = _get_datasets()
+
     st.subheader("Train Model")
 
     # Device detection
@@ -797,8 +818,7 @@ def render_train_section():
     - **Ensemble**: Combines multiple algorithms for better accuracy
     """)
 
-    # Get available datasets for selection
-    datasets = _get_datasets()
+    # Use datasets already fetched above
     dataset_options = [f"{ds['name']} ({ds['version']})" for ds in datasets]
 
     if not datasets:
@@ -897,33 +917,31 @@ def render_train_section():
                 else:
                     ensemble_weights = weights
 
+        # Default model name based on type
+        default_model_name = "quantile" if model_type == "Quantile Regression" else (
+            "classifier" if model_type == "Trend Classifier" else "ensemble"
+        )
+
         model_name = st.text_input(
             "Model Name",
-            value="quantile" if model_type == "Quantile Regression" else (
-                "classifier" if model_type == "Trend Classifier" else "ensemble"
-            ),
+            value=default_model_name,
             key="train_model_name",
         )
 
+        # Auto-increment version to avoid conflicts
+        base_version = datetime.now().strftime("%Y%m%d")
+        # Track name changes to auto-update version
+        prev_model_name = st.session_state.get("_model_prev_name", "")
+        if prev_model_name != model_name or "train_model_version_auto" not in st.session_state:
+            st.session_state["_model_prev_name"] = model_name
+            st.session_state["train_model_version_auto"] = _get_next_model_version(model_name, base_version)
+
         model_version = st.text_input(
             "Model Version",
-            value=datetime.now().strftime("%Y%m%d"),
+            value=st.session_state.get("train_model_version_auto", base_version),
             key="train_model_version",
-            help="Use a unique version to avoid overwriting. Tip: add a suffix like -2, -exp1, etc.",
+            help="Auto-increments to avoid overwriting. Change manually if needed.",
         )
-
-        # Check if model already exists and warn user
-        existing_models = _get_models()
-        existing_match = next(
-            (m for m in existing_models if m["name"] == model_name and m["version"] == model_version),
-            None
-        )
-        if existing_match:
-            st.warning(
-                f"⚠️ **Model `{model_name}` v`{model_version}` already exists** "
-                f"(algorithm: {existing_match.get('algorithm', 'unknown')}).\n\n"
-                "Training will **overwrite** it. To keep both, change the name or version."
-            )
 
         # Horizon selection for classifier (trains one horizon at a time)
         if model_type == "Trend Classifier":
@@ -931,6 +949,19 @@ def render_train_section():
                 "Horizon (days)",
                 options=dataset_horizons,
                 help="Classifier trains one horizon at a time",
+            )
+
+    # Hyperparameter Tuning subsection (only for xgboost/lightgbm)
+    if model_type == "Quantile Regression" and algorithm in ["xgboost", "lightgbm"]:
+        st.markdown("---")
+        st.markdown("##### 🔧 Hyperparameter Tuning (Optional)")
+        with st.expander("Find optimal hyperparameters using Bayesian optimization", expanded=False):
+            _render_tune_section_inline(
+                datasets=datasets,
+                dataset_name=dataset_name,
+                dataset_version=dataset_version,
+                algorithm=algorithm,
+                dataset_horizons=dataset_horizons,
             )
 
     # Warm-start option (only for Quantile Regression with xgboost/lightgbm)
@@ -994,6 +1025,134 @@ def render_train_section():
         st.error("Select at least 2 algorithms for ensemble training")
         return
 
+    # Hyperparameter inputs (only for Quantile Regression with xgboost/lightgbm)
+    hyperparams = {}
+    if model_type == "Quantile Regression" and algorithm in ["xgboost", "lightgbm"]:
+        with st.expander("⚙️ Hyperparameters (Advanced)", expanded=False):
+            # Check for tuned parameters in session state
+            tuned_params = st.session_state.get("tuned_hyperparams", {})
+            tuned_algo = st.session_state.get("tuned_algorithm", "")
+
+            if tuned_params:
+                if tuned_algo == algorithm:
+                    st.success(f"✅ Tuned parameters available for {algorithm}")
+                    if st.button("📥 Apply Tuned Parameters", key="apply_tuned"):
+                        # Store in session state for number inputs to pick up
+                        for key, value in tuned_params.items():
+                            st.session_state[f"hp_{key}"] = value
+                        st.rerun()
+                else:
+                    st.warning(
+                        f"⚠️ Tuned parameters are for {tuned_algo}, but you selected {algorithm}. "
+                        "Re-run tuning with the current algorithm for best results."
+                    )
+
+            st.caption("Leave blank to use algorithm defaults. Values from tuning will give better results.")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                hp_learning_rate = st.number_input(
+                    "Learning Rate",
+                    min_value=0.001,
+                    max_value=0.5,
+                    value=st.session_state.get("hp_learning_rate", 0.1),
+                    step=0.01,
+                    format="%.3f",
+                    key="hp_learning_rate",
+                    help=HYPERPARAM_DESCRIPTIONS["learning_rate"]["description"],
+                )
+                hp_n_estimators = st.number_input(
+                    "Number of Trees",
+                    min_value=10,
+                    max_value=1000,
+                    value=int(st.session_state.get("hp_n_estimators", 100)),
+                    step=10,
+                    key="hp_n_estimators",
+                    help=HYPERPARAM_DESCRIPTIONS["n_estimators"]["description"],
+                )
+                hp_max_depth = st.number_input(
+                    "Max Tree Depth",
+                    min_value=1,
+                    max_value=20,
+                    value=int(st.session_state.get("hp_max_depth", 6)),
+                    step=1,
+                    key="hp_max_depth",
+                    help=HYPERPARAM_DESCRIPTIONS["max_depth"]["description"],
+                )
+                hp_min_child_weight = st.number_input(
+                    "Min Child Weight",
+                    min_value=0.1,
+                    max_value=20.0,
+                    value=float(st.session_state.get("hp_min_child_weight", 1.0)),
+                    step=0.5,
+                    format="%.1f",
+                    key="hp_min_child_weight",
+                    help=HYPERPARAM_DESCRIPTIONS["min_child_weight"]["description"],
+                )
+
+            with col2:
+                hp_subsample = st.number_input(
+                    "Row Subsample",
+                    min_value=0.1,
+                    max_value=1.0,
+                    value=float(st.session_state.get("hp_subsample", 1.0)),
+                    step=0.05,
+                    format="%.2f",
+                    key="hp_subsample",
+                    help=HYPERPARAM_DESCRIPTIONS["subsample"]["description"],
+                )
+                hp_colsample_bytree = st.number_input(
+                    "Column Subsample",
+                    min_value=0.1,
+                    max_value=1.0,
+                    value=float(st.session_state.get("hp_colsample_bytree", 1.0)),
+                    step=0.05,
+                    format="%.2f",
+                    key="hp_colsample_bytree",
+                    help=HYPERPARAM_DESCRIPTIONS["colsample_bytree"]["description"],
+                )
+                hp_reg_alpha = st.number_input(
+                    "L1 Regularization",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=float(st.session_state.get("hp_reg_alpha", 0.0)),
+                    step=0.1,
+                    format="%.2f",
+                    key="hp_reg_alpha",
+                    help=HYPERPARAM_DESCRIPTIONS["reg_alpha"]["description"],
+                )
+                hp_reg_lambda = st.number_input(
+                    "L2 Regularization",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=float(st.session_state.get("hp_reg_lambda", 1.0)),
+                    step=0.1,
+                    format="%.2f",
+                    key="hp_reg_lambda",
+                    help=HYPERPARAM_DESCRIPTIONS["reg_lambda"]["description"],
+                )
+
+            # Build hyperparams dict (only non-default values)
+            if hp_learning_rate != 0.1:
+                hyperparams["learning_rate"] = hp_learning_rate
+            if hp_n_estimators != 100:
+                hyperparams["n_estimators"] = hp_n_estimators
+            if hp_max_depth != 6:
+                hyperparams["max_depth"] = hp_max_depth
+            if hp_min_child_weight != 1.0:
+                hyperparams["min_child_weight"] = hp_min_child_weight
+            if hp_subsample != 1.0:
+                hyperparams["subsample"] = hp_subsample
+            if hp_colsample_bytree != 1.0:
+                hyperparams["colsample_bytree"] = hp_colsample_bytree
+            if hp_reg_alpha != 0.0:
+                hyperparams["reg_alpha"] = hp_reg_alpha
+            if hp_reg_lambda != 1.0:
+                hyperparams["reg_lambda"] = hp_reg_lambda
+
+            if hyperparams:
+                st.info(f"Custom hyperparameters: {hyperparams}")
+
     if st.button("🎯 Train Model", type="primary", use_container_width=True):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
@@ -1019,11 +1178,20 @@ def render_train_section():
                 cmd.extend(["--warm-start", "--base-model", base_model_path])
                 warm_start_cli = f" \\\n    --warm-start --base-model {base_model_path}"
 
+            # Add hyperparameter flags if any are set
+            hyperparams_cli = ""
+            if hyperparams:
+                for key, value in hyperparams.items():
+                    # Convert underscore to hyphen for CLI (e.g., learning_rate -> --learning-rate)
+                    cli_flag = key.replace("_", "-")
+                    cmd.extend([f"--{cli_flag}", str(value)])
+                    hyperparams_cli += f" --{cli_flag} {value}"
+
             cli_subcommand = "train"
             cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
                        f"--dataset-version {dataset_version} --model-name {model_name} "
                        f"--model-version {model_version} --algorithm {algorithm} "
-                       f"--device {train_device}{warm_start_cli}")
+                       f"--device {train_device}{warm_start_cli}{hyperparams_cli}")
         elif model_type == "Trend Classifier":
             train_device = device
             cmd = [
@@ -1185,10 +1353,257 @@ def render_train_section():
         # Show CLI command
         st.code("g2 ml model-inspect --name <name> --version <version>", language="bash")
 
-    # Hyperparameter Tuning
-    st.markdown("---")
-    with st.expander("🔧 Hyperparameter Tuning", expanded=False):
-        _render_tune_section(datasets)
+
+# Hyperparameter descriptions for user education
+HYPERPARAM_DESCRIPTIONS = {
+    "learning_rate": {
+        "name": "Learning Rate",
+        "description": "Step size for each boosting round. Lower values = more stable but slower training.",
+        "range": "0.001 - 0.3",
+        "default": 0.1,
+    },
+    "n_estimators": {
+        "name": "Number of Trees",
+        "description": "Total boosting rounds. More trees = better fit but slower and risk of overfitting.",
+        "range": "50 - 500",
+        "default": 100,
+    },
+    "max_depth": {
+        "name": "Max Tree Depth",
+        "description": "How deep each tree can grow. Deeper = captures more complex patterns but overfits easier.",
+        "range": "3 - 12",
+        "default": 6,
+    },
+    "min_child_weight": {
+        "name": "Min Child Weight",
+        "description": "Minimum samples required in a leaf node. Higher = more conservative, prevents overfitting.",
+        "range": "1 - 10",
+        "default": 1,
+    },
+    "subsample": {
+        "name": "Row Subsample",
+        "description": "Fraction of training data used per tree. Lower = more regularization (like dropout).",
+        "range": "0.5 - 1.0",
+        "default": 1.0,
+    },
+    "colsample_bytree": {
+        "name": "Column Subsample",
+        "description": "Fraction of features used per tree. Lower = more regularization, helps with many features.",
+        "range": "0.5 - 1.0",
+        "default": 1.0,
+    },
+    "reg_alpha": {
+        "name": "L1 Regularization",
+        "description": "Lasso penalty. Higher = sparser model (some features get zero weight).",
+        "range": "0 - 10",
+        "default": 0,
+    },
+    "reg_lambda": {
+        "name": "L2 Regularization",
+        "description": "Ridge penalty. Higher = smaller weights overall, prevents any single feature from dominating.",
+        "range": "0 - 10",
+        "default": 1,
+    },
+}
+
+
+def _render_hyperparams_with_descriptions(params: dict, show_apply_button: bool = False):
+    """Render hyperparameters with educational descriptions."""
+    for key, value in params.items():
+        info = HYPERPARAM_DESCRIPTIONS.get(key, {})
+        name = info.get("name", key)
+        desc = info.get("description", "")
+        range_str = info.get("range", "")
+        default = info.get("default", "")
+
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.metric(name, f"{value:.4f}" if isinstance(value, float) else value)
+        with col2:
+            if desc:
+                st.caption(f"{desc}")
+            if range_str:
+                st.caption(f"Range: {range_str} | Default: {default}")
+
+    if show_apply_button and params:
+        st.markdown("---")
+        if st.button("📥 Apply to Training", type="primary", key="apply_tuned_params"):
+            # Store each param in session state for the hyperparameter inputs to pick up
+            for key, value in params.items():
+                st.session_state[f"hp_{key}"] = value
+            st.session_state["tuned_hyperparams"] = params
+            st.success("✅ Parameters applied! See Hyperparameters section below.")
+            st.rerun()
+
+
+def _render_tune_section_inline(
+    datasets: list,
+    dataset_name: str,
+    dataset_version: str,
+    algorithm: str,
+    dataset_horizons: list,
+):
+    """Render inline hyperparameter tuning (uses same dataset/algorithm as training form)."""
+    st.info(f"""
+    **Tuning for {algorithm}** on dataset `{dataset_name}` v`{dataset_version}`
+
+    Uses Optuna (Bayesian optimization) with time-series cross-validation.
+    Results will be applied to the training form below.
+    """)
+
+    # Check if dataset has exported files
+    from pathlib import Path
+    manifest_path = Path("datasets") / f"{dataset_name}_{dataset_version}" / "manifest.json"
+    if not manifest_path.exists():
+        st.warning(
+            f"Dataset `{dataset_name}` v`{dataset_version}` doesn't have exported files. "
+            "Rebuild with `--export` flag."
+        )
+        st.code(f"g2 ml dataset-build --name {dataset_name} --version {dataset_version} --export", language="bash")
+        return
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        model_type = st.selectbox(
+            "Model Type",
+            ["quantile", "classifier"],
+            key="tune_inline_model_type",
+            help="Quantile optimizes pinball loss. Classifier optimizes accuracy.",
+        )
+
+        horizon = st.selectbox(
+            "Horizon (days)",
+            options=dataset_horizons,
+            key="tune_inline_horizon",
+            help="Prediction horizon to optimize for.",
+        )
+
+    with col2:
+        if model_type == "quantile":
+            quantile = st.selectbox(
+                "Quantile",
+                options=[0.5, 0.1, 0.9],
+                format_func=lambda x: f"q{int(x*100)}",
+                key="tune_inline_quantile",
+                help="q50 (median) is most important.",
+            )
+
+        n_trials = st.number_input(
+            "Number of Trials",
+            min_value=10,
+            max_value=200,
+            value=30,
+            key="tune_inline_trials",
+            help="More trials = better results but slower (30-50 is usually enough)",
+        )
+
+        timeout = st.number_input(
+            "Timeout (seconds)",
+            min_value=30,
+            max_value=1800,
+            value=180,
+            key="tune_inline_timeout",
+            help="Stop after this many seconds",
+        )
+
+    if st.button("🔍 Start Tuning", key="tune_inline_start"):
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+        env["PYTHONUNBUFFERED"] = "1"
+
+        cmd = [
+            sys.executable, "-u", "-m", "g2.cli", "ml", "tune",
+            "--dataset-name", dataset_name,
+            "--dataset-version", dataset_version,
+            "--algorithm", algorithm,
+            "--model-type", model_type,
+            "--horizon", str(horizon),
+            "--n-trials", str(n_trials),
+            "--timeout", str(timeout),
+            "--json",
+        ]
+
+        if model_type == "quantile":
+            cmd.extend(["--quantile", str(quantile)])
+
+        cli_cmd = f"g2 ml tune --dataset-name {dataset_name} --dataset-version {dataset_version} " \
+                  f"--algorithm {algorithm} --model-type {model_type} --horizon {horizon} " \
+                  f"--n-trials {n_trials} --timeout {timeout}"
+        if model_type == "quantile":
+            cli_cmd += f" --quantile {quantile}"
+        st.code(cli_cmd, language="bash")
+
+        with st.status("Tuning hyperparameters...", expanded=True) as status:
+            trial_progress = st.empty()
+            best_score_display = st.empty()
+
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                )
+
+                last_data = {}
+                json_buffer = []
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    json_buffer.append(line)
+                    try:
+                        data = json.loads("\n".join(json_buffer))
+                        json_buffer = []
+                        if not isinstance(data, dict):
+                            continue
+                        last_data = data
+                        msg = data.get("message", "")
+
+                        if "Trial" in msg and "Best score" in msg:
+                            trial_progress.markdown(f"**{msg}**")
+
+                        best_score = data.get("best_score")
+                        trial_num = data.get("trial")
+                        n_trials_total = data.get("n_trials", n_trials)
+                        if best_score is not None and trial_num:
+                            pct = int(100 * trial_num / n_trials_total)
+                            best_score_display.metric(
+                                f"Best Score (Trial {trial_num}/{n_trials_total})",
+                                f"{best_score:.6f}",
+                                delta=f"{pct}% complete",
+                            )
+                    except json.JSONDecodeError:
+                        pass
+
+                returncode = process.wait()
+
+                if returncode == 0:
+                    status.update(label="✅ Tuning complete!", state="complete")
+
+                    best_params = last_data.get("best_params", {})
+                    if best_params:
+                        st.success("**Best Hyperparameters Found:**")
+
+                        # Store for later use
+                        st.session_state["tuned_hyperparams"] = best_params
+                        st.session_state["tuned_algorithm"] = algorithm
+
+                        # Show params with Apply button
+                        _render_hyperparams_with_descriptions(best_params, show_apply_button=True)
+                else:
+                    stderr = process.stderr.read()
+                    status.update(label="❌ Tuning failed", state="error")
+                    st.error("Tuning failed")
+                    if stderr:
+                        st.code(stderr)
+
+            except Exception as e:
+                status.update(label="❌ Error", state="error")
+                st.error(f"Error: {e}")
 
 
 def _render_tune_section(datasets: list):
@@ -1387,8 +1802,18 @@ def _render_tune_section(datasets: list):
                     best_params = last_data.get("best_params", {})
                     if best_params:
                         st.success("**Best Hyperparameters Found:**")
-                        st.json(best_params)
-                        st.info("💡 Use these parameters when training your model.")
+
+                        # Store in session state for use in training
+                        st.session_state["tuned_hyperparams"] = best_params
+                        st.session_state["tuned_algorithm"] = algorithm
+
+                        # Show params with explanations
+                        _render_hyperparams_with_descriptions(best_params)
+
+                        st.success(
+                            "✅ **Parameters saved!** Scroll down to the Train Model section "
+                            "and click 'Apply Tuned Parameters' to use these values."
+                        )
                 else:
                     stderr = process.stderr.read()
                     status.update(label="❌ Tuning failed", state="error")
