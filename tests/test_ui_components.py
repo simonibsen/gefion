@@ -174,6 +174,40 @@ class TestUIStructure:
         content = (ui_dir / "views" / "documentation.py").read_text()
         assert "def render_docs(" in content
 
+    def test_documentation_has_search_function(self, ui_dir):
+        """Documentation view should have search_docs function."""
+        content = (ui_dir / "views" / "documentation.py").read_text()
+        assert "def search_docs(" in content
+
+    def test_documentation_search_finds_results(self):
+        """Documentation search should find results for common terms."""
+        from g2.ui.views.documentation import search_docs
+
+        # Search for a term that should exist in docs
+        results = search_docs("quantile")
+        assert len(results) > 0
+
+        # Each result should have (doc_name, section, line, context)
+        doc_name, section, line, context = results[0]
+        assert isinstance(doc_name, str)
+        assert isinstance(section, str)
+        assert "quantile" in line.lower() or "quantile" in context.lower()
+
+    def test_documentation_search_empty_for_nonsense(self):
+        """Documentation search should return empty for nonsense queries."""
+        from g2.ui.views.documentation import search_docs
+
+        results = search_docs("xyzzy123nonsense")
+        assert len(results) == 0
+
+    def test_documentation_search_requires_min_length(self):
+        """Documentation search should require minimum query length."""
+        from g2.ui.views.documentation import search_docs
+
+        # Single character should return no results
+        results = search_docs("a")
+        assert len(results) == 0
+
     def test_experiments_has_render_function(self, ui_dir):
         """Experiments view should have render_experiments function."""
         content = (ui_dir / "views" / "experiments.py").read_text()

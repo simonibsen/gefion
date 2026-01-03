@@ -3,6 +3,18 @@
 import streamlit as st
 from pathlib import Path
 import re
+from typing import List, Tuple
+
+
+# Document registry for search
+DOCS = {
+    "Whitepaper": "WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md",
+    "User Guide": "USER_GUIDE.md",
+    "ML Pipeline": "ML_QUICKSTART.md",
+    "Backtesting": "BACKTESTING.md",
+    "Experiments": "EXPERIMENTS.md",
+    "Troubleshooting": "TROUBLESHOOTING.md",
+}
 
 
 @st.cache_data
@@ -39,10 +51,85 @@ def extract_sections(content: str) -> dict[str, str]:
     return sections
 
 
+@st.cache_data
+def search_docs(query: str) -> List[Tuple[str, str, str, str]]:
+    """
+    Search all documents for query string.
+
+    Returns list of (doc_name, section, matched_line, context) tuples.
+    """
+    if not query or len(query) < 2:
+        return []
+
+    results = []
+    query_lower = query.lower()
+
+    for doc_name, filename in DOCS.items():
+        content = load_doc(filename)
+        if content.startswith("*Document not found"):
+            continue
+
+        sections = extract_sections(content)
+
+        for section_name, section_content in sections.items():
+            lines = section_content.split('\n')
+            for i, line in enumerate(lines):
+                if query_lower in line.lower():
+                    # Get context (surrounding lines)
+                    start = max(0, i - 1)
+                    end = min(len(lines), i + 2)
+                    context = '\n'.join(lines[start:end])
+
+                    # Highlight the match
+                    highlighted = re.sub(
+                        f'({re.escape(query)})',
+                        r'**\1**',
+                        context,
+                        flags=re.IGNORECASE
+                    )
+
+                    results.append((doc_name, section_name, line.strip()[:100], highlighted))
+
+                    # Limit results per section
+                    if len([r for r in results if r[0] == doc_name and r[1] == section_name]) >= 3:
+                        break
+
+    return results[:50]  # Limit total results
+
+
 def render_docs():
     """Render the documentation page."""
     st.title("📚 Documentation")
     st.markdown("Guides and theory for g2 quantitative trading platform.")
+
+    # Search box
+    search_query = st.text_input(
+        "🔍 Search documentation",
+        placeholder="Type to search across all docs...",
+        key="doc_search"
+    )
+
+    # Show search results if query entered
+    if search_query and len(search_query) >= 2:
+        results = search_docs(search_query)
+
+        if results:
+            st.markdown(f"### Found {len(results)} result(s) for '{search_query}'")
+
+            # Group by document
+            current_doc = None
+            for doc_name, section, matched_line, context in results:
+                if doc_name != current_doc:
+                    current_doc = doc_name
+                    st.markdown(f"#### 📄 {doc_name}")
+
+                with st.expander(f"**{section}**: {matched_line[:60]}..."):
+                    st.markdown(context)
+
+            st.markdown("---")
+        else:
+            st.info(f"No results found for '{search_query}'")
+            st.markdown("---")
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📜 Whitepaper",
