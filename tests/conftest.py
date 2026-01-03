@@ -91,6 +91,10 @@ def pytest_sessionfinish(session, exitstatus):
             # Fall back to re-importing feature definitions/functions
             _restore_features_fallback(env)
 
+        # Always run db-init after restore to recreate any tables dropped by tests
+        # and re-seed built-in data (strategies, etc.)
+        _ensure_tables_exist(env)
+
         # Clean up backup directory
         try:
             shutil.rmtree(_test_backup_path)
@@ -100,6 +104,7 @@ def pytest_sessionfinish(session, exitstatus):
         # Fallback: just restore feature definitions/functions
         print("\n\nRestoring feature definitions and functions after tests...")
         _restore_features_fallback(env)
+        _ensure_tables_exist(env)
 
 
 def _restore_features_fallback(env):
@@ -123,6 +128,20 @@ def _restore_features_fallback(env):
     )
     if result.returncode == 0:
         print(f"  {result.stdout.strip()}")
+
+
+def _ensure_tables_exist(env):
+    """Run db-init to recreate any tables dropped by tests and seed built-in data."""
+    result = subprocess.run(
+        [sys.executable, "-m", "g2.cli", "db-init"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode == 0:
+        print(f"  Tables and seed data restored")
+    else:
+        print(f"  Warning: db-init failed: {result.stderr}")
 
 
 def create_test_function(conn, name: str = "test_func", returns_value: str = "close") -> None:

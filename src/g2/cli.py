@@ -6999,12 +6999,35 @@ def backtest_run(
     emit(f"Running {strategy} strategy backtest...", json_output=json_output)
 
     try:
+        # Helper to convert dict prices to flat list format
+        def _dict_to_flat_prices(prices_dict):
+            """Convert {symbol: [records]} to flat list with symbol field."""
+            flat = []
+            for symbol, records in prices_dict.items():
+                for record in records:
+                    flat_record = {**record}
+                    if "symbol" not in flat_record:
+                        flat_record["symbol"] = symbol
+                    flat.append(flat_record)
+            return flat
+
         # Create wrapper function for strategy that matches BacktestEngine interface
+        # Some strategies expect dict format, others expect flat list
+        dict_format_strategies = {"momentum", "ml_signal", "ml_filter"}
+
         def strategy_fn(current_date, portfolio, prices):
+            # Convert prices to format expected by strategy
+            if strategy in dict_format_strategies:
+                price_data_for_strat = prices
+                portfolio_for_strat = portfolio  # Keep Portfolio object
+            else:
+                price_data_for_strat = _dict_to_flat_prices(prices)
+                portfolio_for_strat = portfolio.positions  # Convert to dict
+
             return strat.generate_signals(
                 current_date=current_date,
-                portfolio=portfolio,
-                price_data=prices,
+                portfolio=portfolio_for_strat,
+                price_data=price_data_for_strat,
                 initial_cash=initial_cash,
             )
 
