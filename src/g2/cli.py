@@ -2712,18 +2712,59 @@ def ml_train_classifier(
 def ml_predict_classifier(
     model_path: Path = typer.Option(..., help="Path to classifier model directory"),
     prediction_date: Optional[str] = typer.Option(None, help="Date to generate predictions for (YYYY-MM-DD). Auto-detects if not provided."),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="Start date for batch predictions (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date for batch predictions (YYYY-MM-DD)"),
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols (optional)"),
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
-    """Generate trend class predictions using a trained classifier."""
+    """
+    Generate trend class predictions using a trained classifier.
+
+    Examples:
+        # Generate predictions for specific date
+        g2 ml predict-classifier --model-path models/classifier_v1_h7 \\
+            --prediction-date 2025-01-15 --symbols AAPL,MSFT,GOOGL
+
+        # Generate predictions for a date range (batch backfill)
+        g2 ml predict-classifier --model-path models/classifier_v1_h7 \\
+            --start-date 2025-01-01 --end-date 2025-01-31 --exchange NASDAQ --limit 50
+    """
     import pandas as pd
     import joblib
     from g2.ml.classifier import predict_classifier
     from decimal import Decimal
     from psycopg.types.json import Json
+    from datetime import datetime, timedelta
+
+    # Handle date range vs single date
+    if start_date and end_date:
+        # Date range mode
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            emit_error("Invalid date format. Use YYYY-MM-DD", json_output=json_output)
+            return
+
+        if start_dt > end_dt:
+            emit_error("start-date must be before end-date", json_output=json_output)
+            return
+
+        # Generate list of dates
+        prediction_dates = []
+        current = start_dt
+        while current <= end_dt:
+            prediction_dates.append(current.isoformat())
+            current += timedelta(days=1)
+        emit(f"Batch prediction mode: {len(prediction_dates)} dates from {start_date} to {end_date}", json_output=json_output)
+    elif prediction_date:
+        prediction_dates = [prediction_date]
+    else:
+        # Will auto-detect later
+        prediction_dates = [None]
 
     # Load model
     model_artifacts = joblib.load(model_path / "classifier.pkl")
@@ -2776,8 +2817,8 @@ def ml_predict_classifier(
         data_ids = [u[0] for u in universe]
         symbol_map = {u[0]: u[1] for u in universe}
 
-        # Auto-detect prediction date if not provided
-        if not prediction_date:
+        # Auto-detect prediction date if not provided (single date mode with None)
+        if prediction_dates == [None]:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -2793,68 +2834,15 @@ def ml_predict_classifier(
                 if not row or not row[0]:
                     emit_error("No features found for symbols. Ensure data-update has been run.", json_output=json_output)
                     return
-                prediction_date = row[0].isoformat()
-                emit(f"Auto-detected prediction date: {prediction_date}", json_output=json_output)
+                prediction_dates = [row[0].isoformat()]
+                emit(f"Auto-detected prediction date: {prediction_dates[0]}", json_output=json_output)
 
-        emit(f"Generating predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
+        # Process each prediction date
+        grand_total_predictions = 0
+        dates_processed = 0
+        dates_skipped = 0
 
-        # Fetch features for all symbols on prediction_date
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT cf.data_id, fd.name, cf.value
-                FROM computed_features cf
-                JOIN feature_definitions fd ON cf.feature_id = fd.id
-                WHERE cf.data_id = ANY(%s)
-                  AND cf.date = %s
-                  AND fd.name = ANY(%s);
-                """,
-                (data_ids, prediction_date, feature_names),
-            )
-            features_data = cur.fetchall()
-
-        if not features_data:
-            # Find latest available date to help user
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT MAX(date) FROM computed_features WHERE data_id = ANY(%s)",
-                    (data_ids,),
-                )
-                row = cur.fetchone()
-                latest_date = row[0] if row else None
-
-            if latest_date:
-                emit_error(
-                    f"No features found for {prediction_date}. "
-                    f"Latest available: {latest_date}. "
-                    f"Run 'g2 data-update' to compute features for more recent dates.",
-                    json_output=json_output,
-                )
-            else:
-                emit_error(
-                    f"No features found for {prediction_date}. "
-                    f"Run 'g2 data-update' to compute features first.",
-                    json_output=json_output,
-                )
-            return
-
-        # Convert to DataFrame and pivot to wide format
-        features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
-        features_wide = features_df.pivot_table(
-            index="data_id",
-            columns="feature_name",
-            values="value",
-            aggfunc="first"
-        )
-
-        emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
-
-        # Generate predictions (preserve data_id from features index)
-        predictions = predict_classifier(model_artifacts, features_wide)
-        # Set predictions index to match features_wide data_ids
-        predictions.index = features_wide.index
-
-        # Get or create model record
+        # Get or create model record (once, outside the loop)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id FROM ml_models WHERE name = %s AND version = %s;",
@@ -2875,61 +2863,138 @@ def ml_predict_classifier(
                 )
                 model_id = cur.fetchone()[0]
 
-        # Store predictions in database
-        total_predictions = 0
-        with conn.cursor() as cur:
-            for data_id in predictions.index:
-                pred_row = predictions.loc[data_id]
-                predicted_class = pred_row["predicted_class"]
+        for pred_date in prediction_dates:
+            emit(f"Generating predictions for {len(universe)} symbols on {pred_date}", json_output=json_output)
 
-                # Get class probabilities (columns start with "probability_")
-                prob_cols = [c for c in predictions.columns if c.startswith("probability_")]
-                class_probs = {c.replace("probability_", ""): float(pred_row[c]) for c in prob_cols}
-
-                # Extract individual probabilities for table columns
-                p_strong_up = class_probs.get("strong_up", 0.0)
-                p_weak_up = class_probs.get("weak_up", 0.0)
-                p_neutral = class_probs.get("flat", 0.0)
-                p_weak_down = class_probs.get("weak_down", 0.0)
-                p_strong_down = class_probs.get("strong_down", 0.0)
-
-                # Calculate margin (difference between top 2 probabilities)
-                sorted_probs = sorted(class_probs.values(), reverse=True)
-                margin = sorted_probs[0] - sorted_probs[1] if len(sorted_probs) > 1 else sorted_probs[0]
-
-                # Calculate entropy: -sum(p * log(p)) for non-zero p
-                import math
-                entropy = -sum(p * math.log(p) for p in class_probs.values() if p > 0)
-
+            # Fetch features for all symbols on pred_date
+            with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO trend_class_predictions
-                      (model_id, data_id, prediction_date, horizon_days, predicted_class,
-                       p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin, entropy)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (model_id, data_id, prediction_date, horizon_days) DO UPDATE SET
-                      predicted_class = EXCLUDED.predicted_class,
-                      p_strong_up = EXCLUDED.p_strong_up,
-                      p_weak_up = EXCLUDED.p_weak_up,
-                      p_neutral = EXCLUDED.p_neutral,
-                      p_weak_down = EXCLUDED.p_weak_down,
-                      p_strong_down = EXCLUDED.p_strong_down,
-                      margin = EXCLUDED.margin,
-                      entropy = EXCLUDED.entropy;
+                    SELECT cf.data_id, fd.name, cf.value
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND cf.date = %s
+                      AND fd.name = ANY(%s);
                     """,
-                    (model_id, int(data_id), prediction_date, horizon, predicted_class,
-                     p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin, entropy),
+                    (data_ids, pred_date, feature_names),
                 )
-                total_predictions += 1
+                features_data = cur.fetchall()
 
-        conn.commit()
+            if not features_data:
+                # Skip this date in batch mode, error in single date mode
+                if len(prediction_dates) > 1:
+                    emit(f"  Skipping {pred_date}: no features available", json_output=json_output)
+                    dates_skipped += 1
+                    continue
+                else:
+                    # Find latest available date to help user
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT MAX(date) FROM computed_features WHERE data_id = ANY(%s)",
+                            (data_ids,),
+                        )
+                        row = cur.fetchone()
+                        latest_date = row[0] if row else None
 
-    emit(f"Generated {total_predictions} predictions", json_output=json_output)
-    emit(
-        f"Classifier predictions generated: {model_name} {model_version} for {prediction_date}",
-        data={"model_id": model_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizon": horizon},
-        json_output=json_output,
-    )
+                    if latest_date:
+                        emit_error(
+                            f"No features found for {pred_date}. "
+                            f"Latest available: {latest_date}. "
+                            f"Run 'g2 data-update' to compute features for more recent dates.",
+                            json_output=json_output,
+                        )
+                    else:
+                        emit_error(
+                            f"No features found for {pred_date}. "
+                            f"Run 'g2 data-update' to compute features first.",
+                            json_output=json_output,
+                        )
+                    return
+
+            # Convert to DataFrame and pivot to wide format
+            features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
+            features_wide = features_df.pivot_table(
+                index="data_id",
+                columns="feature_name",
+                values="value",
+                aggfunc="first"
+            )
+
+            emit(f"  Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
+
+            # Generate predictions (preserve data_id from features index)
+            predictions = predict_classifier(model_artifacts, features_wide)
+            # Set predictions index to match features_wide data_ids
+            predictions.index = features_wide.index
+
+            # Store predictions in database
+            total_predictions = 0
+            with conn.cursor() as cur:
+                for data_id in predictions.index:
+                    pred_row = predictions.loc[data_id]
+                    predicted_class = pred_row["predicted_class"]
+
+                    # Get class probabilities (columns start with "probability_")
+                    prob_cols = [c for c in predictions.columns if c.startswith("probability_")]
+                    class_probs = {c.replace("probability_", ""): float(pred_row[c]) for c in prob_cols}
+
+                    # Extract individual probabilities for table columns
+                    p_strong_up = class_probs.get("strong_up", 0.0)
+                    p_weak_up = class_probs.get("weak_up", 0.0)
+                    p_neutral = class_probs.get("flat", 0.0)
+                    p_weak_down = class_probs.get("weak_down", 0.0)
+                    p_strong_down = class_probs.get("strong_down", 0.0)
+
+                    # Calculate margin (difference between top 2 probabilities)
+                    sorted_probs = sorted(class_probs.values(), reverse=True)
+                    margin = sorted_probs[0] - sorted_probs[1] if len(sorted_probs) > 1 else sorted_probs[0]
+
+                    # Calculate entropy: -sum(p * log(p)) for non-zero p
+                    import math
+                    entropy = -sum(p * math.log(p) for p in class_probs.values() if p > 0)
+
+                    cur.execute(
+                        """
+                        INSERT INTO trend_class_predictions
+                          (model_id, data_id, prediction_date, horizon_days, predicted_class,
+                           p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin, entropy)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (model_id, data_id, prediction_date, horizon_days) DO UPDATE SET
+                          predicted_class = EXCLUDED.predicted_class,
+                          p_strong_up = EXCLUDED.p_strong_up,
+                          p_weak_up = EXCLUDED.p_weak_up,
+                          p_neutral = EXCLUDED.p_neutral,
+                          p_weak_down = EXCLUDED.p_weak_down,
+                          p_strong_down = EXCLUDED.p_strong_down,
+                          margin = EXCLUDED.margin,
+                          entropy = EXCLUDED.entropy;
+                        """,
+                        (model_id, int(data_id), pred_date, horizon, predicted_class,
+                         p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin, entropy),
+                    )
+                    total_predictions += 1
+
+            conn.commit()
+            grand_total_predictions += total_predictions
+            dates_processed += 1
+            emit(f"  Stored {total_predictions} predictions", json_output=json_output)
+
+    # Summary
+    if len(prediction_dates) > 1:
+        emit(f"Batch complete: {dates_processed} dates processed, {dates_skipped} skipped, {grand_total_predictions} total predictions", json_output=json_output)
+        emit(
+            f"Classifier predictions generated: {model_name} {model_version}",
+            data={"model_id": model_id, "dates_processed": dates_processed, "dates_skipped": dates_skipped, "total_predictions": grand_total_predictions, "horizon": horizon},
+            json_output=json_output,
+        )
+    else:
+        emit(f"Generated {grand_total_predictions} predictions", json_output=json_output)
+        emit(
+            f"Classifier predictions generated: {model_name} {model_version} for {prediction_dates[0]}",
+            data={"model_id": model_id, "prediction_date": prediction_dates[0], "total_predictions": grand_total_predictions, "horizon": horizon},
+            json_output=json_output,
+        )
 
 
 @ml_app.command("train-ensemble")
@@ -3112,6 +3177,8 @@ def ml_predict_ensemble(
     model_name: str = typer.Option(..., help="Ensemble model name"),
     model_version: str = typer.Option(..., help="Model version"),
     prediction_date: Optional[str] = typer.Option(None, help="Date to generate predictions for (YYYY-MM-DD). Auto-detects latest date with features if not provided."),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="Start date for batch predictions (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date for batch predictions (YYYY-MM-DD)"),
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
@@ -3128,8 +3195,13 @@ def ml_predict_ensemble(
         # Generate predictions for NASDAQ universe with explicit date
         g2 ml predict-ensemble --model-name nasdaq_ensemble --model-version v1 \\
             --prediction-date 2025-01-15 --exchange NASDAQ --limit 50
+
+        # Generate predictions for a date range (batch backfill)
+        g2 ml predict-ensemble --model-name nasdaq_ensemble --model-version v1 \\
+            --start-date 2025-01-01 --end-date 2025-01-31 --exchange NASDAQ --limit 50
     """
     import pandas as pd
+    from datetime import datetime, timedelta
     from g2.ml.ensemble import load_ensemble, predict_ensemble
     from g2.ml.store import get_ml_dataset
 
@@ -3137,6 +3209,33 @@ def ml_predict_ensemble(
     if not sym_list and not exchange:
         emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
         return
+
+    # Handle date range vs single date
+    if start_date and end_date:
+        # Date range mode
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            emit_error("Invalid date format. Use YYYY-MM-DD", json_output=json_output)
+            return
+
+        if start_dt > end_dt:
+            emit_error("start-date must be before end-date", json_output=json_output)
+            return
+
+        # Generate list of dates
+        prediction_dates = []
+        current = start_dt
+        while current <= end_dt:
+            prediction_dates.append(current.isoformat())
+            current += timedelta(days=1)
+        emit(f"Batch prediction mode: {len(prediction_dates)} dates from {start_date} to {end_date}", json_output=json_output)
+    elif prediction_date:
+        prediction_dates = [prediction_date]
+    else:
+        # Will auto-detect later
+        prediction_dates = [None]
 
     with db_connection(db_url) as conn:
         # Fetch model metadata
@@ -3206,8 +3305,8 @@ def ml_predict_ensemble(
 
         data_ids = [u[0] for u in universe]
 
-        # Auto-detect prediction date if not provided
-        if not prediction_date:
+        # Auto-detect prediction date if not provided (single date mode with None)
+        if prediction_dates == [None]:
             with conn.cursor() as cur:
                 # Find the latest date that has features for these symbols
                 cur.execute(
@@ -3224,150 +3323,173 @@ def ml_predict_ensemble(
                 if not row or not row[0]:
                     emit_error(f"No features found for symbols. Ensure data-update has been run.", json_output=json_output)
                     return
-                prediction_date = row[0].isoformat()
-                emit(f"Auto-detected prediction date: {prediction_date}", json_output=json_output)
+                prediction_dates = [row[0].isoformat()]
+                emit(f"Auto-detected prediction date: {prediction_dates[0]}", json_output=json_output)
 
-        emit(f"Generating ensemble predictions for {len(universe)} symbols on {prediction_date}", json_output=json_output)
+        # Process each prediction date
+        grand_total_predictions = 0
+        dates_processed = 0
+        dates_skipped = 0
 
-        # Fetch features for all symbols on prediction_date
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT cf.data_id, fd.name, cf.value
-                FROM computed_features cf
-                JOIN feature_definitions fd ON cf.feature_id = fd.id
-                WHERE cf.data_id = ANY(%s)
-                  AND cf.date = %s
-                  AND fd.name = ANY(%s);
-                """,
-                (data_ids, prediction_date, feature_names),
-            )
-            features_data = cur.fetchall()
+        for pred_date in prediction_dates:
+            emit(f"Generating ensemble predictions for {len(universe)} symbols on {pred_date}", json_output=json_output)
 
-        if not features_data:
-            # Find latest available date to help user
+            # Fetch features for all symbols on pred_date
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT MAX(date) FROM computed_features WHERE data_id = ANY(%s)",
-                    (data_ids,),
+                    """
+                    SELECT cf.data_id, fd.name, cf.value
+                    FROM computed_features cf
+                    JOIN feature_definitions fd ON cf.feature_id = fd.id
+                    WHERE cf.data_id = ANY(%s)
+                      AND cf.date = %s
+                      AND fd.name = ANY(%s);
+                    """,
+                    (data_ids, pred_date, feature_names),
                 )
-                row = cur.fetchone()
-                latest_date = row[0] if row else None
+                features_data = cur.fetchall()
 
-            if latest_date:
-                emit_error(
-                    f"No features found for {prediction_date}. "
-                    f"Latest available: {latest_date}. "
-                    f"Run 'g2 data-update' to compute features for more recent dates.",
-                    json_output=json_output,
-                )
-            else:
-                emit_error(
-                    f"No features found for {prediction_date}. "
-                    f"Run 'g2 data-update' to compute features first.",
-                    json_output=json_output,
-                )
-            return
+            if not features_data:
+                # Skip this date in batch mode, error in single date mode
+                if len(prediction_dates) > 1:
+                    emit(f"  Skipping {pred_date}: no features available", json_output=json_output)
+                    dates_skipped += 1
+                    continue
+                else:
+                    # Find latest available date to help user
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT MAX(date) FROM computed_features WHERE data_id = ANY(%s)",
+                            (data_ids,),
+                        )
+                        row = cur.fetchone()
+                        latest_date = row[0] if row else None
 
-        # Convert to DataFrame and pivot to wide format
-        features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
-        features_wide = features_df.pivot_table(
-            index="data_id",
-            columns="feature_name",
-            values="value",
-            aggfunc="first"
-        )
+                    if latest_date:
+                        emit_error(
+                            f"No features found for {pred_date}. "
+                            f"Latest available: {latest_date}. "
+                            f"Run 'g2 data-update' to compute features for more recent dates.",
+                            json_output=json_output,
+                        )
+                    else:
+                        emit_error(
+                            f"No features found for {pred_date}. "
+                            f"Run 'g2 data-update' to compute features first.",
+                            json_output=json_output,
+                        )
+                    return
 
-        emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
-
-        # Generate predictions for each horizon
-        from psycopg.types.json import Json
-        from decimal import Decimal
-
-        # Create run record
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
-                VALUES ('predict_ensemble', 'running', %s, %s, NOW())
-                RETURNING id;
-                """,
-                (
-                    dataset_id,
-                    Json(
-                        {
-                            "model_name": model_name,
-                            "model_version": model_version,
-                            "prediction_date": prediction_date,
-                            "universe": {"symbols": sym_list} if sym_list else {"exchange": exchange},
-                        }
-                    ),
-                ),
+            # Convert to DataFrame and pivot to wide format
+            features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
+            features_wide = features_df.pivot_table(
+                index="data_id",
+                columns="feature_name",
+                values="value",
+                aggfunc="first"
             )
-            run_id = int(cur.fetchone()[0])
 
-        total_predictions = 0
-        for horizon in horizons:
-            emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
+            emit(f"Loaded features: {features_wide.shape[0]} symbols x {features_wide.shape[1]} features", json_output=json_output)
 
-            # Load ensemble for this horizon
-            # Ensemble artifacts are saved as {artifact_uri}_h{horizon} (sibling dirs, not subdirs)
-            horizon_ensemble_path = Path(f"{artifact_uri}_h{horizon}")
-            try:
-                ensemble = load_ensemble(horizon_ensemble_path)
-            except FileNotFoundError:
-                emit(f"  Warning: Ensemble not found at {horizon_ensemble_path}, skipping", json_output=json_output)
-                continue
+            # Generate predictions for each horizon
+            from psycopg.types.json import Json
+            from decimal import Decimal
 
-            # Generate predictions
-            predictions = predict_ensemble(ensemble, features_wide)
-
-            # Insert predictions into database
+            # Create run record
             with conn.cursor() as cur:
-                for data_id in predictions.index:
-                    q10 = Decimal(str(predictions.loc[data_id, "q10"]))
-                    q50 = Decimal(str(predictions.loc[data_id, "q50"]))
-                    q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+                cur.execute(
+                    """
+                    INSERT INTO ml_runs (run_type, status, dataset_id, run_config, started_at)
+                    VALUES ('predict_ensemble', 'running', %s, %s, NOW())
+                    RETURNING id;
+                    """,
+                    (
+                        dataset_id,
+                        Json(
+                            {
+                                "model_name": model_name,
+                                "model_version": model_version,
+                                "prediction_date": pred_date,
+                                "universe": {"symbols": sym_list} if sym_list else {"exchange": exchange},
+                            }
+                        ),
+                    ),
+                )
+                run_id = int(cur.fetchone()[0])
 
-                    cur.execute(
-                        """
-                        INSERT INTO quantile_predictions
-                          (model_id, data_id, prediction_date, horizon_days, q10, q50, q90,
-                           model_version, run_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
-                        DO UPDATE SET
-                          q10 = EXCLUDED.q10,
-                          q50 = EXCLUDED.q50,
-                          q90 = EXCLUDED.q90,
-                          model_version = EXCLUDED.model_version,
-                          run_id = EXCLUDED.run_id,
-                          created_at = NOW();
-                        """,
-                        (model_id, int(data_id), prediction_date, horizon, q10, q50, q90, model_version, run_id),
-                    )
-                    total_predictions += 1
+            total_predictions = 0
+            for horizon in horizons:
+                emit(f"Predicting for {horizon}-day horizon...", json_output=json_output)
 
-            emit(f"  Stored {len(predictions)} predictions for {horizon}-day horizon", json_output=json_output)
+                # Load ensemble for this horizon
+                # Ensemble artifacts are saved as {artifact_uri}_h{horizon} (sibling dirs, not subdirs)
+                horizon_ensemble_path = Path(f"{artifact_uri}_h{horizon}")
+                try:
+                    ensemble = load_ensemble(horizon_ensemble_path)
+                except FileNotFoundError:
+                    emit(f"  Warning: Ensemble not found at {horizon_ensemble_path}, skipping", json_output=json_output)
+                    continue
 
-        # Mark run as complete
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE ml_runs SET status = 'completed', finished_at = NOW()
-                WHERE id = %s;
-                """,
-                (run_id,),
-            )
+                # Generate predictions
+                predictions = predict_ensemble(ensemble, features_wide)
 
-        conn.commit()
+                # Insert predictions into database
+                with conn.cursor() as cur:
+                    for data_id in predictions.index:
+                        q10 = Decimal(str(predictions.loc[data_id, "q10"]))
+                        q50 = Decimal(str(predictions.loc[data_id, "q50"]))
+                        q90 = Decimal(str(predictions.loc[data_id, "q90"]))
 
-    emit(f"Generated {total_predictions} predictions", json_output=json_output)
-    emit(
-        f"Ensemble predictions generated: {model_name} {model_version} for {prediction_date}",
-        data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_date, "total_predictions": total_predictions, "horizons": horizons},
-        json_output=json_output,
-    )
+                        cur.execute(
+                            """
+                            INSERT INTO quantile_predictions
+                              (model_id, data_id, prediction_date, horizon_days, q10, q50, q90,
+                               model_version, run_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
+                            DO UPDATE SET
+                              q10 = EXCLUDED.q10,
+                              q50 = EXCLUDED.q50,
+                              q90 = EXCLUDED.q90,
+                              model_version = EXCLUDED.model_version,
+                              run_id = EXCLUDED.run_id,
+                              created_at = NOW();
+                            """,
+                            (model_id, int(data_id), pred_date, horizon, q10, q50, q90, model_version, run_id),
+                        )
+                        total_predictions += 1
+
+                emit(f"  Stored {len(predictions)} predictions for {horizon}-day horizon", json_output=json_output)
+
+            # Mark run as complete
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE ml_runs SET status = 'completed', finished_at = NOW()
+                    WHERE id = %s;
+                    """,
+                    (run_id,),
+                )
+
+            conn.commit()
+            grand_total_predictions += total_predictions
+            dates_processed += 1
+
+    # Summary
+    if len(prediction_dates) > 1:
+        emit(f"Batch complete: {dates_processed} dates processed, {dates_skipped} skipped, {grand_total_predictions} total predictions", json_output=json_output)
+        emit(
+            f"Ensemble predictions generated: {model_name} {model_version}",
+            data={"model_id": model_id, "dates_processed": dates_processed, "dates_skipped": dates_skipped, "total_predictions": grand_total_predictions, "horizons": horizons},
+            json_output=json_output,
+        )
+    else:
+        emit(f"Generated {grand_total_predictions} predictions", json_output=json_output)
+        emit(
+            f"Ensemble predictions generated: {model_name} {model_version} for {prediction_dates[0]}",
+            data={"model_id": model_id, "run_id": run_id, "prediction_date": prediction_dates[0], "total_predictions": grand_total_predictions, "horizons": horizons},
+            json_output=json_output,
+        )
 
 
 @ml_app.command("e2e-test")
