@@ -167,13 +167,11 @@ def render_docs():
                 doc_sections = extract_sections(doc_content)
                 full_section_content = doc_sections.get(section, context)
 
-                # Show full section in expander with relevance indicator
+                # Show full section in expander (ranked by relevance)
                 tab_name = DOC_TO_TAB.get(doc_name, doc_name)
                 preview = matched_line[:50] + "..." if len(matched_line) > 50 else matched_line
-                relevance_bar = "🟢" * min(score // 30, 5) + "⚪" * (5 - min(score // 30, 5))
-                with st.expander(f"{relevance_bar} **{section}** — {preview}"):
-                    st.markdown(f"*From {tab_name}*")
-                    st.markdown("---")
+                with st.expander(f"**{section}** — {preview}"):
+                    st.caption(f"{tab_name}")
                     st.markdown(full_section_content)
 
             st.markdown("---")
