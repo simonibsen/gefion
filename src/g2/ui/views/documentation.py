@@ -11,6 +11,7 @@ DOCS = {
     "Whitepaper": "WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md",
     "User Guide": "USER_GUIDE.md",
     "ML Pipeline": "ML_QUICKSTART.md",
+    "Strategies": "STRATEGIES.md",
     "Backtesting": "BACKTESTING.md",
     "Experiments": "EXPERIMENTS.md",
     "Troubleshooting": "TROUBLESHOOTING.md",
@@ -131,10 +132,11 @@ def render_docs():
             st.info(f"No results found for '{search_query}'")
             st.markdown("---")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📜 Whitepaper",
         "🚀 Quick Start",
         "🧠 ML Pipeline",
+        "⚔️ Strategies",
         "📈 Backtesting",
         "🧪 Experiments",
         "🔧 Troubleshooting",
@@ -150,12 +152,15 @@ def render_docs():
         render_ml_docs()
 
     with tab4:
-        render_backtest_docs()
+        render_strategies_docs()
 
     with tab5:
-        render_experiments_docs()
+        render_backtest_docs()
 
     with tab6:
+        render_experiments_docs()
+
+    with tab7:
         render_troubleshooting()
 
 
@@ -324,6 +329,83 @@ def render_ml_docs():
           --model-version $(date +%Y%m%d)
         ```
         """)
+
+
+def render_strategies_docs():
+    """Render the trading strategies guide."""
+    st.subheader("Trading Strategies")
+
+    st.info("""
+    g2 provides 9 built-in trading strategies: 7 rule-based and 2 ML-integrated.
+    Strategies are Python classes; configs are parameterized instances for comparison.
+    """)
+
+    content = load_doc("STRATEGIES.md")
+
+    if content.startswith("*Document not found"):
+        st.error(content)
+        return
+
+    sections = extract_sections(content)
+
+    # Architecture overview
+    if "Architecture Overview" in sections:
+        with st.expander("**Architecture Overview**", expanded=True):
+            st.markdown(sections["Architecture Overview"])
+
+    # Rule-based strategies
+    st.markdown("---")
+    st.markdown("### Rule-Based Strategies")
+
+    rule_strategies = [
+        "Momentum",
+        "Mean Reversion",
+        "Moving Average Crossover",
+        "Breakout",
+        "Pairs Trading",
+        "RSI Divergence",
+        "Volatility Contraction",
+    ]
+
+    for strat in rule_strategies:
+        if strat in sections:
+            with st.expander(f"**{strat}**"):
+                st.markdown(sections[strat])
+
+    # ML strategies
+    st.markdown("---")
+    st.markdown("### ML-Integrated Strategies")
+
+    # ML overview sections
+    ml_overview = [
+        "Understanding ML Model Types",
+        "Look-Ahead Bias Prevention",
+    ]
+    for section in ml_overview:
+        if section in sections:
+            with st.expander(f"**{section}**", expanded=True):
+                st.markdown(sections[section])
+
+    ml_strategies = ["ML Signal", "ML Filter", "ML Strategy Comparison"]
+    for strat in ml_strategies:
+        if strat in sections:
+            expanded = strat == "ML Strategy Comparison"
+            with st.expander(f"**{strat}**", expanded=expanded):
+                st.markdown(sections[strat])
+
+    # Working with configs
+    st.markdown("---")
+    st.markdown("### Configuration & Extension")
+
+    config_sections = [
+        "Working with Strategy Configs",
+        "Creating New Strategies",
+        "Best Practices",
+    ]
+    for section in config_sections:
+        if section in sections:
+            with st.expander(f"**{section}**"):
+                st.markdown(sections[section])
 
 
 def render_backtest_docs():
