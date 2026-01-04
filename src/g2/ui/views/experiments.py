@@ -85,7 +85,7 @@ def render_list_section():
                         experiment_type,
                         status,
                         objective_metric,
-                        search_method,
+                        config->>'search_method' as search_method,
                         total_trials,
                         completed_trials,
                         best_score,

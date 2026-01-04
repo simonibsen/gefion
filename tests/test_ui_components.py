@@ -781,6 +781,34 @@ class TestStrategyConfigsUI:
         assert "database" in content.lower()
 
 
+class TestExperimentsUIQuery:
+    """Test that experiments UI queries database correctly."""
+
+    @pytest.fixture
+    def ui_dir(self):
+        """Get the UI source directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+
+    def test_experiments_queries_search_method_from_config_jsonb(self, ui_dir):
+        """Experiments list query should extract search_method from config JSONB.
+
+        The search_method is stored in the config JSONB column, not as a
+        separate column. The UI must use config->>'search_method' syntax.
+        """
+        content = (ui_dir / "views" / "experiments.py").read_text()
+
+        # Should NOT have bare search_method in SELECT (that's the bug)
+        # The fix is to use config->>'search_method'
+        assert "config->>'search_method'" in content, (
+            "experiments.py should query config->>'search_method' not bare search_method"
+        )
+
+    def test_experiments_list_section_has_render_function(self, ui_dir):
+        """Experiments view should have render_list_section function."""
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert "def render_list_section(" in content
+
+
 class TestMLAdvancedFeatures:
     """Test ML view advanced features."""
 
