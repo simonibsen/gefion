@@ -715,6 +715,49 @@ class TestBacktestStrategies:
         assert content.count("get_strategies()") >= 2  # Run + Compare sections
 
 
+class TestStrategyConfigsUI:
+    """Test Strategy Configs section in Backtesting UI."""
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+
+    def test_backtest_has_strategy_configs_section(self, views_dir):
+        """Backtest view should have Strategy Configs section."""
+        content = (views_dir / "backtest.py").read_text()
+        assert "Strategy Configs" in content
+        assert "render_strategy_configs" in content or "_render_configs_section" in content
+
+    def test_strategy_configs_lists_existing_configs(self, views_dir):
+        """Strategy Configs section should list existing configs."""
+        content = (views_dir / "backtest.py").read_text()
+        # Should query strategy_configs table
+        assert "strategy_configs" in content
+        # Should display config name, strategy, and params
+        assert "config" in content.lower()
+
+    def test_strategy_configs_has_create_form(self, views_dir):
+        """Strategy Configs section should have create config form."""
+        content = (views_dir / "backtest.py").read_text()
+        # Should have form inputs for creating config
+        assert "Create" in content or "New Config" in content
+        # Should have name input
+        assert "config_name" in content or "new_config" in content
+
+    def test_strategy_configs_has_delete_option(self, views_dir):
+        """Strategy Configs section should have delete option."""
+        content = (views_dir / "backtest.py").read_text()
+        # Should have delete functionality
+        assert "delete" in content.lower() or "Delete" in content
+
+    def test_strategy_configs_shows_cli_command(self, views_dir):
+        """Strategy Configs section should show equivalent CLI command."""
+        content = (views_dir / "backtest.py").read_text()
+        # Should show CLI command for creating config
+        assert "strategy create-config" in content
+
+
 class TestMLAdvancedFeatures:
     """Test ML view advanced features."""
 

@@ -455,7 +455,12 @@ def render_backtest():
     st.title("📈 Backtesting")
     st.markdown("Test trading strategies on historical data.")
 
-    tab1, tab2, tab3 = st.tabs(["🎮 Run Backtest", "⚔️ Compare Strategies", "📊 Help"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🎮 Run Backtest",
+        "⚔️ Compare Strategies",
+        "⚙️ Strategy Configs",
+        "📊 Help"
+    ])
 
     with tab1:
         render_run_section()
@@ -464,6 +469,9 @@ def render_backtest():
         render_compare_section()
 
     with tab3:
+        render_strategy_configs()
+
+    with tab4:
         render_help_section()
 
 
@@ -1105,6 +1113,184 @@ def render_compare_section():
             except Exception as e:
                 status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
+
+
+def get_strategy_configs():
+    """Get all strategy configs from database."""
+    try:
+        from g2.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, name, strategy_name, params, description, active
+                    FROM strategy_configs
+                    ORDER BY name
+                """)
+                return [
+                    {
+                        "id": row[0],
+                        "name": row[1],
+                        "strategy": row[2],
+                        "params": row[3] or {},
+                        "description": row[4] or "",
+                        "active": row[5],
+                    }
+                    for row in cur.fetchall()
+                ]
+    except Exception as e:
+        st.error(f"Failed to load configs: {e}")
+        return []
+
+
+def create_strategy_config(name: str, strategy: str, params: dict, description: str):
+    """Create a new strategy config in database."""
+    try:
+        from g2.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO strategy_configs (name, strategy_name, params, description, active)
+                    VALUES (%s, %s, %s, %s, true)
+                    RETURNING id
+                """, (name, strategy, json.dumps(params), description))
+                config_id = cur.fetchone()[0]
+                conn.commit()
+                return config_id
+    except Exception as e:
+        raise Exception(f"Failed to create config: {e}")
+
+
+def delete_strategy_config(config_id: int):
+    """Delete a strategy config from database."""
+    try:
+        from g2.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM strategy_configs WHERE id = %s", (config_id,))
+                conn.commit()
+    except Exception as e:
+        raise Exception(f"Failed to delete config: {e}")
+
+
+def render_strategy_configs():
+    """Render Strategy Configs management section."""
+    st.subheader("Strategy Configs")
+    st.markdown("""
+    Create and manage parameterized strategy configurations. Configs let you save
+    specific parameter combinations and compare them in backtests.
+    """)
+
+    # Two columns: list and create
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.markdown("### 📋 Existing Configs")
+        configs = get_strategy_configs()
+
+        if not configs:
+            st.info("No strategy configs found. Create one to get started!")
+        else:
+            for config in configs:
+                with st.expander(f"**{config['name']}** ({config['strategy']})", expanded=False):
+                    st.markdown(f"**Strategy:** `{config['strategy']}`")
+                    if config['description']:
+                        st.markdown(f"**Description:** {config['description']}")
+
+                    st.markdown("**Parameters:**")
+                    if config['params']:
+                        st.json(config['params'])
+                    else:
+                        st.markdown("_Default parameters_")
+
+                    # Delete button
+                    delete_key = f"delete_config_{config['id']}"
+                    if st.button(f"🗑️ Delete", key=delete_key, type="secondary"):
+                        try:
+                            delete_strategy_config(config['id'])
+                            st.success(f"Deleted config '{config['name']}'")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(str(e))
+
+    with col2:
+        st.markdown("### ➕ Create New Config")
+
+        # Get available strategies
+        strategies = get_strategies()
+        strategy_names = [s[0] for s in strategies]
+
+        with st.form("create_config_form"):
+            config_name = st.text_input(
+                "Config Name",
+                placeholder="e.g., momentum_aggressive",
+                help="Unique name for this config"
+            )
+
+            base_strategy = st.selectbox(
+                "Base Strategy",
+                options=strategy_names,
+                help="Strategy to configure"
+            )
+
+            config_description = st.text_input(
+                "Description (optional)",
+                placeholder="e.g., Aggressive momentum with short lookback"
+            )
+
+            st.markdown("**Parameters (JSON):**")
+            params_json = st.text_area(
+                "Parameters",
+                value="{}",
+                height=100,
+                help="JSON object with strategy parameters"
+            )
+
+            submitted = st.form_submit_button("Create Config", type="primary")
+
+            if submitted:
+                if not config_name:
+                    st.error("Config name is required")
+                elif not config_name.replace("_", "").isalnum():
+                    st.error("Config name must be alphanumeric (underscores allowed)")
+                else:
+                    try:
+                        params = json.loads(params_json) if params_json.strip() else {}
+                        create_strategy_config(
+                            name=config_name,
+                            strategy=base_strategy,
+                            params=params,
+                            description=config_description
+                        )
+                        st.success(f"Created config '{config_name}'")
+                        st.rerun()
+                    except json.JSONDecodeError:
+                        st.error("Invalid JSON in parameters")
+                    except Exception as e:
+                        st.error(str(e))
+
+    # CLI equivalent
+    st.markdown("---")
+    st.markdown("### 💻 CLI Equivalent")
+    st.code(
+        'g2 strategy create-config --name my_config --strategy momentum --params \'{"lookback_days": 10}\'',
+        language="bash"
+    )
+
+    # Usage tip
+    with st.expander("💡 Using Configs in Backtests"):
+        st.markdown("""
+        Once you create a config, you can use it in the **Compare Strategies** tab:
+
+        1. Go to Compare Strategies
+        2. In the strategies field, type your config name (e.g., `momentum_aggressive`)
+        3. Config names work alongside strategy names: `momentum,momentum_aggressive,mean_reversion`
+
+        **CLI:**
+        ```bash
+        g2 backtest compare --strategies momentum,momentum_aggressive,ml_filter_h7 \\
+          --symbols AAPL,MSFT --start-date 2024-01-01 --end-date 2024-12-01
+        ```
+        """)
 
 
 def render_help_section():
