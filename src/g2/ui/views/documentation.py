@@ -163,15 +163,17 @@ def render_docs():
             # Show ranked results with full section content
             for idx, (doc_name, section, matched_line, context, filename, score) in enumerate(results):
                 # Load full section content
-                content = load_doc(filename)
-                sections = extract_sections(content)
-                full_section_content = sections.get(section, context)
+                doc_content = load_doc(filename)
+                doc_sections = extract_sections(doc_content)
+                full_section_content = doc_sections.get(section, context)
 
                 # Show full section in expander with relevance indicator
                 tab_name = DOC_TO_TAB.get(doc_name, doc_name)
                 preview = matched_line[:50] + "..." if len(matched_line) > 50 else matched_line
-                with st.expander(f"**{section}** — {preview}"):
-                    st.caption(f"📄 {tab_name} • Relevance: {'●' * min(score // 20, 5)}")
+                relevance_bar = "🟢" * min(score // 30, 5) + "⚪" * (5 - min(score // 30, 5))
+                with st.expander(f"{relevance_bar} **{section}** — {preview}"):
+                    st.markdown(f"*From {tab_name}*")
+                    st.markdown("---")
                     st.markdown(full_section_content)
 
             st.markdown("---")
