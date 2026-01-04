@@ -64,11 +64,12 @@ def extract_sections(content: str) -> dict[str, str]:
 
 
 @st.cache_data
-def search_docs(query: str) -> List[Tuple[str, str, str, str, str]]:
+def search_docs(query: str) -> List[Tuple[str, str, str, str, str, int]]:
     """
     Search all documents for query string.
 
-    Returns list of (doc_name, section, matched_line, context, filename) tuples.
+    Returns list of (doc_name, section, matched_line, context, filename, score) tuples,
+    ranked by relevance score (highest first).
     """
     if not query or len(query) < 2:
         return []
@@ -84,10 +85,36 @@ def search_docs(query: str) -> List[Tuple[str, str, str, str, str]]:
         sections = extract_sections(content)
 
         for section_name, section_content in sections.items():
+            # Calculate relevance score for this section
+            section_lower = section_content.lower()
+            match_count = section_lower.count(query_lower)
+
+            if match_count == 0:
+                continue
+
+            # Score factors:
+            # - Match in section title: +50
+            # - Number of matches: +10 each
+            # - Exact case match: +20
+            # - Match in first 200 chars: +30
+            score = match_count * 10
+
+            if query_lower in section_name.lower():
+                score += 50
+
+            if query in section_content:  # Exact case match
+                score += 20
+
+            if query_lower in section_lower[:200]:
+                score += 30
+
+            # Find best matching line for display
             lines = section_content.split('\n')
+            best_line = ""
+            best_context = ""
+
             for i, line in enumerate(lines):
                 if query_lower in line.lower():
-                    # Get context (surrounding lines)
                     start = max(0, i - 1)
                     end = min(len(lines), i + 2)
                     context = '\n'.join(lines[start:end])
@@ -95,16 +122,19 @@ def search_docs(query: str) -> List[Tuple[str, str, str, str, str]]:
                     # Highlight the match
                     highlighted = re.sub(
                         f'({re.escape(query)})',
-                        r'**\1**',
+                        r'**\\1**',
                         context,
                         flags=re.IGNORECASE
                     )
 
-                    results.append((doc_name, section_name, line.strip()[:100], highlighted, filename))
+                    best_line = line.strip()[:100]
+                    best_context = highlighted
+                    break
 
-                    # Limit results per section
-                    if len([r for r in results if r[0] == doc_name and r[1] == section_name]) >= 3:
-                        break
+            results.append((doc_name, section_name, best_line, best_context, filename, score))
+
+    # Sort by score (highest first), then by doc name
+    results.sort(key=lambda x: (-x[5], x[0]))
 
     return results[:50]  # Limit total results
 
@@ -130,22 +160,18 @@ def render_docs():
         if results:
             st.markdown(f"### Found {len(results)} result(s) for '{search_query}'")
 
-            # Group by document and show full section content
-            current_doc = None
-            for idx, (doc_name, section, matched_line, context, filename) in enumerate(results):
-                if doc_name != current_doc:
-                    current_doc = doc_name
-                    st.markdown(f"#### 📄 {doc_name}")
-
+            # Show ranked results with full section content
+            for idx, (doc_name, section, matched_line, context, filename, score) in enumerate(results):
                 # Load full section content
                 content = load_doc(filename)
                 sections = extract_sections(content)
                 full_section_content = sections.get(section, context)
 
-                # Show full section in expander
+                # Show full section in expander with relevance indicator
                 tab_name = DOC_TO_TAB.get(doc_name, doc_name)
-                with st.expander(f"**{section}** — {matched_line[:50]}..."):
-                    st.caption(f"From: {tab_name}")
+                preview = matched_line[:50] + "..." if len(matched_line) > 50 else matched_line
+                with st.expander(f"**{section}** — {preview}"):
+                    st.caption(f"📄 {tab_name} • Relevance: {'●' * min(score // 20, 5)}")
                     st.markdown(full_section_content)
 
             st.markdown("---")
