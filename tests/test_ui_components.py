@@ -745,17 +745,37 @@ class TestStrategyConfigsUI:
         # Should have name input
         assert "config_name" in content or "new_config" in content
 
-    def test_strategy_configs_has_delete_option(self, views_dir):
-        """Strategy Configs section should have delete option."""
+    def test_strategy_configs_has_unregister_option(self, views_dir):
+        """Strategy Configs section should have unregister option."""
         content = (views_dir / "backtest.py").read_text()
-        # Should have delete functionality
-        assert "delete" in content.lower() or "Delete" in content
+        # Should have unregister functionality (not delete - strategies are code)
+        assert "Unregister" in content
+        # Should explain the difference
+        assert "underlying strategy" in content.lower()
 
     def test_strategy_configs_shows_cli_command(self, views_dir):
         """Strategy Configs section should show equivalent CLI command."""
         content = (views_dir / "backtest.py").read_text()
         # Should show CLI command for creating config
         assert "strategy create-config" in content
+
+    def test_strategy_configs_has_parameter_reference(self, views_dir):
+        """Strategy Configs section should have parameter reference for each strategy."""
+        content = (views_dir / "backtest.py").read_text()
+        # Should have parameter reference function
+        assert "get_strategy_params_reference" in content
+        # Should include theory for strategies
+        assert "theory" in content.lower()
+        # Should have example JSON
+        assert "Example JSON" in content
+
+    def test_strategy_configs_explains_strategies_vs_configs(self, views_dir):
+        """Strategy Configs section should explain the difference between strategies and configs."""
+        content = (views_dir / "backtest.py").read_text()
+        # Should explain strategies are code
+        assert "Python classes" in content or "code" in content.lower()
+        # Should explain configs are database records
+        assert "database" in content.lower()
 
 
 class TestMLAdvancedFeatures:

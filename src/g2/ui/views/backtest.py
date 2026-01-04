@@ -1172,12 +1172,125 @@ def delete_strategy_config(config_id: int):
         raise Exception(f"Failed to delete config: {e}")
 
 
+def get_strategy_params_reference():
+    """Return parameter reference for each built-in strategy."""
+    return {
+        "momentum": {
+            "description": "Trend-following strategy that buys top performers over the lookback period.",
+            "theory": "Stocks that have performed well tend to continue performing well (momentum effect).",
+            "params": {
+                "lookback_days": {"type": "int", "default": 20, "desc": "Days to measure momentum"},
+                "top_n": {"type": "int", "default": 10, "desc": "Number of top stocks to hold"},
+                "rebalance_days": {"type": "int", "default": 5, "desc": "Days between rebalancing"},
+            }
+        },
+        "mean_reversion": {
+            "description": "Buys oversold stocks (low RSI) expecting reversion to mean.",
+            "theory": "Extreme price moves tend to revert; oversold stocks bounce, overbought stocks fall.",
+            "params": {
+                "rsi_period": {"type": "int", "default": 14, "desc": "RSI calculation period"},
+                "rsi_oversold": {"type": "int", "default": 30, "desc": "RSI level to trigger buy"},
+                "rsi_overbought": {"type": "int", "default": 70, "desc": "RSI level to trigger sell"},
+                "max_positions": {"type": "int", "default": 5, "desc": "Maximum concurrent positions"},
+            }
+        },
+        "ma_crossover": {
+            "description": "Trades moving average crossover signals (golden/death cross).",
+            "theory": "When fast MA crosses above slow MA, trend is up (buy); below = down (sell).",
+            "params": {
+                "fast_period": {"type": "int", "default": 50, "desc": "Fast moving average period"},
+                "slow_period": {"type": "int", "default": 200, "desc": "Slow moving average period"},
+            }
+        },
+        "breakout": {
+            "description": "Buys when price breaks above recent highs with volume confirmation.",
+            "theory": "Breakouts with high volume indicate strong buying interest and trend continuation.",
+            "params": {
+                "lookback_days": {"type": "int", "default": 20, "desc": "Days for high/low range"},
+                "volume_threshold": {"type": "float", "default": 1.5, "desc": "Volume multiplier required"},
+            }
+        },
+        "pairs_trading": {
+            "description": "Statistical arbitrage on correlated stock pairs.",
+            "theory": "Correlated pairs that diverge will eventually converge; trade the spread.",
+            "params": {
+                "lookback_days": {"type": "int", "default": 60, "desc": "Days for correlation/spread calc"},
+                "entry_zscore": {"type": "float", "default": 2.0, "desc": "Z-score to enter trade"},
+                "exit_zscore": {"type": "float", "default": 0.5, "desc": "Z-score to exit trade"},
+            }
+        },
+        "rsi_divergence": {
+            "description": "Detects RSI divergence for reversal signals.",
+            "theory": "When price makes new low but RSI doesn't, momentum is shifting (bullish divergence).",
+            "params": {
+                "rsi_period": {"type": "int", "default": 14, "desc": "RSI calculation period"},
+                "divergence_lookback": {"type": "int", "default": 10, "desc": "Days to detect divergence"},
+            }
+        },
+        "volatility_contraction": {
+            "description": "Trades Bollinger Band squeeze and expansion patterns.",
+            "theory": "Low volatility (squeeze) precedes high volatility moves; trade the expansion.",
+            "params": {
+                "bb_period": {"type": "int", "default": 20, "desc": "Bollinger Band period"},
+                "bb_std_dev": {"type": "float", "default": 2.0, "desc": "Standard deviations for bands"},
+                "squeeze_threshold": {"type": "float", "default": 0.05, "desc": "Band width to detect squeeze"},
+            }
+        },
+        "ml_signal": {
+            "description": "Pure ML-driven strategy using stored predictions.",
+            "theory": "Machine learning models can identify patterns humans miss; uses quantile or classifier predictions.",
+            "params": {
+                "model_name": {"type": "str", "default": None, "desc": "Name of trained model"},
+                "model_version": {"type": "str", "default": "latest", "desc": "Model version"},
+                "horizon_days": {"type": "int", "default": 7, "desc": "Prediction horizon (7/30/90)"},
+                "prediction_type": {"type": "str", "default": "quantile", "desc": "quantile or classifier"},
+                "return_threshold": {"type": "float", "default": 0.02, "desc": "Min expected return (q50)"},
+                "max_positions": {"type": "int", "default": 10, "desc": "Maximum concurrent positions"},
+            }
+        },
+        "ml_filter": {
+            "description": "Hybrid strategy: filters base strategy signals through ML predictions.",
+            "theory": "Combine rule-based signal generation with ML confirmation to reduce false signals.",
+            "params": {
+                "base_strategy": {"type": "str", "default": "momentum", "desc": "Strategy to filter"},
+                "model_name": {"type": "str", "default": None, "desc": "Name of trained model"},
+                "model_version": {"type": "str", "default": "latest", "desc": "Model version"},
+                "horizon_days": {"type": "int", "default": 7, "desc": "Prediction horizon"},
+                "filter_mode": {"type": "str", "default": "confirm", "desc": "confirm or veto"},
+                "min_q50": {"type": "float", "default": 0.0, "desc": "Min expected return to pass"},
+            }
+        },
+    }
+
+
 def render_strategy_configs():
     """Render Strategy Configs management section."""
     st.subheader("Strategy Configs")
+
+    # Explanation of strategies vs configs
+    with st.expander("ℹ️ Understanding Strategies vs Configs", expanded=False):
+        st.markdown("""
+        ### Strategies vs Configs
+
+        **Strategies** are Python classes defined in code (`src/g2/strategies/`).
+        They contain the trading logic and cannot be modified from the UI.
+        To add a new strategy, you must write Python code.
+
+        **Configs** are parameterized instances of strategies stored in the database.
+        They let you create variations without modifying code:
+        - `momentum` (strategy) → `momentum_aggressive` (config with lookback_days=10)
+        - `ml_filter` (strategy) → `ml_filter_h30` (config with horizon_days=30)
+
+        **Key Points:**
+        - Strategies are immutable (code-based)
+        - Configs are database records (can create/unregister)
+        - Each config references a strategy and overrides some parameters
+        - Unregistering a config doesn't affect the underlying strategy
+        """)
+
     st.markdown("""
-    Create and manage parameterized strategy configurations. Configs let you save
-    specific parameter combinations and compare them in backtests.
+    Create parameterized configurations of strategies. Configs save specific
+    parameter combinations for easy comparison in backtests.
     """)
 
     # Two columns: list and create
@@ -1202,12 +1315,13 @@ def render_strategy_configs():
                     else:
                         st.markdown("_Default parameters_")
 
-                    # Delete button
-                    delete_key = f"delete_config_{config['id']}"
-                    if st.button(f"🗑️ Delete", key=delete_key, type="secondary"):
+                    # Unregister button (configs are DB records, not code)
+                    unregister_key = f"unregister_config_{config['id']}"
+                    if st.button(f"🗑️ Unregister", key=unregister_key, type="secondary",
+                                 help="Remove this config from the database. The underlying strategy remains available."):
                         try:
                             delete_strategy_config(config['id'])
-                            st.success(f"Deleted config '{config['name']}'")
+                            st.success(f"Unregistered config '{config['name']}'")
                             st.rerun()
                         except Exception as e:
                             st.error(str(e))
@@ -1291,6 +1405,52 @@ def render_strategy_configs():
           --symbols AAPL,MSFT --start-date 2024-01-01 --end-date 2024-12-01
         ```
         """)
+
+    # Parameter reference
+    st.markdown("---")
+    st.markdown("### 📖 Strategy Parameter Reference")
+    st.markdown("Each strategy accepts specific parameters. Use these when creating configs.")
+
+    params_ref = get_strategy_params_reference()
+    strategies = get_strategies()
+    strategy_names = [s[0] for s in strategies]
+
+    selected_strategy = st.selectbox(
+        "Select strategy to view parameters",
+        options=strategy_names,
+        key="param_ref_strategy"
+    )
+
+    if selected_strategy in params_ref:
+        ref = params_ref[selected_strategy]
+        st.markdown(f"**{selected_strategy}**")
+        st.markdown(f"_{ref['description']}_")
+        st.info(f"💡 **Theory:** {ref['theory']}")
+
+        # Parameter table
+        param_data = []
+        for param_name, param_info in ref['params'].items():
+            default_val = param_info['default']
+            if default_val is None:
+                default_str = "_required_"
+            else:
+                default_str = str(default_val)
+            param_data.append({
+                "Parameter": param_name,
+                "Type": param_info['type'],
+                "Default": default_str,
+                "Description": param_info['desc'],
+            })
+
+        st.table(param_data)
+
+        # Example JSON
+        example_params = {
+            k: v['default'] for k, v in ref['params'].items()
+            if v['default'] is not None
+        }
+        st.markdown("**Example JSON for config:**")
+        st.code(json.dumps(example_params, indent=2), language="json")
 
 
 def render_help_section():
