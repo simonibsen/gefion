@@ -109,29 +109,40 @@ def search_docs(query: str) -> List[Tuple[str, str, str, str, str]]:
     return results[:50]  # Limit total results
 
 
-def navigate_to_section(doc_name: str, section: str):
-    """Set session state to navigate to a specific section."""
-    st.session_state["doc_target_doc"] = doc_name
-    st.session_state["doc_target_section"] = section
-
-
-def get_target_section() -> Tuple[str, str]:
-    """Get the current navigation target, if any."""
+def get_target_from_query() -> Tuple[str, str]:
+    """Get navigation target from URL query parameters."""
+    params = st.query_params
     return (
-        st.session_state.get("doc_target_doc", ""),
-        st.session_state.get("doc_target_section", "")
+        params.get("doc", ""),
+        params.get("section", "")
     )
 
 
-def clear_target_section():
-    """Clear the navigation target."""
-    st.session_state.pop("doc_target_doc", None)
-    st.session_state.pop("doc_target_section", None)
+def set_query_params(doc_name: str, section: str):
+    """Set URL query parameters for navigation."""
+    st.query_params["doc"] = doc_name
+    st.query_params["section"] = section
+
+
+def clear_query_params():
+    """Clear navigation query parameters."""
+    if "doc" in st.query_params:
+        del st.query_params["doc"]
+    if "section" in st.query_params:
+        del st.query_params["section"]
+
+
+def make_doc_link(doc_name: str, section: str) -> str:
+    """Create a markdown link to a documentation section."""
+    # URL-encode the section name for the query parameter
+    import urllib.parse
+    encoded_section = urllib.parse.quote(section)
+    return f"?doc={doc_name}&section={encoded_section}"
 
 
 def is_target_section(doc_name: str, section: str) -> bool:
     """Check if this section is the navigation target."""
-    target_doc, target_section = get_target_section()
+    target_doc, target_section = get_target_from_query()
     return target_doc == doc_name and target_section == section
 
 
@@ -148,13 +159,10 @@ def render_section_expander(
     # Add visual indicator for target section
     label = f"**{section}**"
     if is_target:
-        label = f"📍 **{section}** ← You are here"
+        label = f"📍 **{section}**"
 
     with st.expander(label, expanded=expanded):
         st.markdown(content)
-        if is_target:
-            # Clear target after viewing
-            clear_target_section()
 
 
 def render_docs():
@@ -162,21 +170,44 @@ def render_docs():
     st.title("📚 Documentation")
     st.markdown("Guides and theory for g2 quantitative trading platform.")
 
-    # Search box
-    search_query = st.text_input(
-        "🔍 Search documentation",
-        placeholder="Type to search across all docs...",
-        key="doc_search"
-    )
+    # Document options for navigation
+    doc_options = [
+        "📜 Whitepaper",
+        "🚀 Quick Start",
+        "🧠 ML Pipeline",
+        "⚔️ Strategies",
+        "📈 Backtesting",
+        "🧪 Experiments",
+        "🔧 Troubleshooting",
+    ]
 
-    # Check for navigation target and show indicator
-    target_doc, target_section = get_target_section()
+    # Check for navigation target from URL query params
+    target_doc, target_section = get_target_from_query()
+
+    # Determine default selection based on navigation target
+    default_index = 0
     if target_doc:
         tab_name = DOC_TO_TAB.get(target_doc, target_doc)
-        st.info(f"📍 Navigate to **{tab_name}** tab → **{target_section}** section (highlighted below)")
-        if st.button("✕ Clear navigation", key="clear_nav"):
-            clear_target_section()
-            st.rerun()
+        if tab_name in doc_options:
+            default_index = doc_options.index(tab_name)
+
+    # Search box and document selector in columns
+    col_search, col_select = st.columns([2, 1])
+
+    with col_search:
+        search_query = st.text_input(
+            "🔍 Search documentation",
+            placeholder="Type to search across all docs...",
+            key="doc_search"
+        )
+
+    with col_select:
+        selected_doc = st.selectbox(
+            "📄 Document",
+            doc_options,
+            index=default_index,
+            key="doc_selector"
+        )
 
     # Show search results if query entered
     if search_query and len(search_query) >= 2:
@@ -192,50 +223,45 @@ def render_docs():
                     current_doc = doc_name
                     st.markdown(f"#### 📄 {doc_name}")
 
-                col1, col2 = st.columns([5, 1])
-                with col1:
-                    with st.expander(f"**{section}**: {matched_line[:60]}..."):
-                        st.markdown(context)
-                with col2:
-                    tab_name = DOC_TO_TAB.get(doc_name, doc_name)
-                    if st.button(f"Go →", key=f"nav_{idx}", help=f"Go to {tab_name} → {section}"):
-                        navigate_to_section(doc_name, section)
-                        st.rerun()
+                # Create clickable link
+                link = make_doc_link(doc_name, section)
+                tab_name = DOC_TO_TAB.get(doc_name, doc_name)
+
+                with st.expander(f"**{section}**: {matched_line[:60]}..."):
+                    st.markdown(context)
+                    st.markdown(f"[→ Go to {tab_name} › {section}]({link})")
 
             st.markdown("---")
         else:
             st.info(f"No results found for '{search_query}'")
             st.markdown("---")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📜 Whitepaper",
-        "🚀 Quick Start",
-        "🧠 ML Pipeline",
-        "⚔️ Strategies",
-        "📈 Backtesting",
-        "🧪 Experiments",
-        "🔧 Troubleshooting",
-    ])
+    # Show target section indicator if navigating
+    if target_doc and target_section:
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.success(f"📍 Showing **{target_section}** section (expanded below)")
+        with col2:
+            if st.button("✕ Clear", key="clear_nav"):
+                clear_query_params()
+                st.rerun()
 
-    with tab1:
+    st.markdown("---")
+
+    # Render selected document
+    if selected_doc == "📜 Whitepaper":
         render_whitepaper()
-
-    with tab2:
+    elif selected_doc == "🚀 Quick Start":
         render_quickstart()
-
-    with tab3:
+    elif selected_doc == "🧠 ML Pipeline":
         render_ml_docs()
-
-    with tab4:
+    elif selected_doc == "⚔️ Strategies":
         render_strategies_docs()
-
-    with tab5:
+    elif selected_doc == "📈 Backtesting":
         render_backtest_docs()
-
-    with tab6:
+    elif selected_doc == "🧪 Experiments":
         render_experiments_docs()
-
-    with tab7:
+    elif selected_doc == "🔧 Troubleshooting":
         render_troubleshooting()
 
 
