@@ -348,64 +348,20 @@ def render_strategies_docs():
 
     sections = extract_sections(content)
 
-    # Architecture overview
-    if "Architecture Overview" in sections:
-        with st.expander("**Architecture Overview**", expanded=True):
-            st.markdown(sections["Architecture Overview"])
-
-    # Rule-based strategies
-    st.markdown("---")
-    st.markdown("### Rule-Based Strategies")
-
-    rule_strategies = [
-        "Momentum",
-        "Mean Reversion",
-        "Moving Average Crossover",
-        "Breakout",
-        "Pairs Trading",
-        "RSI Divergence",
-        "Volatility Contraction",
+    # Show sections in logical order with appropriate expansion
+    section_config = [
+        ("Architecture Overview", True),   # Expanded - important context
+        ("Built-in Strategies", True),     # Expanded - main content
+        ("Working with Strategy Configs", False),
+        ("Creating New Strategies", False),
+        ("Best Practices", False),
+        ("Strategy Comparison", False),
     ]
 
-    for strat in rule_strategies:
-        if strat in sections:
-            with st.expander(f"**{strat}**"):
-                st.markdown(sections[strat])
-
-    # ML strategies
-    st.markdown("---")
-    st.markdown("### ML-Integrated Strategies")
-
-    # ML overview sections
-    ml_overview = [
-        "Understanding ML Model Types",
-        "Look-Ahead Bias Prevention",
-    ]
-    for section in ml_overview:
-        if section in sections:
-            with st.expander(f"**{section}**", expanded=True):
-                st.markdown(sections[section])
-
-    ml_strategies = ["ML Signal", "ML Filter", "ML Strategy Comparison"]
-    for strat in ml_strategies:
-        if strat in sections:
-            expanded = strat == "ML Strategy Comparison"
-            with st.expander(f"**{strat}**", expanded=expanded):
-                st.markdown(sections[strat])
-
-    # Working with configs
-    st.markdown("---")
-    st.markdown("### Configuration & Extension")
-
-    config_sections = [
-        "Working with Strategy Configs",
-        "Creating New Strategies",
-        "Best Practices",
-    ]
-    for section in config_sections:
-        if section in sections:
-            with st.expander(f"**{section}**"):
-                st.markdown(sections[section])
+    for section_name, expanded in section_config:
+        if section_name in sections:
+            with st.expander(f"**{section_name}**", expanded=expanded):
+                st.markdown(sections[section_name])
 
 
 def render_backtest_docs():
