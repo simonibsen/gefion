@@ -277,6 +277,14 @@ class TestDatabaseHelperStructure:
         content = db_module_path.read_text()
         assert "def get_models(" in content
 
+    def test_get_models_uses_algorithm_column(self, db_module_path):
+        """get_models should query 'algorithm' column, not 'model_type'."""
+        content = db_module_path.read_text()
+        # Should use 'algorithm' column (actual column name)
+        assert "algorithm" in content
+        # Should NOT use 'model_type' (doesn't exist in schema)
+        assert "model_type" not in content
+
     def test_has_get_feature_definitions(self, db_module_path):
         """Should have get_feature_definitions function."""
         content = db_module_path.read_text()

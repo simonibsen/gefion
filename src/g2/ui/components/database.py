@@ -76,7 +76,7 @@ def get_models() -> List[dict]:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT name, version, model_type, created_at
+                SELECT name, version, algorithm, created_at
                 FROM ml_models
                 ORDER BY created_at DESC
             """)
