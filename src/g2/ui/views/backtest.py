@@ -1237,28 +1237,43 @@ def get_strategy_params_reference():
             }
         },
         "ml_signal": {
-            "description": "Pure ML-driven strategy using stored predictions.",
-            "theory": "Machine learning models can identify patterns humans miss; uses quantile or classifier predictions.",
+            "description": "Pure ML-driven strategy using stored predictions from quantile regression or trend classifiers.",
+            "theory": """Uses trained ML models to predict future returns. Quantile models predict
+return distribution (q10/q50/q90), classifier models predict trend direction
+(strong_down → strong_up). Avoids look-ahead bias by using D-1 predictions.""",
             "params": {
-                "model_name": {"type": "str", "default": None, "desc": "Name of trained model"},
-                "model_version": {"type": "str", "default": "latest", "desc": "Model version"},
-                "horizon_days": {"type": "int", "default": 7, "desc": "Prediction horizon (7/30/90)"},
-                "prediction_type": {"type": "str", "default": "quantile", "desc": "quantile or classifier"},
-                "return_threshold": {"type": "float", "default": 0.02, "desc": "Min expected return (q50)"},
+                "model_name": {"type": "str", "default": None, "desc": "Name of trained model (e.g., 'quantile')"},
+                "model_version": {"type": "str", "default": "latest", "desc": "Model version (e.g., '20260103-ensemble')"},
+                "horizon_days": {"type": "int", "default": 7, "desc": "Prediction horizon: 7, 30, or 90 days"},
+                "prediction_type": {"type": "str", "default": "quantile", "desc": "'quantile' (continuous) or 'classifier' (5-class)"},
+                "return_threshold": {"type": "float", "default": 0.02, "desc": "Min q50 expected return to buy (quantile mode)"},
                 "max_positions": {"type": "int", "default": 10, "desc": "Maximum concurrent positions"},
-            }
+            },
+            "prediction_types": {
+                "quantile": "Predicts return distribution: q10 (downside), q50 (median), q90 (upside). Buy when q50 > threshold.",
+                "classifier": "Predicts trend class: strong_down, weak_down, flat, weak_up, strong_up. Buy on bullish classes.",
+            },
+            "look_ahead_note": "Uses D-1 predictions: on day D, only sees predictions generated on D-1 to prevent look-ahead bias.",
         },
         "ml_filter": {
-            "description": "Hybrid strategy: filters base strategy signals through ML predictions.",
-            "theory": "Combine rule-based signal generation with ML confirmation to reduce false signals.",
+            "description": "Hybrid strategy: filters rule-based signals through ML predictions to reduce false positives.",
+            "theory": """Combines the pattern recognition of rule-based strategies with ML confirmation.
+Base strategy generates buy signals, ML model filters out those with poor expected outcomes.
+Two modes: 'confirm' requires positive outlook, 'veto' only blocks strongly negative signals.""",
             "params": {
-                "base_strategy": {"type": "str", "default": "momentum", "desc": "Strategy to filter"},
+                "base_strategy": {"type": "str", "default": "momentum", "desc": "Rule-based strategy to filter (momentum, mean_reversion, etc.)"},
                 "model_name": {"type": "str", "default": None, "desc": "Name of trained model"},
                 "model_version": {"type": "str", "default": "latest", "desc": "Model version"},
-                "horizon_days": {"type": "int", "default": 7, "desc": "Prediction horizon"},
-                "filter_mode": {"type": "str", "default": "confirm", "desc": "confirm or veto"},
-                "min_q50": {"type": "float", "default": 0.0, "desc": "Min expected return to pass"},
-            }
+                "horizon_days": {"type": "int", "default": 7, "desc": "Prediction horizon matching model training"},
+                "filter_mode": {"type": "str", "default": "confirm", "desc": "'confirm' (require positive) or 'veto' (block negative)"},
+                "min_q50": {"type": "float", "default": 0.0, "desc": "Minimum expected return to pass filter"},
+                "max_q10": {"type": "float", "default": None, "desc": "Maximum downside risk (optional, blocks if q10 < threshold)"},
+            },
+            "filter_modes": {
+                "confirm": "Signal passes only if ML predicts positive return (q50 > min_q50). More selective.",
+                "veto": "Signal passes unless ML predicts strongly negative return. More permissive.",
+            },
+            "look_ahead_note": "Uses D-1 predictions to prevent look-ahead bias.",
         },
     }
 
@@ -1427,7 +1442,24 @@ def render_strategy_configs():
         st.markdown(f"_{ref['description']}_")
         st.info(f"💡 **Theory:** {ref['theory']}")
 
+        # ML-specific: Look-ahead bias note
+        if "look_ahead_note" in ref:
+            st.warning(f"⚠️ **Look-Ahead Prevention:** {ref['look_ahead_note']}")
+
+        # ML-specific: Prediction types
+        if "prediction_types" in ref:
+            st.markdown("**Prediction Types:**")
+            for ptype, desc in ref['prediction_types'].items():
+                st.markdown(f"- `{ptype}`: {desc}")
+
+        # ML-specific: Filter modes
+        if "filter_modes" in ref:
+            st.markdown("**Filter Modes:**")
+            for mode, desc in ref['filter_modes'].items():
+                st.markdown(f"- `{mode}`: {desc}")
+
         # Parameter table
+        st.markdown("**Parameters:**")
         param_data = []
         for param_name, param_info in ref['params'].items():
             default_val = param_info['default']

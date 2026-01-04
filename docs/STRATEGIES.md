@@ -190,60 +190,264 @@ g2 backtest run --strategy volatility_contraction --squeeze-threshold 0.04
 
 ### ML-Integrated Strategies
 
+g2's ML strategies use trained machine learning models to generate or filter
+trading signals. These strategies require:
+
+1. **Trained models** - Use `g2 ml train` or `g2 ml train-ensemble`
+2. **Stored predictions** - Use `g2 ml predict-ensemble` or `g2 ml predict-classifier`
+
+See [ML Quickstart](ML_QUICKSTART.md) for training workflow.
+
+#### Understanding ML Model Types
+
+g2 supports two types of ML models:
+
+##### Quantile Regression Models
+
+Predict the **distribution of future returns** at three quantiles:
+
+| Quantile | Meaning | Use |
+|----------|---------|-----|
+| **q10** | 10th percentile (downside) | Risk assessment: "90% chance return is above this" |
+| **q50** | 50th percentile (median) | Expected return: "most likely outcome" |
+| **q90** | 90th percentile (upside) | Opportunity: "10% chance return exceeds this" |
+
+**Example prediction:** AAPL at horizon=7 days
+- q10 = -0.03 (3% downside risk)
+- q50 = +0.02 (2% expected return)
+- q90 = +0.08 (8% upside potential)
+
+**Trading logic:** Buy when q50 > threshold (expect positive returns).
+
+##### Classifier Models
+
+Predict **trend direction** as one of 5 classes:
+
+| Class | Meaning | Expected Return |
+|-------|---------|-----------------|
+| `strong_down` | Strong bearish | < -10% |
+| `weak_down` | Mild bearish | -10% to -2% |
+| `flat` | Neutral | -2% to +2% |
+| `weak_up` | Mild bullish | +2% to +10% |
+| `strong_up` | Strong bullish | > +10% |
+
+**Trading logic:** Buy when predicted class is `weak_up` or `strong_up`.
+
+#### Look-Ahead Bias Prevention
+
+**Critical:** ML strategies use **D-1 predictions** to prevent look-ahead bias.
+
+```
+Timeline:
+  Day D-1: Generate predictions using features from D-1 close
+  Day D:   Strategy sees D-1 predictions, makes trading decision
+  Day D+1: Trade executes at D+1 open
+```
+
+This ensures the strategy never sees "future" information. When backtesting,
+predictions must exist in the database for the historical period.
+
+---
+
 #### ML Signal
 
-**Theory:** Machine learning models can identify complex patterns that
-rule-based systems miss. Uses quantile regression or classification predictions
-to generate trading signals.
+**Theory:** Pure ML-driven strategy that uses model predictions directly
+to generate buy/sell signals. No rule-based logic—decisions are entirely
+based on what the model predicts.
 
-**Use Case:** Pure ML-driven trading; leveraging trained models.
+**Use Case:** When you trust your ML model's predictions and want to
+trade them directly without additional filters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| model_name | str | *required* | Name of trained model |
-| model_version | str | latest | Model version |
-| horizon_days | int | 7 | Prediction horizon (7/30/90) |
+| model_name | str | *required* | Name of trained model (e.g., "quantile") |
+| model_version | str | latest | Model version (e.g., "20260103-ensemble") |
+| horizon_days | int | 7 | Prediction horizon: 7, 30, or 90 days |
 | prediction_type | str | quantile | "quantile" or "classifier" |
-| return_threshold | float | 0.02 | Min expected return (q50) to buy |
+| return_threshold | float | 0.02 | Min q50 to buy (quantile mode) |
 | max_positions | int | 10 | Maximum concurrent positions |
 
+**Quantile Mode Example:**
+
 ```bash
+# Buy stocks where expected 7-day return (q50) > 3%
 g2 backtest run --strategy ml_signal \
-  --model-name quantile --model-version 20260103 \
-  --return-threshold 0.03
+  --model-name quantile --model-version 20260103-ensemble \
+  --horizon-days 7 \
+  --prediction-type quantile \
+  --return-threshold 0.03 \
+  --symbols AAPL,MSFT,GOOGL \
+  --start-date 2024-01-01 --end-date 2024-12-01
 ```
 
-**Important:** ML strategies use D-1 predictions to avoid look-ahead bias.
-On day D, the strategy only sees predictions generated on day D-1.
+**Classifier Mode Example:**
+
+```bash
+# Buy stocks predicted as weak_up or strong_up
+g2 backtest run --strategy ml_signal \
+  --model-name trend_classifier --model-version 20260103 \
+  --horizon-days 30 \
+  --prediction-type classifier \
+  --symbols AAPL,MSFT,GOOGL \
+  --start-date 2024-01-01 --end-date 2024-12-01
+```
+
+**How It Works:**
+
+1. On each trading day, fetch D-1 predictions from database
+2. For quantile: rank symbols by q50, buy top N where q50 > threshold
+3. For classifier: buy symbols with bullish class predictions
+4. Sell positions when prediction turns bearish or neutral
+
+**When to Use:**
+- You have a well-calibrated model with good historical performance
+- You want systematic, emotion-free trading
+- You're comfortable with pure ML decision-making
 
 ---
 
 #### ML Filter
 
-**Theory:** Combine rule-based signal generation with ML confirmation.
-The base strategy generates signals; ML filters out signals with poor
-expected outcomes.
+**Theory:** Hybrid strategy that combines rule-based signal generation
+with ML-based filtering. The base strategy (e.g., momentum) generates
+candidate signals; ML predictions filter out signals with poor expected
+outcomes.
 
-**Use Case:** Hybrid approach; reducing false signals from rule-based strategies.
+**Use Case:** When you trust your rule-based strategy's signal generation
+but want to reduce false positives using ML predictions.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| base_strategy | str | momentum | Strategy to filter |
+| base_strategy | str | momentum | Rule-based strategy to filter |
 | model_name | str | *required* | Name of trained model |
 | model_version | str | latest | Model version |
-| horizon_days | int | 7 | Prediction horizon |
+| horizon_days | int | 7 | Prediction horizon (must match model) |
 | filter_mode | str | confirm | "confirm" or "veto" |
 | min_q50 | float | 0.0 | Min expected return to pass filter |
+| max_q10 | float | None | Block if downside risk exceeds this |
 
-**Filter Modes:**
-- `confirm`: Only pass signals with positive ML outlook (min_q50 > 0)
-- `veto`: Block signals with strongly negative outlook (allows neutral)
+**Filter Modes Explained:**
+
+##### Confirm Mode (Default)
+
+**Logic:** Signal passes only if ML predicts positive outcome.
+
+```
+Base strategy: BUY AAPL
+ML prediction: q50 = +0.03 (3% expected return)
+min_q50 = 0.02
+
+Decision: PASS (0.03 > 0.02) → Execute buy
+```
+
+```
+Base strategy: BUY MSFT
+ML prediction: q50 = -0.01 (negative expected return)
+min_q50 = 0.02
+
+Decision: BLOCK → Skip this signal
+```
+
+**Best for:** Conservative trading, reducing false positives.
+
+##### Veto Mode
+
+**Logic:** Signal passes unless ML predicts strongly negative outcome.
+
+```
+Base strategy: BUY AAPL
+ML prediction: q10 = -0.15 (15% downside risk)
+max_q10 = -0.10
+
+Decision: BLOCK (high downside risk)
+```
+
+```
+Base strategy: BUY MSFT
+ML prediction: q10 = -0.03, q50 = 0.00 (neutral)
+
+Decision: PASS (not strongly negative) → Execute buy
+```
+
+**Best for:** Aggressive trading, only blocking high-risk signals.
+
+**Examples:**
 
 ```bash
+# Momentum + ML confirmation: only buy momentum signals with positive outlook
 g2 backtest run --strategy ml_filter \
   --base-strategy momentum \
-  --model-name quantile --model-version 20260103 \
-  --filter-mode confirm --min-q50 0.02
+  --model-name quantile --model-version 20260103-ensemble \
+  --filter-mode confirm \
+  --min-q50 0.02 \
+  --symbols AAPL,MSFT,GOOGL,NVDA,TSLA \
+  --start-date 2024-01-01 --end-date 2024-12-01
+```
+
+```bash
+# Mean reversion + ML veto: block only high-risk reversals
+g2 backtest run --strategy ml_filter \
+  --base-strategy mean_reversion \
+  --model-name quantile --model-version 20260103-ensemble \
+  --filter-mode veto \
+  --max-q10 -0.10 \
+  --symbols AAPL,MSFT,GOOGL \
+  --start-date 2024-01-01 --end-date 2024-12-01
+```
+
+**How It Works:**
+
+1. Base strategy generates candidate buy signals
+2. For each signal, fetch D-1 ML prediction for that symbol
+3. Apply filter logic based on mode:
+   - Confirm: Check q50 > min_q50
+   - Veto: Check q10 > max_q10 (if set)
+4. Execute only signals that pass the filter
+5. Sell signals pass through without ML filtering
+
+**When to Use:**
+- You have a working rule-based strategy but too many false signals
+- You want to add ML "sanity check" without abandoning rule-based logic
+- You're experimenting with combining traditional and ML approaches
+
+---
+
+#### ML Strategy Comparison
+
+| Aspect | ML Signal | ML Filter |
+|--------|-----------|-----------|
+| **Decision source** | 100% ML | Rule-based + ML |
+| **Signal generation** | ML predictions | Base strategy |
+| **ML role** | Generate signals | Filter signals |
+| **Complexity** | Simpler | More complex |
+| **Dependency** | Only ML model | ML model + base strategy |
+| **Best for** | Pure quant trading | Hybrid approach |
+
+---
+
+#### Creating ML Strategy Configs
+
+Compare different ML configurations:
+
+```bash
+# Create configs for different horizons
+g2 strategy create-config --name ml_signal_h7 --strategy ml_signal \
+  --params '{"model_name": "quantile", "model_version": "20260103-ensemble", "horizon_days": 7, "return_threshold": 0.02}'
+
+g2 strategy create-config --name ml_signal_h30 --strategy ml_signal \
+  --params '{"model_name": "quantile", "model_version": "20260103-ensemble", "horizon_days": 30, "return_threshold": 0.05}'
+
+# Create configs for different filter modes
+g2 strategy create-config --name ml_filter_confirm --strategy ml_filter \
+  --params '{"base_strategy": "momentum", "model_name": "quantile", "filter_mode": "confirm", "min_q50": 0.02}'
+
+g2 strategy create-config --name ml_filter_veto --strategy ml_filter \
+  --params '{"base_strategy": "momentum", "model_name": "quantile", "filter_mode": "veto", "max_q10": -0.10}'
+
+# Compare them
+g2 backtest compare \
+  --strategies ml_signal_h7,ml_signal_h30,ml_filter_confirm,ml_filter_veto \
+  --symbols AAPL,MSFT,GOOGL --start-date 2024-01-01 --end-date 2024-12-01
 ```
 
 ---
