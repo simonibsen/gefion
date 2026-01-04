@@ -57,7 +57,7 @@ ml_filter (strategy)    →  ml_filter_h7 (config: horizon_days=7)
 #### Momentum
 
 **Theory:** Stocks that have performed well tend to continue performing well
-(momentum effect). Academic research shows momentum is one of the most
+([momentum effect](https://en.wikipedia.org/wiki/Momentum_(finance))). Academic research shows momentum is one of the most
 persistent market anomalies.
 
 **Use Case:** Trend-following; riding winners.
@@ -76,8 +76,8 @@ g2 backtest run --strategy momentum --lookback-days 10 --top-n 5
 
 #### Mean Reversion
 
-**Theory:** Extreme price moves tend to revert to the mean. Oversold stocks
-(low RSI) are expected to bounce; overbought stocks are expected to fall.
+**Theory:** Extreme price moves tend to [revert to the mean](https://en.wikipedia.org/wiki/Mean_reversion_(finance)). Oversold stocks
+(low [RSI](https://en.wikipedia.org/wiki/Relative_strength_index)) are expected to bounce; overbought stocks are expected to fall.
 
 **Use Case:** Counter-trend trading; buying dips.
 
@@ -96,8 +96,8 @@ g2 backtest run --strategy mean_reversion --rsi-oversold 25 --rsi-overbought 75
 
 #### Moving Average Crossover
 
-**Theory:** When the fast moving average crosses above the slow moving average
-(golden cross), the trend is bullish. Crossing below (death cross) is bearish.
+**Theory:** When the fast [moving average](https://en.wikipedia.org/wiki/Moving_average) crosses above the slow moving average
+([golden cross](https://en.wikipedia.org/wiki/Moving_average_crossover)), the trend is bullish. Crossing below (death cross) is bearish.
 
 **Use Case:** Trend identification; timing entries and exits.
 
@@ -115,7 +115,7 @@ g2 backtest run --strategy ma_crossover --fast-period 20 --slow-period 50
 #### Breakout
 
 **Theory:** When price breaks above recent highs with high volume, it signals
-strong buying interest and potential trend continuation.
+strong buying interest and potential [trend continuation](https://en.wikipedia.org/wiki/Trend_following).
 
 **Use Case:** Catching breakouts from consolidation patterns.
 
@@ -133,10 +133,10 @@ g2 backtest run --strategy breakout --lookback-days 30 --volume-threshold 2.0
 #### Pairs Trading
 
 **Theory:** Correlated stock pairs that diverge from their historical relationship
-will eventually converge. Trade the spread by going long the underperformer and
+will eventually converge ([pairs trade](https://en.wikipedia.org/wiki/Pairs_trade)). Trade the spread by going long the underperformer and
 short the outperformer.
 
-**Use Case:** Market-neutral statistical arbitrage.
+**Use Case:** Market-neutral [statistical arbitrage](https://en.wikipedia.org/wiki/Statistical_arbitrage).
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -152,7 +152,7 @@ g2 backtest run --strategy pairs_trading --entry-zscore 2.5
 
 #### RSI Divergence
 
-**Theory:** When price makes a new low but RSI doesn't (bullish divergence),
+**Theory:** When price makes a new low but [RSI](https://en.wikipedia.org/wiki/Relative_strength_index) doesn't (bullish [divergence](https://en.wikipedia.org/wiki/Divergence_(technical_analysis))),
 momentum is shifting upward even though price is falling. This often precedes
 reversals.
 
@@ -171,7 +171,7 @@ g2 backtest run --strategy rsi_divergence --divergence-lookback 15
 
 #### Volatility Contraction
 
-**Theory:** Periods of low volatility (Bollinger Band squeeze) tend to precede
+**Theory:** Periods of low volatility ([Bollinger Band](https://en.wikipedia.org/wiki/Bollinger_Bands) squeeze) tend to precede
 periods of high volatility. Trade the expansion by entering when bands widen.
 
 **Use Case:** Volatility breakout trading.
@@ -204,7 +204,7 @@ g2 supports two types of ML models:
 
 ##### Quantile Regression Models
 
-Predict the **distribution of future returns** at three quantiles:
+Predict the **distribution of future returns** using [quantile regression](https://en.wikipedia.org/wiki/Quantile_regression) at three quantiles:
 
 | Quantile | Meaning | Use |
 |----------|---------|-----|
@@ -221,7 +221,7 @@ Predict the **distribution of future returns** at three quantiles:
 
 ##### Classifier Models
 
-Predict **trend direction** as one of 5 classes:
+Predict **trend direction** using [gradient boosting](https://en.wikipedia.org/wiki/Gradient_boosting) classifiers ([XGBoost](https://en.wikipedia.org/wiki/XGBoost)/LightGBM) as one of 5 classes:
 
 | Class | Meaning | Expected Return |
 |-------|---------|-----------------|

@@ -8,9 +8,9 @@ g2 predicts **return distributions** instead of single-value forecasts. This app
 
 **Key Concepts:**
 
-- **Features**: Input data used to make predictions (technical indicators like RSI, MACD, price changes, volume, sentiment scores, etc.)
+- **Features**: Input data used to make predictions ([technical indicators](https://en.wikipedia.org/wiki/Technical_indicator) like [RSI](https://en.wikipedia.org/wiki/Relative_strength_index), [MACD](https://en.wikipedia.org/wiki/MACD), price changes, volume, sentiment scores, etc.)
 - **Labels**: What we're predicting - future returns at different time horizons (7, 30, 90 days by default, fully configurable)
-- **Quantile Regression**: Instead of predicting "stock will return 5%", predict "10% chance of worse than -2%, 50% chance of worse than +0.8%, 90% chance of worse than +3.5%"
+- **[Quantile Regression](https://en.wikipedia.org/wiki/Quantile_regression)**: Instead of predicting "stock will return 5%", predict "10% chance of worse than -2%, 50% chance of worse than +0.8%, 90% chance of worse than +3.5%"
 - **Horizons**: Time periods for predictions (e.g., 7-day, 30-day, 90-day returns) - **fully configurable via `--horizons`**
 - **Multi-Horizon**: Train separate models for each time period to capture different market dynamics
 
@@ -293,9 +293,9 @@ Lower is better. Measures average prediction error weighted by quantile.
 
 | Algorithm | Speed | Accuracy | Memory | Use Case |
 |-----------|-------|----------|--------|----------|
-| quantile_regression | ⚡⚡⚡ Fast | ⭐⭐ Good | 💾 Low | Quick prototypes, linear relationships |
-| xgboost | ⚡⚡ Medium | ⭐⭐⭐ Better | 💾💾 Medium | Production models, non-linear patterns |
-| lightgbm | ⚡⚡⚡ Fast | ⭐⭐⭐ Better | 💾 Low | Large datasets (>100K samples) |
+| [quantile_regression](https://en.wikipedia.org/wiki/Quantile_regression) | ⚡⚡⚡ Fast | ⭐⭐ Good | 💾 Low | Quick prototypes, linear relationships |
+| [xgboost](https://en.wikipedia.org/wiki/XGBoost) | ⚡⚡ Medium | ⭐⭐⭐ Better | 💾💾 Medium | Production models, non-linear patterns |
+| [lightgbm](https://en.wikipedia.org/wiki/LightGBM) | ⚡⚡⚡ Fast | ⭐⭐⭐ Better | 💾 Low | Large datasets (>100K samples) |
 
 **Recommendation:**
 - Start with `quantile_regression` for prototyping
@@ -304,7 +304,7 @@ Lower is better. Measures average prediction error weighted by quantile.
 
 ## Model Ensembles
 
-Combine predictions from multiple algorithms for improved accuracy. Ensembles reduce variance and leverage the strengths of different approaches.
+Combine predictions from multiple algorithms for improved accuracy. [Ensemble methods](https://en.wikipedia.org/wiki/Ensemble_learning) reduce variance and leverage the strengths of different approaches.
 
 ### Training an Ensemble
 
@@ -478,7 +478,7 @@ See [E2E Test Guide](E2E_TEST_GUIDE.md) for details.
 
 ## Trend Classification
 
-Train a classifier to predict trend strength categories (strong_up, weak_up, flat, weak_down, strong_down):
+Train a [classifier](https://en.wikipedia.org/wiki/Statistical_classification) to predict trend strength categories (strong_up, weak_up, flat, weak_down, strong_down):
 
 ```bash
 # Train trend classifier
