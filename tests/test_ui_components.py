@@ -187,10 +187,11 @@ class TestUIStructure:
         results = search_docs("quantile")
         assert len(results) > 0
 
-        # Each result should have (doc_name, section, line, context)
-        doc_name, section, line, context = results[0]
+        # Each result should have (doc_name, section, line, context, filename)
+        doc_name, section, line, context, filename = results[0]
         assert isinstance(doc_name, str)
         assert isinstance(section, str)
+        assert isinstance(filename, str)
         assert "quantile" in line.lower() or "quantile" in context.lower()
 
     def test_documentation_search_empty_for_nonsense(self):
