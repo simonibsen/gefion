@@ -272,10 +272,10 @@ class TestBacktestCompareAllStrategies:
     """Tests for comparing all available strategies."""
 
     def test_compare_all_strategies_option(self, monkeypatch):
-        """compare with --all compares all available strategies."""
+        """compare with --all compares all non-ML strategies (ML strategies skipped without model params)."""
         import json
 
-        # Mock to return all 7 strategies
+        # Mock to return all strategies
         def mock_compare(strategies, *args, **kwargs):
             return {name: {"sharpe_ratio": 1.0} for name in strategies}
 
@@ -304,9 +304,15 @@ class TestBacktestCompareAllStrategies:
         assert result.exit_code == 0
         output = parse_json_output(result.output)
 
-        # Should have results for all available strategies
+        # Should have results for all non-ML strategies (ML strategies skipped without model params)
+        ml_strategies = {"ml_signal", "ml_filter"}
         for strategy_name in AVAILABLE_STRATEGIES.keys():
-            assert strategy_name in output["comparison"]
+            if strategy_name not in ml_strategies:
+                assert strategy_name in output["comparison"]
+
+        # ML strategies should be skipped (not in output) since no model params provided
+        for ml_strat in ml_strategies:
+            assert ml_strat not in output["comparison"]
 
 
 # Helper functions

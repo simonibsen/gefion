@@ -308,6 +308,30 @@ class TestDatabaseHelperStructure:
         assert "pool.putconn(conn)" in content
 
 
+class TestBacktestCompareMLSupport:
+    """Tests for ML strategy support in backtest compare."""
+
+    @pytest.fixture
+    def ui_dir(self):
+        """Get the UI source directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+
+    def test_compare_section_has_ml_model_selection(self, ui_dir):
+        """Compare section should have ML model selection when ML strategies selected."""
+        content = (ui_dir / "views" / "backtest.py").read_text()
+        # Should detect ML strategies
+        assert "ml_strategies" in content
+        # Should have model selection for compare
+        assert "cmp_ml_select" in content or "cmp_model_name" in content
+
+    def test_compare_passes_ml_params_to_cli(self, ui_dir):
+        """Compare should pass ML parameters to CLI command."""
+        content = (ui_dir / "views" / "backtest.py").read_text()
+        # Should add model params to command
+        assert "--model-name" in content
+        assert "--model-version" in content
+
+
 class TestStatusComponentStructure:
     """Test status component module structure."""
 

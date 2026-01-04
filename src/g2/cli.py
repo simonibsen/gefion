@@ -7393,12 +7393,35 @@ def backtest_run(
         raise typer.Exit(1)
 
 
+def _get_strategy_config(db_url: str, config_name: str) -> Optional[Dict[str, Any]]:
+    """Look up a strategy config by name from the database."""
+    import psycopg
+
+    try:
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT strategy_name, params
+                    FROM strategy_configs
+                    WHERE name = %s AND active = true
+                """, (config_name,))
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "strategy_name": row[0],
+                        "params": row[1] if row[1] else {},
+                    }
+    except Exception:
+        pass
+    return None
+
+
 @backtest_app.command("compare")
 def backtest_compare(
     strategies: Optional[str] = typer.Option(
         None,
         "--strategies",
-        help="Comma-separated strategy names to compare (e.g., momentum,mean_reversion,breakout)"
+        help="Comma-separated strategy names or config names to compare (e.g., momentum,ml_filter_h7,ml_filter_h30)"
     ),
     all_strategies: bool = typer.Option(
         False,
@@ -7440,6 +7463,21 @@ def backtest_compare(
         "--rank-by",
         help="Metric to rank strategies by (sharpe_ratio, total_return, calmar_ratio, sortino_ratio)"
     ),
+    model_name: Optional[str] = typer.Option(
+        None,
+        "--model-name",
+        help="ML model name for ml_signal/ml_filter strategies"
+    ),
+    model_version: Optional[str] = typer.Option(
+        None,
+        "--model-version",
+        help="ML model version for ml_signal/ml_filter strategies"
+    ),
+    horizon_days: int = typer.Option(
+        7,
+        "--horizon-days",
+        help="Prediction horizon for ML strategies"
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -7449,11 +7487,19 @@ def backtest_compare(
     """
     Compare multiple trading strategies side-by-side.
 
+    Supports both strategy names and config names. Use strategy configs to
+    compare different parameterizations of the same strategy (e.g., ml_filter
+    with different horizons).
+
     Examples:
         # Compare momentum vs mean reversion on tech stocks
         g2 backtest compare --strategies momentum,mean_reversion \\
           --symbols AAPL,MSFT,GOOGL,NVDA,TSLA \\
           --start-date 2024-01-01 --end-date 2024-12-01
+
+        # Compare ML filter configs with different horizons
+        g2 backtest compare --strategies ml_filter_h7,ml_filter_h30 \\
+          --symbols AAPL,MSFT,GOOGL --start-date 2024-01-01 --end-date 2024-12-01
 
         # Compare all strategies on NASDAQ stocks
         g2 backtest compare --all --exchange NASDAQ --limit 50 \\
@@ -7468,19 +7514,34 @@ def backtest_compare(
     from g2.backtest.comparison import compare_strategies, rank_strategies, AVAILABLE_STRATEGIES
 
     try:
-        # Validate strategies
+        # Get database URL for config lookups
+        db_url = os.getenv("DATABASE_URL", SETTINGS.database_url)
+
+        # Validate strategies (support both strategy names and config names)
+        strategy_mapping = {}  # Maps display_name -> actual_strategy
+        config_params = {}  # Params from resolved configs
+
         if all_strategies:
             strategy_list = list(AVAILABLE_STRATEGIES.keys())
         elif strategies:
             strategy_list = [s.strip() for s in strategies.split(",")]
-            # Validate all strategy names
+            # Check if each name is a strategy or a config
             for s in strategy_list:
-                if s not in AVAILABLE_STRATEGIES:
-                    emit_error(
-                        f"Unknown strategy: '{s}'. Available: {list(AVAILABLE_STRATEGIES.keys())}",
-                        json_output=json_output,
-                    )
-                    raise typer.Exit(1)
+                if s in AVAILABLE_STRATEGIES:
+                    # Direct strategy name
+                    continue
+                else:
+                    # Try to resolve as a config name
+                    config = _get_strategy_config(db_url, s)
+                    if config:
+                        strategy_mapping[s] = config["strategy_name"]
+                        config_params[s] = config["params"]
+                    else:
+                        emit_error(
+                            f"Unknown strategy or config: '{s}'. Available strategies: {list(AVAILABLE_STRATEGIES.keys())}",
+                            json_output=json_output,
+                        )
+                        raise typer.Exit(1)
         else:
             emit_error(
                 "Must specify --strategies or --all",
@@ -7500,9 +7561,6 @@ def backtest_compare(
         symbol_list = None
         if symbols:
             symbol_list = [s.strip() for s in symbols.split(",")]
-
-        # Get database URL
-        db_url = os.getenv("DATABASE_URL", SETTINGS.database_url)
 
         # Load price data
         emit(f"Loading price data...", json_output=json_output)
@@ -7529,10 +7587,43 @@ def backtest_compare(
         # Compare strategies (include equity curves for charting)
         emit(f"Comparing {len(strategy_list)} strategies...", json_output=json_output)
 
+        # Build strategy params - start with params from resolved configs
+        strategy_params = dict(config_params)
+
+        # For direct ML strategies (not from configs), require CLI params
+        direct_ml_strategies = [
+            s for s in strategy_list
+            if s in ("ml_signal", "ml_filter") and s not in strategy_mapping
+        ]
+        if direct_ml_strategies:
+            if not model_name or not model_version:
+                if all_strategies:
+                    # When using --all, skip ML strategies if no model params provided
+                    emit(
+                        f"Skipping ML strategies (no --model-name/--model-version provided): {direct_ml_strategies}",
+                        json_output=json_output,
+                    )
+                    strategy_list = [s for s in strategy_list if s not in direct_ml_strategies]
+                else:
+                    emit_error(
+                        "ML strategies require --model-name and --model-version",
+                        json_output=json_output,
+                    )
+                    raise typer.Exit(1)
+            else:
+                for ml_strat in direct_ml_strategies:
+                    strategy_params[ml_strat] = {
+                        "model_name": model_name,
+                        "model_version": model_version,
+                        "horizon_days": horizon_days,
+                    }
+
         comparison = compare_strategies(
             strategies=strategy_list,
+            strategy_mapping=strategy_mapping,
             price_data=price_data,
             initial_capital=initial_cash,
+            strategy_params=strategy_params,
             include_equity_curves=True,
         )
 

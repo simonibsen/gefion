@@ -1001,6 +1001,39 @@ def render_compare_section():
         st.warning("Select at least 2 strategies to compare.")
         return
 
+    # ML strategy configuration (if ml_signal or ml_filter selected)
+    ml_strategies = [s for s in strategies if s in ("ml_signal", "ml_filter")]
+    if ml_strategies:
+        st.markdown("---")
+        st.markdown("### 🤖 ML Strategy Settings")
+        st.caption("Configure ML model settings for ML-based strategies")
+
+        from g2.ui.components.database import get_models
+        available_models = get_models()
+
+        if not available_models:
+            st.warning("No ML models found. Train a model first using the ML Pipeline page.")
+            cmp_model_name = st.text_input("Model Name", value="quantile", key="cmp_ml_name")
+            cmp_model_version = st.text_input("Model Version", value="latest", key="cmp_ml_version")
+        else:
+            model_options = [f"{m['name']} / {m['version']}" for m in available_models]
+            selected_model = st.selectbox("Select Model", model_options, key="cmp_ml_select")
+            if selected_model:
+                parts = selected_model.split(" / ")
+                cmp_model_name = parts[0]
+                cmp_model_version = parts[1] if len(parts) > 1 else "latest"
+            else:
+                cmp_model_name = "quantile"
+                cmp_model_version = "latest"
+
+        col_ml1, col_ml2 = st.columns(2)
+        with col_ml1:
+            cmp_ml_horizon = st.selectbox("Prediction Horizon (days)", [7, 30, 90], index=0, key="cmp_ml_horizon")
+        with col_ml2:
+            cmp_ml_threshold = st.slider("Confidence Threshold", 0.0, 0.5, 0.1, 0.05, key="cmp_ml_thresh")
+
+        st.markdown("---")
+
     # Validate symbol selection
     if symbol_mode == "Selected" and not selected_symbols:
         st.warning("⚠️ Please select at least one symbol to compare.")
@@ -1027,6 +1060,14 @@ def render_compare_section():
             cmd.extend(["--symbols", ",".join(selected_symbols)])
         else:
             cmd.extend(["--exchange", cmp_exchange, "--limit", str(cmp_limit)])
+
+        # Add ML parameters if ML strategies selected
+        if ml_strategies:
+            cmd.extend([
+                "--model-name", cmp_model_name,
+                "--model-version", cmp_model_version,
+                "--horizon-days", str(cmp_ml_horizon),
+            ])
 
         # Show equivalent CLI command (skip "python -m g2.cli" prefix)
         cli_args = cmd[3:]  # Skip [python, -m, g2.cli]
