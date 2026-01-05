@@ -943,8 +943,8 @@ async def list_tools() -> List[Tool]:
                 "properties": {
                     "strategy": {
                         "type": "string",
-                        "description": "Strategy name (momentum, mean_reversion, ma_crossover, breakout)",
-                        "enum": ["momentum", "mean_reversion", "ma_crossover", "breakout"]
+                        "description": "Strategy name (momentum, mean_reversion, ma_crossover, breakout, pairs_trading, rsi_divergence, volatility_contraction, ml_signal, ml_filter)",
+                        "enum": ["momentum", "mean_reversion", "ma_crossover", "breakout", "pairs_trading", "rsi_divergence", "volatility_contraction", "ml_signal", "ml_filter"]
                     },
                     "symbols": {"type": "string", "description": "Comma-separated symbols (e.g., AAPL,MSFT,GOOGL)"},
                     "exchange": {"type": "string", "description": "Exchange name (alternative to symbols)"},
@@ -973,6 +973,9 @@ async def list_tools() -> List[Tool]:
                         "enum": ["fixed_dollar", "fixed_percent", "kelly", "volatility_target"]
                     },
                     "sizing_amount": {"type": "number", "description": "Sizing parameter (dollar amount or percent)"},
+                    "model_name": {"type": "string", "description": "Model name (required for ml_signal and ml_filter strategies)"},
+                    "model_version": {"type": "string", "description": "Model version (required for ml_signal and ml_filter strategies)"},
+                    "horizon": {"type": "integer", "description": "Prediction horizon in days (for ML strategies)", "default": 7},
                 },
                 "required": ["strategy", "start_date", "end_date"],
             },
@@ -1004,6 +1007,8 @@ async def list_tools() -> List[Tool]:
                         "description": "Metric to rank by",
                         "default": "sharpe_ratio"
                     },
+                    "model_name": {"type": "string", "description": "Model name (required when comparing ml_signal or ml_filter strategies)"},
+                    "model_version": {"type": "string", "description": "Model version (required when comparing ml_signal or ml_filter strategies)"},
                 },
                 "required": ["start_date", "end_date"],
             },
@@ -3225,6 +3230,14 @@ async def _backtest_run(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get('initial_cash'):
             cmd.extend(['--initial-cash', str(args['initial_cash'])])
 
+        # ML strategy parameters
+        if args.get('model_name'):
+            cmd.extend(['--model-name', args['model_name']])
+        if args.get('model_version'):
+            cmd.extend(['--model-version', args['model_version']])
+        if args.get('horizon'):
+            cmd.extend(['--horizon', str(args['horizon'])])
+
         # Advanced features (CLI flags to be added when CLI is updated)
         # For now, we note the requested features in the output
         requested_features = {}
@@ -3287,6 +3300,12 @@ async def _backtest_compare(args: Dict[str, Any]) -> Dict[str, Any]:
         # Ranking
         if args.get('rank_by'):
             cmd.extend(['--rank-by', args['rank_by']])
+
+        # ML strategy parameters
+        if args.get('model_name'):
+            cmd.extend(['--model-name', args['model_name']])
+        if args.get('model_version'):
+            cmd.extend(['--model-version', args['model_version']])
 
         return await executor.run(*cmd)
 
