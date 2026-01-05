@@ -685,6 +685,74 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="feature_definitions_export",
+            description=(
+                "Export feature definitions to individual JSON files. "
+                "By default, exports all definitions to the 'feature-definitions/' directory. "
+                "Each definition is saved as <name>.json. "
+                "Useful for version control and backup of feature configurations."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dir": {"type": "string", "description": "Directory to write files (default: feature-definitions)"},
+                    "features": {"type": "string", "description": "Comma-separated list of feature names to export (default: all)"},
+                },
+            },
+        ),
+
+        Tool(
+            name="feature_definitions_import",
+            description=(
+                "Import feature definitions from individual JSON files. "
+                "By default, imports all JSON files from the 'feature-definitions/' directory. "
+                "Idempotent: re-running will upsert by name. "
+                "Use this to restore feature definitions from version control."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dir": {"type": "string", "description": "Directory containing JSON files (default: feature-definitions)"},
+                    "features": {"type": "string", "description": "Comma-separated list of feature names to import (default: all)"},
+                },
+            },
+        ),
+
+        Tool(
+            name="feature_functions_export",
+            description=(
+                "Export feature functions to individual JSON files. "
+                "By default, exports all functions to the 'feature-functions/' directory. "
+                "Each function is saved as <name>_v<version>.json. "
+                "Useful for version control and backup of custom function definitions."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dir": {"type": "string", "description": "Directory to write files (default: feature-functions)"},
+                    "functions": {"type": "string", "description": "Comma-separated list of function names to export (default: all)"},
+                },
+            },
+        ),
+
+        Tool(
+            name="feature_functions_import",
+            description=(
+                "Import feature functions from individual JSON files. "
+                "By default, imports all JSON files from the 'feature-functions/' directory. "
+                "Idempotent: re-running will upsert by (name, version). "
+                "Use this to restore feature functions from version control."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dir": {"type": "string", "description": "Directory containing JSON files (default: feature-functions)"},
+                    "functions": {"type": "string", "description": "Comma-separated list of function names to import (default: all)"},
+                },
+            },
+        ),
+
+        Tool(
             name="cross_sectional_compute",
             description=(
                 "Compute cross-sectional rankings for a feature. "
@@ -1392,6 +1460,14 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _feature_functions_list(arguments)
         elif name == "feature_compute":
             result = await _feature_compute(arguments)
+        elif name == "feature_definitions_export":
+            result = await _feature_definitions_export(arguments)
+        elif name == "feature_definitions_import":
+            result = await _feature_definitions_import(arguments)
+        elif name == "feature_functions_export":
+            result = await _feature_functions_export(arguments)
+        elif name == "feature_functions_import":
+            result = await _feature_functions_import(arguments)
         elif name == "cross_sectional_compute":
             result = await _cross_sectional_compute(arguments)
         elif name == "query_database":
@@ -2149,6 +2225,54 @@ async def _feature_compute(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd.append('--full')
     if args.get('update_existing'):
         cmd.append('--update-existing')
+
+    return await executor.run(*cmd)
+
+
+async def _feature_definitions_export(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Export feature definitions to JSON files."""
+    cmd = ['feat-def-export', '--json']
+
+    if args.get('dir'):
+        cmd.extend(['--dir', args['dir']])
+    if args.get('features'):
+        cmd.extend(['--features', args['features']])
+
+    return await executor.run(*cmd)
+
+
+async def _feature_definitions_import(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Import feature definitions from JSON files."""
+    cmd = ['feat-def-import', '--json']
+
+    if args.get('dir'):
+        cmd.extend(['--dir', args['dir']])
+    if args.get('features'):
+        cmd.extend(['--features', args['features']])
+
+    return await executor.run(*cmd)
+
+
+async def _feature_functions_export(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Export feature functions to JSON files."""
+    cmd = ['feat-fx-export', '--json']
+
+    if args.get('dir'):
+        cmd.extend(['--dir', args['dir']])
+    if args.get('functions'):
+        cmd.extend(['--functions', args['functions']])
+
+    return await executor.run(*cmd)
+
+
+async def _feature_functions_import(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Import feature functions from JSON files."""
+    cmd = ['feat-fx-import', '--json']
+
+    if args.get('dir'):
+        cmd.extend(['--dir', args['dir']])
+    if args.get('functions'):
+        cmd.extend(['--functions', args['functions']])
 
     return await executor.run(*cmd)
 
