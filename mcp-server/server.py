@@ -633,6 +633,58 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="feature_show",
+            description=(
+                "Show details for a single feature definition. "
+                "Returns the feature's function, parameters, source/store tables, and active status."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "feature": {"type": "string", "description": "Feature name (e.g., indicator_rsi_14)"},
+                },
+                "required": ["feature"],
+            },
+        ),
+
+        Tool(
+            name="feature_functions_list",
+            description=(
+                "List all registered feature functions. "
+                "Feature functions are the computation logic (indicator, derivative, fundamental, etc.) "
+                "that feature definitions reference. Shows function name, description, and parameters."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "function": {"type": "string", "description": "Optional function name to filter"},
+                    "show_body": {"type": "boolean", "description": "Include function body/code in output", "default": False},
+                },
+            },
+        ),
+
+        Tool(
+            name="feature_compute",
+            description=(
+                "Compute features for symbols using the dispatcher. "
+                "Supports all feature types (indicators, derivatives, fundamentals). "
+                "Features must be defined in feature_definitions table. "
+                "Use --all-features to compute all active features, or specify individual features."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbols": {"type": "string", "description": "Comma-separated symbols (e.g., AAPL,MSFT)"},
+                    "features": {"type": "string", "description": "Comma-separated feature names to compute"},
+                    "all_features": {"type": "boolean", "description": "Compute all active features", "default": False},
+                    "function_names": {"type": "string", "description": "Filter by function type (indicator, derivative, fundamental)"},
+                    "full": {"type": "boolean", "description": "Full refresh instead of incremental", "default": False},
+                    "update_existing": {"type": "boolean", "description": "Update existing rows on conflict", "default": False},
+                },
+            },
+        ),
+
+        Tool(
             name="cross_sectional_compute",
             description=(
                 "Compute cross-sectional rankings for a feature. "
@@ -1334,6 +1386,12 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _data_update(arguments)
         elif name == "features_list":
             result = await _features_list(arguments)
+        elif name == "feature_show":
+            result = await _feature_show(arguments)
+        elif name == "feature_functions_list":
+            result = await _feature_functions_list(arguments)
+        elif name == "feature_compute":
+            result = await _feature_compute(arguments)
         elif name == "cross_sectional_compute":
             result = await _cross_sectional_compute(arguments)
         elif name == "query_database":
@@ -2054,7 +2112,45 @@ async def _restore(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _features_list(args: Dict[str, Any]) -> Dict[str, Any]:
     """List feature definitions."""
-    return await executor.run('features-list')
+    return await executor.run('feat-def-list', '--json')
+
+
+async def _feature_show(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Show a single feature definition."""
+    feature = args.get('feature')
+    if not feature:
+        return {'success': False, 'error': 'feature is required'}
+    return await executor.run('feat-def-show', '--feature', feature, '--json')
+
+
+async def _feature_functions_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List feature functions."""
+    cmd = ['feat-fx-list', '--json']
+    if args.get('function'):
+        cmd.extend(['--feature', args['function']])
+    if args.get('show_body'):
+        cmd.append('--show-body')
+    return await executor.run(*cmd)
+
+
+async def _feature_compute(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute features for symbols."""
+    cmd = ['feat-compute', '--json']
+
+    if args.get('symbols'):
+        cmd.extend(['--symbols', args['symbols']])
+    if args.get('features'):
+        cmd.extend(['--features', args['features']])
+    if args.get('all_features'):
+        cmd.append('--all-features')
+    if args.get('function_names'):
+        cmd.extend(['--function-names', args['function_names']])
+    if args.get('full'):
+        cmd.append('--full')
+    if args.get('update_existing'):
+        cmd.append('--update-existing')
+
+    return await executor.run(*cmd)
 
 
 async def _cross_sectional_compute(args: Dict[str, Any]) -> Dict[str, Any]:
