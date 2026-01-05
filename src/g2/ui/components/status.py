@@ -48,7 +48,7 @@ def _check_cache_invalidation():
     st.session_state["_stats_last_date"] = current_date
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def get_system_stats() -> Optional[SystemStats]:
     """Get system statistics with 60-second cache."""
     try:
