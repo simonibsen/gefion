@@ -40,26 +40,29 @@ def load_price_data_for_backtest(
         ohlcv_where_clauses = []   # For filtering price data
         params = []
 
-        # Filter by symbols or exchange
+        # Filter by symbols
+        # Note: exchange filtering is not currently supported as stocks table
+        # doesn't have an exchange column. When exchange is specified, we fall
+        # back to just using the limit parameter.
         if symbols:
             symbol_where_clauses.append("s.symbol = ANY(%s)")
             params.append(symbols)
-        elif exchange:
-            symbol_where_clauses.append("LOWER(s.exchange) = LOWER(%s)")
-            params.append(exchange)
 
         # Apply symbol limit if specified
         if limit and not symbols:
             # Create subquery to get limited set of stock IDs
-            subquery_where = " AND ".join(symbol_where_clauses) if symbol_where_clauses else "1=1"
+            # Note: When exchange is passed, we can't filter by it (no column),
+            # so we just use the limit to get top N active stocks with data
             symbol_id_subquery = f"""
-                (SELECT id FROM stocks s
-                 WHERE {subquery_where} AND s.status = 'Active'
+                (SELECT s.id FROM stocks s
+                 JOIN stock_ohlcv o ON s.id = o.data_id
+                 WHERE s.status = 'Active'
+                 GROUP BY s.id
+                 ORDER BY COUNT(*) DESC
                  LIMIT {limit})
             """
             # Replace symbol filters with IN clause
             symbol_where_clauses = [f"s.id IN {symbol_id_subquery}"]
-            # params already has the exchange parameter if needed
 
         # Add active status filter if not using limit subquery
         elif not limit:
@@ -123,21 +126,17 @@ def get_available_symbols(
 
     Args:
         db_url: Database connection URL
-        exchange: Filter by exchange (optional)
+        exchange: Filter by exchange (optional, currently ignored - no exchange column)
         limit: Maximum number of symbols to return (optional)
 
     Returns:
         List of symbol strings
     """
     with psycopg.connect(db_url) as conn:
-        where_clause = ""
-        params = []
-
-        if exchange:
-            where_clause = "WHERE LOWER(s.exchange) = LOWER(%s) AND s.status = 'Active'"
-            params.append(exchange)
-        else:
-            where_clause = "WHERE s.status = 'Active'"
+        # Note: exchange filtering not supported (no exchange column in stocks table)
+        # We just return active stocks with sufficient data
+        where_clause = "WHERE s.status = 'Active'"
+        params: List[Any] = []
 
         limit_clause = f"LIMIT {limit}" if limit else ""
 

@@ -13,14 +13,20 @@ import pytest
 
 @pytest.fixture
 def db_conn():
-    """Get real database connection."""
+    """Get real database connection with required schema initialized."""
     if os.getenv("ENABLE_DB_TESTS", "0") != "1":
         pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
 
-    from g2.cli_helpers import db_connection
+    from g2.cli_helpers import db_connection, init_schema_tables
 
     url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
     with db_connection(url) as conn:
+        # Drop ml_datasets to ensure fresh schema (backup may have old JSONB schema)
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS ml_datasets CASCADE")
+        conn.commit()
+        # Ensure required tables exist (same as CLI does)
+        init_schema_tables(conn, ["stocks", "feature_definitions", "computed_features", "ml_datasets"])
         yield conn
 
 
@@ -168,3 +174,44 @@ def test_discovered_features_match_computed_features(db_conn):
         )
         result = cur.fetchone()
         assert result is not None, "Should find feature by name"
+
+
+def test_upsert_ml_dataset_array_columns(db_conn):
+    """Test that upsert_ml_dataset properly handles PostgreSQL array columns.
+
+    Regression test: horizons_days (INTEGER[]) and feature_names (TEXT[])
+    are PostgreSQL array columns - pass Python lists directly.
+    """
+    from g2.ml.store import upsert_ml_dataset
+
+    payload = {
+        "name": "test_jsonb",
+        "version": "20251230",
+        "universe": {"exchange": "NASDAQ", "limit": 5},
+        "feature_names": ["indicator_rsi_14", "indicator_macd"],
+        "lookback_days": 200,
+        "horizons_days": [7, 30, 90],  # This is a list that must be wrapped
+        "label_spec": {"type": "forward_return_5class", "thresholds": {}},
+        "split_spec": {"type": "walk_forward"},
+        "artifact_uri": "test/manifest.json",
+        "checksum": "abc123",
+    }
+
+    # Should not raise DatatypeMismatch
+    dataset_id = upsert_ml_dataset(db_conn, payload)
+    assert dataset_id > 0
+
+    # Verify the data was stored correctly
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT horizons_days, feature_names FROM ml_datasets WHERE id = %s",
+            (dataset_id,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == [7, 30, 90]  # JSONB comes back as list
+        assert row[1] == ["indicator_rsi_14", "indicator_macd"]
+
+        # Cleanup
+        cur.execute("DELETE FROM ml_datasets WHERE id = %s", (dataset_id,))
+    db_conn.commit()

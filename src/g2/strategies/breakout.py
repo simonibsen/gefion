@@ -76,7 +76,7 @@ class BreakoutStrategy:
         self,
         current_date: date,
         portfolio: Dict[str, Dict[str, Any]],
-        price_data: List[Dict[str, Any]],
+        price_data: Dict[str, List[Dict[str, Any]]] | List[Dict[str, Any]],
         initial_cash: float,
     ) -> List[Dict[str, Any]]:
         """
@@ -85,7 +85,9 @@ class BreakoutStrategy:
         Args:
             current_date: Current date for signal generation
             portfolio: Current holdings {symbol: {shares, avg_price}}
-            price_data: Historical price data
+            price_data: Historical price data - either:
+                - Dict[symbol -> list of price records] (engine format)
+                - List of price records with 'symbol' key (legacy format)
             initial_cash: Available cash for new positions
 
         Returns:
@@ -94,16 +96,27 @@ class BreakoutStrategy:
         if not price_data:
             return []
 
+        # Normalize to Dict[str, List[Dict]] format
+        if isinstance(price_data, dict):
+            # Engine format: Dict[symbol -> list of records]
+            price_by_symbol = price_data
+        else:
+            # Legacy format: flat list with 'symbol' key
+            from collections import defaultdict
+            price_by_symbol = defaultdict(list)
+            for row in price_data:
+                price_by_symbol[row["symbol"]].append(row)
+            price_by_symbol = dict(price_by_symbol)
+
         # Get unique symbols
-        symbols = sorted(set(row["symbol"] for row in price_data))
+        symbols = sorted(price_by_symbol.keys())
 
         # Analyze each symbol for breakouts
         breakouts = {}
         current_prices = {}
 
         for symbol in symbols:
-            symbol_data = [row for row in price_data if row["symbol"] == symbol]
-            symbol_data = sorted(symbol_data, key=lambda x: x["date"])
+            symbol_data = sorted(price_by_symbol[symbol], key=lambda x: x["date"])
 
             # Need sufficient history for lookback period
             if len(symbol_data) < self.lookback_days + 1:
@@ -139,8 +152,14 @@ class BreakoutStrategy:
         # Generate signals
         signals = []
 
+        # Get positions dict (handle both Portfolio object and dict)
+        if hasattr(portfolio, 'positions'):
+            positions = portfolio.positions
+        else:
+            positions = portfolio
+
         # Sell signals for downside breakouts
-        for symbol, position in portfolio.items():
+        for symbol, position in positions.items():
             if symbol in breakouts and breakouts[symbol] == "downside":
                 signals.append({
                     "action": "sell",
@@ -150,14 +169,14 @@ class BreakoutStrategy:
                 })
 
         # Buy signals for upside breakouts
-        current_positions = len(portfolio)
+        current_positions = len(positions)
         available_slots = self.max_positions - current_positions
 
         if available_slots > 0:
             # Find upside breakouts not currently held
             upside_breakouts = [
                 symbol for symbol, direction in breakouts.items()
-                if direction == "upside" and symbol not in portfolio
+                if direction == "upside" and symbol not in positions
             ]
 
             # Buy top N stocks (limit by available slots)

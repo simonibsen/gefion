@@ -39,11 +39,16 @@ ml_extended = [
 charts = [
     "plotly>=5.18",
 ]
+ui = [
+    "streamlit>=1.29",
+    "plotly>=5.18",
+    "anthropic>=0.18",
+]
 gpu = [
     "torch>=2.0",
 ]
 all = [
-    "g2[dev,ml_extended,charts,gpu]",
+    "g2[dev,ml_extended,charts,ui,gpu]",
 ]
 
 [project.scripts]

@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS feature_functions (
     min_app_version TEXT,
     enabled BOOLEAN DEFAULT TRUE,
     created_by TEXT,
+    called_by TEXT,                -- parent meta-function for plugin architecture
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(name, version)
@@ -178,6 +179,15 @@ CREATE INDEX IF NOT EXISTS idx_feature_definitions_active_function
     ON feature_definitions(active, function_name)
     WHERE active = TRUE;
 
+-- Ensure called_by column exists (for upgrades from older schema)
+ALTER TABLE feature_functions ADD COLUMN IF NOT EXISTS called_by TEXT;
+
+-- Feature functions index for plugin discovery
+-- Optimizes: WHERE called_by = 'meta_function' AND enabled = TRUE AND status = 'active'
+CREATE INDEX IF NOT EXISTS idx_feature_functions_called_by_enabled_status
+    ON feature_functions (called_by, enabled, status)
+    WHERE called_by IS NOT NULL;
+
 -- Strategy registry indexes
 CREATE INDEX IF NOT EXISTS idx_strategy_registry_enabled
     ON strategy_registry(enabled, name)
@@ -198,12 +208,12 @@ CREATE TABLE IF NOT EXISTS ml_datasets (
     version TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
     universe JSONB,
-    feature_names JSONB,
-    lookback_days INTEGER,
-    horizons_days JSONB,
-    label_spec JSONB,
-    split_spec JSONB,
-    artifact_uri TEXT,
+    feature_names TEXT[] NOT NULL,
+    lookback_days INTEGER NOT NULL,
+    horizons_days INTEGER[] NOT NULL,
+    label_spec JSONB NOT NULL,
+    split_spec JSONB NOT NULL,
+    artifact_uri TEXT NOT NULL,
     checksum TEXT,
     UNIQUE (name, version)
 );
@@ -274,11 +284,12 @@ CREATE TABLE IF NOT EXISTS prediction_outcomes (
 );
 SELECT create_hypertable('prediction_outcomes', 'prediction_date', if_not_exists => TRUE);
 
--- Model performance metrics
+-- Model performance metrics (one row per model+horizon combination)
 CREATE TABLE IF NOT EXISTS model_performance (
-    model_id INTEGER PRIMARY KEY REFERENCES ml_models(id),
+    model_id INTEGER NOT NULL REFERENCES ml_models(id),
     model_name TEXT NOT NULL,
     horizon_days INTEGER NOT NULL,
+    PRIMARY KEY (model_id, horizon_days),
     q10_calibration NUMERIC(5,2),
     q50_calibration NUMERIC(5,2),
     q90_calibration NUMERIC(5,2),

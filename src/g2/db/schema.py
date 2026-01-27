@@ -495,6 +495,7 @@ def create_trend_class_predictions_table(conn: Connection) -> None:
     """Store 5-class trend classification probabilities per horizon."""
     _ensure_timescaledb(conn)
     with conn.cursor() as cur:
+        # Schema matches sql/schema.sql exactly
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS trend_class_predictions (
@@ -502,27 +503,19 @@ def create_trend_class_predictions_table(conn: Connection) -> None:
                 data_id INTEGER NOT NULL REFERENCES stocks(id),
                 prediction_date DATE NOT NULL,
                 horizon_days INTEGER NOT NULL,
-
-                weak_threshold NUMERIC(10,4) NOT NULL,
-                strong_threshold NUMERIC(10,4) NOT NULL,
-
-                p_strong_up DOUBLE PRECISION,
-                p_weak_up DOUBLE PRECISION,
-                p_neutral DOUBLE PRECISION,
-                p_weak_down DOUBLE PRECISION,
-                p_strong_down DOUBLE PRECISION,
-
-                predicted_class TEXT,
+                predicted_class TEXT NOT NULL,
+                weak_threshold NUMERIC(8,6),
+                strong_threshold NUMERIC(8,6),
+                p_strong_up NUMERIC(5,4),
+                p_weak_up NUMERIC(5,4),
+                p_neutral NUMERIC(5,4),
+                p_weak_down NUMERIC(5,4),
+                p_strong_down NUMERIC(5,4),
+                entropy NUMERIC(8,6),
+                margin NUMERIC(5,4),
                 created_at TIMESTAMP DEFAULT NOW(),
                 run_id INTEGER REFERENCES ml_runs(id),
-
-                PRIMARY KEY (model_id, data_id, prediction_date, horizon_days),
-                CONSTRAINT check_threshold_order CHECK (weak_threshold > 0 AND strong_threshold >= weak_threshold),
-                CONSTRAINT check_horizon_positive CHECK (horizon_days > 0),
-                CONSTRAINT check_probabilities_valid CHECK (
-                    p_strong_up >= 0 AND p_weak_up >= 0 AND p_neutral >= 0 AND
-                    p_weak_down >= 0 AND p_strong_down >= 0
-                )
+                PRIMARY KEY (model_id, data_id, prediction_date, horizon_days)
             );
             """
         )

@@ -99,3 +99,80 @@ def test_ml_train_stores_metrics():
     """Test that ml train stores training metrics in ml_models."""
     # Should store metrics like train_loss, val_loss, etc. in JSONB field
     pass  # TODO: Implement with actual DB fixture
+
+
+# Hyperparameter CLI option tests
+
+
+def test_ml_train_accepts_learning_rate_option():
+    """Test that ml train accepts --learning-rate option."""
+    runner = CliRunner()
+    # This should fail for missing required args, not for unknown option
+    result = runner.invoke(cli.app, ["ml", "train", "--learning-rate", "0.05"])
+    # Check the error is about missing required options, not unknown option
+    assert "no such option" not in result.output.lower()
+
+
+def test_ml_train_accepts_n_estimators_option():
+    """Test that ml train accepts --n-estimators option."""
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["ml", "train", "--n-estimators", "200"])
+    assert "no such option" not in result.output.lower()
+
+
+def test_ml_train_accepts_max_depth_option():
+    """Test that ml train accepts --max-depth option."""
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["ml", "train", "--max-depth", "8"])
+    assert "no such option" not in result.output.lower()
+
+
+def test_ml_train_accepts_min_child_weight_option():
+    """Test that ml train accepts --min-child-weight option."""
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["ml", "train", "--min-child-weight", "5"])
+    assert "no such option" not in result.output.lower()
+
+
+def test_ml_train_accepts_subsample_option():
+    """Test that ml train accepts --subsample option."""
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["ml", "train", "--subsample", "0.8"])
+    assert "no such option" not in result.output.lower()
+
+
+def test_ml_train_accepts_colsample_bytree_option():
+    """Test that ml train accepts --colsample-bytree option."""
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["ml", "train", "--colsample-bytree", "0.8"])
+    assert "no such option" not in result.output.lower()
+
+
+def test_ml_train_accepts_reg_alpha_option():
+    """Test that ml train accepts --reg-alpha option (L1 regularization)."""
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["ml", "train", "--reg-alpha", "0.1"])
+    assert "no such option" not in result.output.lower()
+
+
+def test_ml_train_accepts_reg_lambda_option():
+    """Test that ml train accepts --reg-lambda option (L2 regularization)."""
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["ml", "train", "--reg-lambda", "1.0"])
+    assert "no such option" not in result.output.lower()
+
+
+def test_ml_train_help_shows_hyperparameter_options():
+    """Test that ml train --help shows all hyperparameter options."""
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["ml", "train", "--help"])
+    assert result.exit_code == 0
+    # Check all hyperparameter options are documented
+    assert "--learning-rate" in result.output
+    assert "--n-estimators" in result.output
+    assert "--max-depth" in result.output
+    assert "--min-child-weight" in result.output
+    assert "--subsample" in result.output
+    assert "--colsample-bytree" in result.output
+    assert "--reg-alpha" in result.output
+    assert "--reg-lambda" in result.output

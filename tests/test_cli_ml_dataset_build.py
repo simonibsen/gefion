@@ -9,8 +9,22 @@ from g2 import cli
 def test_ml_dataset_build_writes_manifest_and_upserts_db(tmp_path, monkeypatch):
     calls = {}
 
+    class DummyCursor:
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return None  # Dataset doesn't exist
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
     class DummyConn:
-        pass
+        def cursor(self):
+            return DummyCursor()
 
     class DummyCtx:
         def __enter__(self):
@@ -110,6 +124,58 @@ def test_ml_dataset_build_rejects_threshold_mismatch(tmp_path):
     assert "threshold" in res.output.lower()
 
 
+def test_ml_dataset_build_refuses_overwrite_without_force(tmp_path, monkeypatch):
+    """Should refuse to overwrite existing dataset without --force flag."""
+
+    class DummyCursor:
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            # Simulate existing dataset found
+            return (1,)  # id=1 means dataset exists
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    class DummyConn:
+        def cursor(self):
+            return DummyCursor()
+
+    class DummyCtx:
+        def __enter__(self):
+            return DummyConn()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(cli, "db_connection", lambda *a, **k: DummyCtx())
+    monkeypatch.setattr(cli, "init_schema_tables", lambda *a, **k: None)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli.app,
+        [
+            "ml",
+            "dataset-build",
+            "--name",
+            "existing",
+            "--version",
+            "v1",
+            "--symbols",
+            "IBM",
+            "--out-dir",
+            str(tmp_path),
+            "--json",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "already exists" in res.output.lower() or "force" in res.output.lower()
+
+
 def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
     called = {"export": 0}
     discovered = {"features": None}
@@ -117,6 +183,9 @@ def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
     class DummyCursor:
         def execute(self, sql, params=None):
             pass
+
+        def fetchone(self):
+            return None  # Dataset doesn't exist
 
         def fetchall(self):
             # Return mock features to test discovery path
@@ -153,7 +222,7 @@ def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
 
     import g2.ml.dataset as ds
 
-    def fake_export(conn, *, manifest, out_dir):
+    def fake_export(conn, *, manifest, out_dir, on_progress=None):
         called["export"] += 1
 
     monkeypatch.setattr(ds, "export_dataset_artifacts", fake_export)

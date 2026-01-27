@@ -93,16 +93,25 @@ class MeanReversionStrategy:
         if not price_data:
             return []
 
+        # Normalize to Dict[str, List[Dict]] format
+        if isinstance(price_data, dict):
+            price_by_symbol = price_data
+        else:
+            from collections import defaultdict
+            price_by_symbol = defaultdict(list)
+            for row in price_data:
+                price_by_symbol[row["symbol"]].append(row)
+            price_by_symbol = dict(price_by_symbol)
+
         # Get unique symbols
-        symbols = sorted(set(row["symbol"] for row in price_data))
+        symbols = sorted(price_by_symbol.keys())
 
         # Calculate RSI for each symbol
         rsi_values = {}
         current_prices = {}
 
         for symbol in symbols:
-            symbol_data = [row for row in price_data if row["symbol"] == symbol]
-            symbol_data = sorted(symbol_data, key=lambda x: x["date"])
+            symbol_data = sorted(price_by_symbol[symbol], key=lambda x: x["date"])
 
             # Need sufficient history for RSI
             if len(symbol_data) < self.rsi_period + 1:
@@ -120,8 +129,14 @@ class MeanReversionStrategy:
         # Generate signals
         signals = []
 
+        # Get positions dict (handle both Portfolio object and dict)
+        if hasattr(portfolio, 'positions'):
+            positions = portfolio.positions
+        else:
+            positions = portfolio
+
         # Sell signals for overbought positions
-        for symbol, position in portfolio.items():
+        for symbol, position in positions.items():
             if symbol in rsi_values and rsi_values[symbol] > self.rsi_overbought:
                 # Sell entire position
                 signals.append({
@@ -132,14 +147,14 @@ class MeanReversionStrategy:
                 })
 
         # Buy signals for oversold stocks
-        current_positions = len(portfolio)
+        current_positions = len(positions)
         available_slots = self.max_positions - current_positions
 
         if available_slots > 0:
             # Find oversold stocks not currently held
             oversold = []
             for symbol, rsi in rsi_values.items():
-                if symbol not in portfolio and rsi < self.rsi_oversold:
+                if symbol not in positions and rsi < self.rsi_oversold:
                     oversold.append((symbol, rsi))
 
             # Sort by RSI (most oversold first)

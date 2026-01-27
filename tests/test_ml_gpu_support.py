@@ -382,3 +382,20 @@ class TestGPUIntegration:
         assert gpu_time > 0
         # Log timing for manual inspection
         print(f"\n  CPU time: {cpu_time:.2f}s, GPU time: {gpu_time:.2f}s")
+
+
+class TestLibompErrorHandling:
+    """Tests for helpful error messages when libomp is missing."""
+
+    def test_models_module_has_libomp_error_handling(self):
+        """The models module should have error handling for libomp."""
+        import inspect
+        from g2.ml import models
+
+        # Get the source code of _train_lightgbm_quantile
+        source = inspect.getsource(models._train_lightgbm_quantile)
+
+        # Should catch OSError and check for libomp
+        assert "OSError" in source
+        assert "libomp" in source
+        assert "brew install libomp" in source

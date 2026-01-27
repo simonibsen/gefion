@@ -88,16 +88,25 @@ class MovingAverageCrossoverStrategy:
         if not price_data:
             return []
 
+        # Normalize to Dict[str, List[Dict]] format
+        if isinstance(price_data, dict):
+            price_by_symbol = price_data
+        else:
+            from collections import defaultdict
+            price_by_symbol = defaultdict(list)
+            for row in price_data:
+                price_by_symbol[row["symbol"]].append(row)
+            price_by_symbol = dict(price_by_symbol)
+
         # Get unique symbols
-        symbols = sorted(set(row["symbol"] for row in price_data))
+        symbols = sorted(price_by_symbol.keys())
 
         # Calculate MAs and detect crossovers for each symbol
         crossovers = {}  # symbol -> "golden" or "death"
         current_prices = {}
 
         for symbol in symbols:
-            symbol_data = [row for row in price_data if row["symbol"] == symbol]
-            symbol_data = sorted(symbol_data, key=lambda x: x["date"])
+            symbol_data = sorted(price_by_symbol[symbol], key=lambda x: x["date"])
 
             # Need sufficient history for slow MA
             if len(symbol_data) < self.slow_period + 1:
@@ -128,8 +137,14 @@ class MovingAverageCrossoverStrategy:
         # Generate signals
         signals = []
 
+        # Get positions dict (handle both Portfolio object and dict)
+        if hasattr(portfolio, 'positions'):
+            positions = portfolio.positions
+        else:
+            positions = portfolio
+
         # Sell signals for death crosses
-        for symbol, position in portfolio.items():
+        for symbol, position in positions.items():
             if symbol in crossovers and crossovers[symbol] == "death":
                 # Sell entire position
                 signals.append({
@@ -140,14 +155,14 @@ class MovingAverageCrossoverStrategy:
                 })
 
         # Buy signals for golden crosses
-        current_positions = len(portfolio)
+        current_positions = len(positions)
         available_slots = self.max_positions - current_positions
 
         if available_slots > 0:
             # Find golden cross stocks not currently held
             golden_crosses = []
             for symbol, crossover_type in crossovers.items():
-                if symbol not in portfolio and crossover_type == "golden":
+                if symbol not in positions and crossover_type == "golden":
                     golden_crosses.append(symbol)
 
             # Buy up to available_slots stocks

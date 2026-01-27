@@ -13,5 +13,13 @@ build/
 # Database files
 db/
 
+# ML artifacts (generated output)
+datasets/
+models/
+
 # OS noise
 .DS_Store
+
+# Claude Code local settings (keep settings.json for shared hooks)
+.claude/*
+!.claude/settings.json

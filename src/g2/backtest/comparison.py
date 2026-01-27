@@ -37,30 +37,39 @@ def compare_strategies(
     price_data: List[Dict[str, Any]],
     initial_capital: float = 100000.0,
     strategy_params: Dict[str, Dict[str, Any]] = None,
+    include_equity_curves: bool = False,
+    strategy_mapping: Dict[str, str] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Compare multiple strategies on the same price data.
 
     Args:
-        strategies: List of strategy names to compare
+        strategies: List of strategy names or config names to compare
         price_data: List of OHLCV price records
         initial_capital: Starting capital for each backtest
-        strategy_params: Optional dict of strategy-specific parameters
+        strategy_params: Optional dict of strategy-specific parameters (keyed by display name)
+        include_equity_curves: If True, include equity curves in results
+        strategy_mapping: Optional dict mapping display name -> actual strategy name.
+                         Use this for strategy configs (e.g., {"ml_filter_h7": "ml_filter"}).
+                         If not provided, strategies are used as-is.
 
     Returns:
-        Dict mapping strategy name -> metrics dict
+        Dict mapping strategy/config name -> metrics dict (with optional equity_curve key)
 
     Raises:
         ValueError: If an unknown strategy name is provided
     """
     if strategy_params is None:
         strategy_params = {}
+    if strategy_mapping is None:
+        strategy_mapping = {}
 
-    # Validate strategy names
+    # Validate strategy names (resolve through mapping if present)
     for name in strategies:
-        if name not in AVAILABLE_STRATEGIES:
+        actual_strategy = strategy_mapping.get(name, name)
+        if actual_strategy not in AVAILABLE_STRATEGIES:
             raise ValueError(
-                f"Unknown strategy: '{name}'. "
+                f"Unknown strategy: '{actual_strategy}' (from '{name}'). "
                 f"Available: {list(AVAILABLE_STRATEGIES.keys())}"
             )
 
@@ -74,10 +83,13 @@ def compare_strategies(
 
     results = {}
 
-    for strategy_name in strategies:
+    for display_name in strategies:
+        # Resolve display name to actual strategy name (for config support)
+        actual_strategy = strategy_mapping.get(display_name, display_name)
+
         # Create strategy instance with optional params
-        params = strategy_params.get(strategy_name, {})
-        strategy_class = AVAILABLE_STRATEGIES[strategy_name]
+        params = strategy_params.get(display_name, {})
+        strategy_class = AVAILABLE_STRATEGIES[actual_strategy]
         strategy_instance = strategy_class(**params)
 
         # Create strategy function for BacktestEngine
@@ -89,8 +101,9 @@ def compare_strategies(
         #   - Others: expect flat list prices, dict for portfolio
         def make_strategy_fn(strat, cash, strat_name):
             def strategy_fn(current_date, portfolio, prices):
-                # MomentumStrategy expects dict format, others expect flat list
-                if strat_name == "momentum":
+                # These strategies expect dict format prices and Portfolio object
+                dict_format_strategies = {"momentum", "ml_signal", "ml_filter"}
+                if strat_name in dict_format_strategies:
                     price_data = prices  # Keep dict format
                     port_data = portfolio  # Keep Portfolio object
                 else:
@@ -99,7 +112,8 @@ def compare_strategies(
                 return strat.generate_signals(current_date, port_data, price_data, cash)
             return strategy_fn
 
-        strategy_fn = make_strategy_fn(strategy_instance, initial_capital, strategy_name)
+        # Use actual_strategy for format detection (dict vs list)
+        strategy_fn = make_strategy_fn(strategy_instance, initial_capital, actual_strategy)
 
         # Run backtest
         engine = BacktestEngine(
@@ -125,7 +139,13 @@ def compare_strategies(
             initial_capital=initial_capital,
         )
 
-        results[strategy_name] = metrics
+        # Optionally include equity curve for charting
+        if include_equity_curves:
+            metrics["equity_curve"] = equity_curve
+            metrics["trades"] = trades
+
+        # Use display_name as key (config name or strategy name)
+        results[display_name] = metrics
 
     return results
 

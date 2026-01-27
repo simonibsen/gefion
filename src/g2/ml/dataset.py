@@ -47,7 +47,13 @@ def _stream_to_csv(cursor, path: Path, header: List[str], row_mapper) -> int:
     return count
 
 
-def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -> None:
+def export_dataset_artifacts(
+    conn,
+    *,
+    manifest: Dict[str, Any],
+    out_dir: Path,
+    on_progress: Any = None,
+) -> None:
     """
     Export dataset artifacts.
 
@@ -57,7 +63,13 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
       - labels (forward returns + 5-class labels per horizon)
 
     Supports CSV (default) and Parquet formats via manifest['format'].
+
+    Args:
+        on_progress: Optional callback(message: str) for progress updates.
     """
+    def emit_progress(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -114,6 +126,7 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
             symbols = [row[0] for row in cur.fetchall()]
 
     # Export prices - stream directly for CSV, load for parquet
+    emit_progress(f"Exporting prices for {len(symbols)} symbols...")
     price_rows: list[dict[str, Any]] = []
     price_count = 0
     try:
@@ -163,8 +176,22 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
     except Exception:
         _write_to_file([], prices_path, prices_header, export_format)
 
+    emit_progress(f"Exported {price_count:,} price records")
+
     # Export features - stream directly for CSV, load for parquet
+    emit_progress("Exporting features...")
     feature_rows: list[dict[str, Any]] = []
+    feature_count = 0
+    try:
+        # First check if computed_features has any data
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM computed_features LIMIT 1")
+            total_features = cur.fetchone()[0]
+            if total_features == 0:
+                emit_progress("⚠️  WARNING: computed_features table is empty. Run 'g2 feat-compute' first.")
+    except Exception:
+        pass  # Table might not exist yet
+
     try:
         with conn.cursor() as cur:
             # Build WHERE clause based on feature selection
@@ -206,17 +233,24 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
 
             if export_format == "csv":
                 # Stream directly to CSV - much lower memory usage
-                _stream_to_csv(cur, features_path, features_header, feature_mapper)
+                feature_count = _stream_to_csv(cur, features_path, features_header, feature_mapper)
             else:
                 # For parquet, need all data in memory
                 for row in cur:
                     feature_rows.append(feature_mapper(row))
+                feature_count = len(feature_rows)
                 _write_to_file(feature_rows, features_path, features_header, export_format)
     except Exception:
         _write_to_file([], features_path, features_header, export_format)
 
+    if feature_count == 0:
+        emit_progress("⚠️  WARNING: No features exported. Training will fail without features.")
+    else:
+        emit_progress(f"Features exported: {feature_count:,} records")
+
     # Compute labels from prices
     if price_count > 0 and horizons_days:
+        emit_progress(f"Computing labels for {len(horizons_days)} horizons...")
         try:
             import numpy as np
             import pandas as pd
@@ -231,6 +265,8 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
             if df.empty:
                 return
             df["close_for_label"] = df["adjusted_close"].where(df["adjusted_close"].notna(), df["close"])
+            # Convert to float to handle Decimal types from PostgreSQL
+            df["close_for_label"] = pd.to_numeric(df["close_for_label"], errors="coerce")
             df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
             out = []
             for h in horizons_days:
@@ -269,5 +305,11 @@ def export_dataset_artifacts(conn, *, manifest: Dict[str, Any], out_dir: Path) -
                         labels_df.to_parquet(labels_path, index=False)
                     else:
                         labels_df.to_csv(labels_path, index=False)
-        except Exception:
+                    emit_progress(f"Labels computed: {len(labels_df):,} records")
+                else:
+                    emit_progress("⚠️  WARNING: No labels computed (insufficient price history for horizons).")
+            else:
+                emit_progress("⚠️  WARNING: No labels computed. Check label_spec thresholds in manifest.")
+        except Exception as e:
+            emit_progress(f"⚠️  WARNING: Failed to compute labels: {e}")
             return

@@ -72,3 +72,94 @@ def test_export_dataset_artifacts_writes_csvs(tmp_path):
     assert _read_csv_header(feats)[:3] == ["symbol", "date", "feature_name"]
     assert _read_csv_header(labels)[:3] == ["symbol", "date", "horizon_days"]
 
+
+def test_export_dataset_artifacts_emits_progress(tmp_path):
+    """Export should call progress callback with status updates."""
+    progress_calls = []
+
+    def on_progress(message: str):
+        progress_calls.append(message)
+
+    manifest = {
+        "universe": {"symbols": ["IBM"]},
+        "horizons_days": [1],
+        "label_spec": {
+            "thresholds": {
+                "1": {"weak": 0.02, "strong": 0.05},
+            }
+        },
+    }
+    export_dataset_artifacts(
+        _FakeConn(), manifest=manifest, out_dir=tmp_path, on_progress=on_progress
+    )
+
+    # Should have progress updates for each phase
+    assert len(progress_calls) >= 3, f"Expected at least 3 progress calls, got {progress_calls}"
+    assert any("price" in msg.lower() for msg in progress_calls)
+    assert any("feature" in msg.lower() for msg in progress_calls)
+    assert any("label" in msg.lower() for msg in progress_calls)
+
+
+def test_export_handles_decimal_prices(tmp_path):
+    """Export should handle Decimal types from PostgreSQL without error.
+
+    PostgreSQL returns NUMERIC columns as Python Decimal objects.
+    The label computation must convert these to float for arithmetic.
+    """
+    from decimal import Decimal
+    from datetime import date
+
+    class DecimalCursor:
+        def __init__(self):
+            self._call_count = 0
+
+        def execute(self, *args, **kwargs):
+            self._call_count += 1
+
+        def fetchall(self):
+            return list(self)
+
+        def __iter__(self):
+            if self._call_count == 1:
+                # Return prices as Decimal (like PostgreSQL NUMERIC)
+                return iter([
+                    ("TEST", date(2024, 1, 1), Decimal("100.00"), Decimal("105.00"),
+                     Decimal("99.00"), Decimal("103.00"), Decimal("103.00"), 1000000),
+                    ("TEST", date(2024, 1, 2), Decimal("103.00"), Decimal("108.00"),
+                     Decimal("102.00"), Decimal("106.00"), Decimal("106.00"), 1100000),
+                    ("TEST", date(2024, 1, 3), Decimal("106.00"), Decimal("110.00"),
+                     Decimal("105.00"), Decimal("109.00"), Decimal("109.00"), 1200000),
+                ])
+            return iter([])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class DecimalConn:
+        def cursor(self):
+            return DecimalCursor()
+
+    manifest = {
+        "universe": {"symbols": ["TEST"]},
+        "horizons_days": [1],
+        "label_spec": {
+            "thresholds": {"1": {"weak": 0.02, "strong": 0.05}}
+        },
+    }
+
+    # Should not raise TypeError: unsupported operand type(s) for -: 'decimal.Decimal' and 'float'
+    export_dataset_artifacts(DecimalConn(), manifest=manifest, out_dir=tmp_path)
+
+    labels = tmp_path / "labels.csv"
+    assert labels.exists(), "Labels file should be created even with Decimal prices"
+
+    # Verify labels were computed
+    import pandas as pd
+    df = pd.read_csv(labels)
+    assert len(df) > 0, "Should have computed labels"
+    assert "forward_return" in df.columns
+    assert "label" in df.columns
+

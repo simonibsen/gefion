@@ -64,8 +64,8 @@ class Output:
         In JSON mode, data fields are at the top level (not nested under message).
         """
         if self.json_mode:
-            # Data at top level for machine parsing
-            self._emit_json({**(data or {}), "status": "ok"})
+            # Data at top level for machine parsing, include message for progress updates
+            self._emit_json({"status": "ok", "message": message, **(data or {})})
         else:
             self.console.print(f"[bold green]\u2713[/] {message}")
             self._print_data(data)
@@ -215,7 +215,7 @@ class Output:
             }
 
         output = {"_meta": meta, **payload}
-        print(json.dumps(output, default=str, indent=2))
+        print(json.dumps(output, default=str, indent=2), flush=True)
 
     def _print_data(self, data: Optional[Dict]) -> None:
         """Print supplementary data in rich mode."""

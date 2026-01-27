@@ -28,9 +28,14 @@ def db_conn():
 
 @pytest.fixture
 def clean_feature_tables(db_conn):
-    """Clear feature tables before test, creating them if needed."""
+    """Ensure feature tables exist before test.
+
+    Note: We don't delete existing data because:
+    1. computed_features has FK references to feature_definitions
+    2. The import functions use upsert (ON CONFLICT DO UPDATE), so existing data is fine
+    """
     with db_conn.cursor() as cur:
-        # Ensure tables exist before trying to clear them
+        # Ensure tables exist before trying to use them
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables
@@ -41,7 +46,11 @@ def clean_feature_tables(db_conn):
             # Tables don't exist - run schema init to create them
             init_schema_tables(db_conn, ["feature_functions", "feature_definitions"])
 
-        cur.execute("DELETE FROM feature_definitions WHERE true")
+        # Only delete rows NOT referenced by computed_features
+        cur.execute("""
+            DELETE FROM feature_definitions
+            WHERE id NOT IN (SELECT DISTINCT feature_id FROM computed_features WHERE feature_id IS NOT NULL)
+        """)
         cur.execute("DELETE FROM feature_functions WHERE true")
     yield
 

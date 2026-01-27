@@ -404,6 +404,8 @@ def init_schema_tables(conn: psycopg.Connection, tables: List[str]) -> None:
         "prediction_outcomes": schema.create_prediction_outcomes_table,
         "model_performance": schema.create_model_performance_table,
         "trend_class_predictions": schema.create_trend_class_predictions_table,
+        "strategy_registry": schema.create_strategy_registry_table,
+        "strategy_configs": schema.create_strategy_configs_table,
     }
 
     for table in tables:

@@ -385,6 +385,59 @@ def test_multiple_symbols_mixed_signals():
     assert not any(s["symbol"] == "GOOGL" for s in signals)
 
 
+def test_engine_data_format():
+    """Test strategy handles engine's Dict[str, List[Dict]] format.
+
+    The backtest engine passes price_data as Dict[symbol -> list of price records],
+    not as a flat list. This test ensures compatibility.
+    """
+    strategy = BreakoutStrategy(
+        lookback_days=10,
+        volume_threshold=1.5,
+        position_size=0.3,
+    )
+
+    base_date = date(2024, 1, 1)
+
+    # Engine format: Dict[str, List[Dict]]
+    price_data = {
+        "AAPL": [
+            {
+                "symbol": "AAPL",
+                "date": base_date + timedelta(days=i),
+                "close": 100.0,
+                "high": 102.0,
+                "low": 98.0,
+                "volume": 1000000,
+            }
+            for i in range(10)
+        ] + [
+            {
+                "symbol": "AAPL",
+                "date": base_date + timedelta(days=10),
+                "close": 105.0,
+                "high": 105.0,  # Breakout above 102
+                "low": 101.0,
+                "volume": 1600000,  # Volume confirmation
+            }
+        ],
+    }
+
+    current_date = base_date + timedelta(days=10)
+
+    signals = strategy.generate_signals(
+        current_date=current_date,
+        portfolio={},
+        price_data=price_data,
+        initial_cash=100000.0,
+    )
+
+    # Should generate buy signal for AAPL breakout
+    buy_signals = [s for s in signals if s["action"] == "buy"]
+    assert len(buy_signals) > 0
+    assert buy_signals[0]["symbol"] == "AAPL"
+
+
 def test_position_sizing():
     """Test strategy correctly sizes positions based on position_size parameter."""
     strategy = BreakoutStrategy(

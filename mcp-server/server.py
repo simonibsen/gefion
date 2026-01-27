@@ -289,6 +289,23 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="ml_dataset_inspect",
+            description=(
+                "Inspect a dataset's metadata and show dependent models. "
+                "Returns dataset configuration (universe, horizons, features, thresholds) "
+                "and lists all models trained on this dataset."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Dataset name"},
+                    "version": {"type": "string", "description": "Dataset version"},
+                },
+                "required": ["name", "version"],
+            },
+        ),
+
+        Tool(
             name="ml_train",
             description=(
                 "Train quantile regression models for multi-horizon prediction. "
@@ -616,6 +633,126 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="feature_show",
+            description=(
+                "Show details for a single feature definition. "
+                "Returns the feature's function, parameters, source/store tables, and active status."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "feature": {"type": "string", "description": "Feature name (e.g., indicator_rsi_14)"},
+                },
+                "required": ["feature"],
+            },
+        ),
+
+        Tool(
+            name="feature_functions_list",
+            description=(
+                "List all registered feature functions. "
+                "Feature functions are the computation logic (indicator, derivative, fundamental, etc.) "
+                "that feature definitions reference. Shows function name, description, and parameters."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "function": {"type": "string", "description": "Optional function name to filter"},
+                    "show_body": {"type": "boolean", "description": "Include function body/code in output", "default": False},
+                },
+            },
+        ),
+
+        Tool(
+            name="feature_compute",
+            description=(
+                "Compute features for symbols using the dispatcher. "
+                "Supports all feature types (indicators, derivatives, fundamentals). "
+                "Features must be defined in feature_definitions table. "
+                "Use --all-features to compute all active features, or specify individual features."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbols": {"type": "string", "description": "Comma-separated symbols (e.g., AAPL,MSFT)"},
+                    "features": {"type": "string", "description": "Comma-separated feature names to compute"},
+                    "all_features": {"type": "boolean", "description": "Compute all active features", "default": False},
+                    "function_names": {"type": "string", "description": "Filter by function type (indicator, derivative, fundamental)"},
+                    "full": {"type": "boolean", "description": "Full refresh instead of incremental", "default": False},
+                    "update_existing": {"type": "boolean", "description": "Update existing rows on conflict", "default": False},
+                },
+            },
+        ),
+
+        Tool(
+            name="feature_definitions_export",
+            description=(
+                "Export feature definitions to individual JSON files. "
+                "By default, exports all definitions to the 'feature-definitions/' directory. "
+                "Each definition is saved as <name>.json. "
+                "Useful for version control and backup of feature configurations."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dir": {"type": "string", "description": "Directory to write files (default: feature-definitions)"},
+                    "features": {"type": "string", "description": "Comma-separated list of feature names to export (default: all)"},
+                },
+            },
+        ),
+
+        Tool(
+            name="feature_definitions_import",
+            description=(
+                "Import feature definitions from individual JSON files. "
+                "By default, imports all JSON files from the 'feature-definitions/' directory. "
+                "Idempotent: re-running will upsert by name. "
+                "Use this to restore feature definitions from version control."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dir": {"type": "string", "description": "Directory containing JSON files (default: feature-definitions)"},
+                    "features": {"type": "string", "description": "Comma-separated list of feature names to import (default: all)"},
+                },
+            },
+        ),
+
+        Tool(
+            name="feature_functions_export",
+            description=(
+                "Export feature functions to individual JSON files. "
+                "By default, exports all functions to the 'feature-functions/' directory. "
+                "Each function is saved as <name>_v<version>.json. "
+                "Useful for version control and backup of custom function definitions."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dir": {"type": "string", "description": "Directory to write files (default: feature-functions)"},
+                    "functions": {"type": "string", "description": "Comma-separated list of function names to export (default: all)"},
+                },
+            },
+        ),
+
+        Tool(
+            name="feature_functions_import",
+            description=(
+                "Import feature functions from individual JSON files. "
+                "By default, imports all JSON files from the 'feature-functions/' directory. "
+                "Idempotent: re-running will upsert by (name, version). "
+                "Use this to restore feature functions from version control."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dir": {"type": "string", "description": "Directory containing JSON files (default: feature-functions)"},
+                    "functions": {"type": "string", "description": "Comma-separated list of function names to import (default: all)"},
+                },
+            },
+        ),
+
+        Tool(
             name="cross_sectional_compute",
             description=(
                 "Compute cross-sectional rankings for a feature. "
@@ -926,8 +1063,8 @@ async def list_tools() -> List[Tool]:
                 "properties": {
                     "strategy": {
                         "type": "string",
-                        "description": "Strategy name (momentum, mean_reversion, ma_crossover, breakout)",
-                        "enum": ["momentum", "mean_reversion", "ma_crossover", "breakout"]
+                        "description": "Strategy name (momentum, mean_reversion, ma_crossover, breakout, pairs_trading, rsi_divergence, volatility_contraction, ml_signal, ml_filter)",
+                        "enum": ["momentum", "mean_reversion", "ma_crossover", "breakout", "pairs_trading", "rsi_divergence", "volatility_contraction", "ml_signal", "ml_filter"]
                     },
                     "symbols": {"type": "string", "description": "Comma-separated symbols (e.g., AAPL,MSFT,GOOGL)"},
                     "exchange": {"type": "string", "description": "Exchange name (alternative to symbols)"},
@@ -956,6 +1093,9 @@ async def list_tools() -> List[Tool]:
                         "enum": ["fixed_dollar", "fixed_percent", "kelly", "volatility_target"]
                     },
                     "sizing_amount": {"type": "number", "description": "Sizing parameter (dollar amount or percent)"},
+                    "model_name": {"type": "string", "description": "Model name (required for ml_signal and ml_filter strategies)"},
+                    "model_version": {"type": "string", "description": "Model version (required for ml_signal and ml_filter strategies)"},
+                    "horizon": {"type": "integer", "description": "Prediction horizon in days (for ML strategies)", "default": 7},
                 },
                 "required": ["strategy", "start_date", "end_date"],
             },
@@ -987,6 +1127,8 @@ async def list_tools() -> List[Tool]:
                         "description": "Metric to rank by",
                         "default": "sharpe_ratio"
                     },
+                    "model_name": {"type": "string", "description": "Model name (required when comparing ml_signal or ml_filter strategies)"},
+                    "model_version": {"type": "string", "description": "Model version (required when comparing ml_signal or ml_filter strategies)"},
                 },
                 "required": ["start_date", "end_date"],
             },
@@ -1204,6 +1346,53 @@ async def list_tools() -> List[Tool]:
                 "required": ["symbol", "features"],
             },
         ),
+
+        # Backup/Restore Tools
+        Tool(
+            name="backup",
+            description=(
+                "Backup database data to parquet files. "
+                "Creates backup directory with parquet files for each table and manifest. "
+                "Supports filtering by data type (ohlcv, features, definitions, functions, all), "
+                "date range, and symbols. Use --dry-run to estimate size without creating backup. "
+                "Supports incremental backups to only capture new data since last backup."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "output": {"type": "string", "description": "Output directory path (required)"},
+                    "data_types": {"type": "string", "description": "Data types to backup: ohlcv, features, definitions, functions, all", "default": "all"},
+                    "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                    "symbols": {"type": "string", "description": "Comma-separated symbols to backup"},
+                    "incremental": {"type": "boolean", "description": "Only backup data since last backup", "default": False},
+                    "compress": {"type": "boolean", "description": "Compress output files", "default": True},
+                    "dry_run": {"type": "boolean", "description": "Show size estimate without creating backup", "default": False},
+                },
+                "required": ["output"],
+            },
+        ),
+        Tool(
+            name="restore",
+            description=(
+                "Restore database data from a backup. "
+                "Reads parquet files from backup directory and imports into database. "
+                "Supports merge mode (skip conflicts) or replace mode (overwrite existing). "
+                "Use --dry-run to preview what would be restored. "
+                "Verifies backup integrity before restoring by default."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "input": {"type": "string", "description": "Input backup directory path (required)"},
+                    "mode": {"type": "string", "description": "Restore mode: merge (skip conflicts) or replace", "default": "merge"},
+                    "data_types": {"type": "string", "description": "Filter data types to restore"},
+                    "dry_run": {"type": "boolean", "description": "Show what would be restored without restoring", "default": False},
+                    "verify": {"type": "boolean", "description": "Verify backup integrity before restoring", "default": True},
+                },
+                "required": ["input"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -1235,6 +1424,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _get_role_info(arguments)
         elif name == "ml_dataset_build":
             result = await _ml_dataset_build(arguments)
+        elif name == "ml_dataset_inspect":
+            result = await _ml_dataset_inspect(arguments)
         elif name == "ml_train":
             result = await _ml_train(arguments)
         elif name == "ml_predict":
@@ -1263,6 +1454,20 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _data_update(arguments)
         elif name == "features_list":
             result = await _features_list(arguments)
+        elif name == "feature_show":
+            result = await _feature_show(arguments)
+        elif name == "feature_functions_list":
+            result = await _feature_functions_list(arguments)
+        elif name == "feature_compute":
+            result = await _feature_compute(arguments)
+        elif name == "feature_definitions_export":
+            result = await _feature_definitions_export(arguments)
+        elif name == "feature_definitions_import":
+            result = await _feature_definitions_import(arguments)
+        elif name == "feature_functions_export":
+            result = await _feature_functions_export(arguments)
+        elif name == "feature_functions_import":
+            result = await _feature_functions_import(arguments)
         elif name == "cross_sectional_compute":
             result = await _cross_sectional_compute(arguments)
         elif name == "query_database":
@@ -1319,6 +1524,11 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _chart_predictions(arguments)
         elif name == "chart_features":
             result = await _chart_features(arguments)
+        # Backup/Restore tools
+        elif name == "backup":
+            result = await _backup(arguments)
+        elif name == "restore":
+            result = await _restore(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -1406,6 +1616,16 @@ async def _ml_dataset_build(args: Dict[str, Any]) -> Dict[str, Any]:
 
     # ML operations require PostgreSQL
     return await _execute_with_health_check(['postgres'], _build)
+
+
+async def _ml_dataset_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Inspect ML dataset metadata and dependent models."""
+    async def _inspect():
+        cmd = ['ml', 'dataset-inspect', '--name', args['name'], '--version', args['version']]
+        return await executor.run(*cmd)
+
+    # Inspect requires PostgreSQL
+    return await _execute_with_health_check(['postgres'], _inspect)
 
 
 async def _ml_train(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1920,9 +2140,141 @@ async def _data_update(args: Dict[str, Any]) -> Dict[str, Any]:
     return await executor.run(*cmd)
 
 
+async def _backup(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Backup database data to parquet files."""
+    output = args.get('output')
+    if not output:
+        return {'success': False, 'error': 'output is required'}
+
+    cmd = ['backup', '--output', output]
+
+    if args.get('data_types'):
+        cmd.extend(['--data-types', args['data_types']])
+    if args.get('start_date'):
+        cmd.extend(['--start-date', args['start_date']])
+    if args.get('end_date'):
+        cmd.extend(['--end-date', args['end_date']])
+    if args.get('symbols'):
+        cmd.extend(['--symbols', args['symbols']])
+    if args.get('incremental'):
+        cmd.append('--incremental')
+    if args.get('compress') is False:
+        cmd.append('--no-compress')
+    if args.get('dry_run'):
+        cmd.append('--dry-run')
+
+    return await executor.run(*cmd)
+
+
+async def _restore(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Restore database data from a backup."""
+    input_path = args.get('input')
+    if not input_path:
+        return {'success': False, 'error': 'input is required'}
+
+    cmd = ['restore', '--input', input_path]
+
+    if args.get('mode'):
+        cmd.extend(['--mode', args['mode']])
+    if args.get('data_types'):
+        cmd.extend(['--data-types', args['data_types']])
+    if args.get('dry_run'):
+        cmd.append('--dry-run')
+    if args.get('verify') is False:
+        cmd.append('--no-verify')
+
+    return await executor.run(*cmd)
+
+
 async def _features_list(args: Dict[str, Any]) -> Dict[str, Any]:
     """List feature definitions."""
-    return await executor.run('features-list')
+    return await executor.run('feat-def-list', '--json')
+
+
+async def _feature_show(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Show a single feature definition."""
+    feature = args.get('feature')
+    if not feature:
+        return {'success': False, 'error': 'feature is required'}
+    return await executor.run('feat-def-show', '--feature', feature, '--json')
+
+
+async def _feature_functions_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List feature functions."""
+    cmd = ['feat-fx-list', '--json']
+    if args.get('function'):
+        cmd.extend(['--feature', args['function']])
+    if args.get('show_body'):
+        cmd.append('--show-body')
+    return await executor.run(*cmd)
+
+
+async def _feature_compute(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute features for symbols."""
+    cmd = ['feat-compute', '--json']
+
+    if args.get('symbols'):
+        cmd.extend(['--symbols', args['symbols']])
+    if args.get('features'):
+        cmd.extend(['--features', args['features']])
+    if args.get('all_features'):
+        cmd.append('--all-features')
+    if args.get('function_names'):
+        cmd.extend(['--function-names', args['function_names']])
+    if args.get('full'):
+        cmd.append('--full')
+    if args.get('update_existing'):
+        cmd.append('--update-existing')
+
+    return await executor.run(*cmd)
+
+
+async def _feature_definitions_export(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Export feature definitions to JSON files."""
+    cmd = ['feat-def-export', '--json']
+
+    if args.get('dir'):
+        cmd.extend(['--dir', args['dir']])
+    if args.get('features'):
+        cmd.extend(['--features', args['features']])
+
+    return await executor.run(*cmd)
+
+
+async def _feature_definitions_import(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Import feature definitions from JSON files."""
+    cmd = ['feat-def-import', '--json']
+
+    if args.get('dir'):
+        cmd.extend(['--dir', args['dir']])
+    if args.get('features'):
+        cmd.extend(['--features', args['features']])
+
+    return await executor.run(*cmd)
+
+
+async def _feature_functions_export(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Export feature functions to JSON files."""
+    cmd = ['feat-fx-export', '--json']
+
+    if args.get('dir'):
+        cmd.extend(['--dir', args['dir']])
+    if args.get('functions'):
+        cmd.extend(['--functions', args['functions']])
+
+    return await executor.run(*cmd)
+
+
+async def _feature_functions_import(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Import feature functions from JSON files."""
+    cmd = ['feat-fx-import', '--json']
+
+    if args.get('dir'):
+        cmd.extend(['--dir', args['dir']])
+    if args.get('functions'):
+        cmd.extend(['--functions', args['functions']])
+
+    return await executor.run(*cmd)
 
 
 async def _cross_sectional_compute(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -3098,6 +3450,14 @@ async def _backtest_run(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get('initial_cash'):
             cmd.extend(['--initial-cash', str(args['initial_cash'])])
 
+        # ML strategy parameters
+        if args.get('model_name'):
+            cmd.extend(['--model-name', args['model_name']])
+        if args.get('model_version'):
+            cmd.extend(['--model-version', args['model_version']])
+        if args.get('horizon'):
+            cmd.extend(['--horizon', str(args['horizon'])])
+
         # Advanced features (CLI flags to be added when CLI is updated)
         # For now, we note the requested features in the output
         requested_features = {}
@@ -3160,6 +3520,12 @@ async def _backtest_compare(args: Dict[str, Any]) -> Dict[str, Any]:
         # Ranking
         if args.get('rank_by'):
             cmd.extend(['--rank-by', args['rank_by']])
+
+        # ML strategy parameters
+        if args.get('model_name'):
+            cmd.extend(['--model-name', args['model_name']])
+        if args.get('model_version'):
+            cmd.extend(['--model-version', args['model_version']])
 
         return await executor.run(*cmd)
 
