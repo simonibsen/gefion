@@ -948,4 +948,4 @@ After mastering these workflows:
 4. **Create automated trading signals** with risk management
 5. **Deploy production monitoring** with alerting
 
-See [NEXT_STEPS.md](../NEXT_STEPS.md) for roadmap.
+See [.specify/memory/backlog.md](../.specify/memory/backlog.md) for roadmap.

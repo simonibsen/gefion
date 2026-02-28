@@ -10,7 +10,7 @@
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and DB-first architecture
 - **[PERFORMANCE.md](PERFORMANCE.md)** - Optimization techniques and benchmarks
-- **[ML_ROADMAP.md](ML_ROADMAP.md)** - Future ML features and enhancements
+- **[../.specify/memory/backlog.md](../.specify/memory/backlog.md)** - Future features and backlog
 - **[WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md](WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md)** - White paper on technical analysis and machine learning
 
 ## Archive
@@ -19,7 +19,7 @@ Historical documentation, detailed design docs, and ML vision:
 
 ### ML Vision & Future Plans
 - **[archive/ml/HIGHLEVEL.md](archive/ml/HIGHLEVEL.md)** - Long-term ML-driven analysis goals
-- **[archive/ml/ML_ROADMAP.md](archive/ml/ML_ROADMAP.md)** - Detailed ML implementation plan
+- **[../.specify/memory/backlog.md](../.specify/memory/backlog.md)** - Backlog and future plans
 - **[archive/ml/ML_SYSTEM_DESIGN.md](archive/ml/ML_SYSTEM_DESIGN.md)** - ML system architecture
 - **[archive/ml/SECURITY_SANDBOXING.md](archive/ml/SECURITY_SANDBOXING.md)** - Security threat model
 - **[archive/ml/FUTURE_DIRECTIONS.md](archive/ml/FUTURE_DIRECTIONS.md)** - Future enhancements

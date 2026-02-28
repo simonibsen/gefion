@@ -422,12 +422,12 @@ src/g2/experiments/
     └── strategy_params.py   # StrategyParamExperiment
 ```
 
-See [EXPERIMENTS.md](EXPERIMENTS.md) for detailed documentation.
+See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-framework.md) for detailed documentation.
 
 ## Related Documentation
 
-- **Experiments**: [EXPERIMENTS.md](EXPERIMENTS.md) - AI experimentation framework
-- **ML Roadmap**: [ML_ROADMAP.md](ML_ROADMAP.md) - Future features and enhancements
+- **Experiments**: [.specify/specs/experiments-framework.md](../.specify/specs/experiments-framework.md) - AI experimentation framework
+- **Backlog**: [.specify/memory/backlog.md](../.specify/memory/backlog.md) - Future features and backlog
 - **ML Vision**: [archive/ml/HIGHLEVEL.md](archive/ml/HIGHLEVEL.md) - Long-term ML goals
 - **Security Deep Dive**: [archive/ml/SECURITY_SANDBOXING.md](archive/ml/SECURITY_SANDBOXING.md) - Threat model and mitigation
 - **Performance**: [PERFORMANCE.md](PERFORMANCE.md) - Optimization techniques

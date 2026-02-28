@@ -54,7 +54,7 @@ Claude: [Queries database and shows predictions]
   * Actionable suggestions with exact commands
   * Ordered next steps workflow
 - **`dev_status`** - **Development roadmap and next steps guidance**
-  * Parses DEVELOPMENT.md, NEXT_STEPS.md, PROGRESS.md
+  * Parses DEVELOPMENT.md, .specify/memory/progress.md, .specify/memory/backlog.md
   * Current development phase identification
   * Completed/in-progress/planned items tracking
   * Strategic path options (Trading-First/ML-First/Scale-First)

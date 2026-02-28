@@ -9,7 +9,7 @@ g2’s ML workflow (high level) is:
 4. Train a multi-horizon model that predicts return *distributions* (quantiles) rather than a single number
 5. Store predictions in dedicated prediction tables and validate with point-in-time backtests before turning them into tradeable signals
 
-For details, start at `docs/archive/ml/README.md` (index), then read `docs/archive/ml/HIGHLEVEL.md` (vision), `docs/archive/ml/ML_SYSTEM_DESIGN.md` (schemas/pipelines), and `docs/archive/ml/ML_ROADMAP.md` (phases/tasks).
+For details, start at `docs/archive/ml/README.md` (index), then read `docs/archive/ml/HIGHLEVEL.md` (vision) and `docs/archive/ml/ML_SYSTEM_DESIGN.md` (schemas/pipelines). For backlog and future plans, see `.specify/memory/backlog.md`.
 
 ### ML via Docker (GPU if available, CPU otherwise)
 
@@ -395,7 +395,7 @@ g2 experiment parent --id 2
 - `random` - Random sampling
 - `bayesian` - Adaptive optimization (Optuna TPE sampler)
 
-See [EXPERIMENTS.md](EXPERIMENTS.md) for detailed documentation.
+See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-framework.md) for detailed documentation.
 
 ## Tips and Behaviors
 - Prices/indicators skip symbols already current (latest date = today).

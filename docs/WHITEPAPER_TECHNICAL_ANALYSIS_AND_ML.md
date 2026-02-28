@@ -738,7 +738,7 @@ g2 ml eval --model-name test --model-version 20241214 \
 - **ML Quickstart**: [docs/ML_QUICKSTART.md](ML_QUICKSTART.md)
 - **E2E Test Guide**: [docs/E2E_TEST_GUIDE.md](E2E_TEST_GUIDE.md)
 - **Architecture**: [docs/ARCHITECTURE.md](ARCHITECTURE.md)
-- **ML Roadmap**: [docs/ML_ROADMAP.md](ML_ROADMAP.md)
+- **Backlog**: [.specify/memory/backlog.md](../.specify/memory/backlog.md)
 
 ---
 
