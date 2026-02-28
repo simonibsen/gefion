@@ -14,7 +14,7 @@ Parse the arguments above. Supported modes:
 |---------|---------|
 | *(empty)* or `status` | Show project health and suggest prioritized next steps |
 | `next` | Recommend the single best thing to work on with rationale |
-| `run` | Pick a task and execute a full autonomous dev loop |
+| `run` | Safe dev loop for small tasks (plan gate, max ~3 files) |
 
 ---
 
@@ -69,48 +69,68 @@ Include:
 - **Why**: Business/technical justification
 - **How**: High-level approach (2-3 bullet points)
 - **Scope**: Files likely affected, estimated complexity
-- **Spec needed?**: Whether this warrants a spec (use `/g2-dev run` to execute, or suggest `specify create` for larger items)
+- **Runnable?**: Whether this is small enough for `/g2-dev run` (max ~3 files) or needs a spec
 
-If the task is large enough to warrant a spec, suggest creating one via the spec-kit workflow:
-```
-specify create --name <spec-name>
-```
+**Sizing guide**:
+- **Small** (~1-3 files): recommend `/g2-dev run` to execute it
+- **Medium/Large** (4+ files, new modules, schema changes): recommend creating a spec first via `specify create --name <spec-name>`, then human-driven implementation with Claude helping
 
 ---
 
 ### Mode: `run`
 
-Execute a full autonomous development loop for the highest-priority actionable task.
+Execute a safe, small-scoped dev loop with mandatory plan gate.
 
-**Step 1: Select task**
-- Pick from backlog (highest priority, smallest scope first)
-- Or address a failing test / system health issue
+#### Guardrails (HARD RULES)
 
-**Step 2: Plan** (enter plan mode for non-trivial tasks)
+- **Max scope: ~3 files changed.** If the task would touch more, STOP and recommend creating a spec instead (`specify create --name <name>`)
+- **Plan mode is mandatory.** Always enter plan mode and get user approval before writing any code
+- **No schema changes.** If the task requires DDL, STOP and present the proposed changes for approval
+- **No autonomous commits.** Report results and suggest a commit message — never commit automatically
+
+#### Step 1: Select task
+
+Pick the highest-priority *small* task from one of these sources (in order):
+1. Failing tests or system health issues (always first)
+2. Small backlog items (high priority, ~1-3 files)
+3. Technical debt fixes
+
+**Scope check**: Before proceeding, estimate files affected. If >3 files or the task involves new modules, new CLI commands, or new DB tables — STOP here and tell the user:
+> "This task is too large for `run` mode. I recommend creating a spec: `specify create --name <name>`"
+
+#### Step 2: Plan (mandatory gate)
+
+Enter plan mode and present a plan for user approval:
 - Follow the constitution's plan structure: tests listed before implementation
-- Reference the spec if one exists (`.specify/specs/<name>.md`)
+- Reference the relevant spec if one exists (`.specify/specs/<name>.md`)
+- List exact files to create/modify (verify count is within guardrails)
+- Wait for explicit user approval before proceeding
 
-**Step 3: Implement** (TDD — mandatory per constitution)
+#### Step 3: Implement (TDD — mandatory per constitution)
+
 1. Write tests FIRST in `tests/`
 2. Run pytest — verify FAIL
 3. Implement minimum code in `src/`
 4. Run pytest — verify PASS
 
-**Step 4: Verify**
+#### Step 4: Verify
+
 - Run full test suite
 - If performance-sensitive: check traces via `g2 span-check` (Tempo must be running)
 - Verify no regressions
 
-**Step 5: Update project state**
+#### Step 5: Update project state
+
 - Update `.specify/memory/progress.md` if capabilities changed
 - Update `.specify/memory/backlog.md` (remove completed items, add follow-up work)
 - Update docs if major feature (per constitution documentation requirements)
 
-**Step 6: Report**
+#### Step 6: Report (do NOT commit)
+
 - Summarize what was done
-- Show test results
+- Show test results (pass/fail/skip counts)
 - List files changed
-- Suggest commit message (do NOT commit automatically — wait for user)
+- Suggest commit message — wait for user to commit
 
 ---
 
