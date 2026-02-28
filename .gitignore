@@ -1,5 +1,6 @@
 # Env and secrets
 .env
+.env.prod
 
 # Python artifacts
 __pycache__/
