@@ -565,13 +565,16 @@ class TestFeaturesView:
         content = (ui_dir / "views" / "features.py").read_text()
         assert "def render_features(" in content
 
-    def test_features_has_three_tabs(self, ui_dir):
-        """Features view should have Definitions, Functions, and Coverage tabs."""
+    def test_features_has_four_tabs(self, ui_dir):
+        """Features view should have Definitions, Functions, Coverage, and Compute tabs."""
         content = (ui_dir / "views" / "features.py").read_text()
         assert "Definitions" in content
         assert "Functions" in content
         assert "Coverage" in content
+        assert "Compute" in content
         assert "st.tabs(" in content
+        # Should unpack 4 tabs
+        assert "tab1, tab2, tab3, tab4" in content
 
     def test_features_has_definitions_section(self, ui_dir):
         """Features view should have definitions management."""
@@ -623,6 +626,47 @@ class TestFeaturesView:
         # Should have JSON file write functionality
         assert "save_definition_to_json" in content or "export" in content.lower()
         assert "json.dumps" in content
+
+    def test_features_has_compute_tab_render_function(self, ui_dir):
+        """Features view should have render_compute_tab function."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "def render_compute_tab(" in content
+
+    def test_features_compute_tab_has_symbol_input(self, ui_dir):
+        """Compute tab should have a symbol text input."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "compute_symbols" in content or "feat_symbols" in content
+
+    def test_features_compute_tab_has_all_features_option(self, ui_dir):
+        """Compute tab should have all-features checkbox."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "all_features" in content or "All Features" in content
+        assert "all-features" in content
+
+    def test_features_compute_tab_has_mode_selection(self, ui_dir):
+        """Compute tab should have incremental/full mode selection."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "Incremental" in content
+        assert "Full" in content
+
+    def test_features_compute_tab_shows_cli_command(self, ui_dir):
+        """Compute tab should show equivalent feat-compute CLI command."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "feat-compute" in content
+
+    def test_features_compute_tab_uses_background_process(self, ui_dir):
+        """Compute tab should import and use background process from data.py."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        assert "start_background_process" in content
+        assert "render_process_status" in content
+        assert "get_process_state" in content
+
+    def test_features_compute_tab_disables_while_running(self, ui_dir):
+        """Compute tab should hide form controls while process is running."""
+        content = (ui_dir / "views" / "features.py").read_text()
+        # Should check state and return early when running/completed
+        assert "state.is_running" in content
+        assert "state.completed" in content
 
 
 class TestBacktestStrategies:
