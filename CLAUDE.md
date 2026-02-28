@@ -104,6 +104,8 @@ Before exiting plan mode, verify:
 - New modules should import from `g2.observability`
 - Use `@traced` decorator for significant operations
 - Add logging with `logger = logging.getLogger(__name__)`
+- Child spans MUST propagate parent context — orphaned spans are defects
+- After implementing a feature, inspect its traces via `g2 span-check` before considering it complete
 
 ### Database
 - Use parameterized queries (never string interpolation for SQL)
@@ -111,5 +113,7 @@ Before exiting plan mode, verify:
 
 ### Testing
 - Database tests require `ENABLE_DB_TESTS=1` environment variable
+- Tests automatically use a separate `g2_test` database (derived from `DATABASE_URL` + `_test` suffix)
+- All DB test connections MUST use `schema.test_db_url()` — never hardcode database URLs
 - Use `OTEL_ENABLED=false` to disable tracing in tests
 - Run full test suite: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest`

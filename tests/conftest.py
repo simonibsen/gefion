@@ -3,143 +3,77 @@ Shared test fixtures and helpers.
 """
 import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Optional, List
+from urllib.parse import urlparse
 
+import psycopg
 import pytest
 
 from g2.cli_helpers import upsert_feature_function
-
-
-# Global to store backup path across session hooks
-_test_backup_path: Optional[str] = None
+from g2.db.schema import test_db_url
 
 
 def pytest_sessionstart(session):
     """
-    Create a full database backup before test session starts.
+    Ensure the test database exists before tests run.
 
     Only runs if ENABLE_DB_TESTS=1 (i.e., database tests are enabled).
-    This ensures we can restore the exact database state after tests complete.
+    Creates the g2_test database if it doesn't exist and runs db-init to
+    set up schema, extensions, and seed data.
     """
     if os.getenv("ENABLE_DB_TESTS") != "1":
         return
 
-    global _test_backup_path
+    url = test_db_url()
+    parsed = urlparse(url)
+    test_db_name = parsed.path.lstrip("/")
 
-    print("\nBacking up database before tests...")
+    # Connect to the maintenance database to check/create the test DB
+    maint_url = url.replace(f"/{test_db_name}", "/postgres")
+    # Strip query params for maintenance connection
+    if "?" in maint_url:
+        maint_url = maint_url.split("?")[0]
 
-    # Create temp directory for backup
-    _test_backup_path = tempfile.mkdtemp(prefix="g2_test_backup_")
+    try:
+        with psycopg.connect(maint_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s",
+                    (test_db_name,),
+                )
+                exists = cur.fetchone() is not None
 
-    env = os.environ.copy()
-    env["OTEL_ENABLED"] = "false"
-
-    # Full backup using g2 backup command
-    result = subprocess.run(
-        [sys.executable, "-m", "g2.cli", "backup", "-o", _test_backup_path, "--data-types", "all"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-
-    if result.returncode == 0:
-        print(f"  Backup created at: {_test_backup_path}")
-    else:
-        print(f"  Warning: Backup failed: {result.stderr}")
-        _test_backup_path = None
-
-
-def pytest_sessionfinish(session, exitstatus):
-    """
-    Restore database from backup after test session completes.
-
-    This ensures the database returns to the exact state it was in before tests ran.
-    Only runs if ENABLE_DB_TESTS=1 (i.e., database tests were enabled).
-    """
-    global _test_backup_path
-
-    if os.getenv("ENABLE_DB_TESTS") != "1":
+            if not exists:
+                print(f"\nCreating test database '{test_db_name}'...")
+                with conn.cursor() as cur:
+                    cur.execute(
+                        psycopg.sql.SQL("CREATE DATABASE {}").format(
+                            psycopg.sql.Identifier(test_db_name)
+                        )
+                    )
+                print(f"  Test database '{test_db_name}' created")
+    except psycopg.OperationalError as e:
+        print(f"\n  Warning: Could not connect to maintenance DB: {e}")
         return
 
-    # Only restore if tests actually ran (not just collected)
-    if session.testscollected == 0:
-        return
-
+    # Run db-init against the test database to set up schema + seeds
     env = os.environ.copy()
     env["OTEL_ENABLED"] = "false"
+    env["DATABASE_URL"] = url
 
-    # If we have a backup, restore from it
-    if _test_backup_path and Path(_test_backup_path).exists():
-        print("\n\nRestoring database from backup...")
-
-        result = subprocess.run(
-            [sys.executable, "-m", "g2.cli", "restore", "-i", _test_backup_path, "--mode", "replace"],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-
-        if result.returncode == 0:
-            print(f"  Database restored successfully")
-        else:
-            print(f"  Warning: Restore failed: {result.stderr}")
-            # Fall back to re-importing feature definitions/functions
-            _restore_features_fallback(env)
-
-        # Always run db-init after restore to recreate any tables dropped by tests
-        # and re-seed built-in data (strategies, etc.)
-        _ensure_tables_exist(env)
-
-        # Clean up backup directory
-        try:
-            shutil.rmtree(_test_backup_path)
-        except Exception:
-            pass
-    else:
-        # Fallback: just restore feature definitions/functions
-        print("\n\nRestoring feature definitions and functions after tests...")
-        _restore_features_fallback(env)
-        _ensure_tables_exist(env)
-
-
-def _restore_features_fallback(env):
-    """Fallback restoration of just feature definitions and functions."""
-    # Re-import feature definitions
-    result = subprocess.run(
-        [sys.executable, "-m", "g2.cli", "feat-def-import"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    if result.returncode == 0:
-        print(f"  {result.stdout.strip()}")
-
-    # Re-import feature functions
-    result = subprocess.run(
-        [sys.executable, "-m", "g2.cli", "feat-fx-import"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    if result.returncode == 0:
-        print(f"  {result.stdout.strip()}")
-
-
-def _ensure_tables_exist(env):
-    """Run db-init to recreate any tables dropped by tests and seed built-in data."""
+    print(f"\nInitializing test database '{test_db_name}'...")
     result = subprocess.run(
         [sys.executable, "-m", "g2.cli", "db-init"],
         capture_output=True,
         text=True,
         env=env,
     )
+
     if result.returncode == 0:
-        print(f"  Tables and seed data restored")
+        print(f"  Test database ready: {test_db_name}")
     else:
         print(f"  Warning: db-init failed: {result.stderr}")
 

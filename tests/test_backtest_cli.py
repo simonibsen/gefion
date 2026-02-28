@@ -14,10 +14,7 @@ def create_connection():
     if os.getenv("ENABLE_DB_TESTS", "0") != "1":
         pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
     try:
-        # Load settings to get DATABASE_URL from .env
-        settings = load_settings()
-        db_url = os.environ.get("DATABASE_URL", settings.database_url)
-        return psycopg.connect(db_url)
+        return psycopg.connect(schema.test_db_url())
     except psycopg.OperationalError as exc:
         pytest.skip(f"DB not available: {exc}")
 
@@ -27,8 +24,7 @@ def conn():
     connection = create_connection()
     connection.autocommit = True
     # Store the db_url for tests to use
-    settings = load_settings()
-    connection.test_db_url = os.environ.get("DATABASE_URL", settings.database_url)
+    connection.test_db_url = schema.test_db_url()
     yield connection
     connection.close()
 

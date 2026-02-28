@@ -20,9 +20,8 @@ from g2.db import schema
 
 
 def get_db_url():
-    """Get database URL from environment or settings."""
-    settings = load_settings()
-    return os.environ.get("DATABASE_URL", settings.database_url)
+    """Get database URL for tests."""
+    return schema.test_db_url()
 
 
 class TestParseCommaSeparated:
@@ -92,6 +91,8 @@ class TestParseCommaSeparated:
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
+    if os.getenv("ENABLE_DB_TESTS") != "1":
+        pytest.skip("Database tests disabled. Set ENABLE_DB_TESTS=1 to run.")
     url = get_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
@@ -344,6 +345,10 @@ class TestValidateDateRange:
         assert after is None
 
 
+@pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
 class TestDBConnection:
     """Test database connection helper."""
 
@@ -377,6 +382,10 @@ class TestDBConnection:
             assert conn.autocommit is False
 
 
+@pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
 class TestInitSchemaTables:
     """Test schema initialization helper."""
 

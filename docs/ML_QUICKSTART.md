@@ -553,7 +553,7 @@ g2 ml dataset-build \
 ## Reference
 
 - [E2E Test Guide](E2E_TEST_GUIDE.md) - Automated pipeline testing
-- [ML Roadmap](ML_ROADMAP.md) - Feature status and future enhancements
+- [Backlog](../.specify/memory/backlog.md) - Feature status and future enhancements
 - [ML System Design](archive/ml/ML_SYSTEM_DESIGN.md) - Database schema and architecture
 - [User Guide](USER_GUIDE.md) - Full CLI reference
 - [Architecture](ARCHITECTURE.md) - Overall system design

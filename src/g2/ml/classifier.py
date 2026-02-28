@@ -13,6 +13,8 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precisio
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder
 
+from g2.observability import create_span
+
 logger = logging.getLogger(__name__)
 
 
@@ -126,6 +128,15 @@ def train_classifier(
     if hyperparams is None:
         hyperparams = {}
 
+    with create_span("ml.train_classifier", algorithm=algorithm,
+                      n_samples=X.shape[0], n_features=X.shape[1], device=device):
+        return _train_classifier_impl(X, y, algorithm, hyperparams, device)
+
+
+def _train_classifier_impl(
+    X: pd.DataFrame, y: pd.Series, algorithm: str,
+    hyperparams: Dict[str, Any], device: str,
+) -> Dict[str, Any]:
     logger.info(f"Training {algorithm} classifier")
     logger.info(f"Training data: {X.shape[0]} samples, {X.shape[1]} features")
     logger.info(f"Training device: {device}")
@@ -299,6 +310,11 @@ def predict_classifier(model_artifacts: Dict[str, Any], X: pd.DataFrame) -> pd.D
     Returns:
         DataFrame with predicted_class and probability columns for each class
     """
+    with create_span("ml.predict_classifier", n_samples=X.shape[0]):
+        return _predict_classifier_impl(model_artifacts, X)
+
+
+def _predict_classifier_impl(model_artifacts: Dict[str, Any], X: pd.DataFrame) -> pd.DataFrame:
     model = model_artifacts["model"]
     label_encoder = model_artifacts["label_encoder"]
 

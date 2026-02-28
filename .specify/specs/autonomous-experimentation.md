@@ -13,7 +13,7 @@
 > incrementally as pain points emerge, not all at once.
 >
 > **Current state**: Basic experiment framework exists (propose → approve → run).
-> See [EXPERIMENTS.md](../EXPERIMENTS.md) for current capabilities.
+> See [experiments-framework.md](experiments-framework.md) for current capabilities.
 
 ---
 

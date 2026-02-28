@@ -13,6 +13,8 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import QuantileRegressor
 from sklearn.pipeline import Pipeline
 
+from g2.observability import create_span
+
 logger = logging.getLogger(__name__)
 
 
@@ -157,6 +159,22 @@ def train_quantile_model(
     if hyperparams is None:
         hyperparams = {}
 
+    with create_span("ml.train", algorithm=algorithm, quantiles=str(quantiles),
+                      n_samples=X.shape[0], n_features=X.shape[1], device=device):
+        return _train_quantile_model_impl(
+            X, y, algorithm, hyperparams, quantiles, device, base_model_path
+        )
+
+
+def _train_quantile_model_impl(
+    X: pd.DataFrame,
+    y: pd.Series,
+    algorithm: str,
+    hyperparams: Dict[str, Any],
+    quantiles: List[float],
+    device: str,
+    base_model_path: Path,
+) -> Dict[str, Any]:
     logger.info(f"Training {algorithm} model for quantiles {quantiles}")
     logger.info(f"Training data: {X.shape[0]} samples, {X.shape[1]} features")
     logger.info(f"Training device: {device}")
@@ -539,6 +557,11 @@ def predict_quantiles(
     Raises:
         ValueError: If feature schema doesn't match training
     """
+    with create_span("ml.predict", n_samples=X.shape[0], n_quantiles=len(model_data.get("models", {}))):
+        return _predict_quantiles_impl(model_data, X)
+
+
+def _predict_quantiles_impl(model_data: Dict[str, Any], X: pd.DataFrame) -> pd.DataFrame:
     # Validate feature schema
     expected_features = model_data["feature_names"]
     missing_features = set(expected_features) - set(X.columns)

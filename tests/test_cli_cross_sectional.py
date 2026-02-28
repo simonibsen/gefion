@@ -62,7 +62,8 @@ class TestCrossSectionalComputeIntegration:
     def db_url(self):
         """Get database URL for tests."""
         import os
-        return os.environ.get("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+        from g2.db.schema import test_db_url
+        return test_db_url()
 
     @pytest.mark.skipif(
         not pytest.importorskip("os").environ.get("ENABLE_DB_TESTS"),

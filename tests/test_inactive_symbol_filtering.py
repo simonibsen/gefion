@@ -5,6 +5,8 @@ Requirements:
 1. filter_symbols_needing_update() should exclude Inactive symbols
 2. filter_symbols_needing_features() should exclude Inactive symbols
 3. Universe ingest should not register symbols with Inactive status
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 import pytest
@@ -14,10 +16,16 @@ from g2.db import schema
 from g2.db.ingest import filter_symbols_needing_update, filter_symbols_needing_features
 
 
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
+
+
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
-    url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    url = schema.test_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         # Ensure tables exist before cleanup

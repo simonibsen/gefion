@@ -8,6 +8,7 @@ import os
 import psycopg
 import pytest
 from datetime import date
+from g2.db import schema
 
 
 def _ensure_cross_sectional_schema(conn):
@@ -37,9 +38,9 @@ def _ensure_cross_sectional_schema(conn):
 @pytest.fixture
 def db_conn():
     """Create test database connection and ensure schema exists."""
-    db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
     if not os.getenv("ENABLE_DB_TESTS"):
         pytest.skip("Database tests not enabled (set ENABLE_DB_TESTS=1)")
+    db_url = schema.test_db_url()
 
     try:
         with psycopg.connect(db_url) as conn:

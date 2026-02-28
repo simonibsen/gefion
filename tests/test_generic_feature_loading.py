@@ -164,7 +164,9 @@ def test_load_feature_definitions_ignores_non_json_files():
 @pytest.fixture
 def db_conn():
     """Create test database connection."""
-    db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    if os.getenv("ENABLE_DB_TESTS") != "1":
+        pytest.skip("Database tests disabled. Set ENABLE_DB_TESTS=1 to run.")
+    db_url = schema.test_db_url()
     try:
         with psycopg.connect(db_url) as conn:
             conn.autocommit = True

@@ -89,10 +89,8 @@ class TestExperimentRunner:
     @pytest.fixture
     def db_url(self):
         """Get database URL."""
-        return os.environ.get(
-            "DATABASE_URL",
-            "postgresql://g2:g2pass@localhost:6432/g2"
-        )
+        from g2.db.schema import test_db_url
+        return test_db_url()
 
     @pytest.fixture
     def ensure_tables(self, db_url):
@@ -558,10 +556,8 @@ class TestExperimentDatabaseSchema:
         import psycopg
         from pathlib import Path
 
-        url = os.environ.get(
-            "DATABASE_URL",
-            "postgresql://g2:g2pass@localhost:6432/g2"
-        )
+        from g2.db.schema import test_db_url
+        url = test_db_url()
         with psycopg.connect(url) as conn:
             # Check if experiments table exists
             with conn.cursor() as cur:
@@ -725,10 +721,8 @@ class TestExperimentExecution:
     @pytest.fixture
     def db_url(self):
         """Get database URL."""
-        return os.environ.get(
-            "DATABASE_URL",
-            "postgresql://g2:g2pass@localhost:6432/g2"
-        )
+        from g2.db.schema import test_db_url
+        return test_db_url()
 
     @pytest.fixture
     def ensure_tables(self, db_url):
@@ -852,10 +846,8 @@ class TestGoalAchievement:
 
     @pytest.fixture
     def db_url(self):
-        return os.environ.get(
-            "DATABASE_URL",
-            "postgresql://g2:g2pass@localhost:6432/g2"
-        )
+        from g2.db.schema import test_db_url
+        return test_db_url()
 
     @pytest.fixture
     def ensure_tables(self, db_url):
@@ -998,10 +990,8 @@ class TestBayesianSearchIntegration:
 
     @pytest.fixture
     def db_url(self):
-        return os.environ.get(
-            "DATABASE_URL",
-            "postgresql://g2:g2pass@localhost:6432/g2"
-        )
+        from g2.db.schema import test_db_url
+        return test_db_url()
 
     @pytest.fixture
     def ensure_tables(self, db_url):
@@ -1085,10 +1075,8 @@ class TestExperimentChaining:
 
     @pytest.fixture
     def db_url(self):
-        return os.environ.get(
-            "DATABASE_URL",
-            "postgresql://g2:g2pass@localhost:6432/g2"
-        )
+        from g2.db.schema import test_db_url
+        return test_db_url()
 
     @pytest.fixture
     def ensure_tables(self, db_url):

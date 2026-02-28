@@ -564,7 +564,7 @@ graph TB
 - [docs/WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md](docs/WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md) - White paper on technical analysis and ML
 - [mcp-server/README.md](mcp-server/README.md) - Natural language interface setup
 - [docs/archive/ml/](docs/archive/ml/) - ML vision and future roadmap
-- [PROGRESS.md](PROGRESS.md) - Current status and recent changes
+- [.specify/memory/progress.md](.specify/memory/progress.md) - Current status and capabilities
 
 Tempo/Grafana docker files live in `docker/tempo/` (start with `docker compose -f docker/tempo/docker-compose.tempo.yml up -d`).
 
@@ -630,8 +630,8 @@ g2 feat-def-import --dir feature-definitions # Import definitions from git
 - ✅ Comprehensive documentation
 
 **See:**
-- [PROGRESS.md](PROGRESS.md) for detailed status and recent changes
-- [NEXT_STEPS.md](NEXT_STEPS.md) for prioritized implementation roadmap
+- [.specify/memory/progress.md](.specify/memory/progress.md) for detailed status and capabilities
+- [.specify/memory/backlog.md](.specify/memory/backlog.md) for prioritized implementation backlog
 
 ## Contributing
 

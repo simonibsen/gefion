@@ -366,7 +366,7 @@ g2 data-update --exchange NASDAQ --limit 50 --timeframe full
 
 **Improvements:**
 
-- Test multiple strategies (Item #12 in NEXT_STEPS.md)
+- Test multiple strategies
 - Adjust parameters (`lookback_days`, `top_n`, `rebalance_days`)
 - Add transaction cost modeling (future work)
 - Implement better risk management (position sizing, stop losses)
@@ -641,7 +641,7 @@ Strategies are designed to be reusable for live trading. The `generate_signals()
 - **Paper trading** (planned) - Simulated execution on live data
 - **Live trading** (planned) - Real execution via broker APIs
 
-See [ML_ROADMAP.md](ML_ROADMAP.md#61-live--paper-trading) for the planned live trading architecture.
+See [.specify/memory/backlog.md](../.specify/memory/backlog.md) for the planned live trading architecture.
 
 ## ML Signal Strategy
 
@@ -1076,7 +1076,7 @@ This approach is being implemented as `MLFilterStrategy` - see strategy registry
 
 - [USER_GUIDE.md](USER_GUIDE.md) - Complete g2 workflow guide
 - [ML_QUICKSTART.md](ML_QUICKSTART.md) - Machine learning features
-- [ML_ROADMAP.md](ML_ROADMAP.md) - Future backtesting enhancements
+- [.specify/memory/backlog.md](../.specify/memory/backlog.md) - Future enhancements and backlog
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System design
 
 ## References

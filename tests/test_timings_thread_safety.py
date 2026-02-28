@@ -34,9 +34,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def get_db_url():
-    """Get database URL from environment or settings."""
-    settings = load_settings()
-    return os.environ.get("DATABASE_URL", settings.database_url)
+    """Get database URL for tests."""
+    return schema.test_db_url()
 
 
 @pytest.fixture
@@ -119,7 +118,7 @@ def test_timing_metrics_are_thread_safe(db_conn, setup_db):
     stock_id = setup_db
 
     # Initialize connection pool
-    url = os.getenv("DATABASE_URL", "postgresql://localhost/g2test")
+    url = get_db_url()
     pool.close_pool()
     pool.init_pool(url, min_size=3, max_size=10, prepare_statements=False)
 
