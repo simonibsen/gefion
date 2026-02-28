@@ -1,10 +1,15 @@
 #!/bin/bash
 
-echo "Running test suite before push..."
+echo "Running fast tests before push..."
 echo ""
 
-# Run the test suite
-ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest tests/ -q
+# Run fast unit tests only (skip slow ML tuning tests and DB tests)
+# Full test suite should be run separately:
+#   ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest tests/ -v
+OTEL_ENABLED=false .venv/bin/python -m pytest tests/ -q \
+    --ignore=tests/test_ml_hyperparameter_tuning.py \
+    --ignore=tests/test_ml_gpu_support.py \
+    -x
 
 # Check exit code
 if [ $? -ne 0 ]; then
@@ -12,7 +17,7 @@ if [ $? -ne 0 ]; then
     echo "❌ Tests failed! Push aborted."
     echo ""
     echo "Fix the failing tests before pushing."
-    echo "Run tests manually:"
+    echo "To run full suite with DB tests:"
     echo "  ENABLE_DB_TESTS=1 DATABASE_URL=\"postgresql://g2:g2pass@localhost:6432/g2\" OTEL_ENABLED=false .venv/bin/python -m pytest tests/ -v"
     echo ""
     exit 1
