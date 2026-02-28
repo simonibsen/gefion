@@ -19,7 +19,8 @@ def db_conn():
 
     from g2.cli_helpers import db_connection, init_schema_tables
 
-    url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    from g2.db.schema import test_db_url
+    url = test_db_url()
     with db_connection(url) as conn:
         # Drop ml_datasets to ensure fresh schema (backup may have old JSONB schema)
         with conn.cursor() as cur:

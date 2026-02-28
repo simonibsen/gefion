@@ -3,6 +3,8 @@ Tests for db-init CLI command feature seeding functionality.
 
 Note: These tests focus on the seeding logic, not full schema initialization,
 since schema init requires an empty database which isn't guaranteed in test suites.
+
+Requires ENABLE_DB_TESTS=1 to run.
 """
 import os
 import pytest
@@ -11,16 +13,23 @@ from typer.testing import CliRunner
 from g2 import cli
 from g2.cli import import_functions_from_directory, import_definitions_from_directory
 from g2.cli_helpers import db_connection, init_schema_tables
+from g2.db.schema import test_db_url
 
 
-runner = CliRunner(env={"DATABASE_URL": "postgresql://g2:g2pass@localhost:6432/g2"})
+pytestmark = pytest.mark.skipif(
+    os.getenv("ENABLE_DB_TESTS") != "1",
+    reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."
+)
+
+
+runner = CliRunner(env={"DATABASE_URL": test_db_url()})
 
 
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""
     import psycopg
-    url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    url = test_db_url()
     with psycopg.connect(url) as conn:
         conn.autocommit = True
         yield conn
@@ -69,7 +78,7 @@ class TestFeatureSeeding:
         assert fx_dir.exists(), f"feature-functions directory not found at {fx_dir}"
 
         # Import functions
-        with db_connection(None) as conn:
+        with db_connection(test_db_url()) as conn:
             init_schema_tables(conn, ["feature_functions"])
             count = import_functions_from_directory(conn, fx_dir, None)
 
@@ -92,7 +101,7 @@ class TestFeatureSeeding:
         assert def_dir.exists(), f"feature-definitions directory not found at {def_dir}"
 
         # Import definitions
-        with db_connection(None) as conn:
+        with db_connection(test_db_url()) as conn:
             init_schema_tables(conn, ["feature_definitions", "computed_features"])
             count = import_definitions_from_directory(conn, def_dir, None)
 
@@ -110,7 +119,7 @@ class TestFeatureSeeding:
         package_dir = Path(g2.__file__).parent.parent.parent
         fx_dir = package_dir / "feature-functions"
 
-        with db_connection(None) as conn:
+        with db_connection(test_db_url()) as conn:
             init_schema_tables(conn, ["feature_functions"])
             import_functions_from_directory(conn, fx_dir, None)
 
@@ -134,7 +143,7 @@ class TestFeatureSeeding:
         package_dir = Path(g2.__file__).parent.parent.parent
         def_dir = package_dir / "feature-definitions"
 
-        with db_connection(None) as conn:
+        with db_connection(test_db_url()) as conn:
             init_schema_tables(conn, ["feature_definitions", "computed_features"])
             import_definitions_from_directory(conn, def_dir, None)
 
@@ -158,7 +167,7 @@ class TestFeatureSeeding:
         fx_dir = package_dir / "feature-functions"
 
         # First import
-        with db_connection(None) as conn:
+        with db_connection(test_db_url()) as conn:
             init_schema_tables(conn, ["feature_functions"])
             count1 = import_functions_from_directory(conn, fx_dir, None)
 
@@ -167,7 +176,7 @@ class TestFeatureSeeding:
             db_count1 = cur.fetchone()[0]
 
         # Second import
-        with db_connection(None) as conn:
+        with db_connection(test_db_url()) as conn:
             count2 = import_functions_from_directory(conn, fx_dir, None)
 
         with db_conn.cursor() as cur:
@@ -180,7 +189,7 @@ class TestFeatureSeeding:
 
     def test_import_from_nonexistent_directory(self, db_conn):
         """Import should return 0 for nonexistent directory."""
-        with db_connection(None) as conn:
+        with db_connection(test_db_url()) as conn:
             init_schema_tables(conn, ["feature_functions"])
             count = import_functions_from_directory(conn, Path("/nonexistent/path"), None)
 

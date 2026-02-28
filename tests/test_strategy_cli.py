@@ -11,9 +11,10 @@ from typer.testing import CliRunner
 
 from g2.cli import app
 from g2.config import load_settings
+from g2.db.schema import test_db_url
 
 
-runner = CliRunner()
+runner = CliRunner(env={"DATABASE_URL": test_db_url()})
 
 
 def require_db():
@@ -24,8 +25,8 @@ def require_db():
 
 def get_db_url():
     """Get database URL for tests."""
-    settings = load_settings()
-    return os.environ.get("DATABASE_URL", settings.database_url)
+    from g2.db.schema import test_db_url
+    return test_db_url()
 
 
 @pytest.fixture(scope="module")

@@ -22,9 +22,7 @@ def require_db():
 def create_connection():
     require_db()
     try:
-        settings = load_settings()
-        db_url = os.environ.get("DATABASE_URL", settings.database_url)
-        return psycopg.connect(db_url)
+        return psycopg.connect(schema.test_db_url())
     except psycopg.OperationalError as exc:
         pytest.skip(f"DB not available: {exc}")
 

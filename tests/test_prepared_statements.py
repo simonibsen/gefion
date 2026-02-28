@@ -93,7 +93,8 @@ def fake_pool(monkeypatch):
 
 def test_pool_enables_prepared_statements():
     """Test that connection pool can be initialized with prepared statement support."""
-    db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    from g2.db.schema import test_db_url
+    db_url = test_db_url()
 
     # Initialize pool with prepared statement support
     # This enables psycopg3's automatic statement caching via prepare=True
@@ -110,7 +111,8 @@ def test_pool_enables_prepared_statements():
 
 def test_insert_with_prepared_statements():
     """Test that insert_computed_features uses psycopg3 prepare=True when pool configured."""
-    db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    from g2.db.schema import test_db_url
+    db_url = test_db_url()
 
     # Initialize pool with prepared statements enabled
     pool.init_pool(db_url, min_size=1, max_size=2, prepare_statements=True)
@@ -167,7 +169,8 @@ def test_insert_with_prepared_statements():
 
 def test_fallback_without_pool():
     """Test that insert_computed_features works without pool (backward compatibility)."""
-    db_url = os.getenv("DATABASE_URL", "postgresql://g2:g2pass@localhost:6432/g2")
+    from g2.db.schema import test_db_url
+    db_url = test_db_url()
 
     # Close any existing pool
     pool.close_pool()

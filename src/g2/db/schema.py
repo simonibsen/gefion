@@ -8,15 +8,45 @@ assumes TimescaleDB is installed/enabled (see docker-compose).
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse, urlunparse
 
 import psycopg
 from psycopg import Connection
 from psycopg import sql
 
+_DEFAULT_TEST_URL = "postgresql://g2:g2pass@localhost:6432/g2_test"
+
+
+def _append_test_suffix(url: str) -> str:
+    """Append ``_test`` to the database name in a PostgreSQL URL.
+
+    Preserves query parameters and is idempotent (no double ``_test``).
+    """
+    parsed = urlparse(url)
+    db_name = parsed.path.lstrip("/")
+    if not db_name.endswith("_test"):
+        db_name = db_name + "_test"
+    new_path = "/" + db_name
+    return urlunparse(parsed._replace(path=new_path))
+
 
 def test_db_url() -> str:
-    """Return DATABASE_URL for tests, defaulting to local Timescale compose."""
-    return os.environ.get("DATABASE_URL", "postgresql://g2:g2pass@localhost:5432/g2")
+    """Return the database URL for tests.
+
+    Resolution order:
+    1. ``TEST_DATABASE_URL`` env var (explicit override)
+    2. ``DATABASE_URL`` env var with ``_test`` appended to the DB name
+    3. Default: ``postgresql://g2:g2pass@localhost:6432/g2_test``
+    """
+    explicit = os.environ.get("TEST_DATABASE_URL")
+    if explicit:
+        return explicit
+
+    base = os.environ.get("DATABASE_URL")
+    if base:
+        return _append_test_suffix(base)
+
+    return _DEFAULT_TEST_URL
 
 
 def _ensure_timescaledb(conn: Connection) -> None:

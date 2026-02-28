@@ -1,7 +1,7 @@
 <!--
   Sync Impact Report
-  Version change: 1.3.0 → 1.4.0 (added Secrets Management section)
-  Added sections: Secrets Management
+  Version change: 1.4.0 → 1.5.0 (added Test Database Isolation subsection)
+  Added sections: Test Database Isolation (under II. TDD)
   Templates requiring updates:
     - .specify/templates/plan-template.md ✅ (no changes needed)
     - .specify/templates/spec-template.md ✅ (no changes needed)
@@ -33,6 +33,15 @@ Every code change follows strict Red-Green-Refactor. No exceptions.
 - Tests and implementation MUST be committed together
 - Enforcement is layered: CLAUDE.md instructions, pre-commit hooks, and Claude Code PreToolUse hooks all enforce TDD order
 - Bypassing (via `--no-verify`) requires explicit justification in the commit message
+
+#### Test Database Isolation
+
+Database tests MUST use a dedicated test database, never the development database.
+
+- All test DB connections MUST use `schema.test_db_url()` — hardcoded database URLs in test files are forbidden
+- The test database (`g2_test` by default) is created automatically by `conftest.py` when `ENABLE_DB_TESTS=1`
+- Resolution order: `TEST_DATABASE_URL` env var > `DATABASE_URL` with `_test` suffix > default `g2_test`
+- All database test files MUST have an `ENABLE_DB_TESTS` guard (pytestmark or fixture-level skip)
 
 ### III. CLI-First Interface
 
@@ -150,4 +159,4 @@ This constitution supersedes all ad-hoc practices. Amendments require:
 
 All code changes MUST comply with these principles. Complexity that violates a principle MUST be explicitly justified and documented.
 
-**Version**: 1.4.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28
+**Version**: 1.5.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28

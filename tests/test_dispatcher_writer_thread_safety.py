@@ -29,9 +29,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def get_db_url():
-    """Get database URL from environment or settings."""
-    settings = load_settings()
-    return os.environ.get("DATABASE_URL", settings.database_url)
+    """Get database URL for tests."""
+    return schema.test_db_url()
 
 
 @pytest.fixture
