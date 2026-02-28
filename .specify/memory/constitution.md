@@ -1,7 +1,7 @@
 <!--
   Sync Impact Report
-  Version change: 1.4.0 → 1.5.0 (added Test Database Isolation subsection)
-  Added sections: Test Database Isolation (under II. TDD)
+  Version change: 1.5.0 → 1.6.0 (added Trace-Driven Development subsection)
+  Added sections: Trace-Driven Development (under IV. Observability)
   Templates requiring updates:
     - .specify/templates/plan-template.md ✅ (no changes needed)
     - .specify/templates/spec-template.md ✅ (no changes needed)
@@ -61,6 +61,15 @@ Every significant operation MUST be traceable and debuggable.
 - All modules MUST use structured logging via `logger = logging.getLogger(__name__)`
 - Traces MUST be queryable through Grafana Tempo for performance investigation
 - Database operations MUST be instrumented to identify slow queries
+
+#### Trace-Driven Development
+
+Traces are not just telemetry — they are a development tool. Actively inspecting traces during development catches performance regressions, verifies code paths, and ensures instrumentation is correct.
+
+- **Tempo MUST be running during development** — start it with `/services start`; it is not optional infrastructure
+- **Trace inspection is part of the dev loop** — after implementing or modifying a feature, verify its traces via `g2 span-check` or the Tempo API before considering the work complete
+- **Span parenting is mandatory** — every child span MUST propagate its parent context. Orphaned spans (spans with no parent inside an operation that should have one) are defects, not style issues. Pass `context` or use `@traced` within an already-traced call stack to ensure linkage
+- **Performance awareness** — use `g2 trace-search` and `g2 trace-compare` to identify slow operations and verify optimizations. If a trace shows unexpected duration or span count, investigate before merging
 
 ### V. Consistent CLI Presentation
 
@@ -159,4 +168,4 @@ This constitution supersedes all ad-hoc practices. Amendments require:
 
 All code changes MUST comply with these principles. Complexity that violates a principle MUST be explicitly justified and documented.
 
-**Version**: 1.5.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28
+**Version**: 1.6.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28

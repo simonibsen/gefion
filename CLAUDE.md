@@ -104,6 +104,8 @@ Before exiting plan mode, verify:
 - New modules should import from `g2.observability`
 - Use `@traced` decorator for significant operations
 - Add logging with `logger = logging.getLogger(__name__)`
+- Child spans MUST propagate parent context — orphaned spans are defects
+- After implementing a feature, inspect its traces via `g2 span-check` before considering it complete
 
 ### Database
 - Use parameterized queries (never string interpolation for SQL)
