@@ -36,7 +36,8 @@
 
 ### Interfaces
 - Full CLI (`g2` command with subcommands)
-- MCP server for natural language interaction
+- MCP server for natural language interaction (51 tools, RBAC with operator/developer roles)
+- Claude Code skills: `/g2-dev` (development), `/g2` (operations), `/g2-services` (infrastructure)
 - Textual TUI (in development on `siUI` branch)
 
 ### Testing
