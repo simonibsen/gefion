@@ -6,21 +6,17 @@ Open work items extracted from NEXT_STEPS.md, ML_ROADMAP.md, PROGRESS.md, and NO
 
 ---
 
+## Completed
+
+### ~~Standalone Feature Computation UI~~ ✅
+**Completed**: 2026-02-28 (branch: `standaloneFeatCompUI`)
+
+Added "Compute" tab to Features view with symbol input, feature selection,
+incremental/full mode, CLI preview, and background process execution.
+
+---
+
 ## Active / In Progress
-
-### Standalone Feature Computation UI
-**Source**: NOTES.md
-**Priority**: High
-
-Feature computation is currently bundled with the price update flow. Need a standalone section allowing:
-1. Computing features for symbols that already have price data
-2. Selecting specific features to compute (not just all)
-3. Full refresh toggle (update existing vs only insert new)
-
-**Options to include**:
-- Symbol selection (single, multiple, or by exchange)
-- Feature selection (all active, specific features, or by function type)
-- Full refresh toggle
 
 ### Model Calibration Improvements
 **Source**: NOTES.md
