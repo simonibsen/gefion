@@ -1,11 +1,8 @@
 <!--
   Sync Impact Report
-  Version change: 1.6.0 → 1.6.1 (added skill naming convention)
-  Added: g2- prefix requirement for Claude Code skills (under III. CLI-First)
-  Templates requiring updates:
-    - .specify/templates/plan-template.md ✅ (no changes needed)
-    - .specify/templates/spec-template.md ✅ (no changes needed)
-    - .specify/templates/tasks-template.md ✅ (no changes needed)
+  Version change: 1.6.1 → 1.6.2 (clarify .specify/ is version-controlled)
+  Added: .specify/ version control requirement under Documentation Requirements
+  Templates requiring updates: none
   Follow-up TODOs: none
 -->
 
@@ -130,6 +127,7 @@ Major features MUST include documentation updates as part of the implementation.
 - **docs/ARCHITECTURE.md**: Update if the feature introduces new modules, tables, or data flows
 - **What counts as a major feature**: New CLI commands, new modules in `src/g2/`, new database tables, new MCP tools, new strategies, or changes to existing user-facing behavior
 - **What does NOT require doc updates**: Internal refactors with no behavior change, bug fixes, test-only changes, dependency bumps
+- **`.specify/` is version-controlled**: All files under `.specify/` (memory, specs, templates, scripts) MUST be committed to git and kept consistent across branches
 
 ## Schema Governance
 
@@ -169,4 +167,4 @@ This constitution supersedes all ad-hoc practices. Amendments require:
 
 All code changes MUST comply with these principles. Complexity that violates a principle MUST be explicitly justified and documented.
 
-**Version**: 1.6.1 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28
+**Version**: 1.6.2 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28

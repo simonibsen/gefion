@@ -5,8 +5,14 @@ import subprocess
 import sys
 import os
 import json
+import time
 from pathlib import Path
 from typing import Optional
+
+from g2.ui.views.data import (
+    get_process_state, start_background_process,
+    render_process_status, stop_process, clear_process_state,
+)
 
 
 def get_project_root() -> Path:
@@ -20,7 +26,7 @@ def render_features():
     st.title("🔧 Features")
     st.markdown("Manage feature definitions, functions, and view computed data coverage.")
 
-    tab1, tab2, tab3 = st.tabs(["📋 Definitions", "⚙️ Functions", "📊 Coverage"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 Definitions", "⚙️ Functions", "📊 Coverage", "🔨 Compute"])
 
     with tab1:
         render_definitions_tab()
@@ -30,6 +36,9 @@ def render_features():
 
     with tab3:
         render_coverage_tab()
+
+    with tab4:
+        render_compute_tab()
 
 
 def render_definitions_tab():
@@ -649,6 +658,115 @@ g2 query-database --sql "SELECT * FROM computed_features LIMIT 10" """, language
 
     except Exception as e:
         st.error(f"Error loading coverage: {e}")
+
+
+def render_compute_tab():
+    """Render the feature computation tab."""
+    st.subheader("Compute Features")
+    st.markdown("Run feature computation for selected symbols and features.")
+
+    state = get_process_state("feat_compute")
+
+    # If process is running or completed, show status and return early
+    if state.is_running or state.completed:
+        render_process_status("feat_compute", "Feature Compute")
+
+        # Auto-refresh while running
+        if state.is_running:
+            st.caption("🔄 Auto-refreshing...")
+            time.sleep(1.5)
+            st.rerun()
+        return  # Don't show form while process is active
+
+    # --- Form controls ---
+    col1, col2 = st.columns(2)
+
+    with col1:
+        compute_symbols = st.text_input(
+            "Symbols",
+            placeholder="AAPL,MSFT,GOOGL",
+            help="Comma-separated symbols (leave empty for all active symbols)",
+            key="compute_symbols",
+        )
+
+        all_features = st.checkbox(
+            "All Features",
+            value=True,
+            help="Compute all active feature definitions",
+            key="compute_all_features",
+        )
+
+        # Feature multiselect when not using all features
+        selected_features = []
+        if not all_features:
+            try:
+                definitions = get_feature_definitions_full()
+                feature_names = sorted(d["name"] for d in definitions if d.get("active", True))
+            except Exception:
+                feature_names = []
+
+            selected_features = st.multiselect(
+                "Features",
+                feature_names,
+                help="Select specific features to compute",
+                key="compute_feature_select",
+            )
+
+    with col2:
+        mode = st.radio(
+            "Mode",
+            ["Incremental", "Full"],
+            horizontal=True,
+            help="Incremental: only compute missing dates. Full: recompute everything.",
+            key="compute_mode",
+        )
+
+        update_existing = st.checkbox(
+            "Update existing rows",
+            help="Overwrite existing computed values on conflict",
+            key="compute_update_existing",
+        )
+
+    # Build CLI command preview
+    cli_parts = ["g2", "feat-compute"]
+    if compute_symbols:
+        cli_parts.extend(["--symbols", compute_symbols.upper()])
+    if all_features:
+        cli_parts.append("--all-features")
+    elif selected_features:
+        cli_parts.extend(["--features", ",".join(selected_features)])
+    if mode == "Full":
+        cli_parts.append("--full")
+    if update_existing:
+        cli_parts.append("--update-existing")
+
+    st.code(" ".join(cli_parts), language="bash")
+
+    if st.button("🚀 Compute", type="primary", use_container_width=True, key="compute_start"):
+        if not all_features and not selected_features:
+            st.error("Select at least one feature or enable 'All Features'")
+            return
+
+        # Build command
+        cmd = [sys.executable, "-m", "g2.cli", "feat-compute", "--json"]
+        if compute_symbols:
+            cmd.extend(["--symbols", compute_symbols.upper()])
+        if all_features:
+            cmd.append("--all-features")
+        elif selected_features:
+            cmd.extend(["--features", ",".join(selected_features)])
+        if mode == "Full":
+            cmd.append("--full")
+        if update_existing:
+            cmd.append("--update-existing")
+
+        # Set environment
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+
+        # Start background process
+        start_background_process("feat_compute", cmd, env)
+        st.rerun()
 
 
 # Database helper functions
