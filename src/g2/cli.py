@@ -3635,71 +3635,72 @@ def ingest_prices(
         # Fetch full history and refresh existing data
         g2 prices-ingest --symbol MSFT --timeframe full --refresh-existing
     """
-    if input:
-        payload = json.loads(input.read_text())
-        rows = parse_daily_adjusted(symbol=symbol, payload=payload)
-        if not rows:
-            emit("No rows parsed; nothing to ingest.", json_output=json_output, error=True)
-            raise typer.Exit(code=1)
-        try:
-            with db_connection(db_url) as conn:
-                init_schema_tables(conn, ["stocks", "stock_ohlcv"])
-                stock_id = upsert_stock(conn, symbol)
-                inserted = insert_stock_ohlcv(conn, stock_id, rows)
-                emit(
-                    f"Inserted {inserted} price rows for {symbol}",
-                    data={"symbol": symbol, "inserted": inserted},
-                    json_output=json_output,
+    with create_span("cli.prices-ingest", symbol=symbol, timeframe=timeframe):
+        if input:
+            payload = json.loads(input.read_text())
+            rows = parse_daily_adjusted(symbol=symbol, payload=payload)
+            if not rows:
+                emit("No rows parsed; nothing to ingest.", json_output=json_output, error=True)
+                raise typer.Exit(code=1)
+            try:
+                with db_connection(db_url) as conn:
+                    init_schema_tables(conn, ["stocks", "stock_ohlcv"])
+                    stock_id = upsert_stock(conn, symbol)
+                    inserted = insert_stock_ohlcv(conn, stock_id, rows)
+                    emit(
+                        f"Inserted {inserted} price rows for {symbol}",
+                        data={"symbol": symbol, "inserted": inserted},
+                        json_output=json_output,
+                    )
+            except psycopg.OperationalError as exc:  # pragma: no cover - infra guard
+                emit(f"Database connection failed: {exc}", json_output=json_output, error=True)
+                raise typer.Exit(code=2)
+        else:
+            url = _db_url(db_url)
+            try:
+                client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key)
+            except ValueError as exc:
+                emit(str(exc), json_output=json_output, error=True)
+                raise typer.Exit(code=2)
+            reporter = ProgressReporter(total=1, json_output=json_output, enabled=not json_output)
+            reporter.mode = "api"
+
+            # Calculate target date to prevent inserting partial/future data
+            from g2.ingest.universe import _expected_market_date
+            target_date = _expected_market_date()
+
+            live: Optional[Live] = None
+            if not json_output:
+                live = reporter.start_live()
+                if live:
+                    live.__enter__()
+            try:
+                inserted = ingest_prices_for_symbols(
+                    db_url=url,
+                    client=client,
+                    symbols=[symbol],
+                    max_workers=1,
+                    writer_workers=1,
+                    timeframe=timeframe,
+                    update_existing=refresh_existing,
+                    progress=reporter,
+                    target_date=target_date,
                 )
-        except psycopg.OperationalError as exc:  # pragma: no cover - infra guard
-            emit(f"Database connection failed: {exc}", json_output=json_output, error=True)
-            raise typer.Exit(code=2)
-    else:
-        url = _db_url(db_url)
-        try:
-            client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key)
-        except ValueError as exc:
-            emit(str(exc), json_output=json_output, error=True)
-            raise typer.Exit(code=2)
-        reporter = ProgressReporter(total=1, json_output=json_output, enabled=not json_output)
-        reporter.mode = "api"
-
-        # Calculate target date to prevent inserting partial/future data
-        from g2.ingest.universe import _expected_market_date
-        target_date = _expected_market_date()
-
-        live: Optional[Live] = None
-        if not json_output:
-            live = reporter.start_live()
-            if live:
-                live.__enter__()
-        try:
-            inserted = ingest_prices_for_symbols(
-                db_url=url,
-                client=client,
-                symbols=[symbol],
-                max_workers=1,
-                writer_workers=1,
-                timeframe=timeframe,
-                update_existing=refresh_existing,
-                progress=reporter,
-                target_date=target_date,
+                if live:
+                    live.update(reporter._build_table())
+                reporter.complete(live=live)
+            except Exception as exc:
+                if live:
+                    live.__exit__(type(exc), exc, exc.__traceback__)
+                emit_error(f"Ingest failed: {exc}", json_output=json_output)
+            finally:
+                if live:
+                    live.__exit__(None, None, None)
+            emit(
+                f"Inserted {inserted} price rows for {symbol}",
+                data={"symbol": symbol, "inserted": inserted},
+                json_output=json_output,
             )
-            if live:
-                live.update(reporter._build_table())
-            reporter.complete(live=live)
-        except Exception as exc:
-            if live:
-                live.__exit__(type(exc), exc, exc.__traceback__)
-            emit_error(f"Ingest failed: {exc}", json_output=json_output)
-        finally:
-            if live:
-                live.__exit__(None, None, None)
-        emit(
-            f"Inserted {inserted} price rows for {symbol}",
-            data={"symbol": symbol, "inserted": inserted},
-            json_output=json_output,
-        )
 
 
 @app.command("universe-ingest")
@@ -3742,109 +3743,110 @@ def ingest_universe(
         # Ingest from a saved listings file
         g2 universe-ingest --exchange NASDAQ --listings-file listings.csv
     """
-    if refresh:
-        timeframe = "full"
-        update_existing = True
+    with create_span("cli.universe-ingest", exchange=exchange, timeframe=timeframe):
+        if refresh:
+            timeframe = "full"
+            update_existing = True
 
-    try:
-        client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key, calls_per_minute=calls_per_minute)
-    except ValueError as exc:
-        emit(str(exc), json_output=json_output, error=True)
-        raise typer.Exit(code=2)
+        try:
+            client = AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key, calls_per_minute=calls_per_minute)
+        except ValueError as exc:
+            emit(str(exc), json_output=json_output, error=True)
+            raise typer.Exit(code=2)
 
-    try:
-        if listings_file:
-            listings = load_listings_from_file(listings_file)
-        else:
-            listings = fetch_listings(client)
-    except req_exc.RequestException as exc:
-        emit(f"Failed to fetch listings: {exc}", json_output=json_output, error=True)
-        raise typer.Exit(code=2)
-    filtered = filter_listings(listings, exchange=exchange, status=status)
-    symbols = [row["symbol"] for row in filtered]
-    if limit:
-        symbols = symbols[:limit]
-    if not symbols:
-        emit("No symbols matched filters; nothing to ingest.", json_output=json_output, error=True)
-        raise typer.Exit(code=1)
+        try:
+            if listings_file:
+                listings = load_listings_from_file(listings_file)
+            else:
+                listings = fetch_listings(client)
+        except req_exc.RequestException as exc:
+            emit(f"Failed to fetch listings: {exc}", json_output=json_output, error=True)
+            raise typer.Exit(code=2)
+        filtered = filter_listings(listings, exchange=exchange, status=status)
+        symbols = [row["symbol"] for row in filtered]
+        if limit:
+            symbols = symbols[:limit]
+        if not symbols:
+            emit("No symbols matched filters; nothing to ingest.", json_output=json_output, error=True)
+            raise typer.Exit(code=1)
 
-    url = _db_url(db_url)
-    available = _available_connections(url)
-    worker_count, writer_count = _plan_workers_for_stage(
-        available,
-        compute_locally=False,
-        calls_per_minute=calls_per_minute,
-        requested_fetch=max_workers,
-        requested_writer=writer_workers,
-        default_writer=writer_workers or 1,
-    )
+        url = _db_url(db_url)
+        available = _available_connections(url)
+        worker_count, writer_count = _plan_workers_for_stage(
+            available,
+            compute_locally=False,
+            calls_per_minute=calls_per_minute,
+            requested_fetch=max_workers,
+            requested_writer=writer_workers,
+            default_writer=writer_workers or 1,
+        )
 
-    # Calculate target date to prevent inserting partial/future data
-    from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
-    target_date = _expected_market_date()
+        # Calculate target date to prevent inserting partial/future data
+        from g2.ingest.universe import _expected_market_date, filter_symbols_needing_update
+        target_date = _expected_market_date()
 
-    # Do bulk filtering ONCE for all symbols before chunking
-    # This is much faster than filtering each chunk separately
-    symbols_before = len(symbols)
-    skipped = 0
-    if not update_existing:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["stocks", "stock_ohlcv"])
-            symbols = filter_symbols_needing_update(conn, symbols, target_date)
-            skipped = symbols_before - len(symbols)
-            if skipped > 0 and not json_output:
-                emit(f"Skipped {skipped} up-to-date symbols, processing {len(symbols)} symbols", json_output=False)
+        # Do bulk filtering ONCE for all symbols before chunking
+        # This is much faster than filtering each chunk separately
+        symbols_before = len(symbols)
+        skipped = 0
+        if not update_existing:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["stocks", "stock_ohlcv"])
+                symbols = filter_symbols_needing_update(conn, symbols, target_date)
+                skipped = symbols_before - len(symbols)
+                if skipped > 0 and not json_output:
+                    emit(f"Skipped {skipped} up-to-date symbols, processing {len(symbols)} symbols", json_output=False)
 
-    # Create reporter with initial skipped count already set
-    # Reset start time to exclude bulk filtering duration from rate calculation
-    reporter = ProgressReporter(total=symbols_before, json_output=json_output, enabled=progress)
-    if skipped > 0:
-        reporter.done = skipped
-        reporter.successes = skipped
-        # Reset timer so bulk filtering time doesn't skew the rate
-        reporter._start = time.monotonic()
-    reporter.workers = worker_count
-    reporter.mode = "api"
+        # Create reporter with initial skipped count already set
+        # Reset start time to exclude bulk filtering duration from rate calculation
+        reporter = ProgressReporter(total=symbols_before, json_output=json_output, enabled=progress)
+        if skipped > 0:
+            reporter.done = skipped
+            reporter.successes = skipped
+            # Reset timer so bulk filtering time doesn't skew the rate
+            reporter._start = time.monotonic()
+        reporter.workers = worker_count
+        reporter.mode = "api"
 
-    live: Optional[Live] = None
-    if progress and not json_output:
-        live = reporter.start_live()
-        if live:
-            live.__enter__()
-    try:
-        inserted = 0
-        for sym_chunk in chunked(symbols, 50):
-            inserted += ingest_prices_for_symbols(
-                db_url=url,
-                client=client,
-                symbols=sym_chunk,
-                max_workers=worker_count,
-                writer_workers=writer_count,
-                timeframe=timeframe,
-                update_existing=update_existing,
-                progress=reporter,
-                target_date=target_date,
-            )
-        if live:
-            live.update(reporter._build_table())
-        reporter.complete(live=live)
-    except Exception as exc:
-        if live:
-            live.__exit__(type(exc), exc, exc.__traceback__)
-        emit_error(f"Ingest failed: {exc}", json_output=json_output)
-    finally:
-        if live:
-            live.__exit__(None, None, None)
-    emit(
-        f"Ingested price rows: {inserted} across {len(symbols)} symbols",
-        data={
-            "symbols": symbols,
-            "inserted": inserted,
-            "fetch_workers": worker_count,
-            "writer_workers": writer_count,
-        },
-        json_output=json_output,
-    )
+        live: Optional[Live] = None
+        if progress and not json_output:
+            live = reporter.start_live()
+            if live:
+                live.__enter__()
+        try:
+            inserted = 0
+            for sym_chunk in chunked(symbols, 50):
+                inserted += ingest_prices_for_symbols(
+                    db_url=url,
+                    client=client,
+                    symbols=sym_chunk,
+                    max_workers=worker_count,
+                    writer_workers=writer_count,
+                    timeframe=timeframe,
+                    update_existing=update_existing,
+                    progress=reporter,
+                    target_date=target_date,
+                )
+            if live:
+                live.update(reporter._build_table())
+            reporter.complete(live=live)
+        except Exception as exc:
+            if live:
+                live.__exit__(type(exc), exc, exc.__traceback__)
+            emit_error(f"Ingest failed: {exc}", json_output=json_output)
+        finally:
+            if live:
+                live.__exit__(None, None, None)
+        emit(
+            f"Ingested price rows: {inserted} across {len(symbols)} symbols",
+            data={
+                "symbols": symbols,
+                "inserted": inserted,
+                "fetch_workers": worker_count,
+                "writer_workers": writer_count,
+            },
+            json_output=json_output,
+        )
 
 
 @app.command("db-health")
@@ -4156,14 +4158,15 @@ def span_check(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """Check recent traces in the configured backend (Tempo by default)."""
-    otel_enabled = os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
-    if not otel_enabled:
-        emit(
-            "OTEL_ENABLED is not true; traces may be missing.",
-            data={"hint": "export $(cat .env.example | xargs)"},
-            json_output=json_output,
-        )
-    _span_check_impl(backend, tempo_url, service_name, limit, trace_id, show_spans, json_output)
+    with create_span("cli.span-check"):
+        otel_enabled = os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
+        if not otel_enabled:
+            emit(
+                "OTEL_ENABLED is not true; traces may be missing.",
+                data={"hint": "export $(cat .env.example | xargs)"},
+                json_output=json_output,
+            )
+        _span_check_impl(backend, tempo_url, service_name, limit, trace_id, show_spans, json_output)
 
 
 @app.command("health")
@@ -4187,42 +4190,43 @@ def health_check(
         # JSON output
         g2 health --json
     """
-    from g2.output import get_output
-    out = get_output(json_output)
+    with create_span("cli.health"):
+        from g2.output import get_output
+        out = get_output(json_output)
 
-    if service:
-        # Check specific service
-        service_lower = service.lower()
-        if service_lower == "postgres":
-            status = health.check_postgres_health()
-        elif service_lower == "tempo":
-            status = health.check_tempo_health()
-        elif service_lower == "docker":
-            status = health.check_docker_services()
+        if service:
+            # Check specific service
+            service_lower = service.lower()
+            if service_lower == "postgres":
+                status = health.check_postgres_health()
+            elif service_lower == "tempo":
+                status = health.check_tempo_health()
+            elif service_lower == "docker":
+                status = health.check_docker_services()
+            else:
+                out.error(f"Unknown service: {service}. Valid options: postgres, tempo, docker")
+                raise typer.Exit(code=1)
+
+            if out.json_mode:
+                out.json({"status": "ok" if status["running"] else "error", "service": service_lower, **status})
+            else:
+                status_icon = "✓" if status["running"] else "✗"
+                style = "bold green" if status["running"] else "bold red"
+                out.console.print(f"\n{status_icon} {service_lower.upper()}: {status['message']}\n", style=style)
+
+                if not status["running"] and "suggestion" in status:
+                    out.console.print(f"   → {status['suggestion']}\n")
+                elif status["running"] and "version" in status:
+                    out.console.print(f"   Version: {status['version']}\n")
         else:
-            out.error(f"Unknown service: {service}. Valid options: postgres, tempo, docker")
-            raise typer.Exit(code=1)
+            # Check all services
+            all_status = health.check_all_services()
 
-        if out.json_mode:
-            out.json({"status": "ok" if status["running"] else "error", "service": service_lower, **status})
-        else:
-            status_icon = "✓" if status["running"] else "✗"
-            style = "bold green" if status["running"] else "bold red"
-            out.console.print(f"\n{status_icon} {service_lower.upper()}: {status['message']}\n", style=style)
-
-            if not status["running"] and "suggestion" in status:
-                out.console.print(f"   → {status['suggestion']}\n")
-            elif status["running"] and "version" in status:
-                out.console.print(f"   Version: {status['version']}\n")
-    else:
-        # Check all services
-        all_status = health.check_all_services()
-
-        if out.json_mode:
-            out.json({"status": "ok", "services": all_status})
-        else:
-            report = health.format_health_report(all_status)
-            out.console.print(report)
+            if out.json_mode:
+                out.json({"status": "ok", "services": all_status})
+            else:
+                report = health.format_health_report(all_status)
+                out.console.print(report)
 
 
 @app.command("db-init")
@@ -4367,75 +4371,76 @@ def db_cleanup(
         # Remove orphaned data
         g2 db-cleanup
     """
-    url = _db_url(db_url)
+    with create_span("cli.db-cleanup", dry_run=dry_run):
+        url = _db_url(db_url)
 
-    orphan_queries = [
-        ("computed_features", "DELETE FROM computed_features WHERE data_id NOT IN (SELECT id FROM stocks)"),
-        ("stock_ohlcv", "DELETE FROM stock_ohlcv WHERE data_id NOT IN (SELECT id FROM stocks)"),
-        ("quantile_predictions", "DELETE FROM quantile_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
-        ("trend_class_predictions", "DELETE FROM trend_class_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
-    ]
+        orphan_queries = [
+            ("computed_features", "DELETE FROM computed_features WHERE data_id NOT IN (SELECT id FROM stocks)"),
+            ("stock_ohlcv", "DELETE FROM stock_ohlcv WHERE data_id NOT IN (SELECT id FROM stocks)"),
+            ("quantile_predictions", "DELETE FROM quantile_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+            ("trend_class_predictions", "DELETE FROM trend_class_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+        ]
 
-    count_queries = [
-        ("computed_features", "SELECT COUNT(*) FROM computed_features WHERE data_id NOT IN (SELECT id FROM stocks)"),
-        ("stock_ohlcv", "SELECT COUNT(*) FROM stock_ohlcv WHERE data_id NOT IN (SELECT id FROM stocks)"),
-        ("quantile_predictions", "SELECT COUNT(*) FROM quantile_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
-        ("trend_class_predictions", "SELECT COUNT(*) FROM trend_class_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
-    ]
+        count_queries = [
+            ("computed_features", "SELECT COUNT(*) FROM computed_features WHERE data_id NOT IN (SELECT id FROM stocks)"),
+            ("stock_ohlcv", "SELECT COUNT(*) FROM stock_ohlcv WHERE data_id NOT IN (SELECT id FROM stocks)"),
+            ("quantile_predictions", "SELECT COUNT(*) FROM quantile_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+            ("trend_class_predictions", "SELECT COUNT(*) FROM trend_class_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+        ]
 
-    try:
-        with db_connection(url) as conn:
-            total_orphans = 0
-            results = {}
+        try:
+            with db_connection(url) as conn:
+                total_orphans = 0
+                results = {}
 
-            # Count orphans first
-            with conn.cursor() as cur:
-                for table_name, query in count_queries:
-                    try:
-                        cur.execute(query)
-                        count = cur.fetchone()[0]
-                        results[table_name] = count
-                        total_orphans += count
-                    except Exception:
-                        results[table_name] = 0  # Table might not exist
-
-            if total_orphans == 0:
-                emit("No orphaned data found", json_output=json_output)
-                return
-
-            # Report findings
-            emit(f"Found {total_orphans} orphaned record(s):", json_output=json_output)
-            for table_name, count in results.items():
-                if count > 0:
-                    emit(f"  {table_name}: {count}", json_output=json_output)
-
-            if dry_run:
-                emit("Dry run - no data deleted", json_output=json_output)
-                return
-
-            # Delete orphans
-            deleted = {}
-            with conn.cursor() as cur:
-                for table_name, query in orphan_queries:
-                    if results.get(table_name, 0) > 0:
+                # Count orphans first
+                with conn.cursor() as cur:
+                    for table_name, query in count_queries:
                         try:
                             cur.execute(query)
-                            deleted[table_name] = cur.rowcount
-                        except Exception as e:
-                            emit(f"  Warning: Could not clean {table_name}: {e}", json_output=json_output)
+                            count = cur.fetchone()[0]
+                            results[table_name] = count
+                            total_orphans += count
+                        except Exception:
+                            results[table_name] = 0  # Table might not exist
 
-            conn.commit()
+                if total_orphans == 0:
+                    emit("No orphaned data found", json_output=json_output)
+                    return
 
-            total_deleted = sum(deleted.values())
-            emit(f"Deleted {total_deleted} orphaned record(s)", json_output=json_output)
-            emit(
-                "Cleanup complete",
-                data={"deleted": deleted, "total": total_deleted},
-                json_output=json_output,
-            )
+                # Report findings
+                emit(f"Found {total_orphans} orphaned record(s):", json_output=json_output)
+                for table_name, count in results.items():
+                    if count > 0:
+                        emit(f"  {table_name}: {count}", json_output=json_output)
 
-    except Exception as exc:
-        emit_error(f"Cleanup failed: {exc}", json_output=json_output)
+                if dry_run:
+                    emit("Dry run - no data deleted", json_output=json_output)
+                    return
+
+                # Delete orphans
+                deleted = {}
+                with conn.cursor() as cur:
+                    for table_name, query in orphan_queries:
+                        if results.get(table_name, 0) > 0:
+                            try:
+                                cur.execute(query)
+                                deleted[table_name] = cur.rowcount
+                            except Exception as e:
+                                emit(f"  Warning: Could not clean {table_name}: {e}", json_output=json_output)
+
+                conn.commit()
+
+                total_deleted = sum(deleted.values())
+                emit(f"Deleted {total_deleted} orphaned record(s)", json_output=json_output)
+                emit(
+                    "Cleanup complete",
+                    data={"deleted": deleted, "total": total_deleted},
+                    json_output=json_output,
+                )
+
+        except Exception as exc:
+            emit_error(f"Cleanup failed: {exc}", json_output=json_output)
 
 
 @app.command("db-migrate")
@@ -5046,104 +5051,105 @@ def list_functions(
     show_body: bool = typer.Option(False, "--show-body/--no-show-body", help="Include function_body in output"),
 ) -> None:
     """List registered feature functions."""
-    from g2.output import Column, get_output
+    with create_span("cli.feat-fx-list"):
+        from g2.output import Column, get_output
 
-    out = get_output(json_output)
+        out = get_output(json_output)
 
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_functions"])
-            with conn.cursor() as cur:
-                select_cols = "name, version, status, language, enabled, description, tags, updated_at"
-                if show_body:
-                    select_cols += ", function_body"
-                params: Dict[str, object] = {}
-                where_clause = ""
-                if feature:
-                    where_clause = "WHERE name = %(feature)s"
-                    params["feature"] = feature
-                cur.execute(
-                    f"""
-                    SELECT {select_cols}
-                    FROM feature_functions
-                    {where_clause}
-                    ORDER BY name, version;
-                    """,
-                    params or None,
-                )
-                rows = cur.fetchall()
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_functions"])
+                with conn.cursor() as cur:
+                    select_cols = "name, version, status, language, enabled, description, tags, updated_at"
+                    if show_body:
+                        select_cols += ", function_body"
+                    params: Dict[str, object] = {}
+                    where_clause = ""
+                    if feature:
+                        where_clause = "WHERE name = %(feature)s"
+                        params["feature"] = feature
+                    cur.execute(
+                        f"""
+                        SELECT {select_cols}
+                        FROM feature_functions
+                        {where_clause}
+                        ORDER BY name, version;
+                        """,
+                        params or None,
+                    )
+                    rows = cur.fetchall()
 
-        data = []
-        for r in rows:
-            entry = {
-                "name": r[0],
-                "version": r[1],
-                "status": r[2],
-                "language": r[3],
-                "enabled": r[4],
-                "description": r[5],
-                "tags": list(r[6]) if r[6] is not None else None,
-                "updated_at": r[7].isoformat() if len(r) > 7 and r[7] else None,
-            }
-            if show_body and len(r) > 8:
-                entry["function_body"] = r[8]
-            data.append(entry)
+            data = []
+            for r in rows:
+                entry = {
+                    "name": r[0],
+                    "version": r[1],
+                    "status": r[2],
+                    "language": r[3],
+                    "enabled": r[4],
+                    "description": r[5],
+                    "tags": list(r[6]) if r[6] is not None else None,
+                    "updated_at": r[7].isoformat() if len(r) > 7 and r[7] else None,
+                }
+                if show_body and len(r) > 8:
+                    entry["function_body"] = r[8]
+                data.append(entry)
 
-        if not data:
-            out.warning("No feature functions found")
+            if not data:
+                out.warning("No feature functions found")
+                if out.json_mode:
+                    out.json({"functions": [], "count": 0})
+                return
+
             if out.json_mode:
-                out.json({"functions": [], "count": 0})
-            return
+                out.json({"status": "ok", "functions": data, "count": len(data)})
+                return
 
-        if out.json_mode:
-            out.json({"status": "ok", "functions": data, "count": len(data)})
-            return
-
-        if show_body:
-            for d in data:
-                header = f"[bold]{d['name']}[/bold] v{d['version']} ({d['status']})"
-                header += f" [{'ENABLED' if d['enabled'] else 'DISABLED'}]"
-                header += f" [{d['language']}]"
-                out.console.print(header)
-                if d.get("tags"):
-                    out.console.print(f"tags: {', '.join(d['tags'])}", style="blue")
-                if d.get("updated_at"):
-                    out.console.print(f"updated: {d['updated_at']}", style="dim")
-                if d.get("description"):
-                    out.console.print(d["description"])
-                body = d.get("function_body") or ""
-                out.console.print(body, style="cyan")
-                out.console.print()
-        else:
-            out.table(
-                columns=[
-                    Column("Name", style="white", json_key="name"),
-                    Column("Version", style="magenta", json_key="version"),
-                    Column("Status", style="green", json_key="status"),
-                    Column("Enabled", style="yellow", json_key="enabled"),
-                    Column("Language", style="cyan", json_key="language"),
-                    Column("Tags", style="blue", json_key="tags"),
-                    Column("Updated", style="dim", json_key="updated_at"),
-                ],
-                rows=[
-                    [
-                        d["name"] or "",
-                        d["version"] or "",
-                        d["status"] or "",
-                        str(d["enabled"]),
-                        d["language"] or "",
-                        ",".join(d["tags"]) if d.get("tags") else "",
-                        d["updated_at"] or "",
-                    ]
-                    for d in data
-                ],
-                title="Feature Functions",
-                data_key="functions",
-                json_data=data,
-            )
-    except Exception as exc:
-        out.error(f"List functions failed: {exc}")
-        raise typer.Exit(code=1)
+            if show_body:
+                for d in data:
+                    header = f"[bold]{d['name']}[/bold] v{d['version']} ({d['status']})"
+                    header += f" [{'ENABLED' if d['enabled'] else 'DISABLED'}]"
+                    header += f" [{d['language']}]"
+                    out.console.print(header)
+                    if d.get("tags"):
+                        out.console.print(f"tags: {', '.join(d['tags'])}", style="blue")
+                    if d.get("updated_at"):
+                        out.console.print(f"updated: {d['updated_at']}", style="dim")
+                    if d.get("description"):
+                        out.console.print(d["description"])
+                    body = d.get("function_body") or ""
+                    out.console.print(body, style="cyan")
+                    out.console.print()
+            else:
+                out.table(
+                    columns=[
+                        Column("Name", style="white", json_key="name"),
+                        Column("Version", style="magenta", json_key="version"),
+                        Column("Status", style="green", json_key="status"),
+                        Column("Enabled", style="yellow", json_key="enabled"),
+                        Column("Language", style="cyan", json_key="language"),
+                        Column("Tags", style="blue", json_key="tags"),
+                        Column("Updated", style="dim", json_key="updated_at"),
+                    ],
+                    rows=[
+                        [
+                            d["name"] or "",
+                            d["version"] or "",
+                            d["status"] or "",
+                            str(d["enabled"]),
+                            d["language"] or "",
+                            ",".join(d["tags"]) if d.get("tags") else "",
+                            d["updated_at"] or "",
+                        ]
+                        for d in data
+                    ],
+                    title="Feature Functions",
+                    data_key="functions",
+                    json_data=data,
+                )
+        except Exception as exc:
+            out.error(f"List functions failed: {exc}")
+            raise typer.Exit(code=1)
 
 
 @app.command("feat-fx-export")
@@ -5159,21 +5165,22 @@ def features_fx_export(
     By default, exports all functions to the 'feature-functions/' directory.
     Each function is saved as <name>_v<version>.json.
     """
-    target_dir = Path(dir) if dir else Path("feature-functions")
-    fx_filter = parse_comma_separated(functions)
+    with create_span("cli.feat-fx-export"):
+        target_dir = Path(dir) if dir else Path("feature-functions")
+        fx_filter = parse_comma_separated(functions)
 
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_functions"])
-            exported_count = export_functions_to_directory(conn, target_dir, fx_filter)
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_functions"])
+                exported_count = export_functions_to_directory(conn, target_dir, fx_filter)
 
-        emit(
-            f"Exported {exported_count} function(s) to {target_dir}",
-            data={"exported_count": exported_count, "target_dir": str(target_dir)},
-            json_output=json_output,
-        )
-    except Exception as exc:
-        emit_error(f"Export failed: {exc}", json_output=json_output)
+            emit(
+                f"Exported {exported_count} function(s) to {target_dir}",
+                data={"exported_count": exported_count, "target_dir": str(target_dir)},
+                json_output=json_output,
+            )
+        except Exception as exc:
+            emit_error(f"Export failed: {exc}", json_output=json_output)
 
 
 def _upsert_feature_function(conn: psycopg.Connection, payload: dict) -> None:
@@ -5211,24 +5218,25 @@ def features_fx_import(
     By default, imports all JSON files from the 'feature-functions/' directory.
     Idempotent: re-running will upsert by (name, version).
     """
-    src_dir = Path(dir) if dir else Path("feature-functions")
-    fx_filter = parse_comma_separated(functions)
+    with create_span("cli.feat-fx-import"):
+        src_dir = Path(dir) if dir else Path("feature-functions")
+        fx_filter = parse_comma_separated(functions)
 
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_functions"])
-            imported_count = import_functions_from_directory(conn, src_dir, fx_filter)
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_functions"])
+                imported_count = import_functions_from_directory(conn, src_dir, fx_filter)
 
-        if imported_count == 0:
-            emit(f"No functions found in {src_dir}", json_output=json_output)
-        else:
-            emit(
-                f"Imported {imported_count} function(s) from {src_dir}",
-                data={"imported_count": imported_count, "source_dir": str(src_dir)},
-                json_output=json_output,
-            )
-    except Exception as exc:
-        emit_error(f"Import failed: {exc}", json_output=json_output)
+            if imported_count == 0:
+                emit(f"No functions found in {src_dir}", json_output=json_output)
+            else:
+                emit(
+                    f"Imported {imported_count} function(s) from {src_dir}",
+                    data={"imported_count": imported_count, "source_dir": str(src_dir)},
+                    json_output=json_output,
+                )
+        except Exception as exc:
+            emit_error(f"Import failed: {exc}", json_output=json_output)
 
 
 @app.command("feat-def-export")
@@ -5244,21 +5252,22 @@ def feat_def_export(
     By default, exports all definitions to the 'feature-definitions/' directory.
     Each definition is saved as <name>.json.
     """
-    target_dir = Path(dir) if dir else Path("feature-definitions")
-    feat_filter = parse_comma_separated(features)
+    with create_span("cli.feat-def-export"):
+        target_dir = Path(dir) if dir else Path("feature-definitions")
+        feat_filter = parse_comma_separated(features)
 
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_definitions"])
-            exported_count = export_definitions_to_directory(conn, target_dir, feat_filter)
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_definitions"])
+                exported_count = export_definitions_to_directory(conn, target_dir, feat_filter)
 
-        emit(
-            f"Exported {exported_count} definition(s) to {target_dir}",
-            data={"exported_count": exported_count, "target_dir": str(target_dir)},
-            json_output=json_output,
-        )
-    except Exception as exc:
-        emit_error(f"Export failed: {exc}", json_output=json_output)
+            emit(
+                f"Exported {exported_count} definition(s) to {target_dir}",
+                data={"exported_count": exported_count, "target_dir": str(target_dir)},
+                json_output=json_output,
+            )
+        except Exception as exc:
+            emit_error(f"Export failed: {exc}", json_output=json_output)
 
 
 @app.command("feat-def-import")
@@ -5274,24 +5283,25 @@ def feat_def_import(
     By default, imports all JSON files from the 'feature-definitions/' directory.
     Idempotent: re-running will upsert by name.
     """
-    src_dir = Path(dir) if dir else Path("feature-definitions")
-    feat_filter = parse_comma_separated(features)
+    with create_span("cli.feat-def-import"):
+        src_dir = Path(dir) if dir else Path("feature-definitions")
+        feat_filter = parse_comma_separated(features)
 
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_definitions", "computed_features"])
-            imported_count = import_definitions_from_directory(conn, src_dir, feat_filter)
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_definitions", "computed_features"])
+                imported_count = import_definitions_from_directory(conn, src_dir, feat_filter)
 
-        if imported_count == 0:
-            emit(f"No definitions found in {src_dir}", json_output=json_output)
-        else:
-            emit(
-                f"Imported {imported_count} definition(s) from {src_dir}",
-                data={"imported_count": imported_count, "source_dir": str(src_dir)},
-                json_output=json_output,
-            )
-    except Exception as exc:
-        emit_error(f"Import failed: {exc}", json_output=json_output)
+            if imported_count == 0:
+                emit(f"No definitions found in {src_dir}", json_output=json_output)
+            else:
+                emit(
+                    f"Imported {imported_count} definition(s) from {src_dir}",
+                    data={"imported_count": imported_count, "source_dir": str(src_dir)},
+                    json_output=json_output,
+                )
+        except Exception as exc:
+            emit_error(f"Import failed: {exc}", json_output=json_output)
 
 
 @app.command("feat-trim")
@@ -5308,40 +5318,41 @@ def trim_features(
     Use --before for left-trim, --after for right-trim.
     By default, only features are trimmed. Use --trim-prices to also trim underlying price data.
     """
-    if not before and not after:
-        if json_output:
-            emit_error("Specify --before and/or --after", json_output=True)
-        else:
-            raise typer.BadParameter("Missing option '--before' or '--after'", param_hint="'--before' / '--after'")
-    before_dt = _parse_date_or_error(before, json_output)
-    after_dt = _parse_date_or_error(after, json_output)
+    with create_span("cli.feat-trim", before=before, after=after):
+        if not before and not after:
+            if json_output:
+                emit_error("Specify --before and/or --after", json_output=True)
+            else:
+                raise typer.BadParameter("Missing option '--before' or '--after'", param_hint="'--before' / '--after'")
+        before_dt = _parse_date_or_error(before, json_output)
+        after_dt = _parse_date_or_error(after, json_output)
 
-    names = parse_comma_separated(feature, required=True)
-    if not names:
-        emit_error("No feature names provided", json_output=json_output)
-        return
+        names = parse_comma_separated(feature, required=True)
+        if not names:
+            emit_error("No feature names provided", json_output=json_output)
+            return
 
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_definitions", "computed_features"])
-            deleted = trim_feature_data(conn, names, before=before_dt, after=after_dt)
-            prices_deleted = 0
-            if trim_prices:
-                init_schema_tables(conn, ["stock_ohlcv"])
-                prices_deleted = trim_stock_ohlcv(conn, before=before_dt, after=after_dt)
-        emit(
-            f"Trimmed features {', '.join(names)}",
-            data={
-                "deleted_features": deleted,
-                "deleted_prices": prices_deleted,
-                "features": names,
-                "before": before,
-                "after": after,
-            },
-            json_output=json_output,
-        )
-    except Exception as exc:
-        emit_error(f"Trim failed: {exc}", json_output=json_output)
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_definitions", "computed_features"])
+                deleted = trim_feature_data(conn, names, before=before_dt, after=after_dt)
+                prices_deleted = 0
+                if trim_prices:
+                    init_schema_tables(conn, ["stock_ohlcv"])
+                    prices_deleted = trim_stock_ohlcv(conn, before=before_dt, after=after_dt)
+            emit(
+                f"Trimmed features {', '.join(names)}",
+                data={
+                    "deleted_features": deleted,
+                    "deleted_prices": prices_deleted,
+                    "features": names,
+                    "before": before,
+                    "after": after,
+                },
+                json_output=json_output,
+            )
+        except Exception as exc:
+            emit_error(f"Trim failed: {exc}", json_output=json_output)
 
 
 @app.command("prices-trim")
@@ -5357,39 +5368,40 @@ def trim_prices(
     Trim stock_ohlcv by date (optionally limited to symbols).
     By default, also trims all derived features. Use --no-trim-features to keep features.
     """
-    if not before and not after:
-        if json_output:
-            emit_error("Specify --before and/or --after", json_output=True)
-        else:
-            raise typer.BadParameter("Missing option '--before' or '--after'", param_hint="'--before' / '--after'")
-    before_dt = _parse_date_or_error(before, json_output)
-    after_dt = _parse_date_or_error(after, json_output)
-    sym_list = None
-    if symbols:
-        sym_list = parse_comma_separated(symbols, required=True)
-        if not sym_list:
-            sym_list = None
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["stocks", "stock_ohlcv"])
-            deleted = trim_stock_ohlcv(conn, before=before_dt, after=after_dt, symbols=sym_list)
-            features_deleted = 0
-            if trim_features:
-                init_schema_tables(conn, ["computed_features"])
-                features_deleted = trim_all_computed_features(conn, before=before_dt, after=after_dt, symbols=sym_list)
-        emit(
-            "Trimmed stock_ohlcv" + (" and computed_features" if trim_features else ""),
-            data={
-                "deleted_prices": deleted,
-                "deleted_features": features_deleted,
-                "before": before,
-                "after": after,
-                "symbols": sym_list if sym_list else "All",
-            },
-            json_output=json_output,
-        )
-    except Exception as exc:
-        emit_error(f"Trim prices failed: {exc}", json_output=json_output)
+    with create_span("cli.prices-trim", before=before, after=after):
+        if not before and not after:
+            if json_output:
+                emit_error("Specify --before and/or --after", json_output=True)
+            else:
+                raise typer.BadParameter("Missing option '--before' or '--after'", param_hint="'--before' / '--after'")
+        before_dt = _parse_date_or_error(before, json_output)
+        after_dt = _parse_date_or_error(after, json_output)
+        sym_list = None
+        if symbols:
+            sym_list = parse_comma_separated(symbols, required=True)
+            if not sym_list:
+                sym_list = None
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["stocks", "stock_ohlcv"])
+                deleted = trim_stock_ohlcv(conn, before=before_dt, after=after_dt, symbols=sym_list)
+                features_deleted = 0
+                if trim_features:
+                    init_schema_tables(conn, ["computed_features"])
+                    features_deleted = trim_all_computed_features(conn, before=before_dt, after=after_dt, symbols=sym_list)
+            emit(
+                "Trimmed stock_ohlcv" + (" and computed_features" if trim_features else ""),
+                data={
+                    "deleted_prices": deleted,
+                    "deleted_features": features_deleted,
+                    "before": before,
+                    "after": after,
+                    "symbols": sym_list if sym_list else "All",
+                },
+                json_output=json_output,
+            )
+        except Exception as exc:
+            emit_error(f"Trim prices failed: {exc}", json_output=json_output)
 
 
 @app.command("feat-drop")
@@ -5416,86 +5428,87 @@ def drop_features_cmd(
         # Drop all features completely (DANGEROUS!)
         g2 features-drop --all
     """
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_definitions", "computed_features"])
+    with create_span("cli.feat-drop", all_features=all_features, data_only=data_only):
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_definitions", "computed_features"])
 
-            # Determine which features to drop
-            if all_features:
-                # Get all feature names from database
-                with conn.cursor() as cur:
-                    cur.execute("SELECT name FROM feature_definitions ORDER BY name")
-                    names = [row[0] for row in cur.fetchall()]
+                # Determine which features to drop
+                if all_features:
+                    # Get all feature names from database
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT name FROM feature_definitions ORDER BY name")
+                        names = [row[0] for row in cur.fetchall()]
 
-                if not names:
-                    emit("No features found to drop", json_output=json_output)
-                    return
-
-                # Confirm for safety
-                if not json_output:
-                    action = "delete data for" if data_only else "completely drop"
-                    emit(f"WARNING: About to {action} ALL {len(names)} features!")
-                    emit(f"Features: {', '.join(names[:5])}{' ...' if len(names) > 5 else ''}")
-
-                    # Interactive confirmation
-                    confirmation = input(f"\nType 'yes' to confirm: ").strip().lower()
-                    if confirmation != 'yes':
-                        emit("Operation cancelled.")
+                    if not names:
+                        emit("No features found to drop", json_output=json_output)
                         return
 
-            elif feature:
-                names = parse_comma_separated(feature, required=True)
-                if not names:
-                    emit_error("No feature names provided", json_output=json_output)
+                    # Confirm for safety
+                    if not json_output:
+                        action = "delete data for" if data_only else "completely drop"
+                        emit(f"WARNING: About to {action} ALL {len(names)} features!")
+                        emit(f"Features: {', '.join(names[:5])}{' ...' if len(names) > 5 else ''}")
+
+                        # Interactive confirmation
+                        confirmation = input(f"\nType 'yes' to confirm: ").strip().lower()
+                        if confirmation != 'yes':
+                            emit("Operation cancelled.")
+                            return
+
+                elif feature:
+                    names = parse_comma_separated(feature, required=True)
+                    if not names:
+                        emit_error("No feature names provided", json_output=json_output)
+                        return
+                else:
+                    emit_error("Must specify either --feature or --all", json_output=json_output)
                     return
-            else:
-                emit_error("Must specify either --feature or --all", json_output=json_output)
-                return
 
-            # Execute the drop with progress indicator
-            if data_only:
-                # Delete data only (fast batch operation)
-                if not json_output and len(names) > 1:
-                    emit(f"Deleting data for {len(names)} features...")
-                deleted = delete_feature_data_only(conn, names)
-                emit(
-                    f"Deleted data for {len(names)} feature(s)",
-                    data={
-                        "deleted_rows": deleted,
-                        "definitions_kept": True,
-                        "features": names,
-                        "count": len(names)
-                    },
-                    json_output=json_output,
-                )
-            else:
-                # Drop features in batches with progress
-                # Batch size balances performance vs progress visibility
-                batch_size = 10
-                total_deleted = 0
+                # Execute the drop with progress indicator
+                if data_only:
+                    # Delete data only (fast batch operation)
+                    if not json_output and len(names) > 1:
+                        emit(f"Deleting data for {len(names)} features...")
+                    deleted = delete_feature_data_only(conn, names)
+                    emit(
+                        f"Deleted data for {len(names)} feature(s)",
+                        data={
+                            "deleted_rows": deleted,
+                            "definitions_kept": True,
+                            "features": names,
+                            "count": len(names)
+                        },
+                        json_output=json_output,
+                    )
+                else:
+                    # Drop features in batches with progress
+                    # Batch size balances performance vs progress visibility
+                    batch_size = 10
+                    total_deleted = 0
 
-                if not json_output and len(names) > 1:
-                    emit(f"Dropping {len(names)} features in batches of {batch_size}...")
+                    if not json_output and len(names) > 1:
+                        emit(f"Dropping {len(names)} features in batches of {batch_size}...")
 
-                for i in range(0, len(names), batch_size):
-                    batch = names[i:i + batch_size]
-                    if not json_output and len(names) > batch_size:
-                        emit(f"[{i+1}-{min(i+batch_size, len(names))}/{len(names)}] Dropping batch...")
+                    for i in range(0, len(names), batch_size):
+                        batch = names[i:i + batch_size]
+                        if not json_output and len(names) > batch_size:
+                            emit(f"[{i+1}-{min(i+batch_size, len(names))}/{len(names)}] Dropping batch...")
 
-                    deleted = drop_features(conn, batch)
-                    total_deleted += deleted
+                        deleted = drop_features(conn, batch)
+                        total_deleted += deleted
 
-                emit(
-                    f"Dropped {len(names)} feature(s)",
-                    data={
-                        "deleted": total_deleted,
-                        "features": names,
-                        "count": len(names)
-                    },
-                    json_output=json_output,
-                )
-    except Exception as exc:
-        emit_error(f"Drop features failed: {exc}", json_output=json_output)
+                    emit(
+                        f"Dropped {len(names)} feature(s)",
+                        data={
+                            "deleted": total_deleted,
+                            "features": names,
+                            "count": len(names)
+                        },
+                        json_output=json_output,
+                    )
+        except Exception as exc:
+            emit_error(f"Drop features failed: {exc}", json_output=json_output)
 
 
 @app.command("feat-def-list")
@@ -5504,79 +5517,80 @@ def features_list(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """List feature definitions."""
-    from g2.output import Column, get_output
+    with create_span("cli.feat-def-list"):
+        from g2.output import Column, get_output
 
-    out = get_output(json_output)
+        out = get_output(json_output)
 
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_definitions"])
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, name, function_name, source_table, source_column, store_table, store_column, active, created_at
-                    FROM feature_definitions
-                    ORDER BY name;
-                    """
-                )
-                rows = cur.fetchall()
-
-                data = []
-                for fid, name, fn, source_table, source_column, store_table, store_column, active, created_at in rows:
-                    data.append(
-                        {
-                            "name": name,
-                            "function": fn,
-                            "source_table": source_table,
-                            "source_column": source_column,
-                            "store_table": store_table,
-                            "store_column": store_column,
-                            "active": active,
-                            "created_at": created_at.isoformat() if created_at else None,
-                        }
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_definitions"])
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT id, name, function_name, source_table, source_column, store_table, store_column, active, created_at
+                        FROM feature_definitions
+                        ORDER BY name;
+                        """
                     )
+                    rows = cur.fetchall()
 
-        if not data:
-            out.warning("No features found")
+                    data = []
+                    for fid, name, fn, source_table, source_column, store_table, store_column, active, created_at in rows:
+                        data.append(
+                            {
+                                "name": name,
+                                "function": fn,
+                                "source_table": source_table,
+                                "source_column": source_column,
+                                "store_table": store_table,
+                                "store_column": store_column,
+                                "active": active,
+                                "created_at": created_at.isoformat() if created_at else None,
+                            }
+                        )
+
+            if not data:
+                out.warning("No features found")
+                if out.json_mode:
+                    out.json({"status": "ok", "features": [], "count": 0})
+                return
+
             if out.json_mode:
-                out.json({"status": "ok", "features": [], "count": 0})
-            return
+                out.json({"status": "ok", "features": data, "count": len(data)})
+                return
 
-        if out.json_mode:
-            out.json({"status": "ok", "features": data, "count": len(data)})
-            return
-
-        table_rows = [
-            [
-                d["name"] or "",
-                d["function"] or "",
-                d.get("source_table") or "",
-                d.get("source_column") or "",
-                d["store_table"] or "",
-                d["store_column"] or "",
-                str(d["active"]),
-                d["created_at"] or "",
+            table_rows = [
+                [
+                    d["name"] or "",
+                    d["function"] or "",
+                    d.get("source_table") or "",
+                    d.get("source_column") or "",
+                    d["store_table"] or "",
+                    d["store_column"] or "",
+                    str(d["active"]),
+                    d["created_at"] or "",
+                ]
+                for d in data
             ]
-            for d in data
-        ]
 
-        out.table(
-            columns=[
-                Column("Name", style="white", json_key="name"),
-                Column("Function", style="magenta", json_key="function"),
-                Column("Source", style="cyan", json_key="source_table"),
-                Column("Source Col", style="cyan", json_key="source_column"),
-                Column("Store", style="green", json_key="store_table"),
-                Column("Column", style="blue", json_key="store_column"),
-                Column("Active", style="yellow", json_key="active"),
-                Column("Created", style="dim", json_key="created_at"),
-            ],
-            rows=table_rows,
-            title="Features",
-        )
-    except Exception as exc:
-        out.error(f"List failed: {exc}")
-        raise typer.Exit(code=1)
+            out.table(
+                columns=[
+                    Column("Name", style="white", json_key="name"),
+                    Column("Function", style="magenta", json_key="function"),
+                    Column("Source", style="cyan", json_key="source_table"),
+                    Column("Source Col", style="cyan", json_key="source_column"),
+                    Column("Store", style="green", json_key="store_table"),
+                    Column("Column", style="blue", json_key="store_column"),
+                    Column("Active", style="yellow", json_key="active"),
+                    Column("Created", style="dim", json_key="created_at"),
+                ],
+                rows=table_rows,
+                title="Features",
+            )
+        except Exception as exc:
+            out.error(f"List failed: {exc}")
+            raise typer.Exit(code=1)
 
 
 @app.command("feat-def-show")
@@ -5586,38 +5600,39 @@ def features_show(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """Show a single feature definition."""
-    try:
-        with db_connection(db_url) as conn:
-            init_schema_tables(conn, ["feature_definitions"])
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT name, function_name, params, source_table, source_column,
-                           store_table, store_column, store_type, active, version, created_at
-                    FROM feature_definitions WHERE name = %s;
-                    """,
-                    (feature,),
-                )
-                row = cur.fetchone()
-        if not row:
-            emit_error(f"Feature '{feature}' not found", json_output=json_output)
-            return
-        data = {
-            "name": row[0],
-            "function": row[1],
-            "params": row[2],
-            "source_table": row[3],
-            "source_column": row[4],
-            "store_table": row[5],
-            "store_column": row[6],
-            "store_type": row[7],
-            "active": row[8],
-            "version": row[9],
-            "created_at": row[10].isoformat() if row[10] else None,
-        }
-        emit(f"Feature {feature}", data=data, json_output=json_output)
-    except Exception as exc:
-        emit_error(f"Show failed: {exc}", json_output=json_output)
+    with create_span("cli.feat-def-show", feature=feature):
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_definitions"])
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT name, function_name, params, source_table, source_column,
+                               store_table, store_column, store_type, active, version, created_at
+                        FROM feature_definitions WHERE name = %s;
+                        """,
+                        (feature,),
+                    )
+                    row = cur.fetchone()
+            if not row:
+                emit_error(f"Feature '{feature}' not found", json_output=json_output)
+                return
+            data = {
+                "name": row[0],
+                "function": row[1],
+                "params": row[2],
+                "source_table": row[3],
+                "source_column": row[4],
+                "store_table": row[5],
+                "store_column": row[6],
+                "store_type": row[7],
+                "active": row[8],
+                "version": row[9],
+                "created_at": row[10].isoformat() if row[10] else None,
+            }
+            emit(f"Feature {feature}", data=data, json_output=json_output)
+        except Exception as exc:
+            emit_error(f"Show failed: {exc}", json_output=json_output)
 
 
 @app.command("feat-compute")
@@ -7768,180 +7783,181 @@ def mcp_setup(
         g2 mcp-setup --targets desktop  # Configure only desktop
         g2 mcp-setup --force            # Overwrite existing config
     """
-    import platform
-    import sys
-    from pathlib import Path
-
-    try:
-        # Load environment variables from .env file if it exists
+    with create_span("cli.mcp-setup"):
+        import platform
+        import sys
         from pathlib import Path
-        env_file = Path.cwd() / '.env'
-        if env_file.exists():
-            from dotenv import load_dotenv
-            load_dotenv(env_file)
 
-        # Parse targets
-        target_list = [t.strip().lower() for t in targets.split(',')]
-        if 'all' in target_list:
-            target_list = ['desktop', 'cli']
+        try:
+            # Load environment variables from .env file if it exists
+            from pathlib import Path
+            env_file = Path.cwd() / '.env'
+            if env_file.exists():
+                from dotenv import load_dotenv
+                load_dotenv(env_file)
 
-        # Determine config file locations based on platform
-        system = platform.system()
-        config_files = []
+            # Parse targets
+            target_list = [t.strip().lower() for t in targets.split(',')]
+            if 'all' in target_list:
+                target_list = ['desktop', 'cli']
 
-        if 'desktop' in target_list:
-            if system == "Darwin":  # macOS
-                desktop_config = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
-            elif system == "Windows":
-                desktop_config = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
-            else:  # Linux
-                desktop_config = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
-            config_files.append(('desktop', desktop_config))
+            # Determine config file locations based on platform
+            system = platform.system()
+            config_files = []
 
-        if 'cli' in target_list:
-            # Claude Code CLI uses ~/.claude.json on all platforms
-            cli_config = Path.home() / ".claude.json"
-            config_files.append(('cli', cli_config))
+            if 'desktop' in target_list:
+                if system == "Darwin":  # macOS
+                    desktop_config = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+                elif system == "Windows":
+                    desktop_config = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
+                else:  # Linux
+                    desktop_config = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+                config_files.append(('desktop', desktop_config))
 
-        # Get absolute path to g2 project root
-        cli_file = Path(__file__).resolve()
-        g2_root = cli_file.parent.parent.parent
-        server_path = g2_root / "mcp-server" / "server.py"
+            if 'cli' in target_list:
+                # Claude Code CLI uses ~/.claude.json on all platforms
+                cli_config = Path.home() / ".claude.json"
+                config_files.append(('cli', cli_config))
 
-        if not server_path.exists():
-            emit_error(
-                f"MCP server not found at {server_path}. "
-                "Are you running this from the g2 project directory?",
-                json_output=json_output
-            )
-            raise typer.Exit(1)
+            # Get absolute path to g2 project root
+            cli_file = Path(__file__).resolve()
+            g2_root = cli_file.parent.parent.parent
+            server_path = g2_root / "mcp-server" / "server.py"
 
-        # Get database URL
-        if not db_url:
-            db_url = os.environ.get('DATABASE_URL', 'postgresql://g2:g2pass@localhost:6432/g2')
+            if not server_path.exists():
+                emit_error(
+                    f"MCP server not found at {server_path}. "
+                    "Are you running this from the g2 project directory?",
+                    json_output=json_output
+                )
+                raise typer.Exit(1)
 
-        # Get API key
-        if not api_key:
-            api_key = os.environ.get('ALPHAVANTAGE_API_KEY', '')
+            # Get database URL
+            if not db_url:
+                db_url = os.environ.get('DATABASE_URL', 'postgresql://g2:g2pass@localhost:6432/g2')
 
-        # Get Python interpreter path
-        python_path = sys.executable
+            # Get API key
+            if not api_key:
+                api_key = os.environ.get('ALPHAVANTAGE_API_KEY', '')
 
-        # Prepare MCP server config
-        expected_config = {
-            "command": python_path,
-            "args": [str(server_path)],
-            "env": {"DATABASE_URL": db_url}
-        }
-        if api_key:
-            expected_config["env"]["ALPHAVANTAGE_API_KEY"] = api_key
+            # Get Python interpreter path
+            python_path = sys.executable
 
-        # Process each config file
-        results = []
-        all_unchanged = True
-
-        for target_name, config_file in config_files:
-            config_unchanged = False
-            existing_config = {}
-
-            # Check if config file exists and load it
-            if config_file.exists():
-                with open(config_file, 'r') as f:
-                    existing_config = json.load(f)
-
-                # Check if g2 server already configured
-                if "mcpServers" in existing_config and "g2" in existing_config.get("mcpServers", {}):
-                    existing_g2_config = existing_config["mcpServers"]["g2"]
-
-                    # Compare configurations (ignoring key order)
-                    if (existing_g2_config.get("command") == expected_config["command"] and
-                        existing_g2_config.get("args") == expected_config["args"] and
-                        existing_g2_config.get("env", {}) == expected_config["env"]):
-                        # Configuration is already correct - idempotent success
-                        config_unchanged = True
-                    elif not force:
-                        emit_error(
-                            f"MCP server already configured in {config_file} with different settings. "
-                            "Use --force to overwrite.",
-                            json_output=json_output
-                        )
-                        raise typer.Exit(1)
-
-            # Only write if config changed or doesn't exist
-            if not config_unchanged:
-                all_unchanged = False
-                # Merge configurations
-                if not existing_config.get("mcpServers"):
-                    existing_config["mcpServers"] = {}
-                existing_config["mcpServers"]["g2"] = expected_config
-
-                # Create config directory if it doesn't exist
-                config_file.parent.mkdir(parents=True, exist_ok=True)
-
-                # Write configuration
-                with open(config_file, 'w') as f:
-                    json.dump(existing_config, f, indent=2)
-
-            results.append({
-                "target": target_name,
-                "config_file": str(config_file),
-                "config_unchanged": config_unchanged,
-            })
-
-        result = {
-            "targets": results,
-            "server_path": str(server_path),
-            "python_path": python_path,
-            "database_url": db_url,
-            "api_key_set": bool(api_key),
-            "all_unchanged": all_unchanged,
-        }
-
-        if json_output:
-            emit("MCP Setup Complete", data=result, json_output=True)
-        else:
-            console = Console()
-            if all_unchanged:
-                console.print("\n[bold green]✓ MCP Server Configuration Already Up-to-Date[/bold green]\n")
-            else:
-                console.print("\n[bold green]✓ MCP Server Configuration Complete[/bold green]\n")
-
-            # Show results for each target
-            for target_result in results:
-                target_name = target_result['target']
-                target_file = target_result['config_file']
-                unchanged = target_result['config_unchanged']
-
-                status = "[dim]unchanged[/dim]" if unchanged else "[green]updated[/green]"
-                console.print(f"{target_name.capitalize()}: {status}")
-                console.print(f"  [dim]{target_file}[/dim]")
-
-            console.print(f"\nServer path: [cyan]{server_path}[/cyan]")
-            console.print(f"Python: [cyan]{python_path}[/cyan]")
-            console.print(f"Database: [cyan]{db_url}[/cyan]")
+            # Prepare MCP server config
+            expected_config = {
+                "command": python_path,
+                "args": [str(server_path)],
+                "env": {"DATABASE_URL": db_url}
+            }
             if api_key:
-                console.print(f"API Key: [green]✓ Set[/green]")
-            else:
-                console.print(f"API Key: [yellow]⚠ Not set (optional)[/yellow]")
+                expected_config["env"]["ALPHAVANTAGE_API_KEY"] = api_key
 
-            if not all_unchanged:
-                console.print("\n[bold]Next steps:[/bold]")
-                if any(r['target'] == 'desktop' and not r['config_unchanged'] for r in results):
-                    console.print("• Restart Claude Desktop App")
-                if any(r['target'] == 'cli' and not r['config_unchanged'] for r in results):
-                    console.print("• Restart Claude Code CLI or OpenAI-compatible tools")
-                console.print("\nThe 'g2' MCP server should now be available")
-            else:
-                console.print("\n[dim]All configurations are already correct. No changes needed.[/dim]")
-            console.print("\n[dim]To update configs, run: g2 mcp-setup --force[/dim]")
+            # Process each config file
+            results = []
+            all_unchanged = True
 
-    except typer.Exit:
-        raise
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        emit_error(f"Setup failed: {exc}", json_output=json_output)
-        raise typer.Exit(1)
+            for target_name, config_file in config_files:
+                config_unchanged = False
+                existing_config = {}
+
+                # Check if config file exists and load it
+                if config_file.exists():
+                    with open(config_file, 'r') as f:
+                        existing_config = json.load(f)
+
+                    # Check if g2 server already configured
+                    if "mcpServers" in existing_config and "g2" in existing_config.get("mcpServers", {}):
+                        existing_g2_config = existing_config["mcpServers"]["g2"]
+
+                        # Compare configurations (ignoring key order)
+                        if (existing_g2_config.get("command") == expected_config["command"] and
+                            existing_g2_config.get("args") == expected_config["args"] and
+                            existing_g2_config.get("env", {}) == expected_config["env"]):
+                            # Configuration is already correct - idempotent success
+                            config_unchanged = True
+                        elif not force:
+                            emit_error(
+                                f"MCP server already configured in {config_file} with different settings. "
+                                "Use --force to overwrite.",
+                                json_output=json_output
+                            )
+                            raise typer.Exit(1)
+
+                # Only write if config changed or doesn't exist
+                if not config_unchanged:
+                    all_unchanged = False
+                    # Merge configurations
+                    if not existing_config.get("mcpServers"):
+                        existing_config["mcpServers"] = {}
+                    existing_config["mcpServers"]["g2"] = expected_config
+
+                    # Create config directory if it doesn't exist
+                    config_file.parent.mkdir(parents=True, exist_ok=True)
+
+                    # Write configuration
+                    with open(config_file, 'w') as f:
+                        json.dump(existing_config, f, indent=2)
+
+                results.append({
+                    "target": target_name,
+                    "config_file": str(config_file),
+                    "config_unchanged": config_unchanged,
+                })
+
+            result = {
+                "targets": results,
+                "server_path": str(server_path),
+                "python_path": python_path,
+                "database_url": db_url,
+                "api_key_set": bool(api_key),
+                "all_unchanged": all_unchanged,
+            }
+
+            if json_output:
+                emit("MCP Setup Complete", data=result, json_output=True)
+            else:
+                console = Console()
+                if all_unchanged:
+                    console.print("\n[bold green]✓ MCP Server Configuration Already Up-to-Date[/bold green]\n")
+                else:
+                    console.print("\n[bold green]✓ MCP Server Configuration Complete[/bold green]\n")
+
+                # Show results for each target
+                for target_result in results:
+                    target_name = target_result['target']
+                    target_file = target_result['config_file']
+                    unchanged = target_result['config_unchanged']
+
+                    status = "[dim]unchanged[/dim]" if unchanged else "[green]updated[/green]"
+                    console.print(f"{target_name.capitalize()}: {status}")
+                    console.print(f"  [dim]{target_file}[/dim]")
+
+                console.print(f"\nServer path: [cyan]{server_path}[/cyan]")
+                console.print(f"Python: [cyan]{python_path}[/cyan]")
+                console.print(f"Database: [cyan]{db_url}[/cyan]")
+                if api_key:
+                    console.print(f"API Key: [green]✓ Set[/green]")
+                else:
+                    console.print(f"API Key: [yellow]⚠ Not set (optional)[/yellow]")
+
+                if not all_unchanged:
+                    console.print("\n[bold]Next steps:[/bold]")
+                    if any(r['target'] == 'desktop' and not r['config_unchanged'] for r in results):
+                        console.print("• Restart Claude Desktop App")
+                    if any(r['target'] == 'cli' and not r['config_unchanged'] for r in results):
+                        console.print("• Restart Claude Code CLI or OpenAI-compatible tools")
+                    console.print("\nThe 'g2' MCP server should now be available")
+                else:
+                    console.print("\n[dim]All configurations are already correct. No changes needed.[/dim]")
+                console.print("\n[dim]To update configs, run: g2 mcp-setup --force[/dim]")
+
+        except typer.Exit:
+            raise
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            emit_error(f"Setup failed: {exc}", json_output=json_output)
+            raise typer.Exit(1)
 
 
 # =============================================================================
@@ -9430,43 +9446,44 @@ def launch_ui(
         g2 ui --port 8080        # Use custom port
         g2 ui --no-browser       # Don't open browser automatically
     """
-    import subprocess
-    import sys
-    from pathlib import Path
+    with create_span("cli.ui", port=port):
+        import subprocess
+        import sys
+        from pathlib import Path
 
-    # Find the app.py file
-    ui_app = Path(__file__).parent / "ui" / "app.py"
+        # Find the app.py file
+        ui_app = Path(__file__).parent / "ui" / "app.py"
 
-    if not ui_app.exists():
-        emit("UI app not found. Please reinstall g2.", error=True)
-        raise typer.Exit(1)
+        if not ui_app.exists():
+            emit("UI app not found. Please reinstall g2.", error=True)
+            raise typer.Exit(1)
 
-    emit(f"Starting g2 UI on http://{host}:{port}")
-    emit("Press Ctrl+C to stop")
+        emit(f"Starting g2 UI on http://{host}:{port}")
+        emit("Press Ctrl+C to stop")
 
-    cmd = [
-        sys.executable, "-m", "streamlit", "run",
-        str(ui_app),
-        "--server.port", str(port),
-        "--server.address", host,
-        "--theme.primaryColor", "#2962ff",
-        "--theme.backgroundColor", "#ffffff",
-        "--theme.secondaryBackgroundColor", "#f0f2f6",
-    ]
+        cmd = [
+            sys.executable, "-m", "streamlit", "run",
+            str(ui_app),
+            "--server.port", str(port),
+            "--server.address", host,
+            "--theme.primaryColor", "#2962ff",
+            "--theme.backgroundColor", "#ffffff",
+            "--theme.secondaryBackgroundColor", "#f0f2f6",
+        ]
 
-    if no_browser:
-        cmd.extend(["--server.headless", "true"])
+        if no_browser:
+            cmd.extend(["--server.headless", "true"])
 
-    try:
-        subprocess.run(cmd, check=True)
-    except KeyboardInterrupt:
-        emit("\nShutting down UI...")
-    except subprocess.CalledProcessError as e:
-        emit(f"UI failed to start: {e}", error=True)
-        raise typer.Exit(1)
-    except FileNotFoundError:
-        emit("Streamlit not installed. Install with: pip install 'g2[ui]'", error=True)
-        raise typer.Exit(1)
+        try:
+            subprocess.run(cmd, check=True)
+        except KeyboardInterrupt:
+            emit("\nShutting down UI...")
+        except subprocess.CalledProcessError as e:
+            emit(f"UI failed to start: {e}", error=True)
+            raise typer.Exit(1)
+        except FileNotFoundError:
+            emit("Streamlit not installed. Install with: pip install 'g2[ui]'", error=True)
+            raise typer.Exit(1)
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
