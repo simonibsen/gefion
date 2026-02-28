@@ -1106,17 +1106,28 @@ def _latest_dates_for_features(
     data_id: int,
     feature_ids: List[int],
 ) -> Dict[int, Optional[date]]:
-    """Return per-feature latest date for the given data_id."""
+    """Return per-feature latest date for the given data_id.
+
+    Uses a lateral join to read only the most recent row per feature from the
+    existing (feature_id, data_id, date DESC) index.  On TimescaleDB this
+    enables chunk exclusion — each lateral probe touches only the newest chunk
+    instead of scanning all chunks via MAX(date).
+    """
     if not feature_ids:
         return {}
     placeholders = ",".join(["%s"] * len(feature_ids))
     query = f"""
-    SELECT feature_id, MAX(date)
-    FROM computed_features
-    WHERE data_id = %s AND feature_id IN ({placeholders})
-    GROUP BY feature_id
+    SELECT f.id, latest.date
+    FROM (SELECT unnest(ARRAY[{placeholders}]) AS id) f
+    LEFT JOIN LATERAL (
+        SELECT date
+        FROM computed_features
+        WHERE feature_id = f.id AND data_id = %s
+        ORDER BY date DESC
+        LIMIT 1
+    ) latest ON true
     """
-    params: List[Any] = [data_id] + feature_ids
+    params: List[Any] = feature_ids + [data_id]
     with conn.cursor() as cur:
         cur.execute(query, params)
         rows = cur.fetchall()

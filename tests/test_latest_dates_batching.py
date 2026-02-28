@@ -41,20 +41,18 @@ def test_latest_dates_uses_single_batched_query():
     assert mock_cursor.execute.call_count == 1, \
         f"Expected 1 batched query, got {mock_cursor.execute.call_count} queries"
 
-    # Verify the query uses IN clause for batching
+    # Verify the query uses lateral join for chunk-efficient lookups
     query_args = mock_cursor.execute.call_args[0]
     query = query_args[0]
     params = query_args[1]
 
-    # Query should contain IN clause
-    assert "IN" in query.upper(), "Query should use IN clause for batching"
-
-    # Query should use placeholders for all feature IDs
+    # Query should use lateral join pattern
+    assert "LATERAL" in query.upper(), "Query should use LATERAL join"
     assert "%s" in query, "Query should use parameterized placeholders"
 
-    # Parameters should include data_id and all feature_ids
-    assert params[0] == 10, "First param should be data_id"
-    assert set(params[1:]) == set(feature_ids), "Remaining params should be feature_ids"
+    # Parameters: feature_ids first, then data_id
+    assert params[:3] == [1, 2, 3], "First params should be feature_ids"
+    assert params[3] == 10, "Last param should be data_id"
 
     # Result should contain all features
     assert len(result) == 3

@@ -10,9 +10,9 @@ COMMANDS_DIR = REPO_ROOT / ".claude" / "commands"
 
 
 class TestServicesCommand:
-    """Structural validation of the /services slash command."""
+    """Structural validation of the /g2-services slash command."""
 
-    command_path = COMMANDS_DIR / "services.md"
+    command_path = COMMANDS_DIR / "g2-services.md"
 
     def test_services_command_exists(self):
         """The services.md command file must exist."""
