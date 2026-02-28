@@ -1,7 +1,7 @@
 <!--
   Sync Impact Report
-  Version change: 1.5.0 → 1.6.0 (added Trace-Driven Development subsection)
-  Added sections: Trace-Driven Development (under IV. Observability)
+  Version change: 1.6.0 → 1.6.1 (added skill naming convention)
+  Added: g2- prefix requirement for Claude Code skills (under III. CLI-First)
   Templates requiring updates:
     - .specify/templates/plan-template.md ✅ (no changes needed)
     - .specify/templates/spec-template.md ✅ (no changes needed)
@@ -51,6 +51,7 @@ All functionality MUST be accessible through the `g2` CLI before any other inter
 - CLI commands MUST support both human-readable and JSON output formats
 - The MCP server wraps CLI commands for natural language access; it does not bypass them
 - New capabilities MUST be usable from the command line without requiring a UI or API
+- Claude Code skills (`.claude/commands/`) MUST be prefixed with `g2-` (e.g., `g2-services.md`) to namespace them from third-party skills
 
 ### IV. Observability
 
@@ -168,4 +169,4 @@ This constitution supersedes all ad-hoc practices. Amendments require:
 
 All code changes MUST comply with these principles. Complexity that violates a principle MUST be explicitly justified and documented.
 
-**Version**: 1.6.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28
+**Version**: 1.6.1 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28
