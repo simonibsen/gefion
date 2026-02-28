@@ -209,5 +209,69 @@ def test_model_artifact_path_convention():
     assert correct_path != wrong_path
 
 
+def test_predict_with_calibration():
+    """Predictions should have calibration shifts applied when calibration exists."""
+    import json
+
+    np.random.seed(42)
+    X_train = pd.DataFrame(np.random.randn(100, 3), columns=["f1", "f2", "f3"])
+    y_train = pd.Series(np.random.randn(100))
+
+    model_data = train_quantile_model(X_train, y_train)
+
+    # Save model to temp dir, then add calibration.json
+    with tempfile.TemporaryDirectory() as tmpdir:
+        artifact_path = Path(tmpdir) / "test_model"
+        save_model_artifact(model_data, artifact_path, metadata={"horizon_days": 7})
+
+        # Write calibration.json with known shifts
+        shifts = {"q10": 0.1, "q50": 0.05, "q90": -0.02}
+        cal_data = {"shifts": shifts, "calibrated_at": "2026-01-01T00:00:00"}
+        with open(artifact_path / "calibration.json", "w") as f:
+            json.dump(cal_data, f)
+
+        # Load model (should pick up calibration)
+        loaded = load_model_artifact(artifact_path)
+        assert "calibration" in loaded, "calibration key missing from loaded model"
+        assert loaded["calibration"]["shifts"] == shifts
+
+        # Generate predictions — should have shifts applied
+        X_test = pd.DataFrame(np.random.randn(5, 3), columns=["f1", "f2", "f3"])
+        raw_preds = predict_quantiles({**loaded, "calibration": None}, X_test)
+        calibrated_preds = predict_quantiles(loaded, X_test)
+
+        # q50 should be shifted up by 0.05
+        expected_q50 = raw_preds["q50"] + 0.05
+        np.testing.assert_allclose(calibrated_preds["q50"].values, expected_q50.values, atol=1e-10)
+
+        # Ordering must hold
+        assert (calibrated_preds["q10"] <= calibrated_preds["q50"]).all()
+        assert (calibrated_preds["q50"] <= calibrated_preds["q90"]).all()
+
+
+def test_predict_without_calibration():
+    """Predictions unchanged when no calibration exists."""
+    np.random.seed(42)
+    X_train = pd.DataFrame(np.random.randn(100, 3), columns=["f1", "f2", "f3"])
+    y_train = pd.Series(np.random.randn(100))
+
+    model_data = train_quantile_model(X_train, y_train)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        artifact_path = Path(tmpdir) / "test_model"
+        save_model_artifact(model_data, artifact_path, metadata={"horizon_days": 7})
+
+        loaded = load_model_artifact(artifact_path)
+        # No calibration.json exists
+        assert loaded.get("calibration") is None
+
+        X_test = pd.DataFrame(np.random.randn(5, 3), columns=["f1", "f2", "f3"])
+        preds = predict_quantiles(loaded, X_test)
+
+        # Should produce normal predictions without error
+        assert len(preds) == 5
+        assert "q10" in preds.columns
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

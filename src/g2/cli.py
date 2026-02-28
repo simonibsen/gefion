@@ -2346,6 +2346,217 @@ def ml_eval(
     )
 
 
+@ml_app.command("calibrate")
+def ml_calibrate(
+    model_name: str = typer.Option(..., help="Model name to calibrate"),
+    model_version: str = typer.Option(..., help="Model version"),
+    start_date: str = typer.Option(..., help="Calibration period start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(..., help="Calibration period end date (YYYY-MM-DD)"),
+    out_dir: Path = typer.Option(Path("models"), help="Directory containing model artifacts"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
+) -> None:
+    """
+    Calibrate a quantile model using conformal prediction.
+
+    Computes additive shift corrections from a holdout period so that
+    predicted quantiles achieve their nominal coverage rates (10%, 50%, 90%).
+
+    Saves calibration.json alongside each horizon's model artifacts.
+    Future predictions automatically apply calibration shifts.
+
+    Examples:
+        g2 ml calibrate --model-name quantile --model-version 20260202 \\
+            --start-date 2025-06-01 --end-date 2025-12-31
+
+        g2 ml calibrate --model-name nasdaq_xgb --model-version v1 \\
+            --start-date 2025-01-01 --end-date 2025-06-30 --json
+    """
+    import pandas as pd
+    from datetime import timedelta
+    from decimal import Decimal
+    from g2.ml.evaluation import calculate_calibration_metrics
+    from g2.ml.calibration import (
+        compute_calibration_shifts,
+        apply_calibration_shifts,
+        save_calibration,
+        generate_calibration_report,
+    )
+
+    with create_span("cli.ml-calibrate", model_name=model_name, model_version=model_version):
+        with db_connection(db_url) as conn:
+            # Fetch model metadata
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, dataset_id, artifact_uri
+                    FROM ml_models
+                    WHERE name = %s AND version = %s;
+                    """,
+                    (model_name, model_version),
+                )
+                row = cur.fetchone()
+                if not row:
+                    emit_error(f"Model not found: {model_name} {model_version}", json_output=json_output)
+                    return
+
+                model_id, dataset_id, artifact_uri = row[0], row[1], row[2]
+
+            # Get dataset horizons
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT horizons_days FROM ml_datasets WHERE id = %s;",
+                    (dataset_id,),
+                )
+                ds_row = cur.fetchone()
+                if not ds_row:
+                    emit_error(f"Dataset not found for model (id={dataset_id})", json_output=json_output)
+                    return
+                horizons = ds_row[0]
+
+            emit(
+                f"Calibrating {model_name} {model_version} using period {start_date} to {end_date}...",
+                json_output=json_output,
+            )
+
+            # Fetch stored predictions for calibration period
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT qp.data_id, qp.prediction_date, qp.horizon_days,
+                           qp.q10, qp.q50, qp.q90, s.symbol
+                    FROM quantile_predictions qp
+                    JOIN stocks s ON qp.data_id = s.id
+                    WHERE qp.model_id = %s
+                      AND qp.prediction_date >= %s
+                      AND qp.prediction_date <= %s
+                    ORDER BY qp.prediction_date, qp.data_id, qp.horizon_days;
+                    """,
+                    (model_id, start_date, end_date),
+                )
+                predictions_data = cur.fetchall()
+
+            if not predictions_data:
+                emit_error(
+                    f"No predictions found for calibration period {start_date} to {end_date}. "
+                    f"Run 'g2 ml predict' for this period first.",
+                    json_output=json_output,
+                )
+                return
+
+            predictions_df = pd.DataFrame(
+                predictions_data,
+                columns=["data_id", "prediction_date", "horizon_days", "q10", "q50", "q90", "symbol"],
+            )
+
+            emit(f"Found {len(predictions_df)} predictions", json_output=json_output)
+
+            # Calculate actual returns for each prediction
+            actual_returns = []
+            for _, row in predictions_df.iterrows():
+                data_id = row["data_id"]
+                pred_date = row["prediction_date"]
+                horizon = row["horizon_days"]
+                outcome_date = pred_date + timedelta(days=horizon)
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT date, close
+                        FROM stock_ohlcv
+                        WHERE data_id = %s AND date IN (%s, %s)
+                        ORDER BY date;
+                        """,
+                        (int(data_id), pred_date, outcome_date),
+                    )
+                    prices = cur.fetchall()
+
+                if len(prices) == 2:
+                    start_price = float(prices[0][1])
+                    end_price = float(prices[1][1])
+                    actual_returns.append((end_price - start_price) / start_price)
+                else:
+                    actual_returns.append(None)
+
+            predictions_df["actual_return"] = actual_returns
+            valid = predictions_df[predictions_df["actual_return"].notna()].copy()
+
+            if len(valid) == 0:
+                emit_error("No valid predictions with actual returns found", json_output=json_output)
+                return
+
+            emit(f"Valid predictions with actuals: {len(valid)}", json_output=json_output)
+
+            # Calibrate per horizon
+            shifts_by_horizon: Dict[int, Dict[str, Any]] = {}
+            all_horizons = sorted(valid["horizon_days"].unique())
+
+            for h in all_horizons:
+                h_data = valid[valid["horizon_days"] == h]
+                preds = h_data[["q10", "q50", "q90"]].astype(float)
+                actuals = h_data["actual_return"].astype(float)
+
+                # Before calibration metrics
+                before_metrics = calculate_calibration_metrics(preds, actuals)
+
+                # Compute shifts
+                shifts = compute_calibration_shifts(preds, actuals)
+
+                # After calibration metrics
+                calibrated_preds = apply_calibration_shifts(preds, shifts)
+                after_metrics = calculate_calibration_metrics(calibrated_preds, actuals)
+
+                # Save calibration.json to artifact directory
+                artifact_path = Path(f"{artifact_uri}_h{h}")
+                if artifact_path.exists():
+                    cal_metadata = {
+                        "calibration_period": {"start_date": start_date, "end_date": end_date},
+                        "num_samples": len(h_data),
+                        "before_metrics": before_metrics,
+                        "after_metrics": after_metrics,
+                    }
+                    save_calibration(shifts, artifact_path, cal_metadata)
+                    emit(f"Horizon {h}: saved calibration.json ({len(h_data)} samples)", json_output=json_output)
+                else:
+                    emit(f"Horizon {h}: artifact dir not found at {artifact_path}, skipping save", json_output=json_output)
+
+                shifts_by_horizon[int(h)] = {
+                    "shifts": shifts,
+                    "before": before_metrics,
+                    "after": after_metrics,
+                }
+
+            # Print report
+            report = generate_calibration_report(model_name, shifts_by_horizon)
+            emit(report, json_output=json_output)
+
+            # Update model metrics JSONB with calibrated flag
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE ml_models
+                    SET metrics = COALESCE(metrics, '{}'::jsonb) || %s
+                    WHERE id = %s;
+                    """,
+                    (Json({"calibrated": True, "calibration_period": f"{start_date} to {end_date}"}), model_id),
+                )
+            conn.commit()
+
+        if json_output:
+            emit(
+                "Calibration complete",
+                data={
+                    "model_name": model_name,
+                    "model_version": model_version,
+                    "horizons": list(shifts_by_horizon.keys()),
+                    "shifts_by_horizon": shifts_by_horizon,
+                },
+                json_output=json_output,
+            )
+        else:
+            emit(f"Calibration complete for {model_name} {model_version}")
+
+
 @ml_app.command("feature-importance")
 def ml_feature_importance(
     model_name: str = typer.Option(..., help="Model name"),
@@ -2421,6 +2632,7 @@ def ml_tune(
     n_trials: int = typer.Option(50, help="Number of optimization trials"),
     cv_splits: int = typer.Option(5, help="Number of time-series CV splits"),
     timeout: Optional[int] = typer.Option(None, help="Timeout in seconds"),
+    scoring: str = typer.Option("pinball", help="Scoring: pinball (default) or mae"),
     out_dir: Path = typer.Option(Path("models"), help="Output directory for results"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
 ) -> None:
@@ -2434,6 +2646,9 @@ def ml_tune(
         # Tune XGBoost quantile model with 50 trials
         g2 ml tune --dataset-name mvp --dataset-version v1 \\
           --algorithm xgboost --n-trials 50
+
+        # Tune with pinball loss scoring (default)
+        g2 ml tune --dataset-name mvp --dataset-version v1 --scoring pinball
 
         # Tune classifier with LightGBM
         g2 ml tune --dataset-name mvp --dataset-version v1 \\
@@ -2542,6 +2757,7 @@ def ml_tune(
                 cv_splits=cv_splits,
                 timeout=timeout,
                 progress_callback=progress_callback,
+                scoring=scoring,
             )
         else:
             result = tune_classifier(

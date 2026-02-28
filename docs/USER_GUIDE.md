@@ -130,6 +130,20 @@ g2 ml eval \
 
 Computes calibration metrics (q10/q50/q90 coverage, pinball loss, IQR), stores in `model_performance`, prints evaluation report.
 
+#### 5. Calibrate
+
+Apply conformal calibration to correct quantile coverage on a holdout period:
+
+```bash
+g2 ml calibrate \
+  --model-name mvp_model \
+  --model-version 20251214 \
+  --start-date 2024-06-01 \
+  --end-date 2024-12-01
+```
+
+Computes additive shift corrections so predicted quantiles achieve nominal coverage (10%, 50%, 90%). Saves `calibration.json` alongside model artifacts. Future predictions automatically apply the shifts.
+
 ## Setup
 1. Copy `.env.example` to `.env` and set:
    - `DATABASE_URL` (e.g., `postgresql://g2:g2pass@localhost:5432/g2`)

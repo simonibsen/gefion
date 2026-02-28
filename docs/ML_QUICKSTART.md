@@ -174,6 +174,29 @@ Horizon: 7 days
   Avg IQR:              0.0456
 ```
 
+### 5. Calibrate
+
+Apply conformal calibration to improve quantile coverage:
+
+```bash
+g2 ml calibrate \
+  --model-name quickstart_model \
+  --model-version $(date +%Y%m%d) \
+  --start-date 2024-06-01 \
+  --end-date 2024-12-31
+```
+
+**What happens:**
+- Uses a holdout period of historical predictions and actual returns
+- Computes additive shift corrections for each quantile (q10, q50, q90) per horizon
+- Saves `calibration.json` alongside model artifacts (e.g., `models/quickstart_model_YYYYMMDD_h7/calibration.json`)
+- Future predictions automatically apply the shifts so predicted quantiles achieve nominal coverage (10%, 50%, 90%)
+
+**When to calibrate:**
+- After evaluation shows poor calibration (e.g., q10 coverage far from 10%)
+- Use a holdout period that does not overlap with training data
+- Re-calibrate when retraining or when market regime changes
+
 ## Production Workflow
 
 ### Full Dataset (500 Symbols)

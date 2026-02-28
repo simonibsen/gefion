@@ -149,6 +149,7 @@ def tune_quantile_model(
     custom_space: Optional[Dict[str, Dict[str, Any]]] = None,
     timeout: Optional[int] = None,
     progress_callback: Optional[Callable[[int, int, float], None]] = None,
+    scoring: str = "pinball",
 ) -> Dict[str, Any]:
     """
     Tune hyperparameters for a quantile regression model.
@@ -166,9 +167,11 @@ def tune_quantile_model(
         timeout: Optional timeout in seconds
         progress_callback: Optional callback(trial_num, n_trials, best_value)
             called after each trial
+        scoring: Scoring strategy — "pinball" (default, quantile-appropriate)
+            or "mae" (legacy neg_mean_absolute_error).
 
     Returns:
-        Dict with best_params, best_score, n_trials, etc.
+        Dict with best_params, best_score, n_trials, scoring, etc.
     """
     with create_span(
         "ml.tune_quantile",
@@ -178,6 +181,7 @@ def tune_quantile_model(
         cv_splits=cv_splits,
         n_samples=len(X),
         n_features=X.shape[1] if hasattr(X, 'shape') else 0,
+        scoring=scoring,
     ):
         try:
             import optuna
@@ -194,6 +198,13 @@ def tune_quantile_model(
         imputer = SimpleImputer(strategy='median')
         X_imputed = imputer.fit_transform(X)
 
+        # Build scorer
+        if scoring == "pinball":
+            from g2.ml.calibration import create_pinball_loss_scorer
+            sklearn_scorer = create_pinball_loss_scorer(quantile)
+        else:
+            sklearn_scorer = "neg_mean_absolute_error"
+
         def objective(trial: optuna.Trial) -> float:
             params = _suggest_params(trial, search_space)
 
@@ -202,14 +213,13 @@ def tune_quantile_model(
                 return float('inf')
 
             try:
-                # Use negative pinball loss as score (sklearn convention)
                 scores = cross_val_score(
                     model, X_imputed, y,
                     cv=cv,
-                    scoring='neg_mean_absolute_error',
+                    scoring=sklearn_scorer,
                     n_jobs=1,
                 )
-                return -scores.mean()  # Minimize MAE
+                return -scores.mean()  # Minimize loss
             except Exception as e:
                 logger.warning(f"Trial failed: {e}")
                 return float('inf')
@@ -239,6 +249,7 @@ def tune_quantile_model(
             "algorithm": algorithm,
             "quantile": quantile,
             "cv_splits": cv_splits,
+            "scoring": scoring,
         }
 
 

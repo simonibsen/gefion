@@ -299,3 +299,38 @@ class TestSearchSpace:
 
         assert space["n_estimators"]["high"] == 100
         assert space["max_depth"]["high"] == 6
+
+
+class TestPinballScoring:
+    """Tests for pinball loss scoring in tuning."""
+
+    def test_tune_supports_pinball_scoring(self, tmp_path):
+        """tune_quantile_model should accept and use pinball scoring."""
+        try:
+            import optuna
+        except ImportError:
+            pytest.skip("Optuna not installed")
+
+        from g2.ml.tuning import tune_quantile_model
+
+        np.random.seed(42)
+        n_samples = 200
+        X = pd.DataFrame({
+            'feature_a': np.random.randn(n_samples),
+            'feature_b': np.random.randn(n_samples),
+        })
+        y = X['feature_a'] * 2 + np.random.randn(n_samples) * 0.5
+
+        # Should accept scoring="pinball" (the new default)
+        result = tune_quantile_model(
+            X=X,
+            y=y,
+            algorithm="sklearn",
+            n_trials=3,
+            quantile=0.5,
+            scoring="pinball",
+        )
+
+        assert "best_params" in result
+        assert "best_score" in result
+        assert result.get("scoring") == "pinball"
