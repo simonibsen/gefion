@@ -14,6 +14,17 @@ g2 ml eval --model-name quantile --model-version 20260202 \
   --start-date 2025-10-01 --end-date 2025-10-15
 ```
 
+## Claude Code Skills
+
+Three g2-prefixed skills:
+- `/g2` — Operator assistant (run pipelines, predict, explore, backtest, monitor). Uses MCP tools exclusively.
+- `/g2-dev` — Developer/PM assistant (status, next work, safe dev loop). Uses git, tests, spec-kit.
+- `/g2-services` — Start/stop infrastructure (PostgreSQL, Tempo, Grafana).
+
+The `/g2` operator skill and MCP RBAC (operator/developer roles) are complementary:
+- MCP RBAC controls tool access for external MCP clients (Claude Desktop, production)
+- Skills control behavior for Claude Code CLI sessions
+
 ## Spec-Kit Setup
 
 Initialized 2026-02-28 with `specify init --here --ai claude --force --no-git`.
