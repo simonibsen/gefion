@@ -50,13 +50,4 @@ if [[ "$AUTHOR_EMAIL" == *"anthropic.com"* ]]; then
     exit 1
 fi
 
-# Check commit message for Co-Authored-By: Claude
-COMMIT_MSG_FILE="$1"
-if grep -qi "Co-Authored-By:.*Claude" "$COMMIT_MSG_FILE"; then
-    echo "❌ Commit rejected: Commit message contains 'Co-Authored-By: Claude'"
-    echo ""
-    echo "Remove the Co-Authored-By line with Claude from your commit message"
-    exit 1
-fi
-
 exit 0
