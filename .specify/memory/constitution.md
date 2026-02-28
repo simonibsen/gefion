@@ -1,7 +1,7 @@
 <!--
   Sync Impact Report
-  Version change: 1.6.1 → 1.6.2 (clarify .specify/ is version-controlled)
-  Added: .specify/ version control requirement under Documentation Requirements
+  Version change: 1.6.2 → 1.7.0 (add MCP coverage requirement)
+  Added: MCP tool coverage requirement under CLI-First Interface (Section III)
   Templates requiring updates: none
   Follow-up TODOs: none
 -->
@@ -48,6 +48,7 @@ All functionality MUST be accessible through the `g2` CLI before any other inter
 - CLI commands MUST support both human-readable and JSON output formats
 - The MCP server wraps CLI commands for natural language access; it does not bypass them
 - New capabilities MUST be usable from the command line without requiring a UI or API
+- Major CLI commands MUST have corresponding MCP tool definitions to ensure natural language accessibility
 - Claude Code skills (`.claude/commands/`) MUST be prefixed with `g2-` (e.g., `g2-services.md`) to namespace them from third-party skills
 
 ### IV. Observability
@@ -167,4 +168,4 @@ This constitution supersedes all ad-hoc practices. Amendments require:
 
 All code changes MUST comply with these principles. Complexity that violates a principle MUST be explicitly justified and documented.
 
-**Version**: 1.6.2 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28
+**Version**: 1.7.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28

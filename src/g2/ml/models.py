@@ -531,12 +531,20 @@ def load_model_artifact(artifact_path: Path) -> Dict[str, Any]:
         models[q_key] = joblib.load(model_file)
         logger.info(f"Loaded {q_key} model from {model_file}")
 
+    # Load calibration if present
+    from g2.ml.calibration import load_calibration
+
+    calibration = load_calibration(artifact_path)
+    if calibration:
+        logger.info("Loaded calibration data (shifts: %s)", calibration.get("shifts", {}))
+
     return {
         "models": models,
         "feature_names": metadata["feature_names"],
         "quantiles": metadata["quantiles"],
         "algorithm": metadata["algorithm"],
-        "metadata": metadata
+        "metadata": metadata,
+        "calibration": calibration,
     }
 
 
@@ -586,11 +594,20 @@ def _predict_quantiles_impl(model_data: Dict[str, Any], X: pd.DataFrame) -> pd.D
         predictions[q_key] = model.predict(X_aligned)
         logger.debug(f"Generated {q_key} predictions: mean={predictions[q_key].mean():.4f}")
 
-    # Enforce quantile ordering: q10 <= q50 <= q90
-    if "q10" in predictions and "q50" in predictions:
-        predictions["q10"] = np.minimum(predictions["q10"], predictions["q50"])
-    if "q50" in predictions and "q90" in predictions:
-        predictions["q90"] = np.maximum(predictions["q50"], predictions["q90"])
+    # Apply calibration shifts if present
+    calibration = model_data.get("calibration")
+    if calibration and calibration.get("shifts"):
+        with create_span("ml.predict.apply_calibration", shifts=str(calibration["shifts"])):
+            from g2.ml.calibration import apply_calibration_shifts
+
+            predictions = apply_calibration_shifts(predictions, calibration["shifts"])
+            logger.info("Applied calibration shifts: %s", calibration["shifts"])
+    else:
+        # Enforce quantile ordering: q10 <= q50 <= q90
+        if "q10" in predictions and "q50" in predictions:
+            predictions["q10"] = np.minimum(predictions["q10"], predictions["q50"])
+        if "q50" in predictions and "q90" in predictions:
+            predictions["q90"] = np.maximum(predictions["q50"], predictions["q90"])
 
     logger.info(f"Generated predictions for {len(predictions)} samples")
 

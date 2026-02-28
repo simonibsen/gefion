@@ -382,6 +382,27 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="ml_calibrate",
+            description=(
+                "Calibrate a quantile model using conformal prediction. "
+                "Computes additive shift corrections from a holdout period so that "
+                "predicted quantiles achieve their nominal coverage rates (10%, 50%, 90%). "
+                "Saves calibration.json alongside model artifacts. "
+                "Future predictions automatically apply calibration shifts."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Model name to calibrate"},
+                    "model_version": {"type": "string", "description": "Model version to calibrate"},
+                    "start_date": {"type": "string", "description": "Calibration period start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "Calibration period end date (YYYY-MM-DD)"},
+                },
+                "required": ["model_name", "model_version", "start_date", "end_date"],
+            },
+        ),
+
+        Tool(
             name="ml_feature_importance",
             description=(
                 "Compute SHAP-based feature importance for a trained model. "
@@ -1432,6 +1453,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _ml_predict(arguments)
         elif name == "ml_eval":
             result = await _ml_eval(arguments)
+        elif name == "ml_calibrate":
+            result = await _ml_calibrate(arguments)
         elif name == "ml_feature_importance":
             result = await _ml_feature_importance(arguments)
         elif name == "ml_tune":
@@ -1677,6 +1700,20 @@ async def _ml_eval(args: Dict[str, Any]) -> Dict[str, Any]:
         '--model-version', args['model_version'],
         '--start-date', args['start_date'],
         '--end-date', args['end_date'],
+    ]
+
+    return await executor.run(*cmd)
+
+
+async def _ml_calibrate(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Calibrate a quantile model using conformal prediction."""
+    cmd = [
+        'ml', 'calibrate',
+        '--model-name', args['model_name'],
+        '--model-version', args['model_version'],
+        '--start-date', args['start_date'],
+        '--end-date', args['end_date'],
+        '--json',
     ]
 
     return await executor.run(*cmd)

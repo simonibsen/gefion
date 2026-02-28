@@ -8,29 +8,19 @@ Open work items extracted from NEXT_STEPS.md, ML_ROADMAP.md, PROGRESS.md, and NO
 
 ## Completed
 
+### ~~Model Calibration Improvements~~ ✅
+**Completed**: 2026-02-28 (branch: `siModelCalibration`)
+
+Implemented conformal calibration via `g2 ml calibrate`. Computes additive shift
+corrections from a holdout period so predicted quantiles achieve nominal coverage
+(10%, 50%, 90%). Saves `calibration.json` alongside model artifacts; future
+predictions automatically apply the shifts.
+
 ### ~~Standalone Feature Computation UI~~ ✅
 **Completed**: 2026-02-28 (branch: `standaloneFeatCompUI`)
 
 Added "Compute" tab to Features view with symbol input, feature selection,
 incremental/full mode, CLI preview, and background process execution.
-
----
-
-## Active / In Progress
-
-### Model Calibration Improvements
-**Source**: NOTES.md
-**Priority**: Medium
-
-Quantile model `quantile` v`20260202` evaluation (7-day horizon, 42 samples):
-- Q10 Calibration: 2.4% (target 10%) - poorly calibrated
-- Q50 Calibration: 26.2% (target 50%) - poorly calibrated
-- Q90 Calibration: 85.7% (target 90%) - reasonable
-- 80% Interval Coverage: 83.3% (target 80%) - good
-
-**Next steps**:
-- Generate more historical predictions for robust evaluation
-- Consider training with more data or tuning hyperparameters
 
 ---
 

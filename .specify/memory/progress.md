@@ -22,6 +22,7 @@
 - Quantile regression: q10/q50/q90 predictions for 7/30/90-day horizons
 - Trend classification: 5-class classifier (strong_down to strong_up)
 - Model ensembles: weighted averaging of multiple algorithms
+- Conformal calibration (`g2 ml calibrate`): additive shift corrections for nominal quantile coverage
 - Feature importance: SHAP-based analysis
 - Hyperparameter tuning: Bayesian optimization via Optuna
 - Warm-start retraining: 10-100x faster for XGBoost/LightGBM
