@@ -1,14 +1,11 @@
 <!--
   Sync Impact Report
-  Version change: 1.2.0 → 1.3.0 (added Consistent CLI Presentation principle)
-  Added principles: Consistent CLI Presentation (V)
-  Renumbered: Simplicity (V → VI)
-  Added sections: Documentation Requirements, Schema Governance
-  Modified principles: DB-First (added cross-reference to Schema Governance)
+  Version change: 1.3.0 → 1.4.0 (added Secrets Management section)
+  Added sections: Secrets Management
   Templates requiring updates:
-    - .specify/templates/plan-template.md ✅ (Constitution Check aligns)
+    - .specify/templates/plan-template.md ✅ (no changes needed)
     - .specify/templates/spec-template.md ✅ (no changes needed)
-    - .specify/templates/tasks-template.md ✅ (TDD order reflected)
+    - .specify/templates/tasks-template.md ✅ (no changes needed)
   Follow-up TODOs: none
 -->
 
@@ -133,6 +130,15 @@ The database schema is the backbone of g2. Because it controls data flow, featur
   - Registering new feature definitions or functions (these are data, not schema)
   - Read-only queries for exploration or analysis
 
+## Secrets Management
+
+Files containing secrets (API keys, database passwords, tokens) MUST NOT be committed to version control.
+
+- **`.env` files are gitignored**: `.env`, `.env.prod`, and any environment-specific env files MUST be listed in `.gitignore`
+- **Use `.env.example` for templates**: Tracked example files MUST contain placeholder values, never real credentials
+- **No secrets in code or config**: Secrets MUST be loaded from environment variables or `.env` files at runtime, never hardcoded in source files, docker-compose files, or other tracked configuration
+- **Review before committing**: Any new file that may contain secrets (env files, credential configs, key files) MUST be added to `.gitignore` before first commit
+
 ## Governance
 
 This constitution supersedes all ad-hoc practices. Amendments require:
@@ -144,4 +150,4 @@ This constitution supersedes all ad-hoc practices. Amendments require:
 
 All code changes MUST comply with these principles. Complexity that violates a principle MUST be explicitly justified and documented.
 
-**Version**: 1.3.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28
+**Version**: 1.4.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28
