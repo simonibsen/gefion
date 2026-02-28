@@ -21,6 +21,7 @@ models/
 # OS noise
 .DS_Store
 
-# Claude Code local settings (keep settings.json for shared hooks)
+# Claude Code — ignore user-specific state, track shared config and skills
 .claude/*
 !.claude/settings.json
+!.claude/commands/
