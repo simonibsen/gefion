@@ -6416,17 +6416,18 @@ def _update_all_impl(
         migrations_dir = package_dir / "sql" / "migrations"
 
         if migrations_dir.exists():
-            with db_connection(url) as conn:
-                pending = check_pending_migrations(conn, migrations_dir)
-                if pending:
-                    warning_msg = f"⚠️  Warning: {len(pending)} pending migration(s) detected. Database schema may be out of sync."
-                    if not json_output:
-                        emit(warning_msg)
-                        for m in pending:
-                            emit(f"  - {m['version']}_{m['name']}")
-                        emit("  Run 'g2 db-migrate' to apply migrations before proceeding.")
-                        emit("")
-                    set_attributes(main_span, pending_migrations=len(pending), migrations_warning=True)
+            with create_span("cli.check_migrations"):
+                with db_connection(url) as conn:
+                    pending = check_pending_migrations(conn, migrations_dir)
+                    if pending:
+                        warning_msg = f"⚠️  Warning: {len(pending)} pending migration(s) detected. Database schema may be out of sync."
+                        if not json_output:
+                            emit(warning_msg)
+                            for m in pending:
+                                emit(f"  - {m['version']}_{m['name']}")
+                            emit("  Run 'g2 db-migrate' to apply migrations before proceeding.")
+                            emit("")
+                        set_attributes(main_span, pending_migrations=len(pending), migrations_warning=True)
     except Exception:
         # Don't fail data-update if migration check fails
         pass
@@ -6522,8 +6523,10 @@ def _update_all_impl(
             target_date=str(target_date),
         ) as filter_span:
             with db_connection(db_url) as conn:
-                init_schema_tables(conn, ["stocks", "stock_ohlcv"])
-                price_symbols = filter_symbols_needing_update(conn, symbols, target_date)
+                with create_span("price_filter.schema_init"):
+                    init_schema_tables(conn, ["stocks", "stock_ohlcv"])
+                with create_span("price_filter.filter_symbols", symbol_count=len(symbols)):
+                    price_symbols = filter_symbols_needing_update(conn, symbols, target_date)
                 price_skipped = len(symbols) - len(price_symbols)
                 if price_skipped > 0 and not json_output:
                     emit(f"Skipped {price_skipped} up-to-date symbols, processing {len(price_symbols)} symbols for prices", json_output=False)

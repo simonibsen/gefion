@@ -150,13 +150,12 @@ def _compute_features_impl(
 
     # Step 1: Read active feature definitions
     current_span = get_current_span()
-    add_event(current_span, "fetch_feature_definitions_start")
-    feature_defs = _fetch_feature_definitions(
-        conn,
-        function_names=function_names,
-        feature_names=feature_names
-    )
-    add_event(current_span, "fetch_feature_definitions_complete", count=len(feature_defs))
+    with create_span("compute_features.fetch_definitions"):
+        feature_defs = _fetch_feature_definitions(
+            conn,
+            function_names=function_names,
+            feature_names=feature_names
+        )
     set_attributes(current_span, feature_count=len(feature_defs))
 
     if not feature_defs:
@@ -167,7 +166,8 @@ def _compute_features_impl(
     latest_by_feature: Dict[int, Optional[date]] = {}
     if incremental and not full_refresh:
         feature_ids = [f[0] for f in feature_defs]
-        latest_by_feature = _latest_dates_for_features(conn, data_id, feature_ids)
+        with create_span("compute_features.latest_dates", feature_count=len(feature_ids)):
+            latest_by_feature = _latest_dates_for_features(conn, data_id, feature_ids)
 
     # Step 2: Group by function_name
     grouped_by_function = _group_by_function_name(feature_defs)

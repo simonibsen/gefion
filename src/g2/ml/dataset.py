@@ -4,6 +4,8 @@ import csv
 from pathlib import Path
 from typing import Any, Dict, List
 
+from g2.observability import create_span
+
 
 def _write_to_file(
     data: List[Dict[str, Any]], path: Path, header: List[str], format: str = "csv"
@@ -67,6 +69,15 @@ def export_dataset_artifacts(
     Args:
         on_progress: Optional callback(message: str) for progress updates.
     """
+    n_symbols = len(manifest.get("symbols", []))
+    n_horizons = len(manifest.get("horizons", []))
+    with create_span("ml.dataset_export", symbols=n_symbols, horizons=n_horizons,
+                      format=manifest.get("format", "csv")):
+        _export_dataset_artifacts_impl(conn, manifest=manifest, out_dir=out_dir,
+                                        on_progress=on_progress)
+
+
+def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None):
     def emit_progress(msg: str) -> None:
         if on_progress:
             on_progress(msg)

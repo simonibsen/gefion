@@ -10,6 +10,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from g2.observability import create_span
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +35,13 @@ def compute_shap_importance(
         ImportError: If SHAP is not installed
         FileNotFoundError: If model file not found
     """
+    with create_span("ml.feature_importance", quantile=quantile, n_samples=X_sample.shape[0]):
+        return _compute_shap_importance_impl(model_path, X_sample, quantile)
+
+
+def _compute_shap_importance_impl(
+    model_path: Path, X_sample: pd.DataFrame, quantile: str,
+) -> Dict[str, float]:
     try:
         import shap
     except ImportError:
