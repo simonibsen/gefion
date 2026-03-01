@@ -1,6 +1,6 @@
 # g2 Project Status
 
-**Last Updated**: 2026-02-28
+**Last Updated**: 2026-03-01
 
 ## Current Capabilities
 
@@ -40,8 +40,13 @@
 - Claude Code skills: `/g2-dev` (development), `/g2` (operations), `/g2-services` (infrastructure)
 - Textual TUI (in development on `siUI` branch)
 
+### UI Error Feedback Loop
+- Errors logged to `~/.g2/ui_errors.jsonl` during UI sessions (background process failures, exceptions)
+- On `g2 ui` exit, prints error summary to stdout — visible to Claude Code for diagnosis
+- `g2.ui.errors` module: `log_ui_error()`, `read_session_errors()`, `clear_errors()`
+
 ### Testing
-- 1196 tests passing, 16 skipped
+- 1282 tests passing, 14 skipped
 - Database tests require `ENABLE_DB_TESTS=1`
 - Full suite: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest`
 

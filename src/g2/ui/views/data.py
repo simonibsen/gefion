@@ -187,11 +187,19 @@ def start_background_process(key: str, cmd: list, env: dict):
                 stderr = process.stderr.read()
                 if stderr:
                     state.error_message = stderr
+                from g2.ui.errors import log_ui_error
+                log_ui_error(
+                    source="background_process",
+                    message=state.error_message or f"Process exited with code {returncode}",
+                    context={"key": key, "returncode": returncode},
+                )
 
         except Exception as e:
             state.error_message = str(e)
             state.completed = True
             state.success = False
+            from g2.ui.errors import log_ui_error
+            log_ui_error(source="background_process", message=str(e), context={"key": key})
         finally:
             state.is_running = False
 

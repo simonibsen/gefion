@@ -1,6 +1,6 @@
 # g2 Backlog
 
-**Last Updated**: 2026-02-28
+**Last Updated**: 2026-03-01
 
 Open work items extracted from NEXT_STEPS.md, ML_ROADMAP.md, PROGRESS.md, and NOTES.md.
 
@@ -21,6 +21,14 @@ predictions automatically apply the shifts.
 
 Added "Compute" tab to Features view with symbol input, feature selection,
 incremental/full mode, CLI preview, and background process execution.
+
+### ~~UI Error Feedback Loop~~ ✅
+**Completed**: 2026-03-01
+
+Errors during UI sessions are logged to `~/.g2/ui_errors.jsonl`. When `g2 ui`
+exits, a summary is printed to stdout so Claude Code can see and diagnose
+failures. Hooks in `data.py` (background process failures) and `cli.py`
+(session start/end). Module: `g2.ui.errors`.
 
 ---
 

@@ -9666,6 +9666,9 @@ def launch_ui(
         import subprocess
         import sys
         from pathlib import Path
+        from datetime import datetime, timezone
+
+        from g2.ui.errors import clear_errors, read_session_errors
 
         # Find the app.py file
         ui_app = Path(__file__).parent / "ui" / "app.py"
@@ -9690,6 +9693,9 @@ def launch_ui(
         if no_browser:
             cmd.extend(["--server.headless", "true"])
 
+        session_start = datetime.now(timezone.utc)
+        clear_errors()
+
         try:
             subprocess.run(cmd, check=True)
         except KeyboardInterrupt:
@@ -9700,6 +9706,16 @@ def launch_ui(
         except FileNotFoundError:
             emit("Streamlit not installed. Install with: pip install 'g2[ui]'", error=True)
             raise typer.Exit(1)
+
+        # Print error summary if any errors were logged during the session
+        errors = read_session_errors(since=session_start)
+        if errors:
+            emit(f"\n--- UI Session Errors ({len(errors)}) ---")
+            for err in errors:
+                emit(f"  ({err['source']}) {err['message']}")
+                if err.get("context"):
+                    for k, v in err["context"].items():
+                        emit(f"    {k}: {v}")
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper

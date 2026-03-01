@@ -107,6 +107,11 @@ class TestUIStructure:
         content = (ui_dir / "views" / "data.py").read_text()
         assert "def render_data(" in content
 
+    def test_data_logs_background_process_errors(self, ui_dir):
+        """Data view should log errors via log_ui_error when background process fails."""
+        content = (ui_dir / "views" / "data.py").read_text()
+        assert "log_ui_error" in content, "data.py should call log_ui_error on failure"
+
     def test_ml_has_render_function(self, ui_dir):
         """ML view should have render_ml function."""
         content = (ui_dir / "views" / "ml.py").read_text()
@@ -158,6 +163,16 @@ class TestUIStructure:
         content = (ui_dir / "views" / "ml.py").read_text()
         # Should check if dataset exists and show warning
         assert "already exists" in content.lower(), "Should warn about overwriting"
+
+    def test_ui_errors_module_exists(self, ui_dir):
+        """UI errors module should exist with error logging functions."""
+        errors_file = ui_dir / "errors.py"
+        assert errors_file.exists(), "ui/errors.py not found"
+
+        content = errors_file.read_text()
+        assert "def log_ui_error(" in content
+        assert "def read_session_errors(" in content
+        assert "def clear_errors(" in content
 
     def test_backtest_has_render_function(self, ui_dir):
         """Backtest view should have render_backtest function."""
@@ -243,6 +258,50 @@ class TestUILaunchCommand:
         result = runner.invoke(app, ["ui", "--help"])
 
         assert "g2 ui" in result.output
+
+    def test_launch_ui_prints_error_summary(self, tmp_path):
+        """launch_ui should print error summary when errors were logged during session."""
+        from g2.cli import app
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+
+        error_file = tmp_path / "ui_errors.jsonl"
+
+        def mock_subprocess_run(cmd, **kwargs):
+            """Simulate UI run that logs errors."""
+            import json
+            from datetime import datetime, timezone
+            entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source": "background_process",
+                "message": "Process exited with code 1",
+                "context": {"key": "data_update", "returncode": 1},
+            }
+            error_file.write_text(json.dumps(entry) + "\n")
+
+        runner = CliRunner()
+        with patch("g2.ui.errors._error_file", return_value=error_file):
+            with patch("subprocess.run", side_effect=mock_subprocess_run):
+                result = runner.invoke(app, ["ui"])
+
+        assert "UI Session Errors" in result.output
+        assert "(background_process)" in result.output
+        assert "Process exited with code 1" in result.output
+
+    def test_launch_ui_no_summary_when_no_errors(self, tmp_path):
+        """launch_ui should not print summary when no errors occurred."""
+        from g2.cli import app
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+
+        error_file = tmp_path / "ui_errors.jsonl"
+
+        runner = CliRunner()
+        with patch("g2.ui.errors._error_file", return_value=error_file):
+            with patch("subprocess.run"):
+                result = runner.invoke(app, ["ui"])
+
+        assert "UI Session Errors" not in result.output
 
 
 class TestDatabaseHelperStructure:
