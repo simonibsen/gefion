@@ -853,6 +853,116 @@ class TestExperimentsUIQuery:
         assert "def render_list_section(" in content
 
 
+class TestActionDashboard:
+    """Test the Action Dashboard (formerly AI Prompts page)."""
+
+    @pytest.fixture
+    def ui_dir(self):
+        """Get the UI source directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+
+    def test_assistant_has_check_conditions_function(self, ui_dir):
+        """Assistant should have check_conditions function for evaluating system state."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "def check_conditions(" in content
+
+    def test_assistant_has_free_form_command_entry(self, ui_dir):
+        """Assistant should have text_input for natural language and CLI commands."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "st.text_input(" in content
+        assert "freeform" in content
+
+    def test_assistant_has_mcp_tool_mapping(self, ui_dir):
+        """Assistant should map MCP tool names to CLI commands."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "MCP_TOOL_MAP" in content
+        # Should include key MCP tools
+        assert "data_update" in content
+        assert "ml_train" in content
+        assert "system_status" in content
+
+    def test_assistant_has_parse_input_function(self, ui_dir):
+        """Assistant should parse both MCP tool names and CLI commands."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "def parse_command_input(" in content
+
+    def test_assistant_has_ai_prompt_mode(self, ui_dir):
+        """Assistant should support sending natural language to Claude via claude -p."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # Should use claude CLI for AI prompts
+        assert "claude" in content
+        assert "--print" in content or '"-p"' in content
+        # Should have operator context so LLM doesn't do dev operations
+        assert "append-system-prompt" in content
+        # Should restrict to MCP tools only
+        assert "allowed-tools" in content or "allowedTools" in content
+
+    def test_assistant_uses_background_process(self, ui_dir):
+        """Assistant should import and use background process infrastructure."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "start_background_process" in content
+        assert "render_process_status" in content
+
+    def test_assistant_handles_parse_errors(self, ui_dir):
+        """Assistant should show parse errors to user, not silently swallow them."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "st.error(" in content
+
+    def test_assistant_logs_condition_check_failures(self, ui_dir):
+        """Condition check failures should be logged, not silently swallowed."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "import logging" in content
+        assert "logger" in content
+
+    def test_assistant_shows_cli_commands(self, ui_dir):
+        """Assistant should show equivalent CLI commands with st.code."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert 'st.code(' in content
+        assert 'language="bash"' in content
+
+    def test_assistant_has_action_cards(self, ui_dir):
+        """Assistant should have render_action_card function for displaying actions."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "def render_action_card(" in content
+
+    def test_assistant_has_cached_conditions(self, ui_dir):
+        """Assistant should use @st.cache_data for condition queries."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "@st.cache_data" in content
+        assert "def check_conditions(" in content
+
+    def test_assistant_builds_action_list(self, ui_dir):
+        """Assistant should build a list of actions and always show at least 4."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "def build_actions(" in content
+        # Should have proactive suggestions, not just problem-detection
+        assert "proactive" in content.lower() or "Proactive" in content
+
+    def test_assistant_actions_have_reasoning(self, ui_dir):
+        """Each action card should include reasoning for why it's recommended."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "reason" in content.lower()
+        # render_action_card should accept a reason parameter
+        assert "reason" in content
+
+    def test_assistant_has_freeform_output_renderer(self, ui_dir):
+        """Assistant should have render_freeform_output for plain-text display.
+
+        The freeform section (Ask AI / Run Command) should NOT use
+        render_process_status — that shows data-update metrics (progress,
+        inserted, errors, ETA) which don't apply to AI prompts or general
+        CLI output. Instead, render_freeform_output shows plain text.
+        """
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # Must have the dedicated renderer
+        assert "def render_freeform_output(" in content
+        # Freeform section must call it (not render_process_status)
+        # The function should use st.markdown for plain text output
+        assert "st.markdown(" in content
+        # Should store mode in session state for renderer to use
+        assert "freeform_mode" in content
+
+
 class TestMLAdvancedFeatures:
     """Test ML view advanced features."""
 
