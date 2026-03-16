@@ -5,6 +5,7 @@ import streamlit as st
 import sys
 import os
 import shlex
+import time
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 from datetime import date
@@ -573,6 +574,11 @@ def render_freeform_output(key: str, mode: str):
             clear_process_state(key)
             st.rerun()
 
+    # Auto-refresh while running so output streams to the user
+    if state.is_running:
+        time.sleep(1.5)
+        st.rerun()
+
 
 def render_assistant():
     """Render the Action Dashboard."""
@@ -627,12 +633,16 @@ def render_assistant():
     if freeform_state.is_running or freeform_state.completed:
         freeform_mode = st.session_state.get("freeform_mode", "cli")
         render_freeform_output("freeform_cmd", freeform_mode)
-    elif st.button(
+
+    if not freeform_state.is_running and st.button(
         "▶ Run", type="primary", disabled=not cmd_args, key="freeform_run"
     ):
+        clear_process_state("freeform_cmd")
         st.session_state["freeform_mode"] = mode
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
+        # Remove CLAUDECODE so claude -p can run (it refuses nested sessions)
+        env.pop("CLAUDECODE", None)
         start_background_process("freeform_cmd", cmd_args, env)
         st.rerun()
 

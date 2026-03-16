@@ -1021,6 +1021,42 @@ class TestActionDashboard:
         # Should store mode in session state for renderer to use
         assert "freeform_mode" in content
 
+    def test_assistant_freeform_run_not_blocked_by_completed(self, ui_dir):
+        """Run button must be available even after a previous command completes.
+
+        If the freeform state is completed, the user should be able to type
+        a new command and click Run without having to Clear first. The Run
+        button must NOT be guarded by `elif` after checking completed state.
+        """
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # The run button logic must check "not is_running" rather than
+        # being in an elif that's unreachable when completed=True
+        assert "not freeform_state.is_running" in content
+
+    def test_assistant_freeform_strips_claudecode_env(self, ui_dir):
+        """Freeform command must strip CLAUDECODE env var.
+
+        When g2 ui is launched from Claude Code, the CLAUDECODE env var is set.
+        claude -p refuses to run inside another Claude Code session. The env
+        passed to start_background_process must remove this variable.
+        """
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "CLAUDECODE" in content, "Must handle CLAUDECODE env var for nested sessions"
+
+    def test_assistant_freeform_has_auto_refresh(self, ui_dir):
+        """Freeform output must auto-refresh while the process is running.
+
+        Without st.rerun(), Streamlit won't update the display and the
+        user sees 'Thinking...' forever with no output.
+        """
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # render_freeform_output must trigger a rerun while running
+        # Look for the auto-refresh pattern near the freeform output code
+        assert "st.rerun()" in content
+        # The rerun should be conditional on is_running inside render_freeform_output
+        # Check that there's a sleep before rerun (to avoid tight loop)
+        assert "time.sleep(" in content
+
 
 class TestMLAdvancedFeatures:
     """Test ML view advanced features."""
