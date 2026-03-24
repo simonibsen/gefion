@@ -29,6 +29,7 @@ class ProcessState:
     writer_workers: Optional[int] = None
     mode: str = ""
     output_lines: List[str] = field(default_factory=list)
+    work_events: List[str] = field(default_factory=list)
     error_message: str = ""
     completed: bool = False
     success: bool = False
@@ -127,6 +128,18 @@ def start_background_process(key: str, cmd: list, env: dict):
     state.phase = ""
     state.last_ok = ""
 
+    def read_stderr(process, state):
+        """Read stderr in a background thread, storing lines as work_events."""
+        try:
+            for line in process.stderr:
+                line = line.strip()
+                if line:
+                    state.work_events.append(line)
+                    if len(state.work_events) > 200:
+                        state.work_events.pop(0)
+        except Exception:
+            pass
+
     def run_in_thread():
         try:
             process = subprocess.Popen(
@@ -138,6 +151,12 @@ def start_background_process(key: str, cmd: list, env: dict):
                 env=env,
             )
             state.process = process
+
+            # Start stderr reader thread
+            stderr_thread = threading.Thread(
+                target=read_stderr, args=(process, state), daemon=True
+            )
+            stderr_thread.start()
 
             # Read output line by line
             for line in process.stdout:
@@ -181,12 +200,14 @@ def start_background_process(key: str, cmd: list, env: dict):
                     pass
 
             returncode = process.wait()
+            stderr_thread.join(timeout=2)
             state.completed = True
             state.success = returncode == 0
             if returncode != 0:
-                stderr = process.stderr.read()
-                if stderr:
-                    state.error_message = stderr
+                # stderr was captured by the reader thread into work_events
+                stderr_text = "\n".join(state.work_events[-10:]) if state.work_events else ""
+                if stderr_text:
+                    state.error_message = stderr_text
                 from g2.ui.errors import log_ui_error
                 log_ui_error(
                     source="background_process",
@@ -408,7 +429,7 @@ def render_update_section():
         cli_parts.append("--refresh")
     st.code(" ".join(cli_parts), language="bash")
 
-    if st.button("🚀 Start Update", type="primary", use_container_width=True):
+    if st.button("🚀 Start Update", type="primary"):
         # Build command
         cmd = [sys.executable, "-m", "g2.cli", "data-update", "--json"]
         cmd.extend(["--exchange", exchange])
@@ -437,7 +458,7 @@ def render_update_section():
         help="Enter a symbol to fetch prices and compute features",
     )
 
-    if st.button("Update Symbol", use_container_width=True) and symbol:
+    if st.button("Update Symbol") and symbol:
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
@@ -567,7 +588,7 @@ def render_status_section():
     """Render data status section."""
     st.subheader("Data Status")
 
-    if st.button("🔄 Refresh Status", use_container_width=True):
+    if st.button("🔄 Refresh Status"):
         # Clear caches and rerun
         from g2.ui.components.status import get_system_stats, get_latest_data_date
         get_system_stats.clear()
@@ -897,14 +918,14 @@ def render_backup_section():
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("📊 Estimate Size", use_container_width=True):
+        if st.button("📊 Estimate Size"):
             if not backup_path:
                 st.error("Please specify an output directory")
             else:
                 _run_backup(backup_path, data_types, symbols, start_date, end_date, incremental, compress, dry_run=True)
 
     with col2:
-        if st.button("💾 Create Backup", type="primary", use_container_width=True):
+        if st.button("💾 Create Backup", type="primary"):
             if not backup_path:
                 st.error("Please specify an output directory")
             else:
@@ -1029,7 +1050,7 @@ def render_restore_section():
 
     st.code(" ".join(cli_parts), language="bash")
 
-    if st.button("📥 Restore Backup", type="primary", use_container_width=True):
+    if st.button("📥 Restore Backup", type="primary"):
         if not restore_path:
             st.error("Please specify the backup directory")
         else:

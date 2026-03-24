@@ -36,13 +36,13 @@ st.markdown("""
 # Page options
 PAGES = [
     "🏠 Dashboard",
+    "🤖 AI Actions",
     "📁 Data Management",
     "🔧 Features",
     "🧠 ML Pipeline",
     "📈 Backtesting",
     "🧪 Experiments",
     "📊 Charts",
-    "🤖 AI Prompts",
     "📚 Documentation",
     "⚙️ Settings",
 ]
@@ -70,7 +70,6 @@ def main():
             if st.button(
                 page,
                 key=f"nav_{page}",
-                use_container_width=True,
                 type="primary" if is_current else "secondary",
             ):
                 st.session_state.current_page = page
@@ -88,7 +87,7 @@ def main():
     elif current_page == "📊 Charts":
         from g2.ui.views.charts import render_charts
         render_charts()
-    elif current_page == "🤖 AI Prompts":
+    elif current_page == "🤖 AI Actions":
         from g2.ui.views.assistant import render_assistant
         render_assistant()
     elif current_page == "📁 Data Management":

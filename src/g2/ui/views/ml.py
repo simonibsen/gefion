@@ -1153,7 +1153,7 @@ def render_train_section():
             if hyperparams:
                 st.info(f"Custom hyperparameters: {hyperparams}")
 
-    if st.button("🎯 Train Model", type="primary", use_container_width=True):
+    if st.button("🎯 Train Model", type="primary"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
@@ -1964,7 +1964,7 @@ def render_predict_section():
                 key="pred_limit",
             )
 
-    if st.button("🔮 Generate Predictions", type="primary", use_container_width=True):
+    if st.button("🔮 Generate Predictions", type="primary"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
@@ -2258,7 +2258,7 @@ def render_evaluate_section():
             key="eval_start",
         )
 
-    if st.button("📊 Evaluate", type="primary", use_container_width=True):
+    if st.button("📊 Evaluate", type="primary"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output

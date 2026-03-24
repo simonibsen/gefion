@@ -1,5 +1,6 @@
-"""Action Dashboard — context-aware operations center."""
+"""AI Actions — context-aware operations center with conversation history."""
 
+import json
 import logging
 import streamlit as st
 import sys
@@ -12,6 +13,8 @@ from datetime import date
 
 logger = logging.getLogger(__name__)
 
+from g2.ui.history import append_exchange, read_exchanges, clear_history
+from g2.ui.errors import read_session_errors
 from g2.ui.views.data import (
     start_background_process,
     render_process_status,
@@ -24,8 +27,8 @@ from g2.ui.views.data import (
 # MCP tool name -> (CLI command prefix, description)
 MCP_TOOL_MAP = {
     "data_update": ("data-update", "Update prices and features"),
-    "system_status": ("system-status", "System health check"),
-    "health_check": ("health-check", "Infrastructure health check"),
+    "system_status": ("health", "System health check"),
+    "health_check": ("health", "Infrastructure health check"),
     "ml_dataset_build": ("ml dataset-build", "Build ML dataset"),
     "ml_dataset_inspect": ("ml dataset-inspect", "Inspect dataset"),
     "ml_train": ("ml train", "Train quantile model"),
@@ -40,17 +43,17 @@ MCP_TOOL_MAP = {
     "ml_e2e_test": ("ml e2e-test", "End-to-end ML test"),
     "ml_calibrate": ("ml calibrate", "Calibrate model"),
     "feature_compute": ("feat-compute", "Compute features"),
-    "features_list": ("feat-list", "List features"),
-    "feature_show": ("feat-show", "Show feature details"),
-    "feature_functions_list": ("feat-functions", "List feature functions"),
-    "feature_definitions_export": ("feat-export-definitions", "Export definitions"),
-    "feature_definitions_import": ("feat-import-definitions", "Import definitions"),
-    "feature_functions_export": ("feat-export-functions", "Export functions"),
-    "feature_functions_import": ("feat-import-functions", "Import functions"),
+    "features_list": ("feat-def-list", "List features"),
+    "feature_show": ("feat-def-show", "Show feature details"),
+    "feature_functions_list": ("feat-fx-list", "List feature functions"),
+    "feature_definitions_export": ("feat-def-export", "Export definitions"),
+    "feature_definitions_import": ("feat-def-import", "Import definitions"),
+    "feature_functions_export": ("feat-fx-export", "Export functions"),
+    "feature_functions_import": ("feat-fx-import", "Import functions"),
     "cross_sectional_compute": ("cross-sectional-compute", "Compute rankings"),
     "backtest_run": ("backtest run", "Run backtest"),
     "backtest_compare": ("backtest compare", "Compare strategies"),
-    "volatility_compute": ("volatility-compute", "Compute volatility"),
+    "volatility_compute": ("volatility compute", "Compute volatility"),
     "strategy_list": ("strategy list", "List strategies"),
     "strategy_configs": ("strategy configs", "List strategy configs"),
     "strategy_create_config": ("strategy create-config", "Create strategy config"),
@@ -64,7 +67,6 @@ MCP_TOOL_MAP = {
     "chart_features": ("chart features", "Feature chart"),
     "backup": ("backup", "Backup data"),
     "restore": ("restore", "Restore data"),
-    "query_database": ("query", "Run SQL query"),
 }
 
 # MCP param name -> CLI flag (snake_case to kebab-case)
@@ -81,6 +83,62 @@ UI_OPERATOR_PROMPT = (
     "and system operations using the available MCP tools. "
     "Keep responses concise and actionable."
 )
+
+
+def parse_stream_event(line: str) -> Optional[dict]:
+    """Parse a stream-json event line from claude -p stderr.
+
+    Returns a dict with 'type' and relevant fields, or None if not parseable.
+    Event types: 'tool_use', 'text', 'result', 'init', 'other'.
+    """
+    try:
+        data = json.loads(line.strip())
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    event_type = data.get("type", "")
+
+    if event_type == "assistant":
+        message = data.get("message", {})
+        for content in message.get("content", []):
+            ct = content.get("type", "")
+            if ct == "tool_use":
+                tool_name = content.get("name", "unknown")
+                tool_input = content.get("input", {})
+                # Summarize input (first 150 chars of JSON)
+                input_summary = json.dumps(tool_input)
+                if len(input_summary) > 150:
+                    input_summary = input_summary[:150] + "..."
+                return {
+                    "type": "tool_use",
+                    "tool": tool_name,
+                    "input": input_summary,
+                }
+            elif ct == "text":
+                return {"type": "text", "text": content.get("text", "")}
+        return None
+
+    if event_type == "tool_result":
+        return {
+            "type": "tool_result",
+            "content": json.dumps(data.get("content", ""))[:200],
+        }
+
+    if event_type == "result":
+        return {
+            "type": "result",
+            "result": data.get("result", ""),
+            "duration_ms": data.get("duration_ms", 0),
+            "cost_usd": data.get("total_cost_usd", 0),
+        }
+
+    if event_type == "system":
+        return {"type": "init"}
+
+    return None
 
 
 def _is_command(text: str) -> bool:
@@ -116,14 +174,19 @@ def parse_command_input(text: str) -> Tuple[List[str], str, str]:
     if not text:
         return [], "", ""
 
-    # Natural language -> route to claude -p
+    # Natural language -> route to claude -p with stream-json for transparency
     if not _is_command(text):
         cmd = [
             "claude",
             "-p", text,
             "--append-system-prompt", UI_OPERATOR_PROMPT,
             "--allowedTools", "mcp__g2__*",
+            "--output-format", "stream-json",
+            "--verbose",
         ]
+        # Continue previous AI session for multi-turn context
+        if st.session_state.get("ai_session_active"):
+            cmd.append("--continue")
         return cmd, text, "ai"
 
     # Try to parse as MCP tool name or CLI command
@@ -475,7 +538,7 @@ def build_actions(conditions: SystemConditions) -> List[Action]:
                 "gaps or issues."
             ),
             priority="low",
-            cli_cmd="g2 system-status",
+            cli_cmd="g2 health",
             process_key="action_status",
         ))
 
@@ -556,9 +619,60 @@ def render_freeform_output(key: str, mode: str):
         st_state = "error"
 
     with st.status(label, expanded=True, state=st_state):
-        output_lines = getattr(state, 'output_lines', [])
-        if output_lines:
-            st.markdown("\n".join(output_lines))
+        # For AI mode, parse stream-json events to show response
+        if mode == "ai":
+            # Try stderr (work_events) first, fall back to stdout (output_lines)
+            all_events = getattr(state, 'work_events', []) or getattr(state, 'output_lines', [])
+            response_text = ""
+            tool_calls = []
+            for evt_line in all_events:
+                evt = parse_stream_event(evt_line)
+                if evt and evt["type"] == "result":
+                    response_text = evt.get("result", "")
+                elif evt and evt["type"] == "text" and not response_text:
+                    response_text += evt.get("text", "")
+                elif evt and evt["type"] in ("tool_use", "tool_result"):
+                    tool_calls.append(evt)
+            if response_text:
+                st.markdown(response_text)
+            elif state.is_running:
+                st.markdown("*Waiting for response...*")
+
+            # Work section — nested inside the status block
+            # Group consecutive same-tool calls together
+            if tool_calls or state.is_running:
+                tool_use_count = sum(1 for tc in tool_calls if tc["type"] == "tool_use")
+                work_label = f"Work ({tool_use_count} tool calls)" if tool_use_count else "Work"
+                with st.expander(work_label, expanded=state.is_running):
+                    if not tool_calls and state.is_running:
+                        st.markdown("*Waiting for tool calls...*")
+                    # Group tool_use events by consecutive runs of the same tool
+                    groups = []
+                    for tc in tool_calls:
+                        if tc["type"] == "tool_use":
+                            tool_name = tc["tool"]
+                            if tool_name.startswith("mcp__g2__"):
+                                tool_name = tool_name[len("mcp__g2__"):]
+                            if groups and groups[-1]["tool"] == tool_name:
+                                groups[-1]["calls"].append(tc)
+                            else:
+                                groups.append({"tool": tool_name, "calls": [tc]})
+                        elif tc["type"] == "tool_result" and groups:
+                            groups[-1].setdefault("results", []).append(tc)
+                    for group in groups:
+                        count = len(group["calls"])
+                        if count > 1:
+                            st.markdown(f"🔧 **{group['tool']}** ({count} calls)")
+                        else:
+                            st.markdown(f"🔧 **{group['tool']}**")
+                        for call in group["calls"]:
+                            if call["input"] and call["input"] != "{}":
+                                st.code(call["input"], language="json")
+                        st.markdown("---")
+        else:
+            output_lines = getattr(state, 'output_lines', [])
+            if output_lines:
+                st.markdown("\n".join(output_lines))
 
         if state.error_message:
             st.error(state.error_message)
@@ -581,38 +695,34 @@ def render_freeform_output(key: str, mode: str):
 
 
 def render_assistant():
-    """Render the Action Dashboard."""
-    st.title("Action Dashboard")
-    st.markdown("Recommended actions based on current system state.")
+    """Render the AI Actions page."""
+    st.title("AI Actions")
+    st.markdown("Run commands, ask questions, and explore your data.")
 
-    # --- Section 1: System conditions -> Action cards ---
-    conditions = check_conditions()
+    # --- Session errors indicator ---
+    session_errors = read_session_errors()
+    if session_errors:
+        with st.expander(f"Errors ({len(session_errors)})", expanded=False):
+            for err in session_errors:
+                ts = err.get("timestamp", "")[:19]
+                source = err.get("source", "unknown")
+                msg = err.get("message", "")
+                st.error(f"**[{ts}] {source}**: {msg[:300]}")
 
-    if conditions:
-        actions = build_actions(conditions)
-
-        if actions:
-            for action in actions:
-                render_action_card(action)
-        else:
-            st.success("All systems healthy — no actions needed.")
-    else:
-        st.warning("Could not check system conditions. Is the database running?")
-
-    st.markdown("---")
-
-    # --- Section 2: Free-form prompt / command entry ---
+    # --- Section 1: Prompt entry + conversation history ---
     st.subheader("Ask AI / Run Command")
     st.caption(
         "Type a natural language request (routed to Claude with g2 MCP tools) "
         "or a direct command (e.g. `g2 data-update --exchange NASDAQ`)."
     )
 
-    cmd_input = st.text_input(
-        "Prompt or command",
-        placeholder="Which stocks had the biggest moves this week?",
-        key="freeform_cmd",
-    )
+    with st.form("freeform_form", clear_on_submit=False):
+        cmd_input = st.text_input(
+            "Prompt or command",
+            placeholder="Which stocks had the biggest moves this week?",
+            key="freeform_cmd",
+        )
+        submitted = st.form_submit_button("▶ Run", type="primary")
 
     cmd_args: List[str] = []
     display_cmd = ""
@@ -634,11 +744,41 @@ def render_assistant():
         freeform_mode = st.session_state.get("freeform_mode", "cli")
         render_freeform_output("freeform_cmd", freeform_mode)
 
-    if not freeform_state.is_running and st.button(
-        "▶ Run", type="primary", disabled=not cmd_args, key="freeform_run"
-    ):
+    # Save completed exchange to history (once per completion)
+    if freeform_state.completed and not st.session_state.get("freeform_saved"):
+        prompt_text = st.session_state.get("freeform_prompt", "")
+        freeform_mode = st.session_state.get("freeform_mode", "cli")
+        # For AI mode, extract response from stream-json events
+        if freeform_mode == "ai":
+            all_events = (
+                getattr(freeform_state, "work_events", [])
+                or getattr(freeform_state, "output_lines", [])
+            )
+            response_text = ""
+            for evt_line in all_events:
+                evt = parse_stream_event(evt_line)
+                if evt and evt["type"] == "result":
+                    response_text = evt.get("result", "")
+        else:
+            output_lines = getattr(freeform_state, "output_lines", [])
+            response_text = "\n".join(output_lines) if output_lines else ""
+        append_exchange(
+            prompt=prompt_text,
+            mode=freeform_mode,
+            response=response_text,
+            success=freeform_state.success,
+            duration_sec=0.0,
+        )
+        st.session_state["freeform_saved"] = True
+        # Mark AI session as active so subsequent prompts use --continue
+        if freeform_mode == "ai" and freeform_state.success:
+            st.session_state["ai_session_active"] = True
+
+    if submitted and cmd_args and not freeform_state.is_running:
         clear_process_state("freeform_cmd")
         st.session_state["freeform_mode"] = mode
+        st.session_state["freeform_prompt"] = cmd_input
+        st.session_state["freeform_saved"] = False
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
         # Remove CLAUDECODE so claude -p can run (it refuses nested sessions)
@@ -646,10 +786,45 @@ def render_assistant():
         start_background_process("freeform_cmd", cmd_args, env)
         st.rerun()
 
+    # Render conversation history (nested: History expander > individual exchanges)
+    history = read_exchanges()
+    if history:
+        with st.expander(f"History ({len(history)} exchanges)", expanded=False):
+            if st.button("Clear History", key="clear_history_btn"):
+                clear_history()
+                st.session_state["ai_session_active"] = False
+                st.rerun()
+            for i, ex in enumerate(reversed(history)):
+                status = "✓" if ex.get("success", True) else "✗"
+                prompt_preview = ex["prompt"][:80]
+                with st.expander(f"{status} {prompt_preview}", expanded=(i == 0)):
+                    st.markdown(f"**Prompt:** {ex['prompt']}")
+                    if ex.get("success", True):
+                        st.markdown(ex.get("response", ""))
+                    else:
+                        st.error(ex.get("response", "Command failed"))
+
     # MCP tool reference
     with st.expander("Available MCP Tools"):
         for tool_name, (_, desc) in sorted(MCP_TOOL_MAP.items()):
             st.markdown(f"- `{tool_name}` — {desc}")
+
+    st.markdown("---")
+
+    # --- Section 2: System conditions -> Action cards ---
+    st.subheader("Suggested Actions")
+    conditions = check_conditions()
+
+    if conditions:
+        actions = build_actions(conditions)
+
+        if actions:
+            for action in actions:
+                render_action_card(action)
+        else:
+            st.success("All systems healthy — no actions needed.")
+    else:
+        st.warning("Could not check system conditions. Is the database running?")
 
     st.markdown("---")
 

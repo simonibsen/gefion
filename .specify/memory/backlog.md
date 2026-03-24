@@ -1,6 +1,6 @@
 # g2 Backlog
 
-**Last Updated**: 2026-03-01
+**Last Updated**: 2026-03-15
 
 Open work items extracted from NEXT_STEPS.md, ML_ROADMAP.md, PROGRESS.md, and NOTES.md.
 
@@ -29,6 +29,20 @@ Errors during UI sessions are logged to `~/.g2/ui_errors.jsonl`. When `g2 ui`
 exits, a summary is printed to stdout so Claude Code can see and diagnose
 failures. Hooks in `data.py` (background process failures) and `cli.py`
 (session start/end). Module: `g2.ui.errors`.
+
+### ~~UI Reliability~~ ✅
+**Completed**: 2026-03-22 (branch: `001-ui-reliability`)
+
+Systematic hardening of the Streamlit UI assistant view:
+- Renamed to "AI Actions", promoted to 2nd sidebar position
+- Persistent conversation history (`~/.g2/ai_history.jsonl`, 100 exchange cap)
+- In-UI error surfacing (count badge + expandable list)
+- Form submission, auto-refresh, Run button fixes
+- Fixed 8 broken MCP_TOOL_MAP CLI mappings + regression tests
+- CLAUDECODE env stripping for nested claude -p
+- Chat input reordered above proactive actions
+- Documentation added to USER_GUIDE.md
+- Spec: `specs/001-ui-reliability/spec.md`
 
 ---
 

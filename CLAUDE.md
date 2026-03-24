@@ -117,3 +117,10 @@ Before exiting plan mode, verify:
 - All DB test connections MUST use `schema.test_db_url()` — never hardcode database URLs
 - Use `OTEL_ENABLED=false` to disable tracing in tests
 - Run full test suite: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest`
+
+## Active Technologies
+- Python 3.10+ + Streamlit (UI framework), subprocess (process execution) (001-ui-reliability)
+- JSONL files in `~/.g2/` (conversation history, error log); PostgreSQL (system state queries) (001-ui-reliability)
+
+## Recent Changes
+- 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)
