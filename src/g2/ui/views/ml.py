@@ -558,7 +558,7 @@ def render_dataset_section():
     if st.button(
         "🔨 Build Dataset",
         type="primary",
-        use_container_width=True,
+        width="stretch",
         disabled=(dataset_exists and not confirm_overwrite),
     ):
         env = os.environ.copy()
