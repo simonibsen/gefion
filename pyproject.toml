@@ -54,7 +54,6 @@ all = [
 [project.scripts]
 gefion = "gefion.cli:entrypoint"
 gf = "gefion.cli:entrypoint"
-g2 = "gefion.cli:entrypoint"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
