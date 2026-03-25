@@ -9,14 +9,14 @@ import os
 
 def render_experiments():
     """Render the experiments page."""
-    st.title("🧪 Experiments")
+    st.markdown("# :material/science: Experiments")
     st.markdown("AI-driven parameter optimization with human approval.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📋 List",
-        "➕ Propose",
-        "▶️ Run",
-        "📊 Results"
+        ":material/list: List",
+        ":material/add_circle: Propose",
+        ":material/play_arrow: Run",
+        ":material/assessment: Results"
     ])
 
     with tab1:
@@ -60,7 +60,7 @@ def render_list_section():
             value=20,
         )
 
-    if st.button("🔄 Refresh", use_container_width=True):
+    if st.button("Refresh", width="stretch"):
         st.rerun()
 
     # Build and show CLI command
@@ -129,10 +129,10 @@ def render_list_section():
                     with col1:
                         st.write(f"**{exp[1]}** (ID: {exp[0]}) - {exp[2]}")
                     with col2:
-                        if st.button("✅ Approve", key=f"approve_{exp[0]}"):
+                        if st.button("Approve", key=f"approve_{exp[0]}"):
                             approve_experiment(exp[0])
                     with col3:
-                        if st.button("❌ Reject", key=f"reject_{exp[0]}"):
+                        if st.button("Reject", key=f"reject_{exp[0]}"):
                             reject_experiment(exp[0])
         else:
             st.info("No experiments found matching the filter.")
@@ -278,7 +278,7 @@ def render_propose_section():
     with st.expander("View Search Space JSON"):
         st.json(search_space)
 
-    if st.button("📝 Propose Experiment", type="primary", use_container_width=True):
+    if st.button("Propose Experiment", type="primary", width="stretch"):
         if not name:
             st.error("Please enter an experiment name")
             return
@@ -325,7 +325,7 @@ def render_propose_section():
                 )
 
                 if result.returncode == 0:
-                    status.update(label="✅ Experiment proposed!", state="complete")
+                    status.update(label="Experiment proposed!", state="complete")
                     try:
                         data = json.loads(result.stdout)
                         exp_id = data.get("experiment_id", data.get("id"))
@@ -333,12 +333,12 @@ def render_propose_section():
                     except json.JSONDecodeError:
                         st.success("Experiment created successfully!")
                 else:
-                    status.update(label="❌ Failed", state="error")
+                    status.update(label="Failed", state="error")
                     st.error("Failed to create experiment")
                     st.code(result.stderr)
 
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
 
@@ -374,7 +374,7 @@ def render_run_section():
             )
             exp_id = exp_options[selected]
 
-            if st.button("▶️ Run Experiment", type="primary", use_container_width=True):
+            if st.button("Run Experiment", type="primary", width="stretch"):
                 run_experiment(exp_id)
         else:
             st.warning("No approved experiments to run. Approve an experiment from the List tab first.")
@@ -393,7 +393,7 @@ def render_run_section():
         key="run_exp_id",
     )
 
-    if st.button("Run by ID", use_container_width=True):
+    if st.button("Run by ID", width="stretch"):
         run_experiment(exp_id_input)
 
 
@@ -428,7 +428,7 @@ def render_results_section():
             )
             exp_id = exp_options[selected]
 
-            if st.button("📊 Load Results", use_container_width=True):
+            if st.button("Load Results", width="stretch"):
                 load_experiment_results(exp_id)
         else:
             st.info("No completed experiments yet.")
@@ -449,7 +449,7 @@ def render_results_section():
 
     show_trials = st.checkbox("Show all trials", value=False)
 
-    if st.button("View Results", use_container_width=True):
+    if st.button("View Results", width="stretch"):
         load_experiment_results(exp_id_input, show_trials=show_trials)
 
 
@@ -531,15 +531,15 @@ def run_experiment(exp_id: int):
             returncode = process.wait()
 
             if returncode == 0:
-                status.update(label="✅ Experiment completed!", state="complete")
+                status.update(label="Experiment completed!", state="complete")
                 st.success("Experiment finished. Check Results tab for details.")
             else:
                 stderr = process.stderr.read()
-                status.update(label="❌ Failed", state="error")
+                status.update(label="Failed", state="error")
                 st.error(f"Failed: {stderr}")
 
         except Exception as e:
-            status.update(label="❌ Error", state="error")
+            status.update(label="Error", state="error")
             st.error(f"Error: {e}")
 
 

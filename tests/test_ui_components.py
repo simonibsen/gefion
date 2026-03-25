@@ -4,6 +4,7 @@ These tests verify the UI structure and CLI command without requiring
 Streamlit runtime or database connections.
 """
 
+import sys
 import pytest
 from pathlib import Path
 
@@ -107,6 +108,11 @@ class TestUIStructure:
         content = (ui_dir / "views" / "data.py").read_text()
         assert "def render_data(" in content
 
+    def test_data_logs_background_process_errors(self, ui_dir):
+        """Data view should log errors via log_ui_error when background process fails."""
+        content = (ui_dir / "views" / "data.py").read_text()
+        assert "log_ui_error" in content, "data.py should call log_ui_error on failure"
+
     def test_ml_has_render_function(self, ui_dir):
         """ML view should have render_ml function."""
         content = (ui_dir / "views" / "ml.py").read_text()
@@ -158,6 +164,16 @@ class TestUIStructure:
         content = (ui_dir / "views" / "ml.py").read_text()
         # Should check if dataset exists and show warning
         assert "already exists" in content.lower(), "Should warn about overwriting"
+
+    def test_ui_errors_module_exists(self, ui_dir):
+        """UI errors module should exist with error logging functions."""
+        errors_file = ui_dir / "errors.py"
+        assert errors_file.exists(), "ui/errors.py not found"
+
+        content = errors_file.read_text()
+        assert "def log_ui_error(" in content
+        assert "def read_session_errors(" in content
+        assert "def clear_errors(" in content
 
     def test_backtest_has_render_function(self, ui_dir):
         """Backtest view should have render_backtest function."""
@@ -243,6 +259,50 @@ class TestUILaunchCommand:
         result = runner.invoke(app, ["ui", "--help"])
 
         assert "g2 ui" in result.output
+
+    def test_launch_ui_prints_error_summary(self, tmp_path):
+        """launch_ui should print error summary when errors were logged during session."""
+        from g2.cli import app
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+
+        error_file = tmp_path / "ui_errors.jsonl"
+
+        def mock_subprocess_run(cmd, **kwargs):
+            """Simulate UI run that logs errors."""
+            import json
+            from datetime import datetime, timezone
+            entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source": "background_process",
+                "message": "Process exited with code 1",
+                "context": {"key": "data_update", "returncode": 1},
+            }
+            error_file.write_text(json.dumps(entry) + "\n")
+
+        runner = CliRunner()
+        with patch("g2.ui.errors._error_file", return_value=error_file):
+            with patch("subprocess.run", side_effect=mock_subprocess_run):
+                result = runner.invoke(app, ["ui"])
+
+        assert "UI Session Errors" in result.output
+        assert "(background_process)" in result.output
+        assert "Process exited with code 1" in result.output
+
+    def test_launch_ui_no_summary_when_no_errors(self, tmp_path):
+        """launch_ui should not print summary when no errors occurred."""
+        from g2.cli import app
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+
+        error_file = tmp_path / "ui_errors.jsonl"
+
+        runner = CliRunner()
+        with patch("g2.ui.errors._error_file", return_value=error_file):
+            with patch("subprocess.run"):
+                result = runner.invoke(app, ["ui"])
+
+        assert "UI Session Errors" not in result.output
 
 
 class TestDatabaseHelperStructure:
@@ -851,6 +911,449 @@ class TestExperimentsUIQuery:
         """Experiments view should have render_list_section function."""
         content = (ui_dir / "views" / "experiments.py").read_text()
         assert "def render_list_section(" in content
+
+
+class TestActionDashboard:
+    """Test the Action Dashboard (formerly AI Prompts page)."""
+
+    @pytest.fixture
+    def ui_dir(self):
+        """Get the UI source directory."""
+        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+
+    def test_assistant_has_check_conditions_function(self, ui_dir):
+        """Assistant should have check_conditions function for evaluating system state."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "def check_conditions(" in content
+
+    def test_assistant_has_free_form_command_entry(self, ui_dir):
+        """Assistant should have text input for natural language and CLI commands."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "st.text_area(" in content or "st.text_input(" in content
+        assert "freeform" in content
+
+    def test_assistant_has_mcp_tool_mapping(self, ui_dir):
+        """Assistant should map MCP tool names to CLI commands."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "MCP_TOOL_MAP" in content
+        # Should include key MCP tools
+        assert "data_update" in content
+        assert "ml_train" in content
+        assert "system_status" in content
+
+    def test_assistant_has_parse_input_function(self, ui_dir):
+        """Assistant should parse both MCP tool names and CLI commands."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "def parse_command_input(" in content
+
+    def test_assistant_has_ai_prompt_mode(self, ui_dir):
+        """Assistant should support sending natural language to Claude via claude -p."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # Should use claude CLI for AI prompts
+        assert "claude" in content
+        assert "--print" in content or '"-p"' in content
+        # Should have operator context so LLM doesn't do dev operations
+        assert "append-system-prompt" in content
+        # Should restrict to MCP tools only
+        assert "allowed-tools" in content or "allowedTools" in content
+
+    def test_assistant_uses_background_process(self, ui_dir):
+        """Assistant should import and use background process infrastructure."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "start_background_process" in content
+        assert "render_process_status" in content
+
+    def test_assistant_handles_parse_errors(self, ui_dir):
+        """Assistant should show parse errors to user, not silently swallow them."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "st.error(" in content
+
+    def test_assistant_logs_condition_check_failures(self, ui_dir):
+        """Condition check failures should be logged, not silently swallowed."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "import logging" in content
+        assert "logger" in content
+
+    def test_assistant_shows_cli_commands(self, ui_dir):
+        """Assistant should show equivalent CLI commands with st.code."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert 'st.code(' in content
+        assert 'language="bash"' in content
+
+    def test_assistant_has_action_cards(self, ui_dir):
+        """Assistant should have render_action_card function for displaying actions."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "def render_action_card(" in content
+
+    def test_assistant_has_cached_conditions(self, ui_dir):
+        """Assistant should use @st.cache_data for condition queries."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "@st.cache_data" in content
+        assert "def check_conditions(" in content
+
+    def test_assistant_builds_action_list(self, ui_dir):
+        """Assistant should build a list of actions and always show at least 4."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "def build_actions(" in content
+        # Should have proactive suggestions, not just problem-detection
+        assert "proactive" in content.lower() or "Proactive" in content
+
+    def test_assistant_actions_have_reasoning(self, ui_dir):
+        """Each action card should include reasoning for why it's recommended."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "reason" in content.lower()
+        # render_action_card should accept a reason parameter
+        assert "reason" in content
+
+    def test_assistant_has_freeform_output_renderer(self, ui_dir):
+        """Assistant should have render_freeform_output for plain-text display.
+
+        The freeform section (Ask AI / Run Command) should NOT use
+        render_process_status — that shows data-update metrics (progress,
+        inserted, errors, ETA) which don't apply to AI prompts or general
+        CLI output. Instead, render_freeform_output shows plain text.
+        """
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # Must have the dedicated renderer
+        assert "def render_freeform_output(" in content
+        # Freeform section must call it (not render_process_status)
+        # The function should use st.markdown for plain text output
+        assert "st.markdown(" in content
+        # Should store mode in session state for renderer to use
+        assert "freeform_mode" in content
+
+    def test_assistant_freeform_run_not_blocked_by_completed(self, ui_dir):
+        """Run button must be available even after a previous command completes.
+
+        If the freeform state is completed, the user should be able to type
+        a new command and click Run without having to Clear first. The Run
+        button must NOT be guarded by `elif` after checking completed state.
+        """
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # The run button logic must check "not is_running" rather than
+        # being in an elif that's unreachable when completed=True
+        assert "not freeform_state.is_running" in content
+
+    def test_assistant_freeform_strips_claudecode_env(self, ui_dir):
+        """Freeform command must strip CLAUDECODE env var.
+
+        When g2 ui is launched from Claude Code, the CLAUDECODE env var is set.
+        claude -p refuses to run inside another Claude Code session. The env
+        passed to start_background_process must remove this variable.
+        """
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "CLAUDECODE" in content, "Must handle CLAUDECODE env var for nested sessions"
+
+    def test_assistant_freeform_uses_form(self, ui_dir):
+        """Freeform input and Run button must be wrapped in a st.form.
+
+        Without a form, st.text_input doesn't send its value until the user
+        presses Enter. Wrapping in a form lets the submit button commit
+        the input value in one action.
+        """
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "st.form(" in content, "Freeform section must use st.form"
+        assert "st.form_submit_button(" in content, "Must use form_submit_button inside form"
+
+    def test_assistant_freeform_has_auto_refresh(self, ui_dir):
+        """Freeform output must auto-refresh while the process is running.
+
+        Without st.rerun(), Streamlit won't update the display and the
+        user sees 'Thinking...' forever with no output.
+        """
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # render_freeform_output must trigger a rerun while running
+        # Look for the auto-refresh pattern near the freeform output code
+        assert "st.rerun()" in content
+        # The rerun should be conditional on is_running inside render_freeform_output
+        # Check that there's a sleep before rerun (to avoid tight loop)
+        assert "time.sleep(" in content
+
+    def test_mcp_tool_map_references_valid_cli_commands(self, ui_dir):
+        """Every CLI command in MCP_TOOL_MAP must be a real g2 CLI command.
+
+        system-status and health-check do not exist — the real commands
+        are 'health' and 'db-health'.
+        """
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "-m", "g2.cli", "--help"],
+            capture_output=True, text=True
+        )
+        help_text = result.stdout
+
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # Extract just the MCP_TOOL_MAP block
+        import re
+        map_match = re.search(r'MCP_TOOL_MAP\s*=\s*\{(.+?)\}', content, re.DOTALL)
+        assert map_match, "MCP_TOOL_MAP not found"
+        map_block = map_match.group(1)
+        # Pattern: ("some-command", "description")
+        entries = re.findall(r'\("([^"]+)",\s*"[^"]*"\)', map_block)
+        assert entries, "No entries found in MCP_TOOL_MAP"
+        for cmd in entries:
+            # Multi-word commands like "ml train" — check the first part
+            base = cmd.split()[0]
+            assert base in help_text, (
+                f"MCP_TOOL_MAP references '{cmd}' but '{base}' is not a g2 CLI command"
+            )
+
+    def test_proactive_actions_use_valid_cli_commands(self, ui_dir):
+        """Proactive action cli_cmd values must reference real g2 commands."""
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "-m", "g2.cli", "--help"],
+            capture_output=True, text=True
+        )
+        help_text = result.stdout
+
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        import re
+        # Pattern: cli_cmd="g2 some-command"
+        cmds = re.findall(r'cli_cmd="g2\s+([^"]+)"', content)
+        for cmd in cmds:
+            base = cmd.split()[0]
+            assert base in help_text, (
+                f"Proactive action uses 'g2 {cmd}' but '{base}' is not a g2 CLI command"
+            )
+
+    def test_assistant_renders_conversation_history(self, ui_dir):
+        """Assistant view must read and render conversation history."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "read_exchanges" in content, "Must call read_exchanges() to load history"
+        assert "history" in content.lower(), "Must render conversation history"
+
+    def test_assistant_appends_exchange_on_completion(self, ui_dir):
+        """Assistant view must append exchange after command completes."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "append_exchange" in content, "Must call append_exchange() after command completes"
+
+    def test_assistant_has_clear_history_button(self, ui_dir):
+        """Assistant view must have a Clear History action."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "clear_history" in content, "Must call clear_history() for reset"
+
+    def test_assistant_shows_error_indicator(self, ui_dir):
+        """Assistant view must display session error count from error module."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "read_session_errors" in content, "Must read errors from g2.ui.errors"
+
+    def test_assistant_has_expandable_error_list(self, ui_dir):
+        """Assistant view must have an expander or section for listing session errors."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # Should have an expander or container that shows error details
+        assert "error" in content.lower() and "expander" in content.lower(), (
+            "Must have an expandable section for error details"
+        )
+
+    def test_ai_prompt_uses_stream_json(self, ui_dir):
+        """AI prompts must use --output-format stream-json --verbose for transparency."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "stream-json" in content, "AI command must use --output-format stream-json"
+        assert "--verbose" in content, "AI command must use --verbose for stream-json"
+
+    def test_assistant_has_work_toggle(self, ui_dir):
+        """Assistant view must have a way to show AI work (tool calls) during execution."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "work_events" in content.lower() or "tool_calls" in content.lower() or "work" in content.lower(), (
+            "Must track and display AI work events"
+        )
+
+    def test_ai_prompt_supports_continue(self, ui_dir):
+        """AI prompts must support --continue for multi-turn conversation context."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "ai_session_active" in content, "Must track AI session state"
+        assert '"--continue"' in content, "Must add --continue flag for subsequent prompts"
+
+    def test_parse_stream_json_event_exists(self, ui_dir):
+        """A function to parse stream-json events must exist."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        assert "parse_stream_event" in content, "Must have parse_stream_event function"
+
+    def test_sidebar_ai_actions_position(self, ui_dir):
+        """AI Actions must be the second item in the sidebar PAGES list."""
+        content = (ui_dir / "app.py").read_text()
+        # Find the PAGES list and extract page labels (first element of each tuple)
+        import re
+        # Match tuples like ("Label", ":material/icon:")
+        tuples = re.findall(r'\("([^"]+)",\s*":[^"]+:"\)', content)
+        if not tuples:
+            # Fallback: old format with plain strings
+            pages_match = re.search(r'PAGES\s*=\s*\[(.*?)\]', content, re.DOTALL)
+            assert pages_match, "PAGES list not found in app.py"
+            tuples = re.findall(r'"([^"]+)"', pages_match.group(1))
+        assert len(tuples) >= 2, "PAGES must have at least 2 entries"
+        assert "AI Actions" in tuples[1], (
+            f"AI Actions must be second in PAGES, got '{tuples[1]}'"
+        )
+
+    def test_assistant_renamed_to_ai_actions(self, ui_dir):
+        """The page routing must use 'AI Actions' not 'AI Prompts'."""
+        content = (ui_dir / "app.py").read_text()
+        assert "AI Actions" in content, "app.py must reference 'AI Actions'"
+
+    def test_assistant_input_before_proactive_actions(self, ui_dir):
+        """Chat input must appear before proactive action cards in assistant.py."""
+        content = (ui_dir / "views" / "assistant.py").read_text()
+        # Look within render_assistant function body only
+        render_start = content.find("def render_assistant")
+        assert render_start > 0, "render_assistant must exist"
+        body = content[render_start:]
+        form_pos = body.find("freeform_form")
+        # Find the call to check_conditions(), not the function definition
+        conditions_pos = body.find("check_conditions()")
+        assert form_pos > 0 and conditions_pos > 0, "Both form and conditions call must exist"
+        assert form_pos < conditions_pos, (
+            "Chat input (freeform_form) must appear before proactive actions (check_conditions)"
+        )
+
+
+class TestParseStreamEvent:
+    """Test stream-json event parsing for AI transparency."""
+
+    def test_parse_tool_use_event(self):
+        """Tool use events should be parsed with tool name and input."""
+        from g2.ui.views.assistant import parse_stream_event
+        import json
+        event = json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "mcp__g2__health_check",
+                    "input": {"verbose": True},
+                }]
+            }
+        })
+        result = parse_stream_event(event)
+        assert result is not None
+        assert result["type"] == "tool_use"
+        assert result["tool"] == "mcp__g2__health_check"
+
+    def test_parse_text_event(self):
+        """Text events should return the text content."""
+        from g2.ui.views.assistant import parse_stream_event
+        import json
+        event = json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": "Hello world"}]
+            }
+        })
+        result = parse_stream_event(event)
+        assert result is not None
+        assert result["type"] == "text"
+        assert result["text"] == "Hello world"
+
+    def test_parse_result_event(self):
+        """Result events should include result text and metadata."""
+        from g2.ui.views.assistant import parse_stream_event
+        import json
+        event = json.dumps({
+            "type": "result",
+            "result": "Final answer",
+            "duration_ms": 1500,
+            "total_cost_usd": 0.05,
+        })
+        result = parse_stream_event(event)
+        assert result is not None
+        assert result["type"] == "result"
+        assert result["result"] == "Final answer"
+
+    def test_parse_invalid_json(self):
+        """Invalid JSON should return None."""
+        from g2.ui.views.assistant import parse_stream_event
+        assert parse_stream_event("not json") is None
+        assert parse_stream_event("") is None
+
+
+class TestConversationHistory:
+    """Test conversation history persistence module."""
+
+    @pytest.fixture
+    def ui_dir(self):
+        return Path("src/g2/ui")
+
+    def test_history_module_exists(self, ui_dir):
+        """history.py must exist with required functions."""
+        history_file = ui_dir / "history.py"
+        assert history_file.exists(), "src/g2/ui/history.py must exist"
+        content = history_file.read_text()
+        assert "def append_exchange(" in content
+        assert "def read_exchanges(" in content
+        assert "def clear_history(" in content
+        assert "MAX_EXCHANGES" in content
+
+    @pytest.fixture
+    def tmp_history(self, tmp_path, monkeypatch):
+        """Provide a temporary history file path and patch the module to use it."""
+        history_file = tmp_path / "ai_history.jsonl"
+        import g2.ui.history as hist_mod
+        monkeypatch.setattr(hist_mod, "HISTORY_FILE", history_file)
+        return history_file
+
+    def test_history_append_exchange(self, tmp_history):
+        """append_exchange writes an Exchange record to JSONL."""
+        import json
+        from g2.ui.history import append_exchange
+
+        append_exchange(
+            prompt="g2 health",
+            mode="cli",
+            response="All systems healthy",
+            success=True,
+            duration_sec=1.2,
+        )
+
+        lines = tmp_history.read_text().strip().split("\n")
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["prompt"] == "g2 health"
+        assert record["mode"] == "cli"
+        assert record["response"] == "All systems healthy"
+        assert record["success"] is True
+        assert record["duration_sec"] == 1.2
+        assert "timestamp" in record
+
+    def test_history_read_exchanges(self, tmp_history):
+        """read_exchanges returns list of Exchange dicts from JSONL."""
+        from g2.ui.history import append_exchange, read_exchanges
+
+        append_exchange("prompt 1", "ai", "response 1", True, 0.5)
+        append_exchange("prompt 2", "cli", "response 2", False, 1.0)
+
+        exchanges = read_exchanges()
+        assert len(exchanges) == 2
+        assert exchanges[0]["prompt"] == "prompt 1"
+        assert exchanges[1]["prompt"] == "prompt 2"
+
+    def test_history_clear(self, tmp_history):
+        """clear_history removes all history and returns empty list."""
+        from g2.ui.history import append_exchange, clear_history, read_exchanges
+
+        append_exchange("prompt", "ai", "response", True, 0.5)
+        assert len(read_exchanges()) == 1
+
+        clear_history()
+        assert len(read_exchanges()) == 0
+        # File should not exist or be empty
+        assert not tmp_history.exists() or tmp_history.read_text().strip() == ""
+
+    def test_history_max_100_exchanges(self, tmp_history, monkeypatch):
+        """Appending beyond MAX_EXCHANGES truncates oldest entries."""
+        import g2.ui.history as hist_mod
+        monkeypatch.setattr(hist_mod, "MAX_EXCHANGES", 5)  # Use small cap for test speed
+
+        from g2.ui.history import append_exchange, read_exchanges
+
+        for i in range(7):
+            append_exchange(f"prompt {i}", "cli", f"response {i}", True, 0.1)
+
+        exchanges = read_exchanges()
+        assert len(exchanges) == 5
+        # Oldest two (0, 1) should be gone; newest (2-6) remain
+        assert exchanges[0]["prompt"] == "prompt 2"
+        assert exchanges[-1]["prompt"] == "prompt 6"
 
 
 class TestMLAdvancedFeatures:

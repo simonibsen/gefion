@@ -23,10 +23,10 @@ def get_project_root() -> Path:
 
 def render_features():
     """Render the features management page."""
-    st.title("🔧 Features")
+    st.markdown("# :material/tune: Features")
     st.markdown("Manage feature definitions, functions, and view computed data coverage.")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 Definitions", "⚙️ Functions", "📊 Coverage", "🔨 Compute"])
+    tab1, tab2, tab3, tab4 = st.tabs([":material/list_alt: Definitions", ":material/code: Functions", ":material/donut_large: Coverage", ":material/memory: Compute"])
 
     with tab1:
         render_definitions_tab()
@@ -67,7 +67,7 @@ g2 feat-def-import --dir feature-definitions/""", language="bash")
     with col2:
         status_filter = st.selectbox("Status", ["All", "Active", "Inactive"], key="def_status")
     with col3:
-        if st.button("🔄 Refresh", key="refresh_defs"):
+        if st.button("Refresh", key="refresh_defs"):
             st.rerun()
 
     try:
@@ -108,7 +108,7 @@ def render_definition_row(defn: dict):
     col1, col2, col3, col4, col5 = st.columns([3, 2, 1, 1, 1])
 
     with col1:
-        active_icon = "✅" if defn.get("active", True) else "❌"
+        active_icon = "●" if defn.get("active", True) else "○"
         st.markdown(f"{active_icon} **{defn['name']}**")
 
     with col2:
@@ -118,15 +118,15 @@ def render_definition_row(defn: dict):
             st.caption(params_str[:40] + "..." if len(params_str) > 40 else params_str)
 
     with col3:
-        if st.button("👁", key=f"view_{defn['name']}", help="View details"):
+        if st.button("View", key=f"view_{defn['name']}",  icon=":material/visibility:", help="View details"):
             st.session_state[f"show_detail_{defn['name']}"] = True
 
     with col4:
-        if st.button("✏️", key=f"edit_{defn['name']}", help="Edit definition"):
+        if st.button("Edit", key=f"edit_{defn['name']}",  icon=":material/edit:", help="Edit definition"):
             st.session_state[f"edit_definition_{defn['name']}"] = True
 
     with col5:
-        if st.button("🗑", key=f"del_{defn['name']}", help="Delete definition"):
+        if st.button("Delete", key=f"del_{defn['name']}",  icon=":material/delete:", help="Delete definition"):
             st.session_state[f"confirm_delete_{defn['name']}"] = True
 
     # Show detail modal if requested
@@ -218,7 +218,7 @@ def render_edit_definition(defn: dict):
         col_save, col_cancel = st.columns(2)
 
         with col_save:
-            if st.button("💾 Save", key=f"save_edit_{name}", type="primary"):
+            if st.button("Save", key=f"save_edit_{name}", type="primary"):
                 try:
                     params = json.loads(params_str) if params_str else {}
 
@@ -257,7 +257,7 @@ def render_edit_definition(defn: dict):
 
 def render_add_definition_form():
     """Render form to add a new feature definition."""
-    with st.expander("➕ Add New Definition"):
+    with st.expander(":material/add_circle: Add New Definition"):
         st.markdown("Create a new feature definition.")
 
         # Get available functions for dropdown
@@ -324,7 +324,7 @@ g2 feat-fx-import --dir feature-functions/""", language="bash")
     with col1:
         search = st.text_input("Search", placeholder="Filter by name...", key="func_search")
     with col2:
-        if st.button("🔄 Refresh", key="refresh_funcs"):
+        if st.button("Refresh", key="refresh_funcs"):
             st.rerun()
 
     try:
@@ -357,7 +357,7 @@ def render_function_row(func: dict):
     name = func.get("name", "unknown")
     func_key = f"{name}_v{version}"
 
-    enabled_icon = "✅" if enabled else "❌"
+    enabled_icon = "●" if enabled else "○"
     status_color = "green" if status == "active" else "yellow"
 
     # Row with name and edit button (visible without expanding)
@@ -367,11 +367,11 @@ def render_function_row(func: dict):
         st.markdown(f"{enabled_icon} **{name}** (v{version})")
 
     with col2:
-        if st.button("✏️", key=f"edit_func_{func_key}", help="Edit function"):
+        if st.button("Edit", key=f"edit_func_{func_key}",  icon=":material/edit:", help="Edit function"):
             st.session_state[f"edit_function_{func_key}"] = True
 
     with col3:
-        if st.button("👁", key=f"view_func_{func_key}", help="View details"):
+        if st.button("View", key=f"view_func_{func_key}",  icon=":material/visibility:", help="View details"):
             st.session_state[f"view_function_{func_key}"] = not st.session_state.get(f"view_function_{func_key}", False)
 
     # Show edit form if requested
@@ -425,7 +425,7 @@ def render_function_row(func: dict):
 
 def render_add_function_form():
     """Render form to add a new feature function."""
-    with st.expander("➕ Add New Function"):
+    with st.expander(":material/add_circle: Add New Function"):
         st.markdown("Create a new feature function.")
 
         col1, col2 = st.columns(2)
@@ -571,7 +571,7 @@ def render_edit_function(func: dict):
     col_save, col_cancel = st.columns(2)
 
     with col_save:
-        if st.button("💾 Save", key=f"save_func_{func_key}", type="primary"):
+        if st.button("Save", key=f"save_func_{func_key}", type="primary"):
             try:
                 param_schema = json.loads(param_schema_str) if param_schema_str.strip() else None
                 tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
@@ -629,7 +629,7 @@ g2 query-database --sql "SELECT * FROM computed_features LIMIT 10" """, language
     with col1:
         feature_filter = st.text_input("Filter by feature", placeholder="indicator_rsi", key="cov_filter")
     with col2:
-        if st.button("🔄 Refresh", key="refresh_cov"):
+        if st.button("Refresh", key="refresh_cov"):
             st.rerun()
 
     try:
@@ -673,7 +673,7 @@ def render_compute_tab():
 
         # Auto-refresh while running
         if state.is_running:
-            st.caption("🔄 Auto-refreshing...")
+            st.caption("Auto-refreshing...")
             time.sleep(1.5)
             st.rerun()
         return  # Don't show form while process is active
@@ -742,7 +742,7 @@ def render_compute_tab():
 
     st.code(" ".join(cli_parts), language="bash")
 
-    if st.button("🚀 Compute", type="primary", use_container_width=True, key="compute_start"):
+    if st.button("Compute", type="primary", width="stretch", key="compute_start"):
         if not all_features and not selected_features:
             st.error("Select at least one feature or enable 'All Features'")
             return

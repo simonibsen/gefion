@@ -423,5 +423,42 @@ See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-fram
   - If performance drops after large ingests, run `VACUUM ANALYZE stock_ohlcv computed_features`.
 - Indicators: if local prices are missing for a symbol, feature runs will attempt to fetch daily adjusted prices from Alpha Vantage, store them, and then compute locally.
 
+## Web UI
+
+Launch the Streamlit UI for interactive exploration:
+
+```bash
+g2 ui              # default port 8501
+g2 ui --port 8502  # custom port
+```
+
+### AI Actions
+
+The **AI Actions** page (second item in the sidebar) is the primary interaction point. It supports:
+
+- **Natural language prompts**: Type a question like "Which stocks had the biggest moves?" — routed to `claude -p` with g2 MCP tools.
+- **CLI commands**: Type `g2 health` or any g2 command — executes directly and streams output.
+- **MCP tool shortcuts**: Type a tool name like `data_update` — mapped to the corresponding CLI command.
+
+**Conversation history** persists across page refreshes and server restarts. Previous exchanges are displayed as a chat thread. Click "Clear History" to start fresh. History is stored in `~/.g2/ai_history.jsonl` (capped at 100 exchanges).
+
+**Error indicator**: If errors occur during the session, an expandable "Errors (N)" badge appears at the top of the page showing all session errors with timestamps. Errors are also logged to `~/.g2/ui_errors.jsonl` for diagnosis from Claude Code.
+
+### Other Views
+
+- **Dashboard**: System overview and quick stats
+- **Data Management**: Price data ingestion and updates
+- **Features**: Feature definitions, functions, coverage, and computation
+- **ML Pipeline**: Dataset building, training, prediction, evaluation
+- **Backtesting**: Strategy backtests and comparisons
+- **Experiments**: Propose, approve, and run experiments
+- **Charts**: Price, prediction, and feature charts
+
+### Tips
+
+- The UI is best launched from a regular terminal (not from within Claude Code) — AI prompts via `claude -p` work correctly this way.
+- If launched from Claude Code, CLI commands still work but AI prompts may fail due to session nesting.
+- Errors from the UI session can be read anytime via `cat ~/.g2/ui_errors.jsonl`.
+
 ## Verification
 - Run tests: `make test` (DB tests skipped) or `ENABLE_DB_TESTS=1 make test-db` with the DB running.

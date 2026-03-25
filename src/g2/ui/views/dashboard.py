@@ -167,7 +167,7 @@ def get_g2_insights() -> Optional[G2Insights]:
 
 def render_dashboard():
     """Render the main dashboard."""
-    st.title("📈 g2 Trading Dashboard")
+    st.markdown("# :material/grid_view: Dashboard")
     st.markdown("Welcome to g2 - your AI-powered trading analysis platform.")
 
     # System status section
@@ -184,31 +184,31 @@ def render_dashboard():
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.markdown("### 📊 Charts")
+        st.markdown("### :material/bar_chart: Charts")
         st.markdown("Analyze price movements with interactive charts.")
-        if st.button("Open Charts", key="quick_charts", use_container_width=True):
-            st.session_state.current_page = "📊 Charts"
+        if st.button("Open Charts", key="quick_charts", width="stretch"):
+            st.session_state.current_page = "Charts"
             st.rerun()
 
     with col2:
-        st.markdown("### 🤖 AI Prompts")
-        st.markdown("Example prompts for Claude Code analysis.")
-        if st.button("View Prompts", key="quick_ai", use_container_width=True):
-            st.session_state.current_page = "🤖 AI Prompts"
+        st.markdown("### :material/bolt: AI Actions")
+        st.markdown("Ask questions and run commands with AI.")
+        if st.button("AI Actions", key="quick_ai", width="stretch"):
+            st.session_state.current_page = "AI Actions"
             st.rerun()
 
     with col3:
-        st.markdown("### 📈 Backtest")
+        st.markdown("### :material/history: Backtest")
         st.markdown("Test trading strategies on historical data.")
-        if st.button("Run Backtest", key="quick_backtest", use_container_width=True):
-            st.session_state.current_page = "📈 Backtesting"
+        if st.button("Run Backtest", key="quick_backtest", width="stretch"):
+            st.session_state.current_page = "Backtesting"
             st.rerun()
 
     with col4:
-        st.markdown("### 🧠 ML Predict")
+        st.markdown("### :material/model_training: ML Predict")
         st.markdown("Generate price predictions using trained models.")
-        if st.button("Get Predictions", key="quick_ml", use_container_width=True):
-            st.session_state.current_page = "🧠 ML Pipeline"
+        if st.button("Get Predictions", key="quick_ml", width="stretch"):
+            st.session_state.current_page = "ML Pipeline"
             st.rerun()
 
     st.markdown("---")
@@ -224,7 +224,7 @@ def render_dashboard():
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("📈 Top Gainers")
+            st.subheader("Top Gainers")
             if movers.gainers:
                 for symbol, close, prev, pct in movers.gainers:
                     st.metric(
@@ -265,7 +265,7 @@ def render_dashboard():
 
         # Recent predictions
         with col1:
-            st.subheader("🔮 Recent Predictions")
+            st.subheader("Recent Predictions")
             if insights.pred_count > 0:
                 st.metric("Predictions (7d)", f"{insights.pred_count:,}")
                 if insights.pred_date:
@@ -281,7 +281,7 @@ def render_dashboard():
 
         # Model performance
         with col2:
-            st.subheader("📊 Model Performance")
+            st.subheader("Model Performance")
             if insights.models:
                 for name, horizon, q50_calib, loss in insights.models:
                     st.caption(f"**{name}** ({horizon}d)")
@@ -295,7 +295,7 @@ def render_dashboard():
 
         # Feature coverage
         with col3:
-            st.subheader("🔧 Feature Coverage")
+            st.subheader("Feature Coverage")
             if insights.features_computed:
                 st.metric("Features Active", f"{insights.features_computed}/{insights.features_defined}")
                 st.metric("Symbols Covered", insights.symbols_covered)
@@ -310,15 +310,15 @@ def render_dashboard():
     st.markdown("---")
 
     # Help section
-    with st.expander("ℹ️ Getting Started", expanded=False):
+    with st.expander(":material/info: Getting Started", expanded=False):
         st.markdown("""
         ### Welcome to g2!
 
         **g2** is a comprehensive trading analysis platform that combines:
-        - 📊 **Interactive Charts** - Candlesticks, comparisons, volatility analysis
-        - 🤖 **AI Prompts** - Example queries for Claude Code
-        - 🧠 **ML Predictions** - Quantile regression and trend classification
-        - 📈 **Backtesting** - Test strategies with realistic execution modeling
+        - :material/bar_chart: **Charts** - Candlesticks, comparisons, volatility analysis
+        - :material/bolt: **AI Actions** - Example queries for Claude Code
+        - :material/model_training: **ML Predictions** - Quantile regression and trend classification
+        - :material/history: **Backtesting** - Test strategies with realistic execution modeling
 
         ### Quick Start
 

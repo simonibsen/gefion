@@ -103,7 +103,7 @@ def _render_comparison_results(data: dict) -> None:
                 )
 
     # Metrics comparison table
-    st.markdown("### 📊 Performance Metrics")
+    st.markdown("### Performance Metrics")
 
     # Build comparison dataframe
     rows = []
@@ -123,7 +123,7 @@ def _render_comparison_results(data: dict) -> None:
     # Add benchmark row
     if benchmark:
         rows.append({
-            "Strategy": f"📈 {benchmark.get('name', 'Benchmark')}",
+            "Strategy": f"{benchmark.get('name', 'Benchmark')}",
             "Return %": f"{benchmark.get('total_return_pct', 0):.1f}%",
             "Sharpe": "-",
             "Sortino": "-",
@@ -139,7 +139,7 @@ def _render_comparison_results(data: dict) -> None:
 
     # Equity curves chart
     if equity_curves:
-        st.markdown("### 📈 Equity Curves")
+        st.markdown("### Equity Curves")
         st.caption("Compare how each strategy's portfolio value changed over time. Higher = better.")
 
         # Build combined dataframe for charting
@@ -328,7 +328,7 @@ def _render_backtest_results(data: dict) -> None:
                 alpha = strategy_return - benchmark_return
 
                 st.caption(
-                    f"📊 **Strategy**: {strategy_return:.1f}% | "
+                    f"**Strategy**: {strategy_return:.1f}% | "
                     f"**Benchmark** ({benchmark.get('name', 'Buy & Hold')}): {benchmark_return:.1f}% | "
                     f"**Alpha**: {alpha:+.1f}%"
                 )
@@ -393,7 +393,7 @@ def _render_backtest_results(data: dict) -> None:
     trades = data.get("trades", [])
     if trades:
         st.markdown("### Trades")
-        st.caption("📋 Complete list of all buy/sell orders executed by the strategy.")
+        st.caption("Complete list of all buy/sell orders executed by the strategy.")
 
         # Summary
         total_trades = len(trades)
@@ -452,14 +452,14 @@ def _render_backtest_results(data: dict) -> None:
 
 def render_backtest():
     """Render the backtesting page."""
-    st.title("📈 Backtesting")
+    st.markdown("# :material/history: Backtesting")
     st.markdown("Test trading strategies on historical data.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "🎮 Run Backtest",
-        "⚔️ Compare Strategies",
-        "⚙️ Strategy Configs",
-        "📊 Help"
+        ":material/play_arrow: Run Backtest",
+        ":material/compare_arrows: Compare",
+        ":material/settings: Configs",
+        ":material/help: Help"
     ])
 
     with tab1:
@@ -790,7 +790,7 @@ def render_run_section():
     if symbol_mode == "Selected" and not selected_symbols:
         st.warning("⚠️ Please select at least one symbol to backtest.")
 
-    if st.button("🚀 Run Backtest", type="primary", use_container_width=True):
+    if st.button("Run Backtest", type="primary", width="stretch"):
         # Validate before running
         if symbol_mode == "Selected" and not selected_symbols:
             st.error("No symbols selected. Please select at least one symbol.")
@@ -922,7 +922,7 @@ def render_run_section():
                 )
 
                 if result.returncode == 0:
-                    status.update(label="✅ Backtest complete!", state="complete")
+                    status.update(label="Backtest complete!", state="complete")
 
                     try:
                         data = _parse_last_json(result.stdout)
@@ -933,15 +933,15 @@ def render_run_section():
                     with st.expander("Raw JSON Output"):
                         st.code(result.stdout)
                 else:
-                    status.update(label="❌ Backtest failed", state="error")
+                    status.update(label="Backtest failed", state="error")
                     st.error("Backtest failed")
                     st.code(result.stderr)
 
             except subprocess.TimeoutExpired:
-                status.update(label="❌ Timeout", state="error")
+                status.update(label="Timeout", state="error")
                 st.error("Backtest timed out after 10 minutes")
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
 
@@ -1013,7 +1013,7 @@ def render_compare_section():
     ml_strategies = [s for s in strategies if s in ("ml_signal", "ml_filter")]
     if ml_strategies:
         st.markdown("---")
-        st.markdown("### 🤖 ML Strategy Settings")
+        st.markdown("### ML Strategy Settings")
         st.caption("Configure ML model settings for ML-based strategies")
 
         from g2.ui.components.database import get_models
@@ -1046,7 +1046,7 @@ def render_compare_section():
     if symbol_mode == "Selected" and not selected_symbols:
         st.warning("⚠️ Please select at least one symbol to compare.")
 
-    if st.button("⚔️ Compare", type="primary", use_container_width=True):
+    if st.button("Compare", type="primary", width="stretch"):
         # Validate before running
         if symbol_mode == "Selected" and not selected_symbols:
             st.error("No symbols selected. Please select at least one symbol.")
@@ -1092,7 +1092,7 @@ def render_compare_section():
                 )
 
                 if result.returncode == 0:
-                    status.update(label="✅ Comparison complete!", state="complete")
+                    status.update(label="Comparison complete!", state="complete")
 
                     try:
                         data = _parse_last_json(result.stdout)
@@ -1103,15 +1103,15 @@ def render_compare_section():
                     with st.expander("Raw JSON Output"):
                         st.code(result.stdout)
                 else:
-                    status.update(label="❌ Comparison failed", state="error")
+                    status.update(label="Comparison failed", state="error")
                     st.error("Comparison failed")
                     st.code(result.stderr)
 
             except subprocess.TimeoutExpired:
-                status.update(label="❌ Timeout", state="error")
+                status.update(label="Timeout", state="error")
                 st.error("Comparison timed out after 10 minutes")
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
 
@@ -1283,7 +1283,7 @@ def render_strategy_configs():
     st.subheader("Strategy Configs")
 
     # Explanation of strategies vs configs
-    with st.expander("ℹ️ Understanding Strategies vs Configs", expanded=False):
+    with st.expander(":material/info: Understanding Strategies vs Configs", expanded=False):
         st.markdown("""
         ### Strategies vs Configs
 
@@ -1312,7 +1312,7 @@ def render_strategy_configs():
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.markdown("### 📋 Existing Configs")
+        st.markdown("### Existing Configs")
         configs = get_strategy_configs()
 
         if not configs:
@@ -1332,7 +1332,7 @@ def render_strategy_configs():
 
                     # Unregister button (configs are DB records, not code)
                     unregister_key = f"unregister_config_{config['id']}"
-                    if st.button(f"🗑️ Unregister", key=unregister_key, type="secondary",
+                    if st.button(f"Unregister", key=unregister_key, type="secondary",
                                  help="Remove this config from the database. The underlying strategy remains available."):
                         try:
                             delete_strategy_config(config['id'])
@@ -1342,7 +1342,7 @@ def render_strategy_configs():
                             st.error(str(e))
 
     with col2:
-        st.markdown("### ➕ Create New Config")
+        st.markdown("### Create New Config")
 
         # Get available strategies
         strategies = get_strategies()

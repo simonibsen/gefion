@@ -1,6 +1,6 @@
 # g2 Project Status
 
-**Last Updated**: 2026-02-28
+**Last Updated**: 2026-03-15
 
 ## Current Capabilities
 
@@ -40,8 +40,23 @@
 - Claude Code skills: `/g2-dev` (development), `/g2` (operations), `/g2-services` (infrastructure)
 - Textual TUI (in development on `siUI` branch)
 
+### UI Error Feedback Loop
+- Errors logged to `~/.g2/ui_errors.jsonl` during UI sessions (background process failures, exceptions)
+- On `g2 ui` exit, prints error summary to stdout — visible to Claude Code for diagnosis
+- `g2.ui.errors` module: `log_ui_error()`, `read_session_errors()`, `clear_errors()`
+
+### UI Reliability (branch: `001-ui-reliability`)
+- **AI Actions page**: Renamed from "AI Prompts", promoted to 2nd position in sidebar
+- **Conversation history**: Persistent chat thread (`~/.g2/ai_history.jsonl`), capped at 100 exchanges, survives refresh
+- **Error surfacing**: Session error count badge + expandable error list in UI (no external monitoring needed)
+- **Command execution**: Form submission (no Enter needed), auto-refresh, Run button always available
+- **CLI mapping correctness**: Fixed 8 broken MCP_TOOL_MAP entries, regression tests validate all mappings against `g2 --help`
+- **Environment**: `CLAUDECODE` env var stripped for nested `claude -p` support
+- **Layout**: Chat input above proactive actions and system overview
+- **Documentation**: UI section added to USER_GUIDE.md
+
 ### Testing
-- 1196 tests passing, 16 skipped
+- 1282 tests passing, 14 skipped
 - Database tests require `ENABLE_DB_TESTS=1`
 - Full suite: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest`
 
