@@ -790,7 +790,7 @@ def render_run_section():
     if symbol_mode == "Selected" and not selected_symbols:
         st.warning("⚠️ Please select at least one symbol to backtest.")
 
-    if st.button("🚀 Run Backtest", type="primary"):
+    if st.button("🚀 Run Backtest", type="primary", width="stretch"):
         # Validate before running
         if symbol_mode == "Selected" and not selected_symbols:
             st.error("No symbols selected. Please select at least one symbol.")
@@ -1046,7 +1046,7 @@ def render_compare_section():
     if symbol_mode == "Selected" and not selected_symbols:
         st.warning("⚠️ Please select at least one symbol to compare.")
 
-    if st.button("⚔️ Compare", type="primary"):
+    if st.button("⚔️ Compare", type="primary", width="stretch"):
         # Validate before running
         if symbol_mode == "Selected" and not selected_symbols:
             st.error("No symbols selected. Please select at least one symbol.")

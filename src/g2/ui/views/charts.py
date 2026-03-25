@@ -91,7 +91,7 @@ def render_price_chart():
             help="Technical indicators to overlay",
         )
 
-    if st.button("Generate Chart", type="primary"):
+    if st.button("Generate Chart", type="primary", width="stretch"):
         with st.spinner("Generating chart..."):
             try:
                 from g2.ui.components.database import get_connection
@@ -176,7 +176,7 @@ def render_comparison_chart():
         st.warning("Please select at least 2 symbols to compare.")
         return
 
-    if st.button("Compare", type="primary"):
+    if st.button("Compare", type="primary", width="stretch"):
         with st.spinner("Generating comparison..."):
             try:
                 from g2.ui.components.database import get_connection

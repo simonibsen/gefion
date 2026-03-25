@@ -186,28 +186,28 @@ def render_dashboard():
     with col1:
         st.markdown("### 📊 Charts")
         st.markdown("Analyze price movements with interactive charts.")
-        if st.button("Open Charts", key="quick_charts"):
+        if st.button("Open Charts", key="quick_charts", width="stretch"):
             st.session_state.current_page = "📊 Charts"
             st.rerun()
 
     with col2:
         st.markdown("### 🤖 AI Prompts")
         st.markdown("Example prompts for Claude Code analysis.")
-        if st.button("View Prompts", key="quick_ai"):
+        if st.button("View Prompts", key="quick_ai", width="stretch"):
             st.session_state.current_page = "🤖 AI Prompts"
             st.rerun()
 
     with col3:
         st.markdown("### 📈 Backtest")
         st.markdown("Test trading strategies on historical data.")
-        if st.button("Run Backtest", key="quick_backtest"):
+        if st.button("Run Backtest", key="quick_backtest", width="stretch"):
             st.session_state.current_page = "📈 Backtesting"
             st.rerun()
 
     with col4:
         st.markdown("### 🧠 ML Predict")
         st.markdown("Generate price predictions using trained models.")
-        if st.button("Get Predictions", key="quick_ml"):
+        if st.button("Get Predictions", key="quick_ml", width="stretch"):
             st.session_state.current_page = "🧠 ML Pipeline"
             st.rerun()
 

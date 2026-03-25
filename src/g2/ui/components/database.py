@@ -27,10 +27,16 @@ def get_db_pool():
 
 @contextmanager
 def get_connection():
-    """Get a database connection from the pool."""
+    """Get a database connection from the pool.
+
+    Sets autocommit=True since UI queries are read-only. This prevents
+    'rolling back returned connection' warnings from the pool when
+    connections are returned with an open transaction.
+    """
     pool = get_db_pool()
     conn = pool.getconn()
     try:
+        conn.autocommit = True
         yield conn
     except Exception as e:
         # On OID or connection errors, try to reset the connection
@@ -45,6 +51,7 @@ def get_connection():
         raise
     finally:
         try:
+            conn.autocommit = False
             pool.putconn(conn)
         except Exception:
             pass  # Connection may already be closed

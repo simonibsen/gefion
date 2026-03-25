@@ -742,7 +742,7 @@ def render_compute_tab():
 
     st.code(" ".join(cli_parts), language="bash")
 
-    if st.button("🚀 Compute", type="primary", key="compute_start"):
+    if st.button("🚀 Compute", type="primary", width="stretch", key="compute_start"):
         if not all_features and not selected_features:
             st.error("Select at least one feature or enable 'All Features'")
             return

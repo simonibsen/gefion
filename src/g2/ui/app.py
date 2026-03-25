@@ -71,6 +71,7 @@ def main():
                 page,
                 key=f"nav_{page}",
                 type="primary" if is_current else "secondary",
+                width="stretch",
             ):
                 st.session_state.current_page = page
                 st.rerun()

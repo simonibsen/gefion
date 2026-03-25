@@ -429,7 +429,7 @@ def render_update_section():
         cli_parts.append("--refresh")
     st.code(" ".join(cli_parts), language="bash")
 
-    if st.button("🚀 Start Update", type="primary"):
+    if st.button("🚀 Start Update", type="primary", width="stretch"):
         # Build command
         cmd = [sys.executable, "-m", "g2.cli", "data-update", "--json"]
         cmd.extend(["--exchange", exchange])
@@ -458,7 +458,7 @@ def render_update_section():
         help="Enter a symbol to fetch prices and compute features",
     )
 
-    if st.button("Update Symbol") and symbol:
+    if st.button("Update Symbol", width="stretch") and symbol:
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
@@ -588,7 +588,7 @@ def render_status_section():
     """Render data status section."""
     st.subheader("Data Status")
 
-    if st.button("🔄 Refresh Status"):
+    if st.button("🔄 Refresh Status", width="stretch"):
         # Clear caches and rerun
         from g2.ui.components.status import get_system_stats, get_latest_data_date
         get_system_stats.clear()
@@ -918,14 +918,14 @@ def render_backup_section():
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("📊 Estimate Size"):
+        if st.button("📊 Estimate Size", width="stretch"):
             if not backup_path:
                 st.error("Please specify an output directory")
             else:
                 _run_backup(backup_path, data_types, symbols, start_date, end_date, incremental, compress, dry_run=True)
 
     with col2:
-        if st.button("💾 Create Backup", type="primary"):
+        if st.button("💾 Create Backup", type="primary", width="stretch"):
             if not backup_path:
                 st.error("Please specify an output directory")
             else:
@@ -1050,7 +1050,7 @@ def render_restore_section():
 
     st.code(" ".join(cli_parts), language="bash")
 
-    if st.button("📥 Restore Backup", type="primary"):
+    if st.button("📥 Restore Backup", type="primary", width="stretch"):
         if not restore_path:
             st.error("Please specify the backup directory")
         else:

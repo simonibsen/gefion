@@ -60,7 +60,7 @@ def render_list_section():
             value=20,
         )
 
-    if st.button("🔄 Refresh"):
+    if st.button("🔄 Refresh", width="stretch"):
         st.rerun()
 
     # Build and show CLI command
@@ -278,7 +278,7 @@ def render_propose_section():
     with st.expander("View Search Space JSON"):
         st.json(search_space)
 
-    if st.button("📝 Propose Experiment", type="primary"):
+    if st.button("📝 Propose Experiment", type="primary", width="stretch"):
         if not name:
             st.error("Please enter an experiment name")
             return
@@ -374,7 +374,7 @@ def render_run_section():
             )
             exp_id = exp_options[selected]
 
-            if st.button("▶️ Run Experiment", type="primary"):
+            if st.button("▶️ Run Experiment", type="primary", width="stretch"):
                 run_experiment(exp_id)
         else:
             st.warning("No approved experiments to run. Approve an experiment from the List tab first.")
@@ -393,7 +393,7 @@ def render_run_section():
         key="run_exp_id",
     )
 
-    if st.button("Run by ID"):
+    if st.button("Run by ID", width="stretch"):
         run_experiment(exp_id_input)
 
 
@@ -428,7 +428,7 @@ def render_results_section():
             )
             exp_id = exp_options[selected]
 
-            if st.button("📊 Load Results"):
+            if st.button("📊 Load Results", width="stretch"):
                 load_experiment_results(exp_id)
         else:
             st.info("No completed experiments yet.")
@@ -449,7 +449,7 @@ def render_results_section():
 
     show_trials = st.checkbox("Show all trials", value=False)
 
-    if st.button("View Results"):
+    if st.button("View Results", width="stretch"):
         load_experiment_results(exp_id_input, show_trials=show_trials)
 
 
