@@ -77,7 +77,39 @@ g2 trade flatten --confirm
 
 ---
 
+## Bugs
+
+### Backup Disk Space Check Falsely Reports Insufficient Space
+**Discovered**: 2026-03-25
+**Severity**: Medium
+
+`g2 backup --data-types definitions` reports "Insufficient disk space. Need ~0.0 MB" with 42 GB available. The space estimation logic is broken — reports ~0.0 MB for definitions and ~919.1 MB for all data types.
+
+---
+
 ## Technical Debt
+
+### Cascading Cleanup on Data Cull
+**Discovered**: 2026-03-25
+**Priority**: Medium
+**Branch**: `002-data-cull`
+
+When `stock_ohlcv` rows are deleted (e.g., culling to a 1-year window), downstream artifacts are orphaned with no warning. No foreign key constraints exist between `stock_ohlcv` and derived tables.
+
+**Affected tables** (in dependency order, leaf to root):
+1. `model_performance`, `prediction_outcomes`, `quantile_predictions`, `trend_class_predictions` (leaf)
+2. `ml_models`, `ml_runs`
+3. `ml_datasets`
+4. `computed_features`, `cross_sectional_features`
+5. `stock_ohlcv` (root)
+
+**Proposed solution**: A `g2 data cull --before DATE` command that:
+1. Identifies downstream artifacts overlapping the cull window
+2. Reports impact via dry-run (default)
+3. On `--confirm`, deletes in dependency order leaf → root
+4. Logs removals for auditability
+
+**Manual action taken** (2026-03-25): Deleted 1 stale `ml_datasets` row (training_20260325) built against full 26-year history, incompatible with culled 1-year window.
 
 ### Feature Management CLI Enhancements
 **Source**: PROGRESS.md (Future Work)

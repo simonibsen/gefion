@@ -231,10 +231,10 @@ def start_background_process(key: str, cmd: list, env: dict):
 
 def render_data():
     """Render the data management page."""
-    st.title("📁 Data Management")
+    st.markdown("# :material/storage: Data Management")
     st.markdown("Manage market data, features, and database operations.")
 
-    tab1, tab2, tab3 = st.tabs(["📥 Update Data", "📊 Data Status", "🔧 Maintenance"])
+    tab1, tab2, tab3 = st.tabs([":material/cloud_download: Update Data", ":material/monitoring: Data Status", ":material/build: Maintenance"])
 
     with tab1:
         render_update_section()
@@ -833,7 +833,7 @@ def render_maintenance_section():
     # Backup/Restore Section
     st.subheader("Backup & Restore")
 
-    backup_tab, restore_tab = st.tabs(["💾 Backup", "📥 Restore"])
+    backup_tab, restore_tab = st.tabs([":material/backup: Backup", ":material/restore: Restore"])
 
     with backup_tab:
         render_backup_section()

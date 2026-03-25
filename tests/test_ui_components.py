@@ -927,9 +927,9 @@ class TestActionDashboard:
         assert "def check_conditions(" in content
 
     def test_assistant_has_free_form_command_entry(self, ui_dir):
-        """Assistant should have text_input for natural language and CLI commands."""
+        """Assistant should have text input for natural language and CLI commands."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "st.text_input(" in content
+        assert "st.text_area(" in content or "st.text_input(" in content
         assert "freeform" in content
 
     def test_assistant_has_mcp_tool_mapping(self, ui_dir):
@@ -1173,16 +1173,18 @@ class TestActionDashboard:
     def test_sidebar_ai_actions_position(self, ui_dir):
         """AI Actions must be the second item in the sidebar PAGES list."""
         content = (ui_dir / "app.py").read_text()
-        # Find the PAGES list and check AI Actions is second
+        # Find the PAGES list and extract page labels (first element of each tuple)
         import re
-        pages_match = re.search(r'PAGES\s*=\s*\[(.*?)\]', content, re.DOTALL)
-        assert pages_match, "PAGES list not found in app.py"
-        pages_str = pages_match.group(1)
-        # Extract quoted page names
-        page_names = re.findall(r'"([^"]+)"', pages_str)
-        assert len(page_names) >= 2, "PAGES must have at least 2 entries"
-        assert "AI Actions" in page_names[1], (
-            f"AI Actions must be second in PAGES, got '{page_names[1]}'"
+        # Match tuples like ("Label", ":material/icon:")
+        tuples = re.findall(r'\("([^"]+)",\s*":[^"]+:"\)', content)
+        if not tuples:
+            # Fallback: old format with plain strings
+            pages_match = re.search(r'PAGES\s*=\s*\[(.*?)\]', content, re.DOTALL)
+            assert pages_match, "PAGES list not found in app.py"
+            tuples = re.findall(r'"([^"]+)"', pages_match.group(1))
+        assert len(tuples) >= 2, "PAGES must have at least 2 entries"
+        assert "AI Actions" in tuples[1], (
+            f"AI Actions must be second in PAGES, got '{tuples[1]}'"
         )
 
     def test_assistant_renamed_to_ai_actions(self, ui_dir):

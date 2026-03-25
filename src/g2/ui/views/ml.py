@@ -368,14 +368,14 @@ def _render_model_inspection(model: dict):
 
 def render_ml():
     """Render the ML pipeline page."""
-    st.title("🧠 ML Pipeline")
+    st.markdown("# :material/model_training: ML Pipeline")
     st.markdown("Train models, generate predictions, and evaluate performance.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Dataset",
-        "🎯 Train",
-        "🔮 Predict",
-        "📈 Evaluate"
+        ":material/dataset: Dataset",
+        ":material/fitness_center: Train",
+        ":material/auto_awesome: Predict",
+        ":material/assessment: Evaluate"
     ])
 
     with tab1:

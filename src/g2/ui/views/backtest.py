@@ -452,14 +452,14 @@ def _render_backtest_results(data: dict) -> None:
 
 def render_backtest():
     """Render the backtesting page."""
-    st.title("📈 Backtesting")
+    st.markdown("# :material/history: Backtesting")
     st.markdown("Test trading strategies on historical data.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "🎮 Run Backtest",
-        "⚔️ Compare Strategies",
-        "⚙️ Strategy Configs",
-        "📊 Help"
+        ":material/play_arrow: Run Backtest",
+        ":material/compare_arrows: Compare",
+        ":material/settings: Configs",
+        ":material/help: Help"
     ])
 
     with tab1:

@@ -6,10 +6,10 @@ import os
 
 def render_settings():
     """Render the settings page."""
-    st.title("⚙️ Settings")
+    st.markdown("# :material/settings: Settings")
     st.markdown("Configure g2 settings and preferences.")
 
-    tab1, tab2 = st.tabs(["🗄️ Database", "ℹ️ About"])
+    tab1, tab2 = st.tabs([":material/database: Database", ":material/info: About"])
 
     with tab1:
         render_database_settings()

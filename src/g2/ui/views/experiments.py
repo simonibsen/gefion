@@ -9,14 +9,14 @@ import os
 
 def render_experiments():
     """Render the experiments page."""
-    st.title("🧪 Experiments")
+    st.markdown("# :material/science: Experiments")
     st.markdown("AI-driven parameter optimization with human approval.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📋 List",
-        "➕ Propose",
-        "▶️ Run",
-        "📊 Results"
+        ":material/list: List",
+        ":material/add_circle: Propose",
+        ":material/play_arrow: Run",
+        ":material/assessment: Results"
     ])
 
     with tab1:

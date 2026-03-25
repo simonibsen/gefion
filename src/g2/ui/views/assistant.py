@@ -619,6 +619,11 @@ def render_freeform_output(key: str, mode: str):
         st_state = "error"
 
     with st.status(label, expanded=True, state=st_state):
+        # Show the prompt that triggered this response
+        prompt_text = st.session_state.get("freeform_prompt", "")
+        if prompt_text:
+            st.caption(f"**{prompt_text}**")
+
         # For AI mode, parse stream-json events to show response
         if mode == "ai":
             # Try stderr (work_events) first, fall back to stdout (output_lines)
@@ -703,6 +708,10 @@ def render_assistant():
     session_errors = read_session_errors()
     if session_errors:
         with st.expander(f"Errors ({len(session_errors)})", expanded=False):
+            if st.button("Clear Errors", key="clear_errors_btn"):
+                from g2.ui.errors import clear_errors
+                clear_errors()
+                st.rerun()
             for err in session_errors:
                 ts = err.get("timestamp", "")[:19]
                 source = err.get("source", "unknown")
@@ -716,13 +725,30 @@ def render_assistant():
         "or a direct command (e.g. `g2 data-update --exchange NASDAQ`)."
     )
 
-    with st.form("freeform_form", clear_on_submit=False):
+    history = read_exchanges()
+
+    with st.form("freeform_form", clear_on_submit=True):
         cmd_input = st.text_input(
             "Prompt or command",
-            placeholder="Which stocks had the biggest moves this week?",
+            placeholder="Which stocks had the biggest moves this week?" if not history else "",
             key="freeform_cmd",
         )
-        submitted = st.form_submit_button("▶ Run", type="primary")
+        # Hide submit button, reduce form padding, sharpen input border
+        st.markdown(
+            "<style>"
+            "[data-testid='stFormSubmitButton'] {display: none;}"
+            "[data-testid='stForm'] {border: none; padding: 0;}"
+            "[data-testid='stTextInput'] input {"
+            "  border: 1px solid #ccc; border-radius: 4px;"
+            "  background-color: #fff;"
+            "}"
+            "[data-testid='stTextInput'] input:focus {"
+            "  border-color: #4a7cf7; box-shadow: 0 0 0 1px #4a7cf7;"
+            "}"
+            "</style>",
+            unsafe_allow_html=True,
+        )
+        submitted = st.form_submit_button("Run")
 
     cmd_args: List[str] = []
     display_cmd = ""
@@ -787,7 +813,6 @@ def render_assistant():
         st.rerun()
 
     # Render conversation history (nested: History expander > individual exchanges)
-    history = read_exchanges()
     if history:
         with st.expander(f"History ({len(history)} exchanges)", expanded=False):
             if st.button("Clear History", key="clear_history_btn"):

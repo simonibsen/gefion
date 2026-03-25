@@ -23,10 +23,10 @@ def get_project_root() -> Path:
 
 def render_features():
     """Render the features management page."""
-    st.title("🔧 Features")
+    st.markdown("# :material/tune: Features")
     st.markdown("Manage feature definitions, functions, and view computed data coverage.")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 Definitions", "⚙️ Functions", "📊 Coverage", "🔨 Compute"])
+    tab1, tab2, tab3, tab4 = st.tabs([":material/list_alt: Definitions", ":material/code: Functions", ":material/donut_large: Coverage", ":material/memory: Compute"])
 
     with tab1:
         render_definitions_tab()

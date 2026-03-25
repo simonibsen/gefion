@@ -167,7 +167,7 @@ def get_g2_insights() -> Optional[G2Insights]:
 
 def render_dashboard():
     """Render the main dashboard."""
-    st.title("📈 g2 Trading Dashboard")
+    st.markdown("# :material/grid_view: Dashboard")
     st.markdown("Welcome to g2 - your AI-powered trading analysis platform.")
 
     # System status section
@@ -184,31 +184,31 @@ def render_dashboard():
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.markdown("### 📊 Charts")
+        st.markdown("### :material/bar_chart: Charts")
         st.markdown("Analyze price movements with interactive charts.")
         if st.button("Open Charts", key="quick_charts", width="stretch"):
-            st.session_state.current_page = "📊 Charts"
+            st.session_state.current_page = "Charts"
             st.rerun()
 
     with col2:
-        st.markdown("### 🤖 AI Prompts")
-        st.markdown("Example prompts for Claude Code analysis.")
-        if st.button("View Prompts", key="quick_ai", width="stretch"):
-            st.session_state.current_page = "🤖 AI Prompts"
+        st.markdown("### :material/bolt: AI Actions")
+        st.markdown("Ask questions and run commands with AI.")
+        if st.button("AI Actions", key="quick_ai", width="stretch"):
+            st.session_state.current_page = "AI Actions"
             st.rerun()
 
     with col3:
-        st.markdown("### 📈 Backtest")
+        st.markdown("### :material/history: Backtest")
         st.markdown("Test trading strategies on historical data.")
         if st.button("Run Backtest", key="quick_backtest", width="stretch"):
-            st.session_state.current_page = "📈 Backtesting"
+            st.session_state.current_page = "Backtesting"
             st.rerun()
 
     with col4:
-        st.markdown("### 🧠 ML Predict")
+        st.markdown("### :material/model_training: ML Predict")
         st.markdown("Generate price predictions using trained models.")
         if st.button("Get Predictions", key="quick_ml", width="stretch"):
-            st.session_state.current_page = "🧠 ML Pipeline"
+            st.session_state.current_page = "ML Pipeline"
             st.rerun()
 
     st.markdown("---")

@@ -7,7 +7,7 @@ from typing import Optional
 
 def render_charts():
     """Render the charts page."""
-    st.title("📊 Interactive Charts")
+    st.markdown("# :material/bar_chart: Charts")
 
     # Chart type selection
     chart_type = st.selectbox(

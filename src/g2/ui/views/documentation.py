@@ -13,30 +13,34 @@ DOCS = {
     "ML Pipeline": "ML_QUICKSTART.md",
     "Strategies": "STRATEGIES.md",
     "Backtesting": "BACKTESTING.md",
-    "Experiments": "EXPERIMENTS.md",
+    "Experiments": ".specify/specs/experiments-framework.md",
     "Troubleshooting": "TROUBLESHOOTING.md",
 }
 
 # Map document names to tab names for navigation
 DOC_TO_TAB = {
-    "Whitepaper": "📜 Whitepaper",
-    "User Guide": "🚀 Quick Start",
-    "ML Pipeline": "🧠 ML Pipeline",
-    "Strategies": "⚔️ Strategies",
-    "Backtesting": "📈 Backtesting",
-    "Experiments": "🧪 Experiments",
-    "Troubleshooting": "🔧 Troubleshooting",
+    "Whitepaper": ":material/article: Whitepaper",
+    "User Guide": ":material/rocket_launch: Quick Start",
+    "ML Pipeline": ":material/model_training: ML Pipeline",
+    "Strategies": ":material/compare_arrows: Strategies",
+    "Backtesting": ":material/history: Backtesting",
+    "Experiments": ":material/science: Experiments",
+    "Troubleshooting": ":material/build: Troubleshooting",
 }
 
 
 @st.cache_data
 def load_doc(filename: str) -> str:
-    """Load markdown doc from docs/ directory."""
-    # Navigate from views/ up to src/g2/, then to project root, then docs/
-    docs_dir = Path(__file__).parent.parent.parent.parent.parent / "docs"
+    """Load markdown doc from docs/ directory or project root."""
+    project_root = Path(__file__).parent.parent.parent.parent.parent
+    docs_dir = project_root / "docs"
+    # Check docs/ first, then project root (for .specify/ paths etc.)
     doc_path = docs_dir / filename
     if doc_path.exists():
         return doc_path.read_text()
+    root_path = project_root / filename
+    if root_path.exists():
+        return root_path.read_text()
     return f"*Document not found: {filename}*"
 
 
@@ -143,7 +147,7 @@ def search_docs(query: str) -> List[Tuple[str, str, str, str, str, int]]:
 
 def render_docs():
     """Render the documentation page."""
-    st.title("📚 Documentation")
+    st.markdown("# :material/menu_book: Documentation")
     st.markdown("Guides and theory for g2 quantitative trading platform.")
 
     # Search box
@@ -181,13 +185,13 @@ def render_docs():
 
     # Tabs for document navigation
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📜 Whitepaper",
-        "🚀 Quick Start",
-        "🧠 ML Pipeline",
-        "⚔️ Strategies",
-        "📈 Backtesting",
-        "🧪 Experiments",
-        "🔧 Troubleshooting",
+        ":material/article: Whitepaper",
+        ":material/rocket_launch: Quick Start",
+        ":material/model_training: ML Pipeline",
+        ":material/compare_arrows: Strategies",
+        ":material/history: Backtesting",
+        ":material/science: Experiments",
+        ":material/build: Troubleshooting",
     ])
 
     with tab1:
@@ -488,7 +492,7 @@ def render_experiments_docs():
     experiments, users approve them.
     """)
 
-    content = load_doc("EXPERIMENTS.md")
+    content = load_doc(".specify/specs/experiments-framework.md")
 
     if content.startswith("*Document not found"):
         st.error(content)
