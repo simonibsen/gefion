@@ -62,7 +62,7 @@ def get_period_dates(period: str) -> tuple:
 
 def render_price_chart():
     """Render candlestick price chart."""
-    st.subheader("📈 Price Chart")
+    st.subheader("Price Chart")
 
     col1, col2, col3 = st.columns([2, 1, 1])
 
@@ -118,7 +118,7 @@ def render_price_chart():
                 st.plotly_chart(fig, use_container_width=True)
 
                 # Display insights
-                with st.expander("📊 Analysis", expanded=True):
+                with st.expander("Analysis", expanded=True):
                     col1, col2, col3 = st.columns(3)
 
                     with col1:
@@ -149,7 +149,7 @@ def render_price_chart():
 
 def render_comparison_chart():
     """Render multi-symbol comparison chart."""
-    st.subheader("📊 Symbol Comparison")
+    st.subheader("Symbol Comparison")
 
     col1, col2 = st.columns([3, 1])
 
@@ -372,7 +372,7 @@ def render_drawdown_chart():
 
 def render_rolling_chart():
     """Render rolling returns chart."""
-    st.subheader("📊 Rolling Returns")
+    st.subheader("Rolling Returns")
 
     st.info("💡 Rolling returns show performance over moving time windows. Useful for comparing consistency.")
 

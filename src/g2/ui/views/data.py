@@ -267,7 +267,7 @@ def render_process_status(key: str, title: str):
     with st.status(status_label, expanded=True, state=status_state):
         # Phase and progress bar
         if state.phase:
-            phase_emoji = "📊" if state.phase == "prices" else "🧮" if state.phase == "features" else "⚙️"
+            phase_emoji = "▸" if state.phase == "prices" else "▸" if state.phase == "features" else "▸"
             st.write(f"{phase_emoji} Phase: **{state.phase.title()}**")
 
         if state.progress > 0:
@@ -318,7 +318,7 @@ def render_process_status(key: str, title: str):
         # Show CLI output log
         output_lines = getattr(state, 'output_lines', [])
         if output_lines:
-            with st.expander("📜 CLI Output", expanded=False):
+            with st.expander("CLI Output", expanded=False):
                 # Parse JSON objects from output (may span multiple lines)
                 buffer = ""
                 json_objects = []
@@ -369,7 +369,7 @@ def render_update_section():
 
         # Auto-refresh while running
         if state.is_running:
-            st.caption("🔄 Auto-refreshing...")
+            st.caption("Auto-refreshing...")
             time.sleep(1.5)
             st.rerun()
         return  # Don't show update form while process is active
@@ -429,7 +429,7 @@ def render_update_section():
         cli_parts.append("--refresh")
     st.code(" ".join(cli_parts), language="bash")
 
-    if st.button("🚀 Start Update", type="primary", width="stretch"):
+    if st.button("Start Update", type="primary", width="stretch"):
         # Build command
         cmd = [sys.executable, "-m", "g2.cli", "data-update", "--json"]
         cmd.extend(["--exchange", exchange])
@@ -521,7 +521,7 @@ g2 feat-compute --symbols {symbol.upper()} --all-features""", language="bash")
                 returncode = process.wait()
                 if returncode != 0:
                     stderr = process.stderr.read()
-                    status.update(label=f"❌ Price fetch failed", state="error")
+                    status.update(label=f"Price fetch failed", state="error")
                     st.error(f"Failed: {stderr}")
                     raise Exception("Price fetch failed")
 
@@ -568,7 +568,7 @@ g2 feat-compute --symbols {symbol.upper()} --all-features""", language="bash")
                 returncode = process.wait()
 
                 if returncode == 0:
-                    status.update(label=f"✅ {symbol.upper()} updated!", state="complete")
+                    status.update(label=f"{symbol.upper()} updated!", state="complete")
                     st.success(
                         f"Updated {symbol.upper()}: "
                         f"{price_inserted:,} price records, "
@@ -576,11 +576,11 @@ g2 feat-compute --symbols {symbol.upper()} --all-features""", language="bash")
                     )
                 else:
                     stderr = process.stderr.read()
-                    status.update(label=f"❌ Feature compute failed", state="error")
+                    status.update(label=f"Feature compute failed", state="error")
                     st.error(f"Failed: {stderr}")
 
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
 
@@ -588,7 +588,7 @@ def render_status_section():
     """Render data status section."""
     st.subheader("Data Status")
 
-    if st.button("🔄 Refresh Status", width="stretch"):
+    if st.button("Refresh Status", width="stretch"):
         # Clear caches and rerun
         from g2.ui.components.status import get_system_stats, get_latest_data_date
         get_system_stats.clear()
@@ -695,7 +695,7 @@ def render_maintenance_section():
             help="Comma-separated symbols to trim (leave empty for all)",
         )
 
-        if st.button("🗑️ Trim Data", type="secondary"):
+        if st.button("Trim Data", type="secondary"):
             if not before_date and not after_date:
                 st.error("Please select at least one date boundary")
             else:
@@ -795,27 +795,27 @@ def render_maintenance_section():
                                 if trim_features:
                                     features_metric.metric("Feature Rows", f"{deleted_features:,}", "deleted")
                                 phase_display.write("Phase: **Complete**")
-                                status.update(label="✅ Trim complete!", state="complete")
+                                status.update(label="Trim complete!", state="complete")
                                 st.success(
                                     f"Deleted {deleted:,} price rows"
                                     + (f", {deleted_features:,} feature rows" if trim_features else "")
                                 )
                             except json.JSONDecodeError:
-                                status.update(label="✅ Trim complete!", state="complete")
+                                status.update(label="Trim complete!", state="complete")
                                 st.info(result.stdout)
                         else:
-                            status.update(label="❌ Trim failed", state="error")
+                            status.update(label="Trim failed", state="error")
                             st.error(f"Failed: {result.stderr}")
 
                     except Exception as e:
-                        status.update(label="❌ Error", state="error")
+                        status.update(label="Error", state="error")
                         st.error(f"Error: {e}")
 
     with col2:
         st.markdown("### Vacuum Database")
         st.markdown("Reclaim disk space and optimize performance.")
 
-        if st.button("🧹 Vacuum", type="secondary"):
+        if st.button("Vacuum", type="secondary"):
             with st.spinner("Vacuuming..."):
                 try:
                     from g2.ui.components.database import get_connection
@@ -824,7 +824,7 @@ def render_maintenance_section():
                         conn.autocommit = True
                         with conn.cursor() as cur:
                             cur.execute("VACUUM ANALYZE")
-                    st.success("✅ Vacuum complete")
+                    st.success("Vacuum complete")
                 except Exception as e:
                     st.error(f"Error: {e}")
 
@@ -918,14 +918,14 @@ def render_backup_section():
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("📊 Estimate Size", width="stretch"):
+        if st.button("Estimate Size", width="stretch"):
             if not backup_path:
                 st.error("Please specify an output directory")
             else:
                 _run_backup(backup_path, data_types, symbols, start_date, end_date, incremental, compress, dry_run=True)
 
     with col2:
-        if st.button("💾 Create Backup", type="primary", width="stretch"):
+        if st.button("Create Backup", type="primary", width="stretch"):
             if not backup_path:
                 st.error("Please specify an output directory")
             else:
@@ -963,7 +963,7 @@ def _run_backup(backup_path, data_types, symbols, start_date, end_date, incremen
                 try:
                     data = json.loads(result.stdout)
                     if dry_run:
-                        status.update(label="✅ Size estimate", state="complete")
+                        status.update(label="Size estimate", state="complete")
                         # Show estimate details
                         if "estimate" in data:
                             est = data["estimate"]
@@ -976,23 +976,23 @@ def _run_backup(backup_path, data_types, symbols, start_date, end_date, incremen
                         else:
                             st.json(data)
                     else:
-                        status.update(label="✅ Backup complete!", state="complete")
+                        status.update(label="Backup complete!", state="complete")
                         st.success(f"Backup saved to: {data.get('output_dir', backup_path)}")
                         if "tables" in data:
                             for table, info in data["tables"].items():
                                 st.caption(f"  • {table}: {info.get('rows', 0):,} rows")
                 except json.JSONDecodeError:
-                    status.update(label="✅ Complete", state="complete")
+                    status.update(label="Complete", state="complete")
                     st.info(result.stdout)
             else:
-                status.update(label="❌ Failed", state="error")
+                status.update(label="Failed", state="error")
                 st.error(result.stderr or result.stdout)
 
         except subprocess.TimeoutExpired:
-            status.update(label="❌ Timeout", state="error")
+            status.update(label="Timeout", state="error")
             st.error("Backup timed out after 10 minutes")
         except Exception as e:
-            status.update(label="❌ Error", state="error")
+            status.update(label="Error", state="error")
             st.error(f"Error: {e}")
 
 
@@ -1050,7 +1050,7 @@ def render_restore_section():
 
     st.code(" ".join(cli_parts), language="bash")
 
-    if st.button("📥 Restore Backup", type="primary", width="stretch"):
+    if st.button("Restore Backup", type="primary", width="stretch"):
         if not restore_path:
             st.error("Please specify the backup directory")
         else:
@@ -1081,7 +1081,7 @@ def _run_restore(restore_path, mode, data_types_filter, verify, dry_run):
                 try:
                     data = json.loads(result.stdout)
                     if dry_run:
-                        status.update(label="✅ Restore preview", state="complete")
+                        status.update(label="Restore preview", state="complete")
                         st.markdown("**Would restore:**")
                         if "tables" in data:
                             for table, info in data["tables"].items():
@@ -1089,23 +1089,23 @@ def _run_restore(restore_path, mode, data_types_filter, verify, dry_run):
                         else:
                             st.json(data)
                     else:
-                        status.update(label="✅ Restore complete!", state="complete")
+                        status.update(label="Restore complete!", state="complete")
                         st.success("Database restored successfully!")
                         if "tables" in data:
                             for table, info in data["tables"].items():
                                 st.caption(f"  • {table}: {info.get('restored', info.get('rows', 0)):,} rows restored")
                 except json.JSONDecodeError:
-                    status.update(label="✅ Complete", state="complete")
+                    status.update(label="Complete", state="complete")
                     st.info(result.stdout)
             else:
-                status.update(label="❌ Failed", state="error")
+                status.update(label="Failed", state="error")
                 st.error(result.stderr or result.stdout)
 
         except subprocess.TimeoutExpired:
-            status.update(label="❌ Timeout", state="error")
+            status.update(label="Timeout", state="error")
             st.error("Restore timed out after 10 minutes")
         except Exception as e:
-            status.update(label="❌ Error", state="error")
+            status.update(label="Error", state="error")
             st.error(f"Error: {e}")
 
 

@@ -152,7 +152,7 @@ def render_docs():
 
     # Search box
     search_query = st.text_input(
-        "🔍 Search documentation",
+        "Search documentation",
         placeholder="Type to search across all docs...",
         key="doc_search"
     )

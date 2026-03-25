@@ -31,7 +31,7 @@ def render_database_settings():
     st.code(db_url.replace(":g2pass@", ":****@"))  # Mask password
 
     # Test connection
-    if st.button("🔍 Test Connection"):
+    if st.button("Test Connection"):
         try:
             from g2.ui.components.database import get_connection
 
@@ -40,10 +40,10 @@ def render_database_settings():
                     cur.execute("SELECT version()")
                     version = cur.fetchone()[0]
 
-            st.success(f"✅ Connected!")
+            st.success(f"Connected!")
             st.caption(f"PostgreSQL: {version[:50]}...")
         except Exception as e:
-            st.error(f"❌ Connection failed: {e}")
+            st.error(f"Connection failed: {e}")
 
     st.markdown("---")
 
@@ -90,7 +90,7 @@ def render_database_settings():
 
     if st.button("Update Connection") and new_db_url:
         os.environ["DATABASE_URL"] = new_db_url
-        st.success("✅ Connection string updated for this session")
+        st.success("Connection string updated for this session")
         st.warning("Restart the app to use new connection")
 
 
@@ -103,10 +103,10 @@ def render_about():
 
     **g2** is a comprehensive trading analysis platform that combines:
 
-    - 📊 **Interactive Charts** - Professional Plotly visualizations
-    - 🤖 **AI Prompts** - Example queries for Claude Code
-    - 🧠 **ML Pipeline** - Quantile regression & classification models
-    - 📈 **Backtesting** - Strategy testing with realistic execution
+    - :material/bar_chart: **Charts** - Professional Plotly visualizations
+    - :material/bolt: **AI Actions** - Example queries for Claude Code
+    - :material/model_training: **ML Pipeline** - Quantile regression & classification models
+    - :material/history: **Backtesting** - Strategy testing with realistic execution
 
     ### Features
 

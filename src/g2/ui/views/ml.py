@@ -147,7 +147,7 @@ def _render_dataset_inspection(ds: dict):
         st.error("Invalid response from dataset-inspect")
         return
 
-    with st.expander(f"📋 Dataset Details: {ds['name']} {ds['version']}", expanded=True):
+    with st.expander(f"Dataset Details: {ds['name']} {ds['version']}", expanded=True):
         col1, col2 = st.columns(2)
 
         with col1:
@@ -232,7 +232,7 @@ def _render_feature_importance(model: dict, model_data: dict):
             key=f"fi_topk_{model['id']}",
         )
 
-    if st.button("📊 Compute", key=f"fi_compute_{model['id']}"):
+    if st.button("Compute", key=f"fi_compute_{model['id']}"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
 
@@ -503,7 +503,7 @@ def render_dataset_section():
         )
 
     # Feature selection
-    with st.expander("🔧 Feature Selection (optional)"):
+    with st.expander(":material/tune: Feature Selection (optional)"):
         available_features = _get_available_features()
 
         if not available_features:
@@ -548,7 +548,7 @@ def render_dataset_section():
     # Show info and confirm checkbox if dataset exists
     confirm_overwrite = True
     if dataset_exists:
-        st.info(f"ℹ️ Dataset `{dataset_name}` version `{dataset_version}` already exists.")
+        st.info(f" Dataset `{dataset_name}` version `{dataset_version}` already exists.")
         confirm_overwrite = st.checkbox(
             "Overwrite existing dataset",
             value=False,
@@ -556,7 +556,7 @@ def render_dataset_section():
         )
 
     if st.button(
-        "🔨 Build Dataset",
+        "Build Dataset",
         type="primary",
         width="stretch",
         disabled=(dataset_exists and not confirm_overwrite),
@@ -648,25 +648,25 @@ def render_dataset_section():
 
                         # Update step indicators based on message content
                         if "Discovered" in msg and "features" in msg:
-                            step_discover.markdown(f"✅ {msg}")
+                            step_discover.markdown(f"Done: {msg}")
                             steps_completed.append("discover")
                         elif "Exporting prices" in msg:
                             step_prices.markdown(f"⏳ {msg}")
                         elif "Exported" in msg and "price" in msg:
-                            step_prices.markdown(f"✅ {msg}")
+                            step_prices.markdown(f"Done: {msg}")
                             steps_completed.append("prices")
                         elif "Exporting features" in msg:
                             step_features.markdown(f"⏳ {msg}")
                         elif "Features exported" in msg:
-                            step_features.markdown(f"✅ {msg}")
+                            step_features.markdown(f"Done: {msg}")
                             steps_completed.append("features")
                         elif "Computing labels" in msg:
                             step_labels.markdown(f"⏳ {msg}")
                         elif "Labels computed" in msg:
-                            step_labels.markdown(f"✅ {msg}")
+                            step_labels.markdown(f"Done: {msg}")
                             steps_completed.append("labels")
                         elif "Dataset registered" in msg:
-                            step_register.markdown(f"✅ {msg}")
+                            step_register.markdown(f"Done: {msg}")
                             steps_completed.append("register")
 
                     except json.JSONDecodeError:
@@ -676,19 +676,19 @@ def render_dataset_section():
                 returncode = process.wait()
 
                 if returncode == 0:
-                    status.update(label="✅ Dataset built!", state="complete")
+                    status.update(label="Dataset built!", state="complete")
                     st.success(f"Dataset {dataset_name} v{dataset_version} built successfully!")
                     # Clear cache so new dataset shows up immediately
                     _get_datasets.clear()
                 else:
                     stderr = process.stderr.read()
-                    status.update(label="❌ Build failed", state="error")
+                    status.update(label="Build failed", state="error")
                     st.error("Build failed")
                     if stderr:
                         st.code(stderr)
 
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
     # Dataset management
@@ -697,7 +697,7 @@ def render_dataset_section():
     with col1:
         st.subheader("Manage Datasets")
     with col2:
-        if st.button("🔄", key="refresh_datasets", help="Refresh dataset list"):
+        if st.button("Refresh", icon=":material/refresh:", key="refresh_datasets", help="Refresh dataset list"):
             _get_datasets.clear()
             st.rerun()
 
@@ -730,19 +730,19 @@ def render_dataset_section():
                     st.caption(f"🔗 {model_count} model(s)")
 
             with col3:
-                if st.button("🔍", key=f"inspect_{ds['id']}", help="Inspect dataset"):
+                if st.button("Inspect", icon=":material/search:", key=f"inspect_{ds['id']}", help="Inspect dataset"):
                     st.session_state[f"inspecting_{ds['id']}"] = True
 
             with col4:
                 if ds.get("model_count", 0) > 0:
                     st.button(
-                        "🗑️",
+                        "Delete", icon=":material/delete:",
                         key=f"del_{ds['id']}",
                         disabled=True,
                         help=f"Cannot delete: {ds['model_count']} model(s) depend on this dataset",
                     )
                 else:
-                    if st.button("🗑️", key=f"del_{ds['id']}", help="Delete dataset"):
+                    if st.button("Delete", icon=":material/delete:", key=f"del_{ds['id']}", help="Delete dataset"):
                         # Run delete command
                         env = os.environ.copy()
                         env["OTEL_ENABLED"] = "false"
@@ -807,7 +807,7 @@ def render_train_section():
 
     if cuda_available:
         gpu_name = device_info.get("cuda_device_name", "GPU")
-        st.success(f"🚀 **GPU Detected:** {gpu_name} — Training will use CUDA acceleration")
+        st.success(f"GPU Detected:** {gpu_name} — Training will use CUDA acceleration")
     else:
         st.warning("⚠️ **No GPU Detected** — Training will use CPU. All algorithms work fine on CPU.")
 
@@ -954,7 +954,7 @@ def render_train_section():
     # Hyperparameter Tuning subsection (only for xgboost/lightgbm)
     if model_type == "Quantile Regression" and algorithm in ["xgboost", "lightgbm"]:
         st.markdown("---")
-        st.markdown("##### 🔧 Hyperparameter Tuning (Optional)")
+        st.markdown("##### :material/tune: Hyperparameter Tuning (Optional)")
         with st.expander("Find optimal hyperparameters using Bayesian optimization", expanded=False):
             _render_tune_section_inline(
                 datasets=datasets,
@@ -972,7 +972,7 @@ def render_train_section():
     models = _get_models()
 
     if model_type == "Quantile Regression" and algorithm in ["xgboost", "lightgbm"]:
-        with st.expander("🚀 Warm-Start Training (Advanced)", expanded=False):
+        with st.expander(":material/speed: Warm-Start Training (Advanced)", expanded=False):
             st.info("""
             **Warm-start** continues training from an existing model instead of starting fresh.
             This is **10-100x faster** for incremental updates (e.g., new day of data).
@@ -1028,15 +1028,15 @@ def render_train_section():
     # Hyperparameter inputs (only for Quantile Regression with xgboost/lightgbm)
     hyperparams = {}
     if model_type == "Quantile Regression" and algorithm in ["xgboost", "lightgbm"]:
-        with st.expander("⚙️ Hyperparameters (Advanced)", expanded=False):
+        with st.expander(":material/settings: Hyperparameters (Advanced)", expanded=False):
             # Check for tuned parameters in session state
             tuned_params = st.session_state.get("tuned_hyperparams", {})
             tuned_algo = st.session_state.get("tuned_algorithm", "")
 
             if tuned_params:
                 if tuned_algo == algorithm:
-                    st.success(f"✅ Tuned parameters available for {algorithm}")
-                    if st.button("📥 Apply Tuned Parameters", key="apply_tuned"):
+                    st.success(f"Tuned parameters available for {algorithm}")
+                    if st.button("Apply Tuned Parameters", key="apply_tuned"):
                         # Store in session state for number inputs to pick up
                         for key, value in tuned_params.items():
                             st.session_state[f"hp_{key}"] = value
@@ -1153,7 +1153,7 @@ def render_train_section():
             if hyperparams:
                 st.info(f"Custom hyperparameters: {hyperparams}")
 
-    if st.button("🎯 Train Model", type="primary", width="stretch"):
+    if st.button("Train Model", type="primary", width="stretch"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
@@ -1277,19 +1277,19 @@ def render_train_section():
                 returncode = process.wait()
 
                 if returncode == 0:
-                    status.update(label="✅ Model trained!", state="complete")
+                    status.update(label="Model trained!", state="complete")
                     st.success(f"Model {model_name} v{model_version} trained successfully!")
                     # Clear cache so new model shows up immediately
                     _get_models.clear()
                 else:
                     stderr = process.stderr.read()
-                    status.update(label="❌ Training failed", state="error")
+                    status.update(label="Training failed", state="error")
                     st.error("Training failed")
                     if stderr:
                         st.code(stderr)
 
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
     # Model management
@@ -1306,7 +1306,7 @@ def render_train_section():
 
             with col1:
                 algo = model.get("algorithm", "-")
-                active_badge = "✅" if model.get("active") else "⏸️"
+                active_badge = "●" if model.get("active") else "○"
                 st.markdown(f"**{model['name']}** `{model['version']}` {active_badge}")
                 st.caption(f"{algo} | Dataset: {model.get('dataset_name', '?')} {model.get('dataset_version', '')}")
 
@@ -1316,11 +1316,11 @@ def render_train_section():
                 st.caption(f"Created: {created_str}")
 
             with col3:
-                if st.button("🔍", key=f"inspect_model_{model['id']}", help="Inspect model"):
+                if st.button("Inspect", icon=":material/search:", key=f"inspect_model_{model['id']}", help="Inspect model"):
                     st.session_state[f"inspecting_model_{model['id']}"] = True
 
             with col4:
-                if st.button("🗑️", key=f"del_model_{model['id']}", help="Delete model"):
+                if st.button("Delete", icon=":material/delete:", key=f"del_model_{model['id']}", help="Delete model"):
                     # Run delete command
                     env = os.environ.copy()
                     env["OTEL_ENABLED"] = "false"
@@ -1344,7 +1344,7 @@ def render_train_section():
 
             # Show inspection panel if toggled
             if st.session_state.get(f"inspecting_model_{model['id']}", False):
-                with st.expander(f"📋 Model Details: {model['name']} {model['version']}", expanded=True):
+                with st.expander(f"Model Details: {model['name']} {model['version']}", expanded=True):
                     _render_model_inspection(model)
                 if st.button("Close", key=f"close_inspect_model_{model['id']}"):
                     st.session_state[f"inspecting_model_{model['id']}"] = False
@@ -1427,12 +1427,12 @@ def _render_hyperparams_with_descriptions(params: dict, show_apply_button: bool 
 
     if show_apply_button and params:
         st.markdown("---")
-        if st.button("📥 Apply to Training", type="primary", key="apply_tuned_params"):
+        if st.button("Apply to Training", type="primary", key="apply_tuned_params"):
             # Store each param in session state for the hyperparameter inputs to pick up
             for key, value in params.items():
                 st.session_state[f"hp_{key}"] = value
             st.session_state["tuned_hyperparams"] = params
-            st.success("✅ Parameters applied! See Hyperparameters section below.")
+            st.success("Parameters applied! See Hyperparameters section below.")
             st.rerun()
 
 
@@ -1507,7 +1507,7 @@ def _render_tune_section_inline(
             help="Stop after this many seconds",
         )
 
-    if st.button("🔍 Start Tuning", key="tune_inline_start"):
+    if st.button("Start Tuning", key="tune_inline_start"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
         env["PYTHONUNBUFFERED"] = "1"
@@ -1582,7 +1582,7 @@ def _render_tune_section_inline(
                 returncode = process.wait()
 
                 if returncode == 0:
-                    status.update(label="✅ Tuning complete!", state="complete")
+                    status.update(label="Tuning complete!", state="complete")
 
                     best_params = last_data.get("best_params", {})
                     if best_params:
@@ -1596,13 +1596,13 @@ def _render_tune_section_inline(
                         _render_hyperparams_with_descriptions(best_params, show_apply_button=True)
                 else:
                     stderr = process.stderr.read()
-                    status.update(label="❌ Tuning failed", state="error")
+                    status.update(label="Tuning failed", state="error")
                     st.error("Tuning failed")
                     if stderr:
                         st.code(stderr)
 
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
 
@@ -1713,7 +1713,7 @@ def _render_tune_section(datasets: list):
             help="Stop after this many seconds",
         )
 
-    if st.button("🔍 Start Tuning", type="primary", key="tune_start"):
+    if st.button("Start Tuning", type="primary", key="tune_start"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
@@ -1796,7 +1796,7 @@ def _render_tune_section(datasets: list):
                 returncode = process.wait()
 
                 if returncode == 0:
-                    status.update(label="✅ Tuning complete!", state="complete")
+                    status.update(label="Tuning complete!", state="complete")
 
                     # Show best hyperparameters
                     best_params = last_data.get("best_params", {})
@@ -1811,18 +1811,18 @@ def _render_tune_section(datasets: list):
                         _render_hyperparams_with_descriptions(best_params)
 
                         st.success(
-                            "✅ **Parameters saved!** Scroll down to the Train Model section "
+                            "**Parameters saved!** Scroll down to the Train Model section "
                             "and click 'Apply Tuned Parameters' to use these values."
                         )
                 else:
                     stderr = process.stderr.read()
-                    status.update(label="❌ Tuning failed", state="error")
+                    status.update(label="Tuning failed", state="error")
                     st.error("Tuning failed")
                     if stderr:
                         st.code(stderr)
 
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
 
@@ -1875,10 +1875,10 @@ def render_predict_section():
             st.info(f"🏷️ **Classifier Model**: `{model_name}` v`{model_version}` ({algorithm})\n\n"
                    "Predicts trend direction (strong_up, weak_up, flat, weak_down, strong_down)")
         elif model_type == "ensemble":
-            st.info(f"🎯 **Ensemble Model**: `{model_name}` v`{model_version}` ({algorithm})\n\n"
+            st.info(f"Ensemble Model**: `{model_name}` v`{model_version}` ({algorithm})\n\n"
                    "Combines multiple algorithms for improved predictions")
         else:
-            st.info(f"📊 **Quantile Model**: `{model_name}` v`{model_version}` ({algorithm or 'unknown'})\n\n"
+            st.info(f"Quantile Model**: `{model_name}` v`{model_version}` ({algorithm or 'unknown'})\n\n"
                    "Predicts price ranges (q10/q50/q90 quantiles)")
 
         # Get latest date with features
@@ -1964,7 +1964,7 @@ def render_predict_section():
                 key="pred_limit",
             )
 
-    if st.button("🔮 Generate Predictions", type="primary", width="stretch"):
+    if st.button("Generate Predictions", type="primary", width="stretch"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
@@ -2079,17 +2079,17 @@ def render_predict_section():
                     total_preds = last_data.get("total_predictions", 0)
                     if total_preds:
                         predictions_metric.metric("Predictions", total_preds)
-                    status.update(label="✅ Predictions generated!", state="complete")
+                    status.update(label="Predictions generated!", state="complete")
                     st.success("Predictions generated successfully!")
                 else:
                     stderr = process.stderr.read()
-                    status.update(label="❌ Prediction failed", state="error")
+                    status.update(label="Prediction failed", state="error")
                     st.error("Prediction failed")
                     if stderr:
                         st.code(stderr)
 
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
     st.markdown("---")
@@ -2258,7 +2258,7 @@ def render_evaluate_section():
             key="eval_start",
         )
 
-    if st.button("📊 Evaluate", type="primary", width="stretch"):
+    if st.button("Evaluate", type="primary", width="stretch"):
         env = os.environ.copy()
         env["OTEL_ENABLED"] = "false"
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
@@ -2312,17 +2312,17 @@ def render_evaluate_section():
                 returncode = process.wait()
 
                 if returncode == 0:
-                    status.update(label="✅ Evaluation complete!", state="complete")
+                    status.update(label="Evaluation complete!", state="complete")
                     st.success("Evaluation completed!")
                 else:
                     stderr = process.stderr.read()
-                    status.update(label="❌ Evaluation failed", state="error")
+                    status.update(label="Evaluation failed", state="error")
                     st.error("Evaluation failed")
                     if stderr:
                         st.code(stderr)
 
             except Exception as e:
-                status.update(label="❌ Error", state="error")
+                status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
     st.markdown("---")

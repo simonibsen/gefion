@@ -667,9 +667,9 @@ def render_freeform_output(key: str, mode: str):
                     for group in groups:
                         count = len(group["calls"])
                         if count > 1:
-                            st.markdown(f"🔧 **{group['tool']}** ({count} calls)")
+                            st.markdown(f":material/build: **{group['tool']}** ({count} calls)")
                         else:
-                            st.markdown(f"🔧 **{group['tool']}**")
+                            st.markdown(f":material/build: **{group['tool']}**")
                         for call in group["calls"]:
                             if call["input"] and call["input"] != "{}":
                                 st.code(call["input"], language="json")

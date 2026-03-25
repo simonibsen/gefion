@@ -224,7 +224,7 @@ def render_dashboard():
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("📈 Top Gainers")
+            st.subheader("Top Gainers")
             if movers.gainers:
                 for symbol, close, prev, pct in movers.gainers:
                     st.metric(
@@ -265,7 +265,7 @@ def render_dashboard():
 
         # Recent predictions
         with col1:
-            st.subheader("🔮 Recent Predictions")
+            st.subheader("Recent Predictions")
             if insights.pred_count > 0:
                 st.metric("Predictions (7d)", f"{insights.pred_count:,}")
                 if insights.pred_date:
@@ -281,7 +281,7 @@ def render_dashboard():
 
         # Model performance
         with col2:
-            st.subheader("📊 Model Performance")
+            st.subheader("Model Performance")
             if insights.models:
                 for name, horizon, q50_calib, loss in insights.models:
                     st.caption(f"**{name}** ({horizon}d)")
@@ -295,7 +295,7 @@ def render_dashboard():
 
         # Feature coverage
         with col3:
-            st.subheader("🔧 Feature Coverage")
+            st.subheader("Feature Coverage")
             if insights.features_computed:
                 st.metric("Features Active", f"{insights.features_computed}/{insights.features_defined}")
                 st.metric("Symbols Covered", insights.symbols_covered)
@@ -310,15 +310,15 @@ def render_dashboard():
     st.markdown("---")
 
     # Help section
-    with st.expander("ℹ️ Getting Started", expanded=False):
+    with st.expander(":material/info: Getting Started", expanded=False):
         st.markdown("""
         ### Welcome to g2!
 
         **g2** is a comprehensive trading analysis platform that combines:
-        - 📊 **Interactive Charts** - Candlesticks, comparisons, volatility analysis
-        - 🤖 **AI Prompts** - Example queries for Claude Code
-        - 🧠 **ML Predictions** - Quantile regression and trend classification
-        - 📈 **Backtesting** - Test strategies with realistic execution modeling
+        - :material/bar_chart: **Charts** - Candlesticks, comparisons, volatility analysis
+        - :material/bolt: **AI Actions** - Example queries for Claude Code
+        - :material/model_training: **ML Predictions** - Quantile regression and trend classification
+        - :material/history: **Backtesting** - Test strategies with realistic execution modeling
 
         ### Quick Start
 
