@@ -4445,6 +4445,42 @@ def health_check(
                 out.console.print(report)
 
 
+@app.command("init")
+def init(
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """
+    Initialize g2 — the single command to get a working system.
+
+    Sets up the database schema, runs migrations, imports feature functions
+    and definitions from git, seeds strategies, and verifies infrastructure
+    health. Safe to run multiple times (idempotent).
+
+    Examples:
+        # Full initialization
+        g2 init
+
+        # JSON output
+        g2 init --json
+    """
+    with create_span("cli.init"):
+        if not json_output:
+            emit("=== g2 init ===")
+        _db_init_impl(db_url, json_output)
+        if not json_output:
+            emit("")
+            emit("=== Health Check ===")
+        all_status = health.check_all_services()
+        if json_output:
+            emit("", data={"health": all_status}, json_output=True)
+        else:
+            report = health.format_health_report(all_status)
+            from g2.output import get_output
+            out = get_output(json_output)
+            out.console.print(report)
+
+
 @app.command("db-init")
 def db_init(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
