@@ -1,5 +1,5 @@
 """
-Tests for g2.health module.
+Tests for gefion.health module.
 
 These tests document expected behavior of health check functions.
 Note: health.py was implemented before tests (TDD violation), so these tests
@@ -7,7 +7,7 @@ are written retrospectively to establish test coverage and prevent regressions.
 """
 import pytest
 from unittest.mock import patch, MagicMock
-from g2 import health
+from gefion import health
 
 
 class TestCheckPostgresHealth:
@@ -240,10 +240,10 @@ class TestCheckAllServices:
 
     def test_check_all_services_structure(self):
         """Test check_all_services returns dict with all services."""
-        with patch('g2.health.check_docker_services', return_value={"running": True, "message": "Docker ok"}), \
-             patch('g2.health.check_postgres_health', return_value={"running": True, "message": "Postgres ok"}), \
-             patch('g2.health.check_tempo_health', return_value={"running": True, "message": "Tempo ok"}), \
-             patch('g2.health.check_grafana_health', return_value={"running": True, "message": "Grafana ok"}):
+        with patch('gefion.health.check_docker_services', return_value={"running": True, "message": "Docker ok"}), \
+             patch('gefion.health.check_postgres_health', return_value={"running": True, "message": "Postgres ok"}), \
+             patch('gefion.health.check_tempo_health', return_value={"running": True, "message": "Tempo ok"}), \
+             patch('gefion.health.check_grafana_health', return_value={"running": True, "message": "Grafana ok"}):
 
             result = health.check_all_services()
 

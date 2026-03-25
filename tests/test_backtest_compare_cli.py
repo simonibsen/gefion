@@ -9,7 +9,7 @@ import pytest
 from datetime import date, timedelta
 from typer.testing import CliRunner
 
-from g2.cli import app
+from gefion.cli import app
 
 
 runner = CliRunner()
@@ -125,14 +125,14 @@ class TestBacktestCompareOutput:
             return mock_results
 
         # Monkeypatch the compare function
-        from g2.backtest import comparison
+        from gefion.backtest import comparison
         monkeypatch.setattr(comparison, "compare_strategies", mock_compare)
 
         # Also mock price data loading
         def mock_load_price_data(*args, **kwargs):
             return _create_sample_price_data()
 
-        from g2.backtest import data_loader
+        from gefion.backtest import data_loader
         monkeypatch.setattr(data_loader, "load_price_data_for_backtest", mock_load_price_data)
 
         result = runner.invoke(
@@ -186,13 +186,13 @@ class TestBacktestCompareMetrics:
         def mock_compare(*args, **kwargs):
             return mock_results
 
-        from g2.backtest import comparison
+        from gefion.backtest import comparison
         monkeypatch.setattr(comparison, "compare_strategies", mock_compare)
 
         def mock_load_price_data(*args, **kwargs):
             return _create_sample_price_data()
 
-        from g2.backtest import data_loader
+        from gefion.backtest import data_loader
         monkeypatch.setattr(data_loader, "load_price_data_for_backtest", mock_load_price_data)
 
         result = runner.invoke(
@@ -235,13 +235,13 @@ class TestBacktestCompareRanking:
         def mock_compare(*args, **kwargs):
             return mock_results
 
-        from g2.backtest import comparison
+        from gefion.backtest import comparison
         monkeypatch.setattr(comparison, "compare_strategies", mock_compare)
 
         def mock_load_price_data(*args, **kwargs):
             return _create_sample_price_data()
 
-        from g2.backtest import data_loader
+        from gefion.backtest import data_loader
         monkeypatch.setattr(data_loader, "load_price_data_for_backtest", mock_load_price_data)
 
         result = runner.invoke(
@@ -279,14 +279,14 @@ class TestBacktestCompareAllStrategies:
         def mock_compare(strategies, *args, **kwargs):
             return {name: {"sharpe_ratio": 1.0} for name in strategies}
 
-        from g2.backtest import comparison
-        from g2.backtest.comparison import AVAILABLE_STRATEGIES
+        from gefion.backtest import comparison
+        from gefion.backtest.comparison import AVAILABLE_STRATEGIES
         monkeypatch.setattr(comparison, "compare_strategies", mock_compare)
 
         def mock_load_price_data(*args, **kwargs):
             return _create_sample_price_data(days=60)
 
-        from g2.backtest import data_loader
+        from gefion.backtest import data_loader
         monkeypatch.setattr(data_loader, "load_price_data_for_backtest", mock_load_price_data)
 
         result = runner.invoke(

@@ -10,9 +10,9 @@ COMMANDS_DIR = REPO_ROOT / ".claude" / "commands"
 
 
 class TestServicesCommand:
-    """Structural validation of the /g2-services slash command."""
+    """Structural validation of the /gefion-services slash command."""
 
-    command_path = COMMANDS_DIR / "g2-services.md"
+    command_path = COMMANDS_DIR / "gefion-services.md"
 
     def test_services_command_exists(self):
         """The services.md command file must exist."""
@@ -40,12 +40,12 @@ class TestServicesCommand:
 
 
 class TestDevCommand:
-    """Structural validation of the /g2-dev slash command."""
+    """Structural validation of the /gefion-dev slash command."""
 
-    command_path = COMMANDS_DIR / "g2-dev.md"
+    command_path = COMMANDS_DIR / "gefion-dev.md"
 
     def test_dev_command_exists(self):
-        """The g2-dev.md command file must exist."""
+        """The gefion-dev.md command file must exist."""
         assert self.command_path.exists(), (
             f"Expected command file at {self.command_path}"
         )

@@ -28,7 +28,7 @@ class TestDeviceDetection:
 
     def test_detect_device_returns_cpu_when_no_cuda(self):
         """detect_device returns 'cpu' when CUDA not available."""
-        from g2.ml.device import detect_device
+        from gefion.ml.device import detect_device
 
         with patch.dict('sys.modules', {'torch': None}):
             # When torch not installed, should return cpu
@@ -37,7 +37,7 @@ class TestDeviceDetection:
 
     def test_detect_device_returns_dict_with_info(self):
         """detect_device returns dict with device info."""
-        from g2.ml.device import detect_device
+        from gefion.ml.device import detect_device
 
         result = detect_device(return_info=True)
 
@@ -48,7 +48,7 @@ class TestDeviceDetection:
 
     def test_detect_device_respects_override(self):
         """detect_device respects explicit device override."""
-        from g2.ml.device import detect_device
+        from gefion.ml.device import detect_device
 
         # Force CPU even if CUDA available
         device = detect_device(force_device="cpu")
@@ -62,7 +62,7 @@ class TestXGBoostGPU:
     def test_xgboost_uses_gpu_when_device_cuda(self):
         """XGBoost training uses GPU params when device=cuda."""
         import xgboost as xgb
-        from g2.ml.models import train_quantile_model
+        from gefion.ml.models import train_quantile_model
 
         # Create minimal test data
         X = pd.DataFrame({
@@ -94,7 +94,7 @@ class TestXGBoostGPU:
 
     def test_xgboost_uses_cpu_when_device_cpu(self):
         """XGBoost training uses CPU params when device=cpu."""
-        from g2.ml.models import train_quantile_model
+        from gefion.ml.models import train_quantile_model
 
         X = pd.DataFrame({
             'feature1': np.random.randn(100),
@@ -120,7 +120,7 @@ class TestLightGBMGPU:
     def test_lightgbm_uses_gpu_when_device_cuda(self):
         """LightGBM training uses GPU params when device=cuda."""
         import lightgbm as lgb
-        from g2.ml.models import train_quantile_model
+        from gefion.ml.models import train_quantile_model
 
         X = pd.DataFrame({
             'feature1': np.random.randn(100),
@@ -147,7 +147,7 @@ class TestLightGBMGPU:
 
     def test_lightgbm_uses_cpu_when_device_cpu(self):
         """LightGBM training uses CPU when device=cpu."""
-        from g2.ml.models import train_quantile_model
+        from gefion.ml.models import train_quantile_model
 
         X = pd.DataFrame({
             'feature1': np.random.randn(100),
@@ -171,7 +171,7 @@ class TestClassifierGPU:
     def test_classifier_xgboost_uses_gpu(self):
         """XGBoost classifier uses GPU when device=cuda."""
         import xgboost as xgb
-        from g2.ml.classifier import train_classifier
+        from gefion.ml.classifier import train_classifier
 
         X = pd.DataFrame({
             'feature1': np.random.randn(100),
@@ -206,7 +206,7 @@ class TestCLIDeviceFlag:
     def test_ml_train_accepts_device_flag(self):
         """ml train command accepts --device flag."""
         from typer.testing import CliRunner
-        from g2.cli import app
+        from gefion.cli import app
 
         runner = CliRunner()
         result = runner.invoke(app, ["ml", "train", "--help"])
@@ -217,7 +217,7 @@ class TestCLIDeviceFlag:
     def test_ml_train_classifier_accepts_device_flag(self):
         """ml train-classifier command accepts --device flag."""
         from typer.testing import CliRunner
-        from g2.cli import app
+        from gefion.cli import app
 
         runner = CliRunner()
         result = runner.invoke(app, ["ml", "train-classifier", "--help"])
@@ -228,7 +228,7 @@ class TestCLIDeviceFlag:
     def test_device_flag_accepts_auto_cpu_cuda(self):
         """--device flag accepts 'auto', 'cpu', 'cuda' values."""
         from typer.testing import CliRunner
-        from g2.cli import app
+        from gefion.cli import app
 
         runner = CliRunner()
         result = runner.invoke(app, ["ml", "train", "--help"])
@@ -283,7 +283,7 @@ class TestGPUIntegration:
     def test_xgboost_quantile_trains_on_gpu(self, sample_data):
         """XGBoost quantile regression actually trains on GPU."""
         pytest.importorskip("xgboost")
-        from g2.ml.models import train_quantile_model
+        from gefion.ml.models import train_quantile_model
 
         X, y_reg, _ = sample_data
 
@@ -305,7 +305,7 @@ class TestGPUIntegration:
     def test_lightgbm_quantile_trains_on_gpu(self, sample_data):
         """LightGBM quantile regression actually trains on GPU."""
         pytest.importorskip("lightgbm")
-        from g2.ml.models import train_quantile_model
+        from gefion.ml.models import train_quantile_model
 
         X, y_reg, _ = sample_data
 
@@ -322,7 +322,7 @@ class TestGPUIntegration:
     def test_xgboost_classifier_trains_on_gpu(self, sample_data):
         """XGBoost classifier actually trains on GPU."""
         pytest.importorskip("xgboost")
-        from g2.ml.classifier import train_classifier
+        from gefion.ml.classifier import train_classifier
 
         X, _, y_cls = sample_data
 
@@ -339,7 +339,7 @@ class TestGPUIntegration:
     def test_lightgbm_classifier_trains_on_gpu(self, sample_data):
         """LightGBM classifier actually trains on GPU."""
         pytest.importorskip("lightgbm")
-        from g2.ml.classifier import train_classifier
+        from gefion.ml.classifier import train_classifier
 
         X, _, y_cls = sample_data
 
@@ -357,7 +357,7 @@ class TestGPUIntegration:
         """GPU training should be faster than CPU for larger datasets."""
         pytest.importorskip("xgboost")
         import time
-        from g2.ml.models import train_quantile_model
+        from gefion.ml.models import train_quantile_model
 
         # Create larger dataset for timing comparison
         np.random.seed(42)
@@ -390,7 +390,7 @@ class TestLibompErrorHandling:
     def test_models_module_has_libomp_error_handling(self):
         """The models module should have error handling for libomp."""
         import inspect
-        from g2.ml import models
+        from gefion.ml import models
 
         # Get the source code of _train_lightgbm_quantile
         source = inspect.getsource(models._train_lightgbm_quantile)

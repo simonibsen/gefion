@@ -5,7 +5,7 @@ import pytest
 from datetime import date, timedelta
 from decimal import Decimal
 
-from g2.strategies.ma_crossover import MovingAverageCrossoverStrategy
+from gefion.strategies.ma_crossover import MovingAverageCrossoverStrategy
 
 
 def test_strategy_initialization():

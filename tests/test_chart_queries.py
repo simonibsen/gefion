@@ -10,7 +10,7 @@ from datetime import date, timedelta
 import psycopg
 import pytest
 
-from g2.db import schema
+from gefion.db import schema
 
 
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
@@ -140,7 +140,7 @@ class TestFetchOhlcvForChart:
 
     def test_fetch_ohlcv_returns_expected_structure(self, conn, sample_ohlcv_data):
         """fetch_ohlcv_for_chart should return list of dicts with OHLCV fields."""
-        from g2.charts.queries import fetch_ohlcv_for_chart
+        from gefion.charts.queries import fetch_ohlcv_for_chart
 
         data = fetch_ohlcv_for_chart(conn, sample_ohlcv_data)
 
@@ -158,7 +158,7 @@ class TestFetchOhlcvForChart:
 
     def test_fetch_ohlcv_with_date_range(self, conn, sample_ohlcv_data):
         """fetch_ohlcv_for_chart should filter by date range."""
-        from g2.charts.queries import fetch_ohlcv_for_chart
+        from gefion.charts.queries import fetch_ohlcv_for_chart
 
         start = date.today() - timedelta(days=30)
         end = date.today() - timedelta(days=20)
@@ -172,7 +172,7 @@ class TestFetchOhlcvForChart:
 
     def test_fetch_ohlcv_ordered_by_date(self, conn, sample_ohlcv_data):
         """fetch_ohlcv_for_chart should return data ordered by date ascending."""
-        from g2.charts.queries import fetch_ohlcv_for_chart
+        from gefion.charts.queries import fetch_ohlcv_for_chart
 
         data = fetch_ohlcv_for_chart(conn, sample_ohlcv_data)
 
@@ -181,7 +181,7 @@ class TestFetchOhlcvForChart:
 
     def test_fetch_ohlcv_nonexistent_symbol_returns_empty(self, conn):
         """fetch_ohlcv_for_chart should return empty list for unknown symbol."""
-        from g2.charts.queries import fetch_ohlcv_for_chart
+        from gefion.charts.queries import fetch_ohlcv_for_chart
 
         data = fetch_ohlcv_for_chart(conn, "NONEXISTENT_SYMBOL_XYZ")
 
@@ -252,7 +252,7 @@ class TestFetchPredictionsForChart:
         self, conn, sample_ohlcv_data, sample_predictions
     ):
         """fetch_predictions_for_chart should return list of dicts with q10/q50/q90."""
-        from g2.charts.queries import fetch_predictions_for_chart
+        from gefion.charts.queries import fetch_predictions_for_chart
 
         data = fetch_predictions_for_chart(conn, sample_ohlcv_data, sample_predictions)
 
@@ -267,7 +267,7 @@ class TestFetchPredictionsForChart:
 
     def test_fetch_predictions_filters_by_model(self, conn, sample_ohlcv_data, sample_predictions):
         """fetch_predictions_for_chart should filter by model_name."""
-        from g2.charts.queries import fetch_predictions_for_chart
+        from gefion.charts.queries import fetch_predictions_for_chart
 
         data = fetch_predictions_for_chart(conn, sample_ohlcv_data, "nonexistent_model")
 
@@ -275,7 +275,7 @@ class TestFetchPredictionsForChart:
 
     def test_fetch_predictions_filters_by_horizon(self, conn, sample_ohlcv_data, sample_predictions):
         """fetch_predictions_for_chart should filter by horizon."""
-        from g2.charts.queries import fetch_predictions_for_chart
+        from gefion.charts.queries import fetch_predictions_for_chart
 
         # Test data uses horizon=7
         data_h7 = fetch_predictions_for_chart(conn, sample_ohlcv_data, sample_predictions, horizon=7)
@@ -353,7 +353,7 @@ class TestFetchFeaturesForChart:
         self, conn, sample_ohlcv_data, sample_features
     ):
         """fetch_features_for_chart should return dict mapping feature names to data."""
-        from g2.charts.queries import fetch_features_for_chart
+        from gefion.charts.queries import fetch_features_for_chart
 
         data = fetch_features_for_chart(conn, sample_ohlcv_data, sample_features)
 
@@ -370,7 +370,7 @@ class TestFetchFeaturesForChart:
 
     def test_fetch_features_with_date_range(self, conn, sample_ohlcv_data, sample_features):
         """fetch_features_for_chart should filter by date range."""
-        from g2.charts.queries import fetch_features_for_chart
+        from gefion.charts.queries import fetch_features_for_chart
 
         start = date.today() - timedelta(days=25)
         end = date.today() - timedelta(days=15)
@@ -386,7 +386,7 @@ class TestFetchFeaturesForChart:
 
     def test_fetch_features_nonexistent_returns_empty(self, conn, sample_ohlcv_data):
         """fetch_features_for_chart should return empty lists for unknown features."""
-        from g2.charts.queries import fetch_features_for_chart
+        from gefion.charts.queries import fetch_features_for_chart
 
         data = fetch_features_for_chart(conn, sample_ohlcv_data, ["nonexistent_feature"])
 
@@ -398,7 +398,7 @@ class TestFetchBacktestEquityCurve:
 
     def test_fetch_backtest_nonexistent_returns_empty(self, conn):
         """fetch_backtest_equity_curve should return empty list for unknown backtest."""
-        from g2.charts.queries import fetch_backtest_equity_curve
+        from gefion.charts.queries import fetch_backtest_equity_curve
 
         # When table doesn't exist or backtest not found, should return empty list
         data = fetch_backtest_equity_curve(conn, "nonexistent_backtest_id")

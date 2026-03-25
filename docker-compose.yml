@@ -1,7 +1,7 @@
 services:
   postgres:
     image: timescale/timescaledb:2.12.0-pg14
-    container_name: g2-postgres
+    container_name: gefion-postgres
     restart: unless-stopped
     command:
       [
@@ -10,16 +10,16 @@ services:
         "-c", "max_locks_per_transaction=256"
       ]
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-g2}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-g2pass}
-      POSTGRES_DB: ${POSTGRES_DB:-g2}
+      POSTGRES_USER: ${POSTGRES_USER:-gefion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gefionpass}
+      POSTGRES_DB: ${POSTGRES_DB:-gefion}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       #- ${POSTGRES_DATA_DIR:-./db}:/var/lib/postgresql/data
       - ./docker/initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-g2} -d ${POSTGRES_DB:-g2}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gefion} -d ${POSTGRES_DB:-gefion}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,7 +30,7 @@ services:
       dockerfile: docker/Dockerfile.ml
     working_dir: /app
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-g2}:${POSTGRES_PASSWORD:-g2pass}@postgres:5432/${POSTGRES_DB:-g2}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-gefion}:${POSTGRES_PASSWORD:-gefionpass}@postgres:5432/${POSTGRES_DB:-gefion}}
     depends_on:
       postgres:
         condition: service_healthy

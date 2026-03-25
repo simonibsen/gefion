@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from g2.ml.evaluation import (
+from gefion.ml.evaluation import (
     pinball_loss,
     calculate_calibration_metrics,
     generate_evaluation_report,

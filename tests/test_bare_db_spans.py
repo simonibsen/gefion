@@ -10,10 +10,10 @@ from contextlib import contextmanager
 from datetime import date
 from unittest.mock import patch
 
-import g2.cli as cli
-import g2.ingest.universe as universe
-import g2.db.ingest as ingest
-import g2.features.dispatcher as dispatcher
+import gefion.cli as cli
+import gefion.ingest.universe as universe
+import gefion.db.ingest as ingest
+import gefion.features.dispatcher as dispatcher
 
 
 class DummySpan:

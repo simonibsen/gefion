@@ -12,7 +12,7 @@ from datetime import date
 from unittest.mock import MagicMock, patch, call
 import psycopg.errors
 
-from g2.db.ingest import insert_computed_features
+from gefion.db.ingest import insert_computed_features
 
 
 def test_optimistic_insert_fast_path_no_chunk_creation():
@@ -32,8 +32,8 @@ def test_optimistic_insert_fast_path_no_chunk_creation():
     ]
     feature_map = {"rsi": 1, "macd": 2}
 
-    with patch("g2.db.pool.should_prepare_statements", return_value=False):
-        with patch("g2.utils.timescale.ensure_chunks_for_date_range") as mock_ensure:
+    with patch("gefion.db.pool.should_prepare_statements", return_value=False):
+        with patch("gefion.utils.timescale.ensure_chunks_for_date_range") as mock_ensure:
             # Call insert
             result = insert_computed_features(
                 conn=conn,
@@ -83,8 +83,8 @@ def test_optimistic_insert_slow_path_creates_chunks_on_error():
     ]
     feature_map = {"rsi": 1}
 
-    with patch("g2.db.pool.should_prepare_statements", return_value=False):
-        with patch("g2.utils.timescale.ensure_chunks_for_date_range") as mock_ensure:
+    with patch("gefion.db.pool.should_prepare_statements", return_value=False):
+        with patch("gefion.utils.timescale.ensure_chunks_for_date_range") as mock_ensure:
             with patch("warnings.warn") as mock_warn:
                 # Mock psycopg.connect to return a mock connection for chunk creation
                 with patch("psycopg.connect") as mock_connect:
@@ -136,8 +136,8 @@ def test_optimistic_insert_propagates_non_chunk_errors():
     rows = [{"date": date(2024, 1, 1), "rsi": 50.0}]
     feature_map = {"rsi": 1}
 
-    with patch("g2.db.pool.should_prepare_statements", return_value=False):
-        with patch("g2.utils.timescale.ensure_chunks_for_date_range") as mock_ensure:
+    with patch("gefion.db.pool.should_prepare_statements", return_value=False):
+        with patch("gefion.utils.timescale.ensure_chunks_for_date_range") as mock_ensure:
             # Call insert - should raise exception
             with pytest.raises(Exception) as exc_info:
                 insert_computed_features(
@@ -161,7 +161,7 @@ def test_optimistic_insert_empty_data():
     """Test that empty data returns 0 without any operations."""
     conn = MagicMock()
 
-    with patch("g2.utils.timescale.ensure_chunks_for_date_range") as mock_ensure:
+    with patch("gefion.utils.timescale.ensure_chunks_for_date_range") as mock_ensure:
         result = insert_computed_features(
             conn=conn,
             data_id=10,

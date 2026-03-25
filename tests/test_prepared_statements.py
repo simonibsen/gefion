@@ -5,9 +5,9 @@ from datetime import date
 import psycopg
 import pytest
 
-from g2.db.ingest import insert_computed_features
-from g2.db import schema
-from g2.db import pool
+from gefion.db.ingest import insert_computed_features
+from gefion.db import schema
+from gefion.db import pool
 
 
 class FakeCursor:
@@ -93,7 +93,7 @@ def fake_pool(monkeypatch):
 
 def test_pool_enables_prepared_statements():
     """Test that connection pool can be initialized with prepared statement support."""
-    from g2.db.schema import test_db_url
+    from gefion.db.schema import test_db_url
     db_url = test_db_url()
 
     # Initialize pool with prepared statement support
@@ -111,7 +111,7 @@ def test_pool_enables_prepared_statements():
 
 def test_insert_with_prepared_statements():
     """Test that insert_computed_features uses psycopg3 prepare=True when pool configured."""
-    from g2.db.schema import test_db_url
+    from gefion.db.schema import test_db_url
     db_url = test_db_url()
 
     # Initialize pool with prepared statements enabled
@@ -169,7 +169,7 @@ def test_insert_with_prepared_statements():
 
 def test_fallback_without_pool():
     """Test that insert_computed_features works without pool (backward compatibility)."""
-    from g2.db.schema import test_db_url
+    from gefion.db.schema import test_db_url
     db_url = test_db_url()
 
     # Close any existing pool

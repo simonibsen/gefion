@@ -10,10 +10,10 @@ import os
 import pytest
 from pathlib import Path
 from typer.testing import CliRunner
-from g2 import cli
-from g2.cli import import_functions_from_directory, import_definitions_from_directory
-from g2.cli_helpers import db_connection, init_schema_tables
-from g2.db.schema import test_db_url
+from gefion import cli
+from gefion.cli import import_functions_from_directory, import_definitions_from_directory
+from gefion.cli_helpers import db_connection, init_schema_tables
+from gefion.db.schema import test_db_url
 
 
 pytestmark = pytest.mark.skipif(
@@ -70,8 +70,8 @@ class TestFeatureSeeding:
     def test_import_functions_from_directory(self, db_conn, clean_feature_tables):
         """import_functions_from_directory should load JSON files into feature_functions table."""
         # Get the feature-functions directory
-        import g2
-        package_dir = Path(g2.__file__).parent.parent.parent
+        import gefion
+        package_dir = Path(gefion.__file__).parent.parent.parent
         fx_dir = package_dir / "feature-functions"
 
         # Verify it exists
@@ -93,8 +93,8 @@ class TestFeatureSeeding:
     def test_import_definitions_from_directory(self, db_conn, clean_feature_tables):
         """import_definitions_from_directory should load JSON files into feature_definitions table."""
         # Get the feature-definitions directory
-        import g2
-        package_dir = Path(g2.__file__).parent.parent.parent
+        import gefion
+        package_dir = Path(gefion.__file__).parent.parent.parent
         def_dir = package_dir / "feature-definitions"
 
         # Verify it exists
@@ -115,8 +115,8 @@ class TestFeatureSeeding:
 
     def test_seeds_expected_indicator_functions(self, db_conn, clean_feature_tables):
         """Seeding should include expected indicator functions."""
-        import g2
-        package_dir = Path(g2.__file__).parent.parent.parent
+        import gefion
+        package_dir = Path(gefion.__file__).parent.parent.parent
         fx_dir = package_dir / "feature-functions"
 
         with db_connection(test_db_url()) as conn:
@@ -139,8 +139,8 @@ class TestFeatureSeeding:
 
     def test_seeds_expected_feature_definitions(self, db_conn, clean_feature_tables):
         """Seeding should include expected feature definitions."""
-        import g2
-        package_dir = Path(g2.__file__).parent.parent.parent
+        import gefion
+        package_dir = Path(gefion.__file__).parent.parent.parent
         def_dir = package_dir / "feature-definitions"
 
         with db_connection(test_db_url()) as conn:
@@ -162,8 +162,8 @@ class TestFeatureSeeding:
 
     def test_import_is_idempotent(self, db_conn, clean_feature_tables):
         """Running import twice should not cause errors or duplicates."""
-        import g2
-        package_dir = Path(g2.__file__).parent.parent.parent
+        import gefion
+        package_dir = Path(gefion.__file__).parent.parent.parent
         fx_dir = package_dir / "feature-functions"
 
         # First import

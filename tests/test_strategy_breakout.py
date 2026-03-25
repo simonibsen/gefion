@@ -5,7 +5,7 @@ import pytest
 from datetime import date, timedelta
 from decimal import Decimal
 
-from g2.strategies.breakout import BreakoutStrategy
+from gefion.strategies.breakout import BreakoutStrategy
 
 
 def test_strategy_initialization():

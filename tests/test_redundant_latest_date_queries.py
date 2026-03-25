@@ -16,11 +16,11 @@ def test_latest_dates_not_queried_in_full_refresh():
     In full refresh mode, we recompute all dates regardless of what's already
     in the database, so querying latest dates is wasteful.
     """
-    from g2.features.dispatcher import compute_features
+    from gefion.features.dispatcher import compute_features
 
-    with patch('g2.features.dispatcher._fetch_feature_definitions') as mock_fetch_defs, \
-         patch('g2.features.dispatcher._latest_dates_for_features') as mock_latest_dates, \
-         patch('g2.features.dispatcher._process_function_group') as mock_process:
+    with patch('gefion.features.dispatcher._fetch_feature_definitions') as mock_fetch_defs, \
+         patch('gefion.features.dispatcher._latest_dates_for_features') as mock_latest_dates, \
+         patch('gefion.features.dispatcher._process_function_group') as mock_process:
 
         # Setup mocks
         mock_fetch_defs.return_value = [
@@ -50,11 +50,11 @@ def test_latest_dates_queried_in_incremental_mode():
     In incremental mode, we need to know the latest computed date for each
     feature so we can fetch only new data.
     """
-    from g2.features.dispatcher import compute_features
+    from gefion.features.dispatcher import compute_features
 
-    with patch('g2.features.dispatcher._fetch_feature_definitions') as mock_fetch_defs, \
-         patch('g2.features.dispatcher._latest_dates_for_features') as mock_latest_dates, \
-         patch('g2.features.dispatcher._process_function_group') as mock_process:
+    with patch('gefion.features.dispatcher._fetch_feature_definitions') as mock_fetch_defs, \
+         patch('gefion.features.dispatcher._latest_dates_for_features') as mock_latest_dates, \
+         patch('gefion.features.dispatcher._process_function_group') as mock_process:
 
         # Setup mocks
         mock_fetch_defs.return_value = [
@@ -89,11 +89,11 @@ def test_full_refresh_overrides_incremental():
     Even if incremental=True, full_refresh=True should take precedence
     and skip latest date queries.
     """
-    from g2.features.dispatcher import compute_features
+    from gefion.features.dispatcher import compute_features
 
-    with patch('g2.features.dispatcher._fetch_feature_definitions') as mock_fetch_defs, \
-         patch('g2.features.dispatcher._latest_dates_for_features') as mock_latest_dates, \
-         patch('g2.features.dispatcher._process_function_group') as mock_process:
+    with patch('gefion.features.dispatcher._fetch_feature_definitions') as mock_fetch_defs, \
+         patch('gefion.features.dispatcher._latest_dates_for_features') as mock_latest_dates, \
+         patch('gefion.features.dispatcher._process_function_group') as mock_process:
 
         # Setup mocks
         mock_fetch_defs.return_value = [

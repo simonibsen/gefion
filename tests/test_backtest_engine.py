@@ -10,7 +10,7 @@ from datetime import date
 
 def test_portfolio_initialization():
     """Test creating a portfolio with initial cash."""
-    from g2.backtest.portfolio import Portfolio
+    from gefion.backtest.portfolio import Portfolio
 
     portfolio = Portfolio(initial_cash=100000.0)
 
@@ -21,7 +21,7 @@ def test_portfolio_initialization():
 
 def test_portfolio_buy_stock():
     """Test buying a stock."""
-    from g2.backtest.portfolio import Portfolio
+    from gefion.backtest.portfolio import Portfolio
 
     portfolio = Portfolio(initial_cash=100000.0)
 
@@ -36,7 +36,7 @@ def test_portfolio_buy_stock():
 
 def test_portfolio_sell_stock():
     """Test selling a stock."""
-    from g2.backtest.portfolio import Portfolio
+    from gefion.backtest.portfolio import Portfolio
 
     portfolio = Portfolio(initial_cash=100000.0)
     portfolio.buy(symbol="AAPL", shares=100, price=150.0, date=date(2024, 1, 1))
@@ -50,7 +50,7 @@ def test_portfolio_sell_stock():
 
 def test_portfolio_equity_calculation():
     """Test portfolio equity calculation with current prices."""
-    from g2.backtest.portfolio import Portfolio
+    from gefion.backtest.portfolio import Portfolio
 
     portfolio = Portfolio(initial_cash=100000.0)
     portfolio.buy(symbol="AAPL", shares=100, price=150.0, date=date(2024, 1, 1))
@@ -69,8 +69,8 @@ def test_portfolio_equity_calculation():
 
 def test_backtest_engine_simple_strategy():
     """Test running a simple backtest with buy-and-hold strategy."""
-    from g2.backtest.engine import BacktestEngine
-    from g2.backtest.portfolio import Portfolio
+    from gefion.backtest.engine import BacktestEngine
+    from gefion.backtest.portfolio import Portfolio
 
     # Sample price data for backtesting
     price_data = [
@@ -125,7 +125,7 @@ def test_backtest_engine_simple_strategy():
 
 def test_backtest_metrics_calculation():
     """Test calculating backtest performance metrics."""
-    from g2.backtest.metrics import calculate_metrics
+    from gefion.backtest.metrics import calculate_metrics
 
     equity_curve = [
         {"date": date(2024, 1, 1), "equity": 100000.0},
@@ -150,7 +150,7 @@ def test_backtest_metrics_calculation():
 
 def test_point_in_time_correctness():
     """Test that strategy only has access to past data (no look-ahead bias)."""
-    from g2.backtest.engine import BacktestEngine
+    from gefion.backtest.engine import BacktestEngine
 
     price_data = [
         {"symbol": "AAPL", "date": date(2024, 1, 1), "close": 150.0},
@@ -186,7 +186,7 @@ def test_point_in_time_correctness():
 
 def test_portfolio_transaction_log():
     """Test that portfolio maintains a transaction log."""
-    from g2.backtest.portfolio import Portfolio
+    from gefion.backtest.portfolio import Portfolio
 
     portfolio = Portfolio(initial_cash=100000.0)
     portfolio.buy(symbol="AAPL", shares=100, price=150.0, date=date(2024, 1, 1))
@@ -213,9 +213,9 @@ class TestBacktestEngineIntegration:
 
     def test_engine_with_costs_and_slippage(self):
         """Engine applies costs and slippage to trades."""
-        from g2.backtest.engine import BacktestEngine
-        from g2.backtest.costs import TransactionCosts
-        from g2.backtest.slippage import SlippageModel
+        from gefion.backtest.engine import BacktestEngine
+        from gefion.backtest.costs import TransactionCosts
+        from gefion.backtest.slippage import SlippageModel
 
         price_data = [
             {"date": date(2024, 1, 1), "symbol": "AAPL", "close": 100.0},
@@ -251,8 +251,8 @@ class TestBacktestEngineIntegration:
 
     def test_engine_with_risk_manager(self):
         """Engine applies risk management to positions."""
-        from g2.backtest.engine import BacktestEngine
-        from g2.backtest.risk import RiskManager, RiskLimits
+        from gefion.backtest.engine import BacktestEngine
+        from gefion.backtest.risk import RiskManager, RiskLimits
 
         price_data = [
             {"date": date(2024, 1, 1), "symbol": "AAPL", "close": 100.0},
@@ -285,8 +285,8 @@ class TestBacktestEngineIntegration:
 
     def test_engine_with_position_sizer(self):
         """Engine uses position sizer for trade sizing."""
-        from g2.backtest.engine import BacktestEngine
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.engine import BacktestEngine
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         price_data = [
             {"date": date(2024, 1, 1), "symbol": "AAPL", "close": 100.0},
@@ -320,7 +320,7 @@ class TestBacktestEngineIntegration:
 
     def test_engine_backward_compatible(self):
         """Engine works without optional features (backward compatible)."""
-        from g2.backtest.engine import BacktestEngine
+        from gefion.backtest.engine import BacktestEngine
 
         price_data = [
             {"date": date(2024, 1, 1), "symbol": "AAPL", "close": 100.0},

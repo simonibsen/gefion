@@ -1,7 +1,7 @@
 from datetime import date
 
-from g2.db.ingest import insert_computed_features
-from g2.db import pool as db_pool
+from gefion.db.ingest import insert_computed_features
+from gefion.db import pool as db_pool
 
 
 def test_insert_always_prepares_when_enabled(monkeypatch):

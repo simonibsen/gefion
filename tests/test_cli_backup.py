@@ -15,7 +15,7 @@ class TestBackupCommand:
 
     def test_backup_command_exists(self):
         """Backup command should be registered."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["backup", "--help"])
         assert result.exit_code == 0
@@ -23,7 +23,7 @@ class TestBackupCommand:
 
     def test_backup_requires_output(self):
         """Backup should require --output option."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["backup"])
         # Should fail without required output
@@ -31,9 +31,9 @@ class TestBackupCommand:
 
     def test_backup_dry_run_shows_estimate(self):
         """Backup --dry-run should show size estimate without creating file."""
-        from g2.cli import app
+        from gefion.cli import app
 
-        with patch("g2.backup.estimate_backup_size") as mock_estimate:
+        with patch("gefion.backup.estimate_backup_size") as mock_estimate:
             mock_estimate.return_value = {
                 "tables": {
                     "stock_ohlcv": {"rows": 1000, "estimated_bytes": 100000},
@@ -51,9 +51,9 @@ class TestBackupCommand:
 
     def test_backup_json_output_format(self):
         """Backup with --json should output valid JSON."""
-        from g2.cli import app
+        from gefion.cli import app
 
-        with patch("g2.backup.create_backup") as mock_backup:
+        with patch("gefion.backup.create_backup") as mock_backup:
             mock_backup.return_value = {
                 "success": True,
                 "file": "/tmp/test.parquet",
@@ -71,14 +71,14 @@ class TestBackupCommand:
 
     def test_backup_supports_data_types_filter(self):
         """Backup should support --data-types option."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["backup", "--help"])
         assert "--data-types" in result.output
 
     def test_backup_supports_date_range(self):
         """Backup should support --start-date and --end-date options."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["backup", "--help"])
         assert "--start-date" in result.output or "--after" in result.output
@@ -86,7 +86,7 @@ class TestBackupCommand:
 
     def test_backup_supports_symbols_filter(self):
         """Backup should support --symbols option."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["backup", "--help"])
         assert "--symbols" in result.output
@@ -97,7 +97,7 @@ class TestRestoreCommand:
 
     def test_restore_command_exists(self):
         """Restore command should be registered."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["restore", "--help"])
         assert result.exit_code == 0
@@ -105,7 +105,7 @@ class TestRestoreCommand:
 
     def test_restore_requires_input(self):
         """Restore should require --input option."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["restore"])
         # Should fail without required input
@@ -113,14 +113,14 @@ class TestRestoreCommand:
 
     def test_restore_supports_mode_option(self):
         """Restore should support --mode option (merge/replace)."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["restore", "--help"])
         assert "--mode" in result.output
 
     def test_restore_dry_run_shows_preview(self):
         """Restore --dry-run should show what would be restored."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["restore", "--help"])
         assert "--dry-run" in result.output
@@ -131,14 +131,14 @@ class TestBackupModule:
 
     def test_backup_module_exists(self):
         """Backup module should exist."""
-        from g2 import backup
+        from gefion import backup
         assert hasattr(backup, "create_backup")
         assert hasattr(backup, "restore_backup")
         assert hasattr(backup, "estimate_backup_size")
 
     def test_estimate_backup_size_returns_dict(self):
         """estimate_backup_size should return size info dict."""
-        from g2.backup import estimate_backup_size
+        from gefion.backup import estimate_backup_size
 
         # Mock connection
         mock_conn = MagicMock()
@@ -162,7 +162,7 @@ class TestBackupModule:
 
     def test_check_disk_space_returns_bool(self):
         """check_disk_space should return whether enough space exists."""
-        from g2.backup import check_disk_space
+        from gefion.backup import check_disk_space
 
         # Should work on any valid path
         result = check_disk_space("/tmp", required_bytes=1024)
@@ -174,7 +174,7 @@ class TestBackupManifest:
 
     def test_manifest_includes_metadata(self):
         """Backup manifest should include version and timestamp."""
-        from g2.backup import create_manifest
+        from gefion.backup import create_manifest
 
         manifest = create_manifest(
             tables={"stock_ohlcv": {"rows": 1000}},
@@ -188,7 +188,7 @@ class TestBackupManifest:
 
     def test_manifest_includes_checksums(self):
         """Backup manifest should include file checksums."""
-        from g2.backup import create_manifest
+        from gefion.backup import create_manifest
 
         manifest = create_manifest(
             tables={"stock_ohlcv": {"rows": 1000, "checksum": "abc123"}},
@@ -204,7 +204,7 @@ class TestIncrementalBackup:
 
     def test_get_last_backup_date(self):
         """Should be able to get date of last backup."""
-        from g2.backup import get_last_backup_info
+        from gefion.backup import get_last_backup_info
 
         # With no previous backup, should return None
         result = get_last_backup_info("/nonexistent/path")
@@ -212,7 +212,7 @@ class TestIncrementalBackup:
 
     def test_backup_supports_incremental_flag(self):
         """Backup should support --incremental option."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["backup", "--help"])
         assert "--incremental" in result.output

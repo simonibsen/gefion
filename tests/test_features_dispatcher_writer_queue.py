@@ -1,6 +1,6 @@
 from datetime import date
 
-from g2.features.dispatcher import _process_function_group
+from gefion.features.dispatcher import _process_function_group
 
 
 def test_process_function_group_with_writer_queue(monkeypatch):
@@ -15,15 +15,15 @@ def test_process_function_group_with_writer_queue(monkeypatch):
         rows_written["feature_map"] = feature_map
         return len(rows)
 
-    monkeypatch.setattr("g2.features.dispatcher._fetch_source_data", fake_fetch)
-    monkeypatch.setattr("g2.features.dispatcher.insert_computed_features", fake_insert)
+    monkeypatch.setattr("gefion.features.dispatcher._fetch_source_data", fake_fetch)
+    monkeypatch.setattr("gefion.features.dispatcher.insert_computed_features", fake_insert)
 
     features = [
         (1, "feat1", "indicator", {}, "stock_ohlcv", "close", "computed_features", "value"),
     ]
 
     # Patch resolve_compute_function to bypass DB
-    monkeypatch.setattr("g2.features.dispatcher._resolve_compute_function", lambda conn, fn: lambda rows, specs: rows)
+    monkeypatch.setattr("gefion.features.dispatcher._resolve_compute_function", lambda conn, fn: lambda rows, specs: rows)
 
     result = _process_function_group(
         conn=None,

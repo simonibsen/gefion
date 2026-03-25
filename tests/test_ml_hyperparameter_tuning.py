@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
-import g2.cli as cli
+import gefion.cli as cli
 
 
 runner = CliRunner()
@@ -65,7 +65,7 @@ class TestOptunaIntegration:
         except ImportError:
             pytest.skip("Optuna not installed")
 
-        from g2.ml.tuning import create_study
+        from gefion.ml.tuning import create_study
 
         study = create_study(study_name="test_study", direction="minimize")
 
@@ -81,7 +81,7 @@ class TestOptunaIntegration:
         except (ImportError, Exception) as e:
             pytest.skip(f"XGBoost not available: {e}")
 
-        from g2.ml.tuning import tune_quantile_model
+        from gefion.ml.tuning import tune_quantile_model
 
         X, y = sample_data
 
@@ -111,7 +111,7 @@ class TestOptunaIntegration:
         except (ImportError, Exception) as e:
             pytest.skip(f"LightGBM not available: {e}")
 
-        from g2.ml.tuning import tune_quantile_model
+        from gefion.ml.tuning import tune_quantile_model
 
         X, y = sample_data
 
@@ -135,7 +135,7 @@ class TestOptunaIntegration:
         except (ImportError, Exception) as e:
             pytest.skip(f"XGBoost not available: {e}")
 
-        from g2.ml.tuning import tune_classifier
+        from gefion.ml.tuning import tune_classifier
 
         X, _ = sample_data
         # Create classification target
@@ -178,7 +178,7 @@ class TestTimeSeriesCV:
         except ImportError:
             pytest.skip("Optuna not installed")
 
-        from g2.ml.tuning import create_time_series_cv
+        from gefion.ml.tuning import create_time_series_cv
 
         X, y = time_series_data
         cv = create_time_series_cv(n_splits=3)
@@ -199,7 +199,7 @@ class TestTimeSeriesCV:
         except ImportError:
             pytest.skip("Required packages not installed")
 
-        from g2.ml.tuning import tune_quantile_model
+        from gefion.ml.tuning import tune_quantile_model
 
         X, y = time_series_data
 
@@ -221,7 +221,7 @@ class TestTuningResults:
 
     def test_save_tuning_results(self, tmp_path):
         """Test saving tuning results to file."""
-        from g2.ml.tuning import save_tuning_results
+        from gefion.ml.tuning import save_tuning_results
 
         results = {
             "best_params": {"n_estimators": 100, "max_depth": 5},
@@ -243,7 +243,7 @@ class TestTuningResults:
 
     def test_load_tuning_results(self, tmp_path):
         """Test loading tuning results from file."""
-        from g2.ml.tuning import load_tuning_results, save_tuning_results
+        from gefion.ml.tuning import load_tuning_results, save_tuning_results
 
         results = {
             "best_params": {"n_estimators": 100},
@@ -262,7 +262,7 @@ class TestSearchSpace:
 
     def test_default_xgboost_search_space(self):
         """Test default search space for XGBoost."""
-        from g2.ml.tuning import get_search_space
+        from gefion.ml.tuning import get_search_space
 
         space = get_search_space("xgboost")
 
@@ -273,7 +273,7 @@ class TestSearchSpace:
 
     def test_default_lightgbm_search_space(self):
         """Test default search space for LightGBM."""
-        from g2.ml.tuning import get_search_space
+        from gefion.ml.tuning import get_search_space
 
         space = get_search_space("lightgbm")
 
@@ -288,7 +288,7 @@ class TestSearchSpace:
         except ImportError:
             pytest.skip("Optuna not installed")
 
-        from g2.ml.tuning import get_search_space
+        from gefion.ml.tuning import get_search_space
 
         custom_space = {
             "n_estimators": {"type": "int", "low": 50, "high": 100},
@@ -311,7 +311,7 @@ class TestPinballScoring:
         except ImportError:
             pytest.skip("Optuna not installed")
 
-        from g2.ml.tuning import tune_quantile_model
+        from gefion.ml.tuning import tune_quantile_model
 
         np.random.seed(42)
         n_samples = 200

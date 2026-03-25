@@ -1,7 +1,7 @@
 import csv
 from pathlib import Path
 
-from g2.ml.dataset import export_dataset_artifacts
+from gefion.ml.dataset import export_dataset_artifacts
 
 
 class _FakeCursor:

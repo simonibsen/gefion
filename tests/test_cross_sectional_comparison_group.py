@@ -8,12 +8,12 @@ import os
 import psycopg
 import pytest
 from datetime import date
-from g2.db import schema
+from gefion.db import schema
 
 
 def _ensure_cross_sectional_schema(conn):
     """Ensure cross_sectional_features table exists with comparison_group."""
-    from g2.db.schema import create_stocks_table
+    from gefion.db.schema import create_stocks_table
     create_stocks_table(conn)
 
     with conn.cursor() as cur:

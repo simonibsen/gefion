@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 # Skip if plotly not available
 plotly = pytest.importorskip("plotly")
 
-from g2.cli import app
+from gefion.cli import app
 
 runner = CliRunner()
 
@@ -34,8 +34,8 @@ class TestChartPriceCommand:
                 {"date": "2024-12-01", "open": 100, "high": 102, "low": 99, "close": 101, "volume": 1000000}
             ]
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
-                 patch("g2.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
-                 patch("g2.charts.output.open_in_browser"):
+                 patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
+                 patch("gefion.charts.output.open_in_browser"):
 
                 result = runner.invoke(app, ["chart", "price", "AAPL", "--no-open"])
 
@@ -49,8 +49,8 @@ class TestChartPriceCommand:
                 {"date": "2024-12-01", "open": 100, "high": 102, "low": 99, "close": 101, "volume": 1000000}
             ]
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
-                 patch("g2.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
-                 patch("g2.charts.output.open_in_browser") as mock_open:
+                 patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
+                 patch("gefion.charts.output.open_in_browser") as mock_open:
 
                 runner.invoke(app, ["chart", "price", "AAPL", "--no-open"])
 
@@ -64,8 +64,8 @@ class TestChartPriceCommand:
                 {"date": "2024-12-01", "open": 100, "high": 102, "low": 99, "close": 101, "volume": 1000000}
             ]
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
-                 patch("g2.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
-                 patch("g2.charts.output.open_in_browser"):
+                 patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
+                 patch("gefion.charts.output.open_in_browser"):
 
                 result = runner.invoke(app, ["chart", "price", "AAPL", "--json", "--no-open"])
 
@@ -93,9 +93,9 @@ class TestChartPredictionsCommand:
                 {"date": "2024-12-08", "q10": 98, "q50": 102, "q90": 106}
             ]
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
-                 patch("g2.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
-                 patch("g2.charts.queries.fetch_predictions_for_chart", return_value=mock_preds), \
-                 patch("g2.charts.output.open_in_browser"):
+                 patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
+                 patch("gefion.charts.queries.fetch_predictions_for_chart", return_value=mock_preds), \
+                 patch("gefion.charts.output.open_in_browser"):
 
                 result = runner.invoke(app, ["chart", "predictions", "AAPL", "--model", "test_model", "--no-open"])
 
@@ -121,9 +121,9 @@ class TestChartFeaturesCommand:
                 "rsi_14": [{"date": "2024-12-01", "value": 55}]
             }
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
-                 patch("g2.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
-                 patch("g2.charts.queries.fetch_features_for_chart", return_value=mock_features), \
-                 patch("g2.charts.output.open_in_browser"):
+                 patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
+                 patch("gefion.charts.queries.fetch_features_for_chart", return_value=mock_features), \
+                 patch("gefion.charts.output.open_in_browser"):
 
                 result = runner.invoke(app, ["chart", "features", "AAPL", "--features", "rsi_14", "--no-open"])
 

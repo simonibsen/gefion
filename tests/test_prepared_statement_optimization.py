@@ -17,7 +17,7 @@ def test_prepared_statements_controlled_by_pool():
     - Hot paths (features-compute) to use prepared statements
     - Cold paths and tests to skip prepared statement overhead
     """
-    from g2.db import pool as db_pool
+    from gefion.db import pool as db_pool
 
     # When pool is configured without prepared statements
     # (like in tests or one-off scripts)
@@ -37,8 +37,8 @@ def test_insert_respects_pool_setting():
     When pool has prepare_statements=False, inserts should not use
     prepared statements, avoiding unnecessary overhead.
     """
-    from g2.db.ingest import insert_computed_features
-    from g2.db import pool as db_pool
+    from gefion.db.ingest import insert_computed_features
+    from gefion.db import pool as db_pool
     from unittest.mock import Mock, patch
     from datetime import date
 
@@ -88,8 +88,8 @@ def test_hot_path_uses_prepared_statements():
     When pool is configured with prepare_statements=True (production),
     the hot path should use prepared statements for performance.
     """
-    from g2.db.ingest import insert_computed_features
-    from g2.db import pool as db_pool
+    from gefion.db.ingest import insert_computed_features
+    from gefion.db import pool as db_pool
     from unittest.mock import Mock, patch
     from datetime import date
 

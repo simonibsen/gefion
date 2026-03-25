@@ -12,8 +12,8 @@ import os
 import psycopg
 import pytest
 
-from g2.config import load_settings
-from g2.db import schema
+from gefion.config import load_settings
+from gefion.db import schema
 
 
 pytestmark = pytest.mark.skipif(

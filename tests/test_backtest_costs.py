@@ -12,7 +12,7 @@ class TestTransactionCosts:
 
     def test_zero_costs_returns_zero(self):
         """Zero cost model returns zero for any trade."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts()
         assert costs.calculate_cost(100, 50.0, "buy") == 0.0
@@ -20,7 +20,7 @@ class TestTransactionCosts:
 
     def test_commission_per_trade(self):
         """Fixed commission per trade is applied."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts(commission_per_trade=10.0)
         assert costs.calculate_cost(100, 50.0, "buy") == 10.0
@@ -28,7 +28,7 @@ class TestTransactionCosts:
 
     def test_commission_per_share(self):
         """Per-share commission is calculated correctly."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts(commission_per_share=0.01)
         assert costs.calculate_cost(100, 50.0, "buy") == 1.0  # 100 * 0.01
@@ -36,7 +36,7 @@ class TestTransactionCosts:
 
     def test_commission_combined(self):
         """Per-trade and per-share commissions combine."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts(
             commission_per_trade=5.0,
@@ -47,7 +47,7 @@ class TestTransactionCosts:
 
     def test_commission_min_applied(self):
         """Minimum commission is enforced."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts(
             commission_per_trade=1.0,
@@ -58,7 +58,7 @@ class TestTransactionCosts:
 
     def test_commission_max_applied(self):
         """Maximum commission is enforced."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts(
             commission_per_share=1.0,
@@ -69,7 +69,7 @@ class TestTransactionCosts:
 
     def test_bid_ask_spread(self):
         """Bid-ask spread cost is calculated as % of trade value."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts(bid_ask_spread_pct=0.001)  # 10 bps
         # Trade value = 100 * 100 = 10000
@@ -79,7 +79,7 @@ class TestTransactionCosts:
 
     def test_market_impact_with_volume(self):
         """Market impact scales with sqrt of participation rate."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts(market_impact_coefficient=0.1)
         # 1000 shares, 10000 daily volume = 10% participation
@@ -92,7 +92,7 @@ class TestTransactionCosts:
 
     def test_market_impact_no_volume(self):
         """Market impact is zero when volume not provided."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts(market_impact_coefficient=0.1)
         # No daily_volume provided, impact should be 0
@@ -101,7 +101,7 @@ class TestTransactionCosts:
 
     def test_all_costs_combined(self):
         """All cost components combine correctly."""
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.costs import TransactionCosts
 
         costs = TransactionCosts(
             commission_per_trade=5.0,
@@ -122,8 +122,8 @@ class TestPortfolioCostsIntegration:
     def test_buy_with_costs_deducts_from_cash(self):
         """Buying with costs deducts cost from cash."""
         from datetime import date
-        from g2.backtest.portfolio import Portfolio
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.portfolio import Portfolio
+        from gefion.backtest.costs import TransactionCosts
 
         portfolio = Portfolio(initial_cash=10000.0)
         costs = TransactionCosts(commission_per_trade=10.0)
@@ -136,7 +136,7 @@ class TestPortfolioCostsIntegration:
     def test_buy_without_costs_unchanged(self):
         """Buying without costs works as before (backward compatible)."""
         from datetime import date
-        from g2.backtest.portfolio import Portfolio
+        from gefion.backtest.portfolio import Portfolio
 
         portfolio = Portfolio(initial_cash=10000.0)
         portfolio.buy("AAPL", 100, 50.0, date(2024, 1, 1))
@@ -146,8 +146,8 @@ class TestPortfolioCostsIntegration:
     def test_sell_with_costs_reduces_proceeds(self):
         """Selling with costs reduces net proceeds."""
         from datetime import date
-        from g2.backtest.portfolio import Portfolio
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.portfolio import Portfolio
+        from gefion.backtest.costs import TransactionCosts
 
         portfolio = Portfolio(initial_cash=10000.0)
         costs = TransactionCosts(commission_per_trade=10.0)
@@ -162,8 +162,8 @@ class TestPortfolioCostsIntegration:
     def test_transaction_logs_cost(self):
         """Transaction log includes cost information."""
         from datetime import date
-        from g2.backtest.portfolio import Portfolio
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.portfolio import Portfolio
+        from gefion.backtest.costs import TransactionCosts
 
         portfolio = Portfolio(initial_cash=10000.0)
         costs = TransactionCosts(commission_per_trade=10.0)
@@ -178,8 +178,8 @@ class TestPortfolioCostsIntegration:
         """Insufficient cash check includes transaction costs."""
         from datetime import date
         import pytest
-        from g2.backtest.portfolio import Portfolio
-        from g2.backtest.costs import TransactionCosts
+        from gefion.backtest.portfolio import Portfolio
+        from gefion.backtest.costs import TransactionCosts
 
         portfolio = Portfolio(initial_cash=5005.0)  # Just enough for shares, not costs
         costs = TransactionCosts(commission_per_trade=10.0)
@@ -194,13 +194,13 @@ class TestCostPresets:
 
     def test_zero_costs_preset(self):
         """ZERO_COSTS preset has all zero values."""
-        from g2.backtest.costs import ZERO_COSTS
+        from gefion.backtest.costs import ZERO_COSTS
 
         assert ZERO_COSTS.calculate_cost(1000, 100.0, "buy") == 0.0
 
     def test_retail_costs_preset(self):
         """RETAIL_COSTS preset exists and is reasonable."""
-        from g2.backtest.costs import RETAIL_COSTS
+        from gefion.backtest.costs import RETAIL_COSTS
 
         # Retail should have low costs
         cost = RETAIL_COSTS.calculate_cost(100, 100.0, "buy")
@@ -209,7 +209,7 @@ class TestCostPresets:
 
     def test_institutional_costs_preset(self):
         """INSTITUTIONAL_COSTS preset exists and includes market impact."""
-        from g2.backtest.costs import INSTITUTIONAL_COSTS
+        from gefion.backtest.costs import INSTITUTIONAL_COSTS
 
         # Large order should have market impact
         cost = INSTITUTIONAL_COSTS.calculate_cost(

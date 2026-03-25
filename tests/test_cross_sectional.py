@@ -9,8 +9,8 @@ Requires ENABLE_DB_TESTS=1 to run.
 import os
 import pytest
 import psycopg
-from g2.config import load_settings
-from g2.db import schema
+from gefion.config import load_settings
+from gefion.db import schema
 
 
 pytestmark = pytest.mark.skipif(
@@ -64,7 +64,7 @@ def setup_db(db_conn):
 
 def test_compute_return_vs_market():
     """Test computing stock returns relative to market average."""
-    from g2.compute.cross_sectional import compute_return_vs_market
+    from gefion.compute.cross_sectional import compute_return_vs_market
 
     # Sample data: 3 stocks with different returns
     price_data = [
@@ -98,7 +98,7 @@ def test_compute_return_vs_market():
 
 def test_compute_market_rankings():
     """Test computing market rankings based on returns."""
-    from g2.compute.cross_sectional import compute_market_rankings
+    from gefion.compute.cross_sectional import compute_market_rankings
 
     # Sample data with clear rankings
     returns_data = [
@@ -142,8 +142,8 @@ def test_cross_sectional_table_exists(db_conn, setup_db):
 
 def test_insert_cross_sectional_features(db_conn, setup_db):
     """Test inserting cross-sectional features into database."""
-    from g2.db.cross_sectional import insert_cross_sectional_features
-    from g2.db.ingest import upsert_stock
+    from gefion.db.cross_sectional import insert_cross_sectional_features
+    from gefion.db.ingest import upsert_stock
 
     # Insert test stocks first
     upsert_stock(db_conn, "AAPL")
@@ -193,7 +193,7 @@ def test_insert_cross_sectional_features(db_conn, setup_db):
 
 def test_compute_percentiles():
     """Test percentile computation for cross-sectional ranking."""
-    from g2.compute.cross_sectional import compute_percentiles
+    from gefion.compute.cross_sectional import compute_percentiles
 
     data = [
         {"symbol": "A", "value": 10.0},

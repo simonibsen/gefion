@@ -12,7 +12,7 @@ def _parse_cli_commands_and_spans() -> tuple[set[str], set[str]]:
     Returns:
         (command_names, traced_command_names)
     """
-    cli_path = Path(__file__).parent.parent / "src" / "g2" / "cli.py"
+    cli_path = Path(__file__).parent.parent / "src" / "gefion" / "cli.py"
     source = cli_path.read_text()
 
     # Find all @app.command("name") decorators

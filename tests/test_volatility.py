@@ -13,7 +13,7 @@ class TestHistoricalVolatility:
 
     def test_calculates_annualized_volatility(self):
         """Test basic volatility calculation with annualization."""
-        from g2.ml.volatility import calculate_historical_volatility
+        from gefion.ml.volatility import calculate_historical_volatility
 
         # Create returns with known std dev
         # 1% daily std dev = ~15.9% annualized (1% * sqrt(252))
@@ -28,7 +28,7 @@ class TestHistoricalVolatility:
 
     def test_returns_none_for_insufficient_data(self):
         """Test returns None when not enough data for window."""
-        from g2.ml.volatility import calculate_historical_volatility
+        from gefion.ml.volatility import calculate_historical_volatility
 
         returns = pd.Series([0.01, 0.02, -0.01])  # Only 3 data points
 
@@ -38,7 +38,7 @@ class TestHistoricalVolatility:
 
     def test_non_annualized_volatility(self):
         """Test volatility without annualization."""
-        from g2.ml.volatility import calculate_historical_volatility
+        from gefion.ml.volatility import calculate_historical_volatility
 
         np.random.seed(42)
         returns = pd.Series(np.random.normal(0, 0.01, 100))
@@ -55,7 +55,7 @@ class TestBollingerBandWidth:
 
     def test_calculates_normalized_width(self):
         """Test BB width calculation."""
-        from g2.ml.volatility import calculate_bb_width
+        from gefion.ml.volatility import calculate_bb_width
 
         # Upper=110, Lower=90, Middle=100 -> width = 20/100 = 0.20
         width = calculate_bb_width(bb_upper=110, bb_lower=90, bb_middle=100)
@@ -64,7 +64,7 @@ class TestBollingerBandWidth:
 
     def test_returns_none_for_zero_middle(self):
         """Test returns None when middle band is zero."""
-        from g2.ml.volatility import calculate_bb_width
+        from gefion.ml.volatility import calculate_bb_width
 
         width = calculate_bb_width(bb_upper=110, bb_lower=90, bb_middle=0)
 
@@ -72,7 +72,7 @@ class TestBollingerBandWidth:
 
     def test_returns_none_for_negative_middle(self):
         """Test returns None when middle band is negative."""
-        from g2.ml.volatility import calculate_bb_width
+        from gefion.ml.volatility import calculate_bb_width
 
         width = calculate_bb_width(bb_upper=110, bb_lower=90, bb_middle=-100)
 
@@ -84,7 +84,7 @@ class TestAdaptiveThresholds:
 
     def test_scales_by_horizon_sqrt_t(self):
         """Test thresholds scale by sqrt(T) for different horizons."""
-        from g2.ml.volatility import compute_adaptive_thresholds
+        from gefion.ml.volatility import compute_adaptive_thresholds
 
         vol = 0.25  # 25% annual volatility
 
@@ -97,7 +97,7 @@ class TestAdaptiveThresholds:
 
     def test_aapl_example_thresholds(self):
         """Test AAPL-like stock (25% vol) gets expected thresholds."""
-        from g2.ml.volatility import compute_adaptive_thresholds
+        from gefion.ml.volatility import compute_adaptive_thresholds
 
         vol = 0.25  # 25% annual volatility
 
@@ -111,7 +111,7 @@ class TestAdaptiveThresholds:
 
     def test_tsla_example_thresholds(self):
         """Test TSLA-like stock (60% vol) gets wider thresholds."""
-        from g2.ml.volatility import compute_adaptive_thresholds
+        from gefion.ml.volatility import compute_adaptive_thresholds
 
         vol = 0.60  # 60% annual volatility
 
@@ -125,7 +125,7 @@ class TestAdaptiveThresholds:
 
     def test_high_volatility_percentile_adjustment(self):
         """Test high volatility percentile gets wider thresholds."""
-        from g2.ml.volatility import compute_adaptive_thresholds
+        from gefion.ml.volatility import compute_adaptive_thresholds
 
         vol = 0.25
 
@@ -142,7 +142,7 @@ class TestAdaptiveThresholds:
 
     def test_low_volatility_percentile_adjustment(self):
         """Test low volatility percentile gets narrower thresholds."""
-        from g2.ml.volatility import compute_adaptive_thresholds
+        from gefion.ml.volatility import compute_adaptive_thresholds
 
         vol = 0.25
 
@@ -159,7 +159,7 @@ class TestAdaptiveThresholds:
 
     def test_custom_sigma_multipliers(self):
         """Test custom weak/strong sigma multipliers."""
-        from g2.ml.volatility import compute_adaptive_thresholds
+        from gefion.ml.volatility import compute_adaptive_thresholds
 
         vol = 0.25
 
@@ -176,7 +176,7 @@ class TestVolatilityPercentile:
 
     def test_median_volatility_returns_50th_percentile(self):
         """Test median volatility stock returns ~0.5 percentile."""
-        from g2.ml.volatility import compute_volatility_percentile
+        from gefion.ml.volatility import compute_volatility_percentile
 
         all_vols = pd.Series([0.10, 0.20, 0.30, 0.40, 0.50])
         stock_vol = 0.30  # Median
@@ -187,7 +187,7 @@ class TestVolatilityPercentile:
 
     def test_highest_volatility_returns_high_percentile(self):
         """Test highest volatility stock returns high percentile."""
-        from g2.ml.volatility import compute_volatility_percentile
+        from gefion.ml.volatility import compute_volatility_percentile
 
         all_vols = pd.Series([0.10, 0.20, 0.30, 0.40, 0.50])
         stock_vol = 0.60  # Higher than all
@@ -198,7 +198,7 @@ class TestVolatilityPercentile:
 
     def test_lowest_volatility_returns_zero_percentile(self):
         """Test lowest volatility stock returns 0 percentile."""
-        from g2.ml.volatility import compute_volatility_percentile
+        from gefion.ml.volatility import compute_volatility_percentile
 
         all_vols = pd.Series([0.10, 0.20, 0.30, 0.40, 0.50])
         stock_vol = 0.05  # Lower than all

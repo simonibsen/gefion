@@ -1,5 +1,5 @@
-from g2.features import dispatcher
-from g2.db import pool as db_pool
+from gefion.features import dispatcher
+from gefion.db import pool as db_pool
 
 
 def test_compute_features_with_writer_queue_uses_queue(monkeypatch):

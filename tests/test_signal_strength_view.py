@@ -11,7 +11,7 @@ import psycopg
 @pytest.fixture
 def db_conn():
     """Get database connection and ensure schema is applied."""
-    from g2.db.schema import test_db_url
+    from gefion.db.schema import test_db_url
     url = test_db_url()
     with psycopg.connect(url) as conn:
         # Ensure view exists by running schema if needed

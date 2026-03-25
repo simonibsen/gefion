@@ -1,6 +1,6 @@
 import psycopg
 
-from g2.db import migrate
+from gefion.db import migrate
 
 
 class FakeCursor:
@@ -51,7 +51,7 @@ def test_migrate_stock_prices_copies_when_present(monkeypatch):
     def fake_create(_conn):
         return None
 
-    monkeypatch.setattr("g2.db.schema.create_stock_ohlcv_table", fake_create)
+    monkeypatch.setattr("gefion.db.schema.create_stock_ohlcv_table", fake_create)
 
     copied, dropped = migrate.migrate_stock_prices_to_ohlcv(conn, drop_old=False)
 
@@ -63,7 +63,7 @@ def test_migrate_stock_prices_copies_when_present(monkeypatch):
 def test_migrate_stock_prices_noop_when_missing(monkeypatch):
     conn = FakeConn(has_legacy=False)
 
-    monkeypatch.setattr("g2.db.schema.create_stock_ohlcv_table", lambda _c: None)
+    monkeypatch.setattr("gefion.db.schema.create_stock_ohlcv_table", lambda _c: None)
 
     copied, dropped = migrate.migrate_stock_prices_to_ohlcv(conn, drop_old=True)
 

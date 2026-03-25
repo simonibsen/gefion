@@ -1,4 +1,4 @@
-from g2.db import migrate
+from gefion.db import migrate
 
 
 class FakeCursor:

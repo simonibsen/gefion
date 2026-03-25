@@ -12,8 +12,8 @@ import os
 import pytest
 import psycopg
 from datetime import date, timedelta
-from g2.db import schema
-from g2.db.ingest import filter_symbols_needing_update, filter_symbols_needing_features
+from gefion.db import schema
+from gefion.db.ingest import filter_symbols_needing_update, filter_symbols_needing_features
 
 
 pytestmark = pytest.mark.skipif(
@@ -211,7 +211,7 @@ def test_filter_handles_mixed_symbols(db_conn, setup_test_stocks):
 
 def test_upsert_stock_with_status(db_conn):
     """Test that upsert_stock stores status when provided."""
-    from g2.db.ingest import upsert_stock
+    from gefion.db.ingest import upsert_stock
 
     schema.create_stocks_table(db_conn)
 
@@ -243,7 +243,7 @@ def test_upsert_stock_with_status(db_conn):
 
 def test_upsert_stock_without_status_defaults_to_null(db_conn):
     """Test that upsert_stock without status leaves it NULL."""
-    from g2.db.ingest import upsert_stock
+    from gefion.db.ingest import upsert_stock
 
     schema.create_stocks_table(db_conn)
 

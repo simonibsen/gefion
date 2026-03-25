@@ -1,6 +1,6 @@
 from datetime import date
 
-from g2.features import dispatcher
+from gefion.features import dispatcher
 
 
 def test_db_wrapper_handles_pandas_style_function(monkeypatch):

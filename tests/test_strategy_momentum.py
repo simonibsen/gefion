@@ -10,7 +10,7 @@ from datetime import date
 
 def test_momentum_strategy_initialization():
     """Test creating a momentum strategy with parameters."""
-    from g2.strategies.momentum import MomentumStrategy
+    from gefion.strategies.momentum import MomentumStrategy
 
     strategy = MomentumStrategy(
         lookback_days=20,
@@ -25,7 +25,7 @@ def test_momentum_strategy_initialization():
 
 def test_calculate_momentum():
     """Test calculating momentum (percent return) over lookback period."""
-    from g2.strategies.momentum import calculate_momentum
+    from gefion.strategies.momentum import calculate_momentum
 
     # Price increased from 100 to 120 over period
     price_history = [
@@ -44,7 +44,7 @@ def test_calculate_momentum():
 
 def test_calculate_momentum_insufficient_data():
     """Test that momentum uses available data when less than lookback period."""
-    from g2.strategies.momentum import calculate_momentum
+    from gefion.strategies.momentum import calculate_momentum
 
     # Only 2 days of data, but lookback is 20
     # Should calculate momentum over available data
@@ -61,7 +61,7 @@ def test_calculate_momentum_insufficient_data():
 
 def test_rank_stocks_by_momentum():
     """Test ranking stocks by momentum and selecting top N."""
-    from g2.strategies.momentum import rank_stocks_by_momentum
+    from gefion.strategies.momentum import rank_stocks_by_momentum
 
     stock_momentums = {
         "AAPL": 0.15,   # Rank 2
@@ -79,7 +79,7 @@ def test_rank_stocks_by_momentum():
 
 def test_momentum_strategy_signal_generation():
     """Test that strategy generates buy signals for top momentum stocks."""
-    from g2.strategies.momentum import MomentumStrategy
+    from gefion.strategies.momentum import MomentumStrategy
 
     strategy = MomentumStrategy(lookback_days=5, top_n=2, rebalance_days=5)
 
@@ -128,7 +128,7 @@ def test_momentum_strategy_signal_generation():
 
 def test_momentum_strategy_rebalance_logic():
     """Test that strategy only rebalances on scheduled days."""
-    from g2.strategies.momentum import MomentumStrategy
+    from gefion.strategies.momentum import MomentumStrategy
 
     strategy = MomentumStrategy(lookback_days=2, top_n=1, rebalance_days=5)
 
@@ -167,7 +167,7 @@ def test_momentum_strategy_rebalance_logic():
 
 def test_momentum_strategy_position_sizing():
     """Test that strategy sizes positions equally across top N stocks."""
-    from g2.strategies.momentum import MomentumStrategy
+    from gefion.strategies.momentum import MomentumStrategy
 
     strategy = MomentumStrategy(lookback_days=5, top_n=3, rebalance_days=5)
 

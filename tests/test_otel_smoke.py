@@ -21,7 +21,7 @@ def main():
     os.environ.setdefault("OTEL_OTLP_ENDPOINT", "http://localhost:4317")
 
     # Import observability after defaults are set
-    from g2.observability import create_span, is_enabled, shutdown
+    from gefion.observability import create_span, is_enabled, shutdown
 
     print(f"OTEL enabled: {is_enabled()}")
 

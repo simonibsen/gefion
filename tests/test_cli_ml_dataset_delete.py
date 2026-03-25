@@ -3,7 +3,7 @@
 from typer.testing import CliRunner
 from unittest.mock import MagicMock, patch
 
-from g2 import cli
+from gefion import cli
 
 
 runner = CliRunner()

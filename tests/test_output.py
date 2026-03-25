@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from g2.output import Column, Output, get_output
+from gefion.output import Column, Output, get_output
 
 
 class TestColumn:

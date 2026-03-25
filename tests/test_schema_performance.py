@@ -3,7 +3,7 @@ import os
 import psycopg
 import pytest
 
-from g2.db import schema
+from gefion.db import schema
 
 
 def create_connection():

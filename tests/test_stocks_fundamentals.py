@@ -15,13 +15,13 @@ def db_conn():
     """Create test database connection and ensure schema exists."""
     if not os.getenv("ENABLE_DB_TESTS"):
         pytest.skip("Database tests not enabled (set ENABLE_DB_TESTS=1)")
-    from g2.db.schema import test_db_url
+    from gefion.db.schema import test_db_url
     db_url = test_db_url()
 
     try:
         with psycopg.connect(db_url) as conn:
             # Ensure stocks table exists with required columns
-            from g2.db.schema import create_stocks_table
+            from gefion.db.schema import create_stocks_table
             create_stocks_table(conn)
             yield conn
     except psycopg.OperationalError:

@@ -1,8 +1,8 @@
 import time
 from datetime import date
 
-from g2.features import dispatcher
-from g2.db import pool as db_pool
+from gefion.features import dispatcher
+from gefion.db import pool as db_pool
 
 
 def test_compute_features_timings_include_queue_and_writer(monkeypatch):

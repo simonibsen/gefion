@@ -12,7 +12,7 @@ class TestSizingMethod:
 
     def test_sizing_methods_exist(self):
         """All sizing methods are available."""
-        from g2.backtest.sizing import SizingMethod
+        from gefion.backtest.sizing import SizingMethod
 
         assert SizingMethod.FIXED_DOLLAR is not None
         assert SizingMethod.FIXED_PERCENT is not None
@@ -26,7 +26,7 @@ class TestPositionSizerFixedDollar:
 
     def test_fixed_dollar_calculates_shares(self):
         """Fixed dollar sizing returns correct share count."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(
             method=SizingMethod.FIXED_DOLLAR,
@@ -42,7 +42,7 @@ class TestPositionSizerFixedDollar:
 
     def test_fixed_dollar_rounds_down(self):
         """Fixed dollar sizing rounds down to whole shares."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(
             method=SizingMethod.FIXED_DOLLAR,
@@ -62,7 +62,7 @@ class TestPositionSizerFixedPercent:
 
     def test_fixed_percent_calculates_shares(self):
         """Fixed percent sizing returns correct share count."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(
             method=SizingMethod.FIXED_PERCENT,
@@ -78,7 +78,7 @@ class TestPositionSizerFixedPercent:
 
     def test_fixed_percent_with_different_portfolio(self):
         """Fixed percent adjusts with portfolio size."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(
             method=SizingMethod.FIXED_PERCENT,
@@ -98,7 +98,7 @@ class TestPositionSizerKelly:
 
     def test_kelly_sizing_with_win_rate(self):
         """Kelly sizing uses win rate and win/loss ratio."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(
             method=SizingMethod.KELLY,
@@ -118,7 +118,7 @@ class TestPositionSizerKelly:
 
     def test_kelly_negative_edge_returns_zero(self):
         """Kelly returns zero shares for negative edge strategies."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(
             method=SizingMethod.KELLY,
@@ -140,7 +140,7 @@ class TestPositionSizerVolatilityTarget:
 
     def test_volatility_target_sizing(self):
         """Volatility targeting adjusts size for target volatility."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(
             method=SizingMethod.VOLATILITY_TARGET,
@@ -158,7 +158,7 @@ class TestPositionSizerVolatilityTarget:
 
     def test_volatility_target_low_vol_stock(self):
         """Low volatility stocks get larger positions."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(
             method=SizingMethod.VOLATILITY_TARGET,
@@ -185,7 +185,7 @@ class TestPositionSizerRiskParity:
 
     def test_risk_parity_equal_risk(self):
         """Risk parity equalizes risk contribution."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(
             method=SizingMethod.RISK_PARITY,
@@ -208,14 +208,14 @@ class TestPositionSizerDefaults:
 
     def test_default_method_is_fixed_percent(self):
         """Default sizing method is fixed percent."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer()
         assert sizer.method == SizingMethod.FIXED_PERCENT
 
     def test_default_values(self):
         """Default values are reasonable."""
-        from g2.backtest.sizing import PositionSizer
+        from gefion.backtest.sizing import PositionSizer
 
         sizer = PositionSizer()
         assert sizer.fixed_dollar_amount == 10000.0
@@ -229,7 +229,7 @@ class TestPositionSizerEdgeCases:
 
     def test_zero_price_returns_zero(self):
         """Zero price returns zero shares."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(method=SizingMethod.FIXED_DOLLAR)
         shares = sizer.calculate_shares(
@@ -241,7 +241,7 @@ class TestPositionSizerEdgeCases:
 
     def test_zero_portfolio_returns_zero(self):
         """Zero portfolio value returns zero shares."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(method=SizingMethod.FIXED_PERCENT)
         shares = sizer.calculate_shares(
@@ -253,7 +253,7 @@ class TestPositionSizerEdgeCases:
 
     def test_missing_volatility_for_vol_target(self):
         """Missing volatility for vol targeting returns zero."""
-        from g2.backtest.sizing import PositionSizer, SizingMethod
+        from gefion.backtest.sizing import PositionSizer, SizingMethod
 
         sizer = PositionSizer(method=SizingMethod.VOLATILITY_TARGET)
         shares = sizer.calculate_shares(

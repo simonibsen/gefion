@@ -11,7 +11,7 @@ import psycopg
 from datetime import date, timedelta
 from pathlib import Path
 
-from g2.db import schema
+from gefion.db import schema
 
 
 @pytest.fixture
@@ -92,7 +92,7 @@ def _load_function_from_json(conn, function_name):
 
 def _execute_function(conn, function_name, rows, specs):
     """Execute a feature function from the database."""
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     result = _load_db_function(conn, function_name)
     if not result:

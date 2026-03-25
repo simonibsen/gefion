@@ -1,5 +1,5 @@
 [project]
-name = "g2-mcp-server"
+name = "gefion-mcp-server"
 version = "0.1.0"
 description = "MCP server for g2 ML platform - natural language interface"
 requires-python = ">=3.10"

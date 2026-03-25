@@ -10,8 +10,8 @@ from datetime import date, timedelta
 import psycopg
 import pytest
 
-from g2.db import schema
-from g2.db.ingest import upsert_stock, insert_stock_ohlcv
+from gefion.db import schema
+from gefion.db.ingest import upsert_stock, insert_stock_ohlcv
 
 
 def create_connection():

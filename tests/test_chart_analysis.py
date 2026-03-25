@@ -101,7 +101,7 @@ class TestComputePriceInsights:
 
     def test_returns_expected_structure(self):
         """compute_price_insights should return dict with expected keys."""
-        from g2.charts.analysis import compute_price_insights
+        from gefion.charts.analysis import compute_price_insights
 
         ohlcv = make_ohlcv_data()
         result = compute_price_insights(ohlcv)
@@ -114,7 +114,7 @@ class TestComputePriceInsights:
 
     def test_calculates_price_change(self):
         """compute_price_insights should calculate percentage price change."""
-        from g2.charts.analysis import compute_price_insights
+        from gefion.charts.analysis import compute_price_insights
 
         ohlcv = make_ohlcv_data(trend="up")
         result = compute_price_insights(ohlcv)
@@ -124,7 +124,7 @@ class TestComputePriceInsights:
 
     def test_includes_price_range(self):
         """compute_price_insights should include high/low/current prices."""
-        from g2.charts.analysis import compute_price_insights
+        from gefion.charts.analysis import compute_price_insights
 
         ohlcv = make_ohlcv_data()
         result = compute_price_insights(ohlcv)
@@ -135,7 +135,7 @@ class TestComputePriceInsights:
 
     def test_generates_insights_list(self):
         """compute_price_insights should generate list of insight strings."""
-        from g2.charts.analysis import compute_price_insights
+        from gefion.charts.analysis import compute_price_insights
 
         ohlcv = make_ohlcv_data()
         result = compute_price_insights(ohlcv)
@@ -148,7 +148,7 @@ class TestComputePredictionInsights:
 
     def test_returns_expected_structure(self):
         """compute_prediction_insights should return dict with expected keys."""
-        from g2.charts.analysis import compute_prediction_insights
+        from gefion.charts.analysis import compute_prediction_insights
 
         predictions = make_prediction_data(100.0, upside=True)
         result = compute_prediction_insights(predictions, 100.0)
@@ -162,7 +162,7 @@ class TestComputePredictionInsights:
 
     def test_upside_prediction(self):
         """compute_prediction_insights should detect upside predictions."""
-        from g2.charts.analysis import compute_prediction_insights
+        from gefion.charts.analysis import compute_prediction_insights
 
         predictions = make_prediction_data(100.0, upside=True)
         result = compute_prediction_insights(predictions, 100.0)
@@ -172,7 +172,7 @@ class TestComputePredictionInsights:
 
     def test_downside_prediction(self):
         """compute_prediction_insights should detect downside predictions."""
-        from g2.charts.analysis import compute_prediction_insights
+        from gefion.charts.analysis import compute_prediction_insights
 
         predictions = make_prediction_data(100.0, upside=False)
         result = compute_prediction_insights(predictions, 100.0)
@@ -182,7 +182,7 @@ class TestComputePredictionInsights:
 
     def test_confidence_width_percentage(self):
         """compute_prediction_insights should calculate confidence width as percentage."""
-        from g2.charts.analysis import compute_prediction_insights
+        from gefion.charts.analysis import compute_prediction_insights
 
         predictions = make_prediction_data(100.0)
         result = compute_prediction_insights(predictions, 100.0)
@@ -196,7 +196,7 @@ class TestComputeBacktestInsights:
 
     def test_returns_expected_structure(self):
         """compute_backtest_insights should return dict with expected keys."""
-        from g2.charts.analysis import compute_backtest_insights
+        from gefion.charts.analysis import compute_backtest_insights
 
         equity = make_equity_data()
         result = compute_backtest_insights(equity)
@@ -209,7 +209,7 @@ class TestComputeBacktestInsights:
 
     def test_profitable_strategy(self):
         """compute_backtest_insights should detect profitable strategy."""
-        from g2.charts.analysis import compute_backtest_insights
+        from gefion.charts.analysis import compute_backtest_insights
 
         equity = make_equity_data(profitable=True)
         result = compute_backtest_insights(equity)
@@ -219,7 +219,7 @@ class TestComputeBacktestInsights:
 
     def test_unprofitable_strategy(self):
         """compute_backtest_insights should detect unprofitable strategy."""
-        from g2.charts.analysis import compute_backtest_insights
+        from gefion.charts.analysis import compute_backtest_insights
 
         equity = make_equity_data(profitable=False)
         result = compute_backtest_insights(equity)
@@ -229,7 +229,7 @@ class TestComputeBacktestInsights:
 
     def test_max_drawdown_calculated(self):
         """compute_backtest_insights should calculate max drawdown."""
-        from g2.charts.analysis import compute_backtest_insights
+        from gefion.charts.analysis import compute_backtest_insights
 
         equity = make_equity_data()
         result = compute_backtest_insights(equity)
@@ -243,7 +243,7 @@ class TestDetectTechnicalSignals:
 
     def test_returns_list_of_strings(self):
         """detect_technical_signals should return list of insight strings."""
-        from g2.charts.analysis import detect_technical_signals
+        from gefion.charts.analysis import detect_technical_signals
 
         ohlcv = make_ohlcv_data()
         features = make_feature_data()
@@ -255,7 +255,7 @@ class TestDetectTechnicalSignals:
 
     def test_detects_overbought_rsi(self):
         """detect_technical_signals should detect overbought RSI."""
-        from g2.charts.analysis import detect_technical_signals
+        from gefion.charts.analysis import detect_technical_signals
 
         ohlcv = make_ohlcv_data()
         # RSI at 75+ is overbought
@@ -271,7 +271,7 @@ class TestDetectTechnicalSignals:
 
     def test_detects_oversold_rsi(self):
         """detect_technical_signals should detect oversold RSI."""
-        from g2.charts.analysis import detect_technical_signals
+        from gefion.charts.analysis import detect_technical_signals
 
         ohlcv = make_ohlcv_data()
         # RSI at 25 is oversold
@@ -287,7 +287,7 @@ class TestDetectTechnicalSignals:
 
     def test_empty_features_returns_empty_list(self):
         """detect_technical_signals should handle empty features."""
-        from g2.charts.analysis import detect_technical_signals
+        from gefion.charts.analysis import detect_technical_signals
 
         ohlcv = make_ohlcv_data()
         result = detect_technical_signals(ohlcv, {})

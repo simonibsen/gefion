@@ -1,6 +1,6 @@
 import json
 
-from g2 import cli
+from gefion import cli
 
 
 def test_emit_json_outputs_payload(capsys):

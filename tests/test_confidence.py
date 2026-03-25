@@ -12,7 +12,7 @@ class TestQuantileConfidence:
 
     def test_narrow_iqr_gives_high_confidence(self):
         """Narrow IQR relative to historical = high confidence."""
-        from g2.ml.confidence import compute_quantile_confidence
+        from gefion.ml.confidence import compute_quantile_confidence
 
         # IQR = 0.05, historical median = 0.10 (narrow = high confidence)
         confidence = compute_quantile_confidence(
@@ -24,7 +24,7 @@ class TestQuantileConfidence:
 
     def test_wide_iqr_gives_low_confidence(self):
         """Wide IQR relative to historical = low confidence."""
-        from g2.ml.confidence import compute_quantile_confidence
+        from gefion.ml.confidence import compute_quantile_confidence
 
         # IQR = 0.20, historical median = 0.10 (wide = low confidence)
         confidence = compute_quantile_confidence(
@@ -36,7 +36,7 @@ class TestQuantileConfidence:
 
     def test_returns_neutral_for_zero_historical(self):
         """Returns 0.5 when no historical reference."""
-        from g2.ml.confidence import compute_quantile_confidence
+        from gefion.ml.confidence import compute_quantile_confidence
 
         confidence = compute_quantile_confidence(
             q10=-0.05, q50=0.0, q90=0.05,
@@ -47,7 +47,7 @@ class TestQuantileConfidence:
 
     def test_confidence_bounded_zero_to_one(self):
         """Confidence should always be in [0, 1] range."""
-        from g2.ml.confidence import compute_quantile_confidence
+        from gefion.ml.confidence import compute_quantile_confidence
 
         # Test various inputs
         for iqr in [0.01, 0.05, 0.10, 0.50, 1.0]:
@@ -63,7 +63,7 @@ class TestClassifierConfidence:
 
     def test_high_probability_single_class_gives_high_confidence(self):
         """90% probability in one class = high confidence."""
-        from g2.ml.confidence import compute_classifier_confidence
+        from gefion.ml.confidence import compute_classifier_confidence
 
         probs = {
             'strong_up': 0.90,
@@ -80,7 +80,7 @@ class TestClassifierConfidence:
 
     def test_uniform_distribution_gives_low_confidence(self):
         """Uniform 20% each class = low confidence."""
-        from g2.ml.confidence import compute_classifier_confidence
+        from gefion.ml.confidence import compute_classifier_confidence
 
         probs = {
             'strong_up': 0.20,
@@ -97,7 +97,7 @@ class TestClassifierConfidence:
 
     def test_returns_entropy(self):
         """Returns Shannon entropy of distribution."""
-        from g2.ml.confidence import compute_classifier_confidence
+        from gefion.ml.confidence import compute_classifier_confidence
 
         # Uniform distribution has max entropy = log(5) ≈ 1.61
         probs = {
@@ -114,7 +114,7 @@ class TestClassifierConfidence:
 
     def test_returns_margin_between_top_two(self):
         """Returns difference between top-2 class probabilities."""
-        from g2.ml.confidence import compute_classifier_confidence
+        from gefion.ml.confidence import compute_classifier_confidence
 
         probs = {
             'strong_up': 0.50,
@@ -130,7 +130,7 @@ class TestClassifierConfidence:
 
     def test_handles_zero_probabilities(self):
         """Handles zero probabilities without error."""
-        from g2.ml.confidence import compute_classifier_confidence
+        from gefion.ml.confidence import compute_classifier_confidence
 
         probs = {
             'strong_up': 1.0,
@@ -151,7 +151,7 @@ class TestEnsembleDisagreement:
 
     def test_identical_predictions_give_full_agreement(self):
         """All models predicting same value = full agreement."""
-        from g2.ml.confidence import compute_ensemble_disagreement
+        from gefion.ml.confidence import compute_ensemble_disagreement
 
         predictions = [0.05, 0.05, 0.05]
 
@@ -163,7 +163,7 @@ class TestEnsembleDisagreement:
 
     def test_divergent_predictions_give_low_agreement(self):
         """Models with very different predictions = low agreement."""
-        from g2.ml.confidence import compute_ensemble_disagreement
+        from gefion.ml.confidence import compute_ensemble_disagreement
 
         predictions = [-0.10, 0.0, 0.10]  # Spread of 0.20
 
@@ -175,7 +175,7 @@ class TestEnsembleDisagreement:
 
     def test_single_model_returns_full_agreement(self):
         """Single model = full agreement by default."""
-        from g2.ml.confidence import compute_ensemble_disagreement
+        from gefion.ml.confidence import compute_ensemble_disagreement
 
         predictions = [0.05]
 
@@ -186,7 +186,7 @@ class TestEnsembleDisagreement:
 
     def test_empty_predictions_returns_full_agreement(self):
         """Empty predictions = full agreement by default."""
-        from g2.ml.confidence import compute_ensemble_disagreement
+        from gefion.ml.confidence import compute_ensemble_disagreement
 
         predictions = []
 
@@ -197,7 +197,7 @@ class TestEnsembleDisagreement:
 
     def test_agreement_score_bounded(self):
         """Agreement score should always be in [0, 1] range."""
-        from g2.ml.confidence import compute_ensemble_disagreement
+        from gefion.ml.confidence import compute_ensemble_disagreement
 
         # Test with varying levels of disagreement
         for spread in [0.01, 0.05, 0.10, 0.50]:

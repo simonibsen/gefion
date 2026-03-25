@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
-import g2.cli as cli
+import gefion.cli as cli
 
 
 runner = CliRunner()
@@ -70,7 +70,7 @@ class TestWarmStartXGBoost:
         except (ImportError, Exception) as e:
             pytest.skip(f"XGBoost not available: {e}")
 
-        from g2.ml.models import train_quantile_model, save_model_artifact
+        from gefion.ml.models import train_quantile_model, save_model_artifact
 
         X_initial, y_initial = sample_data
         X_new, y_new = new_data
@@ -107,7 +107,7 @@ class TestWarmStartXGBoost:
         except (ImportError, Exception) as e:
             pytest.skip(f"XGBoost not available: {e}")
 
-        from g2.ml.models import train_quantile_model, save_model_artifact
+        from gefion.ml.models import train_quantile_model, save_model_artifact
 
         X_initial, y_initial = sample_data
         X_new, y_new = new_data
@@ -177,7 +177,7 @@ class TestWarmStartLightGBM:
         except (ImportError, Exception) as e:
             pytest.skip(f"LightGBM not available: {e}")
 
-        from g2.ml.models import train_quantile_model, save_model_artifact
+        from gefion.ml.models import train_quantile_model, save_model_artifact
 
         X_initial, y_initial = sample_data
         X_new, y_new = new_data
@@ -229,7 +229,7 @@ class TestWarmStartMetadata:
         except (ImportError, Exception) as e:
             pytest.skip(f"XGBoost not available: {e}")
 
-        from g2.ml.models import train_quantile_model, save_model_artifact
+        from gefion.ml.models import train_quantile_model, save_model_artifact
 
         X, y = sample_data
 
@@ -273,7 +273,7 @@ class TestWarmStartValidation:
 
     def test_warm_start_fails_gracefully_for_sklearn(self):
         """sklearn QuantileRegressor doesn't support warm-start."""
-        from g2.ml.models import train_quantile_model
+        from gefion.ml.models import train_quantile_model
 
         np.random.seed(42)
         X = pd.DataFrame({'a': np.random.randn(50)})

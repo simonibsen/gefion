@@ -5,7 +5,7 @@ orphaned data from database tables.
 """
 import pytest
 from typer.testing import CliRunner
-from g2.cli import app
+from gefion.cli import app
 
 
 runner = CliRunner()

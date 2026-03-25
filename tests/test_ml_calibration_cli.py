@@ -4,7 +4,7 @@ TDD: Written BEFORE the CLI command implementation.
 """
 from typer.testing import CliRunner
 
-import g2.cli as cli
+import gefion.cli as cli
 
 runner = CliRunner()
 

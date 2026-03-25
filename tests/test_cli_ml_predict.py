@@ -2,7 +2,7 @@
 import pytest
 from typer.testing import CliRunner
 
-import g2.cli as cli
+import gefion.cli as cli
 
 
 def test_ml_predict_requires_model_name():

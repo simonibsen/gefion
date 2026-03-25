@@ -5,9 +5,9 @@ from datetime import date, timedelta
 import pytest
 import psycopg
 
-from g2.db import schema
-from g2.db.ingest import upsert_stock, insert_stock_ohlcv, filter_symbols_needing_update
-from g2.ingest.universe import _expected_market_date
+from gefion.db import schema
+from gefion.db.ingest import upsert_stock, insert_stock_ohlcv, filter_symbols_needing_update
+from gefion.ingest.universe import _expected_market_date
 
 
 def require_db():
@@ -152,7 +152,7 @@ def test_filter_symbols_empty_list():
 
 def test_filter_new_rows_from_api_response():
     """Only insert rows newer than latest existing date."""
-    from g2.db.ingest import filter_new_rows
+    from gefion.db.ingest import filter_new_rows
     conn = require_db()
     schema.create_stocks_table(conn)
     schema.create_stock_ohlcv_table(conn)
@@ -192,7 +192,7 @@ def test_filter_new_rows_from_api_response():
 
 def test_filter_new_rows_no_existing_data():
     """When no existing data, all API rows are new."""
-    from g2.db.ingest import filter_new_rows
+    from gefion.db.ingest import filter_new_rows
     conn = require_db()
     schema.create_stocks_table(conn)
     schema.create_stock_ohlcv_table(conn)

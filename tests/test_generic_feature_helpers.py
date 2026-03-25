@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 def test_latest_feature_date_with_indicator_function():
     """Test latest_feature_date() works for function_name='indicator'."""
-    from g2.db.ingest import latest_feature_date
+    from gefion.db.ingest import latest_feature_date
 
     # Mock connection
     conn = MagicMock()
@@ -30,7 +30,7 @@ def test_latest_feature_date_with_indicator_function():
 
 def test_latest_feature_date_with_derivative_function():
     """Test latest_feature_date() works for function_name='derivative'."""
-    from g2.db.ingest import latest_feature_date
+    from gefion.db.ingest import latest_feature_date
 
     conn = MagicMock()
     cursor_mock = MagicMock()
@@ -45,7 +45,7 @@ def test_latest_feature_date_with_derivative_function():
 
 def test_latest_feature_date_with_no_data():
     """Test latest_feature_date() returns None when no data exists."""
-    from g2.db.ingest import latest_feature_date
+    from gefion.db.ingest import latest_feature_date
 
     conn = MagicMock()
     cursor_mock = MagicMock()
@@ -60,7 +60,7 @@ def test_latest_feature_date_with_no_data():
 
 def test_latest_feature_date_defaults_to_all_functions():
     """Test latest_feature_date() with function_name=None gets latest across all functions."""
-    from g2.db.ingest import latest_feature_date
+    from gefion.db.ingest import latest_feature_date
 
     conn = MagicMock()
     cursor_mock = MagicMock()
@@ -75,7 +75,7 @@ def test_latest_feature_date_defaults_to_all_functions():
 
 def test_filter_symbols_needing_features_with_indicators():
     """Test filter_symbols_needing_features() for indicator features."""
-    from g2.db.ingest import filter_symbols_needing_features
+    from gefion.db.ingest import filter_symbols_needing_features
 
     conn = MagicMock()
     cursor_mock = MagicMock()
@@ -101,7 +101,7 @@ def test_filter_symbols_needing_features_with_indicators():
 
 def test_filter_symbols_needing_features_with_derivatives():
     """Test filter_symbols_needing_features() for derivative features."""
-    from g2.db.ingest import filter_symbols_needing_features
+    from gefion.db.ingest import filter_symbols_needing_features
 
     conn = MagicMock()
     cursor_mock = MagicMock()
@@ -127,7 +127,7 @@ def test_filter_symbols_needing_features_with_derivatives():
 
 def test_filter_symbols_needing_features_all_up_to_date():
     """Test filter_symbols_needing_features() when all symbols are up-to-date."""
-    from g2.db.ingest import filter_symbols_needing_features
+    from gefion.db.ingest import filter_symbols_needing_features
 
     conn = MagicMock()
     cursor_mock = MagicMock()

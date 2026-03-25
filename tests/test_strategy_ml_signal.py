@@ -14,12 +14,12 @@ class TestMLSignalStrategyBasics:
 
     def test_strategy_can_be_imported(self):
         """MLSignalStrategy should be importable."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
         assert MLSignalStrategy is not None
 
     def test_strategy_has_required_params(self):
         """Strategy should accept model selection parameters."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
 
         strategy = MLSignalStrategy(
             model_name="test_model",
@@ -35,7 +35,7 @@ class TestMLSignalStrategyBasics:
 
     def test_strategy_has_generate_signals_method(self):
         """Strategy should have generate_signals method."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
 
         strategy = MLSignalStrategy()
         assert hasattr(strategy, "generate_signals")
@@ -43,7 +43,7 @@ class TestMLSignalStrategyBasics:
 
     def test_strategy_supports_classifier_mode(self):
         """Strategy should support classifier prediction mode."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
 
         strategy = MLSignalStrategy(
             prediction_type="classifier",
@@ -58,10 +58,10 @@ class TestMLSignalStrategyBasics:
 class TestMLSignalStrategySignals:
     """Test signal generation logic."""
 
-    @patch("g2.strategies.ml_signal.get_predictions_for_date")
+    @patch("gefion.strategies.ml_signal.get_predictions_for_date")
     def test_generates_buy_signal_for_positive_prediction(self, mock_get_preds):
         """Should generate buy signal when q50 exceeds threshold."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
 
         # Mock predictions: AAPL has high expected return
         mock_get_preds.return_value = {
@@ -94,10 +94,10 @@ class TestMLSignalStrategySignals:
         assert "AAPL" in buy_symbols
         assert "MSFT" not in buy_symbols
 
-    @patch("g2.strategies.ml_signal.get_predictions_for_date")
+    @patch("gefion.strategies.ml_signal.get_predictions_for_date")
     def test_generates_sell_signal_for_negative_prediction(self, mock_get_preds):
         """Should generate sell signal when q50 is below negative threshold."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
 
         # Mock: AAPL has negative outlook
         mock_get_preds.return_value = {
@@ -129,10 +129,10 @@ class TestMLSignalStrategySignals:
         assert len(sell_signals) == 1
         assert sell_signals[0]["symbol"] == "AAPL"
 
-    @patch("g2.strategies.ml_signal.get_predictions_for_date")
+    @patch("gefion.strategies.ml_signal.get_predictions_for_date")
     def test_respects_max_positions(self, mock_get_preds):
         """Should not exceed max_positions limit."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
 
         # Many stocks with good predictions
         mock_get_preds.return_value = {
@@ -162,10 +162,10 @@ class TestMLSignalStrategySignals:
         buy_signals = [s for s in signals if s["action"] == "buy"]
         assert len(buy_signals) <= 3
 
-    @patch("g2.strategies.ml_signal.get_predictions_for_date")
+    @patch("gefion.strategies.ml_signal.get_predictions_for_date")
     def test_no_signals_when_no_predictions(self, mock_get_preds):
         """Should return empty list when no predictions available."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
 
         mock_get_preds.return_value = {}
 
@@ -184,10 +184,10 @@ class TestMLSignalStrategySignals:
 class TestMLSignalStrategyClassifier:
     """Test classifier-based signal generation."""
 
-    @patch("g2.strategies.ml_signal.get_classifier_predictions_for_date")
+    @patch("gefion.strategies.ml_signal.get_classifier_predictions_for_date")
     def test_buys_on_strong_up_prediction(self, mock_get_preds):
         """Should buy when classifier predicts strong_up with high confidence."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
 
         mock_get_preds.return_value = {
             "AAPL": {
@@ -229,14 +229,14 @@ class TestMLSignalStrategyRegistration:
 
     def test_ml_signal_in_builtin_strategies(self):
         """ml_signal should be registered in BUILTIN_STRATEGIES."""
-        from g2.strategies.dispatcher import BUILTIN_STRATEGIES
+        from gefion.strategies.dispatcher import BUILTIN_STRATEGIES
 
         assert "ml_signal" in BUILTIN_STRATEGIES
         assert BUILTIN_STRATEGIES["ml_signal"]["class_name"] == "MLSignalStrategy"
 
     def test_ml_signal_has_correct_default_params(self):
         """ml_signal should have sensible default parameters."""
-        from g2.strategies.dispatcher import BUILTIN_STRATEGIES
+        from gefion.strategies.dispatcher import BUILTIN_STRATEGIES
 
         defaults = BUILTIN_STRATEGIES["ml_signal"]["default_params"]
 
@@ -250,10 +250,10 @@ class TestMLSignalStrategyRegistration:
 class TestMLSignalLookAheadProtection:
     """Test that strategy avoids look-ahead bias."""
 
-    @patch("g2.strategies.ml_signal.get_predictions_for_date")
+    @patch("gefion.strategies.ml_signal.get_predictions_for_date")
     def test_queries_previous_day_predictions(self, mock_get_preds):
         """Strategy should query predictions from PREVIOUS day to avoid look-ahead."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
         from datetime import timedelta
 
         mock_get_preds.return_value = {}
@@ -283,7 +283,7 @@ class TestMLSignalLookAheadProtection:
 
     def test_prediction_source_always_database(self):
         """Strategy should always use database mode (live mode removed)."""
-        from g2.strategies.ml_signal import MLSignalStrategy
+        from gefion.strategies.ml_signal import MLSignalStrategy
 
         # Even if live is passed, should use database
         strategy = MLSignalStrategy(prediction_source="live")

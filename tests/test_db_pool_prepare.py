@@ -1,6 +1,6 @@
 import os
 
-from g2.db import pool
+from gefion.db import pool
 
 
 def test_should_prepare_respects_env(monkeypatch):

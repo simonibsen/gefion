@@ -53,7 +53,7 @@ class TestLoadDatasetParquet:
     def test_load_prefers_parquet_over_csv(self, tmp_path, sample_features_df, sample_labels_df, sample_manifest):
         """When both CSV and Parquet exist, Parquet should be preferred."""
         pytest.importorskip("pyarrow")
-        from g2.ml.models import load_dataset
+        from gefion.ml.models import load_dataset
 
         # Create both CSV and Parquet files
         sample_features_df.to_csv(tmp_path / "features.csv", index=False)
@@ -78,7 +78,7 @@ class TestLoadDatasetParquet:
     def test_load_from_parquet_only(self, tmp_path, sample_features_df, sample_labels_df, sample_manifest):
         """Load from Parquet when only Parquet files exist."""
         pytest.importorskip("pyarrow")
-        from g2.ml.models import load_dataset
+        from gefion.ml.models import load_dataset
 
         # Create only Parquet files
         sample_features_df.to_parquet(tmp_path / "features.parquet", index=False)
@@ -99,7 +99,7 @@ class TestLoadDatasetParquet:
 
     def test_load_from_csv_fallback(self, tmp_path, sample_features_df, sample_labels_df, sample_manifest):
         """Load from CSV when only CSV files exist (backward compatibility)."""
-        from g2.ml.models import load_dataset
+        from gefion.ml.models import load_dataset
 
         # Create only CSV files
         sample_features_df.to_csv(tmp_path / "features.csv", index=False)
@@ -119,7 +119,7 @@ class TestLoadDatasetParquet:
     def test_load_parquet_preserves_types(self, tmp_path, sample_manifest):
         """Parquet loading should preserve numeric types."""
         pytest.importorskip("pyarrow")
-        from g2.ml.models import load_dataset
+        from gefion.ml.models import load_dataset
 
         # Create features with specific types
         features_df = pd.DataFrame({
@@ -151,7 +151,7 @@ class TestLoadDatasetParquet:
 
     def test_load_raises_when_no_files_exist(self, tmp_path, sample_manifest):
         """Should raise FileNotFoundError when no data files exist."""
-        from g2.ml.models import load_dataset
+        from gefion.ml.models import load_dataset
 
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps(sample_manifest))
@@ -165,5 +165,5 @@ class TestLoadDatasetFunction:
 
     def test_function_exists(self):
         """The function should be importable."""
-        from g2.ml.models import load_dataset
+        from gefion.ml.models import load_dataset
         assert callable(load_dataset)

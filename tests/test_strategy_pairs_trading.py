@@ -5,7 +5,7 @@ import pytest
 from datetime import date, timedelta
 from decimal import Decimal
 
-from g2.strategies.pairs_trading import PairsTradingStrategy
+from gefion.strategies.pairs_trading import PairsTradingStrategy
 
 
 def test_strategy_initialization():

@@ -4,8 +4,8 @@ import psycopg
 import pytest
 from typer.testing import CliRunner
 
-from g2 import cli
-from g2.db import schema
+from gefion import cli
+from gefion.db import schema
 
 runner = CliRunner()
 

@@ -14,9 +14,9 @@ import psycopg
 import tempfile
 import shutil
 from typer.testing import CliRunner
-from g2 import cli
-from g2.config import load_settings
-from g2.db import schema
+from gefion import cli
+from gefion.config import load_settings
+from gefion.db import schema
 
 
 pytestmark = pytest.mark.skipif(

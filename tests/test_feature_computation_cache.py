@@ -24,7 +24,7 @@ def test_cache_is_passed_to_feature_functions():
     Feature functions should be able to access a cache to store/retrieve
     intermediate calculations.
     """
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -75,7 +75,7 @@ def test_cache_shared_across_features_for_same_stock():
     When processing multiple features for one stock, they should all share
     the same cache instance, allowing them to reuse calculations.
     """
-    from g2.features.dispatcher import _process_function_group
+    from gefion.features.dispatcher import _process_function_group
     from unittest.mock import Mock
 
     # Mock two features that both need MA(20)
@@ -227,7 +227,7 @@ def test_cache_is_optional_for_backwards_compatibility():
     Existing feature functions that don't use cache should continue to work.
     Cache is an optional enhancement.
     """
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()

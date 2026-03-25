@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from g2.db.ingest import insert_computed_features
-from g2.db import pool as db_pool
+from gefion.db.ingest import insert_computed_features
+from gefion.db import pool as db_pool
 
 
 def test_insert_computed_features_uses_prepared_for_large_batches(monkeypatch):

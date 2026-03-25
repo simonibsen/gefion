@@ -113,10 +113,10 @@ Before exiting plan mode, verify:
 
 ### Testing
 - Database tests require `ENABLE_DB_TESTS=1` environment variable
-- Tests automatically use a separate `g2_test` database (derived from `DATABASE_URL` + `_test` suffix)
+- Tests automatically use a separate `gefion_test` database (derived from `DATABASE_URL` + `_test` suffix)
 - All DB test connections MUST use `schema.test_db_url()` — never hardcode database URLs
 - Use `OTEL_ENABLED=false` to disable tracing in tests
-- Run full test suite: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest`
+- Run full test suite: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" OTEL_ENABLED=false .venv/bin/python -m pytest`
 
 ## Active Technologies
 - Python 3.10+ + Streamlit (UI framework), subprocess (process execution) (001-ui-reliability)

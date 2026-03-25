@@ -207,7 +207,7 @@ def format_service_error(service: str, health_status: Dict[str, Any]) -> str:
 
 
 # Initialize server and health cache
-app = Server("g2-mcp-server")
+app = Server("gefion-mcp-server")
 executor = G2Executor()
 health_cache = HealthCheckCache(ttl_seconds=60)
 
@@ -249,7 +249,7 @@ ROLE_INFO = {
 
 # Log role at startup
 import sys
-print(f"[g2-mcp-server] Starting with role: {MCP_ROLE}", file=sys.stderr)
+print(f"[gefion-mcp-server] Starting with role: {MCP_ROLE}", file=sys.stderr)
 
 
 # ============================================================================
@@ -2044,7 +2044,7 @@ async def _query_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
 
     # Execute via psql (g2 doesn't have a direct SQL query command)
     import os
-    db_url = os.environ.get('DATABASE_URL', 'postgresql://g2:g2pass@localhost:5432/g2')
+    db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:5432/gefion')
 
     try:
         result = subprocess.run(
@@ -2116,7 +2116,7 @@ async def _query_model_performance(args: Dict[str, Any]) -> Dict[str, Any]:
     """
 
     import os
-    db_url = os.environ.get('DATABASE_URL', 'postgresql://g2:g2pass@localhost:5432/g2')
+    db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:5432/gefion')
 
     try:
         result = subprocess.run(
@@ -2363,7 +2363,7 @@ async def _query_database(args: Dict[str, Any]) -> Dict[str, Any]:
 
     # Execute query
     import os
-    db_url = os.environ.get('DATABASE_URL', 'postgresql://g2:g2pass@localhost:5432/g2')
+    db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:5432/gefion')
 
     try:
         result = subprocess.run(

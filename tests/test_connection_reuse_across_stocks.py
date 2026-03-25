@@ -27,16 +27,16 @@ def test_worker_reuses_same_connection_across_stocks():
     3. Release connection
     4. Repeat for each stock (churn)
     """
-    from g2.cli import features_compute
+    from gefion.cli import features_compute
     import io
     import sys
 
     # Mock the database and pool
-    with patch('g2.cli.psycopg.connect') as mock_connect, \
-         patch('g2.cli.db_pool') as mock_pool, \
-         patch('g2.cli.schema') as mock_schema, \
-         patch('g2.cli.get_available_connections') as mock_avail, \
-         patch('g2.features.dispatcher.compute_features') as mock_compute:
+    with patch('gefion.cli.psycopg.connect') as mock_connect, \
+         patch('gefion.cli.db_pool') as mock_pool, \
+         patch('gefion.cli.schema') as mock_schema, \
+         patch('gefion.cli.get_available_connections') as mock_avail, \
+         patch('gefion.features.dispatcher.compute_features') as mock_compute:
 
         # Setup main connection mock
         mock_main_conn = MagicMock()
