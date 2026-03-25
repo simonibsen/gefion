@@ -735,7 +735,7 @@ used for trading on day D+1, avoiding look-ahead bias.
 
 **Workflow:**
 1. Train model on historical data
-2. Generate predictions for backtest period using `g2 ml predict`
+2. Generate predictions for backtest period using `gefion ml predict`
 3. Run backtest - strategy automatically uses D-1 predictions
 
 ### Quick Start

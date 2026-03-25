@@ -193,8 +193,8 @@ g2 backtest run --strategy volatility_contraction --squeeze-threshold 0.04
 g2's ML strategies use trained machine learning models to generate or filter
 trading signals. These strategies require:
 
-1. **Trained models** - Use `g2 ml train` or `g2 ml train-ensemble`
-2. **Stored predictions** - Use `g2 ml predict-ensemble` or `g2 ml predict-classifier`
+1. **Trained models** - Use `gefion ml train` or `gefion ml train-ensemble`
+2. **Stored predictions** - Use `gefion ml predict-ensemble` or `gefion ml predict-classifier`
 
 See [ML Quickstart](ML_QUICKSTART.md) for training workflow.
 

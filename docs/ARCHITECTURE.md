@@ -409,7 +409,7 @@ Experiment C (threshold_tuning)
 - **Backtest Engine**: Strategy param experiments run backtests for evaluation
 - **ML Pipeline**: Hyperparameter experiments train and evaluate models
 - **MCP Server**: AI can propose experiments via MCP tools
-- **CLI**: Full experiment management via `g2 experiment` commands
+- **CLI**: Full experiment management via `gefion experiment` commands
 
 ### Module Structure
 

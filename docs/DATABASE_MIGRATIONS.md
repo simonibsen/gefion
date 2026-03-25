@@ -96,7 +96,7 @@ The migration system consists of three main components:
    - Applied in sequential order
    - Standard SQL syntax (psql meta-commands like `\echo` are filtered out)
 
-3. **Migration Runner** (`g2 db-migrate` command)
+3. **Migration Runner** (`gefion db-migrate` command)
    - Scans migration directory
    - Compares with applied migrations
    - Applies pending migrations in order
@@ -217,7 +217,7 @@ If a migration fails:
 1. **Check the error message** - Indicates what went wrong
 2. **Migration is NOT recorded** - Failed migrations won't be marked as applied
 3. **Fix the migration file** - Correct the SQL syntax or logic
-4. **Run again** - `g2 db-migrate` will retry the failed migration
+4. **Run again** - `gefion db-migrate` will retry the failed migration
 
 ### Migration Skipped Unexpectedly
 

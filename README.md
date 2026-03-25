@@ -1,4 +1,4 @@
-# g2 (working title)
+# Gefion (working title)
 
 Database-first ML platform for quantitative stock analysis. Ingests price data, computes technical indicators, trains ML models, and backtests trading strategies.
 
@@ -38,7 +38,7 @@ source .venv/bin/activate               # Activate venv (Windows: .venv\Scripts\
 # Configure environment variables
 cp .env.example .env
 # Edit .env and set:
-#   DATABASE_URL=postgresql://g2:g2pass@localhost:5432/g2
+#   DATABASE_URL=postgresql://gefion:gefionpass@localhost:5432/g2
 #   ALPHAVANTAGE_API_KEY=your_key_here
 ```
 
@@ -119,9 +119,9 @@ g2 ml eval --model-name model --model-version $(date +%Y%m%d) --start-date 2024-
 ```
 
 **Additional ML commands:**
-- `g2 ml train-classifier` - Train 5-class trend classifier (strong_down → strong_up)
-- `g2 ml predict-classifier` - Generate trend class predictions
-- `g2 ml predict-ensemble` - Predictions using ensemble models
+- `gefion ml train-classifier` - Train 5-class trend classifier (strong_down → strong_up)
+- `gefion ml predict-classifier` - Generate trend class predictions
+- `gefion ml predict-ensemble` - Predictions using ensemble models
 
 **Learn more:** [docs/ML_QUICKSTART.md](docs/ML_QUICKSTART.md) - Complete ML workflow guide
 
@@ -454,9 +454,9 @@ python custom_ingest.py
 ### Pattern is always the same
 
 1. Create fetcher function in `feature-functions/`
-2. Import to database: `g2 feat-fx-import`
-3. Register definition: `g2 feat-def-register`
-4. Compute: `g2 feat-compute`
+2. Import to database: `gefion feat-fx-import`
+3. Register definition: `gefion feat-def-register`
+4. Compute: `gefion feat-compute`
 
 ### What's allowed in sandboxed functions
 
@@ -576,7 +576,7 @@ export $(cat .env.example | xargs)
 g2 span-check
 ```
 
-Tip: during development, run `g2 span-check` after performance-sensitive changes to see recent traces and grab the printed Tempo API link for the selected trace.
+Tip: during development, run `gefion span-check` after performance-sensitive changes to see recent traces and grab the printed Tempo API link for the selected trace.
 
 More details: [docs/TEMPO_QUICKSTART.md](docs/TEMPO_QUICKSTART.md) and [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 

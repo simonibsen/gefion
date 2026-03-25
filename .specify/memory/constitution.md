@@ -36,13 +36,13 @@ Every code change follows strict Red-Green-Refactor. No exceptions.
 Database tests MUST use a dedicated test database, never the development database.
 
 - All test DB connections MUST use `schema.test_db_url()` — hardcoded database URLs in test files are forbidden
-- The test database (`g2_test` by default) is created automatically by `conftest.py` when `ENABLE_DB_TESTS=1`
-- Resolution order: `TEST_DATABASE_URL` env var > `DATABASE_URL` with `_test` suffix > default `g2_test`
+- The test database (`gefion_test` by default) is created automatically by `conftest.py` when `ENABLE_DB_TESTS=1`
+- Resolution order: `TEST_DATABASE_URL` env var > `DATABASE_URL` with `_test` suffix > default `gefion_test`
 - All database test files MUST have an `ENABLE_DB_TESTS` guard (pytestmark or fixture-level skip)
 
 ### III. CLI-First Interface
 
-All functionality MUST be accessible through the `g2` CLI before any other interface.
+All functionality MUST be accessible through the `gefion` CLI before any other interface.
 
 - Every operation (data update, feature compute, ML train, backtest) MUST have a CLI command
 - CLI commands MUST support both human-readable and JSON output formats
@@ -67,13 +67,13 @@ Every significant operation MUST be traceable and debuggable.
 Traces are not just telemetry — they are a development tool. Actively inspecting traces during development catches performance regressions, verifies code paths, and ensures instrumentation is correct.
 
 - **Tempo MUST be running during development** — start it with `/services start`; it is not optional infrastructure
-- **Trace inspection is part of the dev loop** — after implementing or modifying a feature, verify its traces via `g2 span-check` or the Tempo API before considering the work complete
+- **Trace inspection is part of the dev loop** — after implementing or modifying a feature, verify its traces via `gefion span-check` or the Tempo API before considering the work complete
 - **Span parenting is mandatory** — every child span MUST propagate its parent context. Orphaned spans (spans with no parent inside an operation that should have one) are defects, not style issues. Pass `context` or use `@traced` within an already-traced call stack to ensure linkage
-- **Performance awareness** — use `g2 trace-search` and `g2 trace-compare` to identify slow operations and verify optimizations. If a trace shows unexpected duration or span count, investigate before merging
+- **Performance awareness** — use `gefion trace-search` and `gefion trace-compare` to identify slow operations and verify optimizations. If a trace shows unexpected duration or span count, investigate before merging
 
 ### V. Consistent CLI Presentation
 
-All `g2` CLI output MUST have a unified look and feel. Colors, progress bars, status indicators, tables, and error formatting MUST use a shared library - not ad-hoc inline formatting.
+All `gefion` CLI output MUST have a unified look and feel. Colors, progress bars, status indicators, tables, and error formatting MUST use a shared library - not ad-hoc inline formatting.
 
 - All terminal output (colors, spinners, progress bars, tables, panels) MUST go through a common presentation module
 - New commands MUST NOT introduce their own formatting with raw ANSI codes or one-off Rich/click styling
@@ -110,7 +110,7 @@ Start simple. Avoid premature abstraction. YAGNI.
 2. **Test first**: Write failing tests that describe the expected behavior
 3. **Implement**: Write the minimum code to make tests pass
 4. **Verify**: Run the full test suite (`make test-db` for DB tests, `make test` for unit tests)
-5. **Observe**: Check traces with `g2 span-check` after performance-sensitive changes
+5. **Observe**: Check traces with `gefion span-check` after performance-sensitive changes
 6. **Commit**: Tests and implementation together in one commit
 
 ### Plan Structure

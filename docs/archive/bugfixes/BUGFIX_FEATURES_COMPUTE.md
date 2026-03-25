@@ -1,7 +1,7 @@
 # Bug Fix: Features-Compute Showing 0 Inserts
 
 ## Problem
-`g2 features-compute` was showing 0 inserts for all symbols despite having price data and active feature definitions.
+`gefion features-compute` was showing 0 inserts for all symbols despite having price data and active feature definitions.
 
 ## Root Cause
 There were two critical bugs in the features dispatcher integration:

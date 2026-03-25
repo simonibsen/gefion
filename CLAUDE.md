@@ -105,7 +105,7 @@ Before exiting plan mode, verify:
 - Use `@traced` decorator for significant operations
 - Add logging with `logger = logging.getLogger(__name__)`
 - Child spans MUST propagate parent context — orphaned spans are defects
-- After implementing a feature, inspect its traces via `g2 span-check` before considering it complete
+- After implementing a feature, inspect its traces via `gefion span-check` before considering it complete
 
 ### Database
 - Use parameterized queries (never string interpolation for SQL)

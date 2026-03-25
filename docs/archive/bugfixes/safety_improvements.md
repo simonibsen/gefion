@@ -2,12 +2,12 @@
 
 ## Overview
 
-Added comprehensive safety mechanisms to the `ResourceAwareAdaptiveLimiter` to prevent catastrophic system hangs like the one experienced during `g2 features-compute --all-features`.
+Added comprehensive safety mechanisms to the `ResourceAwareAdaptiveLimiter` to prevent catastrophic system hangs like the one experienced during `gefion features-compute --all-features`.
 
 ## The Problem
 
 User reported a complete system hang:
-- Command: `g2 features-compute --all-features`
+- Command: `gefion features-compute --all-features`
 - Symptoms: System lost network connection and console access (kernel-level hang)
 - Root cause: Likely resource exhaustion (memory/CPU/threads) causing OOM killer or kernel panic
 
@@ -274,7 +274,7 @@ If system starts to hang despite these improvements:
    - Verify max_total_threads setting
 
 3. **Recovery:**
-   - Reduce max_workers: `g2 features-compute --max-workers 4`
+   - Reduce max_workers: `gefion features-compute --max-workers 4`
    - Increase memory threshold: Edit cli.py, set `min_memory_threshold_gb=4.0`
    - Disable auto-scaling: Set `user_max_writer_workers=2` to prevent writer scaling
 

@@ -205,7 +205,7 @@ Or add Tempo services to your existing `docker-compose.yml`.
 
 ## Next Steps
 
-- **Enable profiling**: Use `g2 feat-compute --profile` to get detailed timing breakdowns
+- **Enable profiling**: Use `gefion feat-compute --profile` to get detailed timing breakdowns
 - **Create dashboards**: Build Grafana dashboards showing trace metrics over time
 - **Add metrics**: Send metrics to Prometheus and correlate with traces
 - **Production setup**: Configure S3/GCS storage for long-term retention

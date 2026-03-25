@@ -691,7 +691,7 @@ g2 model-validate --model-id 1 --start 2020-01-01 --end 2024-01-01
 **Decision:** Store MVP configuration in dedicated tables (`ml_datasets`, `ml_runs`) rather than embedding it only in code or in `ml_models`.
 
 **Rationale:**
-- Keeps the `g2` CLI flexible while maintaining reproducibility (“what data and labels produced this?”)
+- Keeps the `gefion` CLI flexible while maintaining reproducibility (“what data and labels produced this?”)
 - Makes it easy to track and compare experiments, predictions, and evaluations over time
 - Provides a clean join path: dataset → train run → model → predict run → predictions → eval run → outcomes/metrics
 

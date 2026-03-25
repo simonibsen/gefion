@@ -22,7 +22,7 @@
 - Quantile regression: q10/q50/q90 predictions for 7/30/90-day horizons
 - Trend classification: 5-class classifier (strong_down to strong_up)
 - Model ensembles: weighted averaging of multiple algorithms
-- Conformal calibration (`g2 ml calibrate`): additive shift corrections for nominal quantile coverage
+- Conformal calibration (`gefion ml calibrate`): additive shift corrections for nominal quantile coverage
 - Feature importance: SHAP-based analysis
 - Hyperparameter tuning: Bayesian optimization via Optuna
 - Warm-start retraining: 10-100x faster for XGBoost/LightGBM
@@ -35,14 +35,14 @@
 - Experiment framework: propose/approve/run with grid/random/bayesian search
 
 ### Interfaces
-- Full CLI (`g2` command with subcommands)
+- Full CLI (`gefion` command with subcommands)
 - MCP server for natural language interaction (51 tools, RBAC with operator/developer roles)
 - Claude Code skills: `/g2-dev` (development), `/g2` (operations), `/g2-services` (infrastructure)
 - Textual TUI (in development on `siUI` branch)
 
 ### UI Error Feedback Loop
 - Errors logged to `~/.g2/ui_errors.jsonl` during UI sessions (background process failures, exceptions)
-- On `g2 ui` exit, prints error summary to stdout — visible to Claude Code for diagnosis
+- On `gefion ui` exit, prints error summary to stdout — visible to Claude Code for diagnosis
 - `g2.ui.errors` module: `log_ui_error()`, `read_session_errors()`, `clear_errors()`
 
 ### UI Reliability (branch: `001-ui-reliability`)
@@ -50,7 +50,7 @@
 - **Conversation history**: Persistent chat thread (`~/.g2/ai_history.jsonl`), capped at 100 exchanges, survives refresh
 - **Error surfacing**: Session error count badge + expandable error list in UI (no external monitoring needed)
 - **Command execution**: Form submission (no Enter needed), auto-refresh, Run button always available
-- **CLI mapping correctness**: Fixed 8 broken MCP_TOOL_MAP entries, regression tests validate all mappings against `g2 --help`
+- **CLI mapping correctness**: Fixed 8 broken MCP_TOOL_MAP entries, regression tests validate all mappings against `gefion --help`
 - **Environment**: `CLAUDECODE` env var stripped for nested `claude -p` support
 - **Layout**: Chat input above proactive actions and system overview
 - **Documentation**: UI section added to USER_GUIDE.md
@@ -58,7 +58,7 @@
 ### Testing
 - 1282 tests passing, 14 skipped
 - Database tests require `ENABLE_DB_TESTS=1`
-- Full suite: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest`
+- Full suite: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" OTEL_ENABLED=false .venv/bin/python -m pytest`
 
 ### Data Coverage (as of 2026-02-16)
 - Price data: 1999-11-01 to 2026-01-30

@@ -44,7 +44,7 @@ g2 feat-compute --symbols AAPL --function-names indicator --profile
 g2 span-check
 ```
 
-`g2 span-check` prints recent traces plus a direct Tempo API link for the selected trace, which is handy during development performance checks.
+`gefion span-check` prints recent traces plus a direct Tempo API link for the selected trace, which is handy during development performance checks.
 
 5. View traces:
 
@@ -67,7 +67,7 @@ Use the printed Tempo API link to inspect the selected trace details without hun
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OTEL_ENABLED` | `false` | Enable/disable OpenTelemetry |
-| `OTEL_SERVICE_NAME` | `g2` | Service name in traces |
+| `OTEL_SERVICE_NAME` | `gefion` | Service name in traces |
 | `OTEL_EXPORTER` | `otlp` | Exporter type: `otlp` or `console` |
 | `OTEL_OTLP_ENDPOINT` | `http://localhost:4317` | Tempo OTLP gRPC endpoint |
 | `OTEL_SAMPLING_RATE` | `1.0` | Sampling rate (0.0-1.0) |
@@ -113,5 +113,5 @@ No traces appearing:
 - Confirm Grafana: `curl -s http://localhost:3000/api/health`
 - Confirm Tempo API: `curl -s http://localhost:3200/api/search`
 - Confirm g2 config: `env | rg '^OTEL_'`
-- Run: `g2 span-check` (shows trace counts + span counts)
+- Run: `gefion span-check` (shows trace counts + span counts)
 - Check Tempo logs: `docker compose -f docker/tempo/docker-compose.tempo.yml logs tempo`

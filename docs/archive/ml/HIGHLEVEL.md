@@ -1959,13 +1959,13 @@ INSERT INTO model_training_history VALUES (
 ### 5. Application Layer
 
 **CLI Interface** (`src/cli/`)
-- `g2 ingest <symbols>` - Download and store data
-- `g2 train` - Train multi-horizon quantile model
-- `g2 predict <symbol>` - Get quantile predictions for all horizons
-- `g2 query <symbol> --target-return X --horizon H` - Get signal strength for specific move
-- `g2 backtest` - Run historical validation with calibration metrics
-- `g2 evaluate` - Model performance metrics and diagnostics
-- `g2 screen --min-return X --horizon H` - Find stocks meeting criteria
+- `gefion ingest <symbols>` - Download and store data
+- `gefion train` - Train multi-horizon quantile model
+- `gefion predict <symbol>` - Get quantile predictions for all horizons
+- `gefion query <symbol> --target-return X --horizon H` - Get signal strength for specific move
+- `gefion backtest` - Run historical validation with calibration metrics
+- `gefion evaluate` - Model performance metrics and diagnostics
+- `gefion screen --min-return X --horizon H` - Find stocks meeting criteria
 
 **Future: Web API** (Optional)
 - REST API for predictions
@@ -2731,7 +2731,7 @@ metadata_features:
 
 1. **Add metadata** to `entity_attributes` or `entity_time_series` tables (SQL insert or API)
 2. **Update config** (`config/metadata_features.yaml`) to include the new attribute
-3. **Retrain model** (`g2 train`)
+3. **Retrain model** (`gefion train`)
 4. **Model automatically uses new metadata** (no code changes!)
 
 This is much more flexible than creating a new feature provider class for every data source.

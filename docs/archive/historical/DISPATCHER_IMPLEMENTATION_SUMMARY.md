@@ -361,7 +361,7 @@ Successfully implemented a production-ready generic feature dispatcher that:
 
 **Next Steps**:
 - Define derivative feature_definitions for desired derivatives
-- Use `g2 features-compute` to compute derivatives from indicators
+- Use `gefion features-compute` to compute derivatives from indicators
 - Monitor performance and adjust batch sizes as needed
 - Consider parallel stock processing for large-scale computation
 

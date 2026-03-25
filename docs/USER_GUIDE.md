@@ -152,7 +152,7 @@ Computes additive shift corrections so predicted quantiles achieve nominal cover
 3. Install: `python -m venv .venv && . .venv/bin/activate && pip install -e .`
 
 ## CLI Commands
-`g2 --help` for all commands. Add `--json` for machine-readable output.
+`gefion --help` for all commands. Add `--json` for machine-readable output.
 
 ### Prices
 ```bash
@@ -213,7 +213,7 @@ Use `--listings-file <csv|json>` to bypass the API for universe selection and wo
    ```
 
 ### Feature definitions
-- Seed indicator feature metadata: `g2 seed-features` (creates `stocks`, `feature_definitions`, `computed_features`, and seeds indicator definitions).
+- Seed indicator feature metadata: `gefion seed-features` (creates `stocks`, `feature_definitions`, `computed_features`, and seeds indicator definitions).
 - Register a single feature definition from JSON:
 ```bash
 g2 register-feature --definition '{
@@ -275,9 +275,9 @@ g2 data-update --exchange NASDAQ --timeframe auto --refresh-existing --local
 - Processes symbols in small chunks to reduce DB pressure; keep writer workers low (default 1).
 
 ### Features management
-- List: `g2 features-list --json`
-- Show one: `g2 features-show --feature indicator_rsi_14 --json`
-- Run features (indicators): `g2 features-run --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing`
+- List: `gefion features-list --json`
+- Show one: `gefion features-show --feature indicator_rsi_14 --json`
+- Run features (indicators): `gefion features-run --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing`
 
 ### Fundamentals (sector, industry, company name)
 Update company fundamentals from AlphaVantage OVERVIEW endpoint:
@@ -417,7 +417,7 @@ See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-fram
 - API calls retry on transient errors/timeouts; local compute avoids rate limits.
 - Batch inserts are used to reduce lock contention; if you see `max_locks_per_transaction`, lower `--writer-workers` or process smaller batches.
 - Performance knobs:
-  - Timescale tuning: `g2 db-tune --chunk-days 30 --compress-after-days 60` sets chunk interval and compression policies.
+  - Timescale tuning: `gefion db-tune --chunk-days 30 --compress-after-days 60` sets chunk interval and compression policies.
   - Concurrency: keep writer workers low (1–2). Heavy commands process symbols in chunks (~50) to avoid overwhelming the DB. `features-run` always starts with 1 fetch/1 writer, then ramps fetchers up batch-by-batch on success, and backs off on errors (even when `--max-workers` is set; it’s a ceiling).
   - Use `--max-workers` and `--limit` to reduce load while testing. Larger batch sizes are better than many writers.
   - If performance drops after large ingests, run `VACUUM ANALYZE stock_ohlcv computed_features`.
@@ -437,7 +437,7 @@ g2 ui --port 8502  # custom port
 The **AI Actions** page (second item in the sidebar) is the primary interaction point. It supports:
 
 - **Natural language prompts**: Type a question like "Which stocks had the biggest moves?" — routed to `claude -p` with g2 MCP tools.
-- **CLI commands**: Type `g2 health` or any g2 command — executes directly and streams output.
+- **CLI commands**: Type `gefion health` or any g2 command — executes directly and streams output.
 - **MCP tool shortcuts**: Type a tool name like `data_update` — mapped to the corresponding CLI command.
 
 **Conversation history** persists across page refreshes and server restarts. Previous exchanges are displayed as a chat thread. Click "Clear History" to start fresh. History is stored in `~/.g2/ai_history.jsonl` (capped at 100 exchanges).
