@@ -11,7 +11,7 @@ Slope and concavity features capture trend and acceleration patterns in time ser
 **Use when**: Experimenting with ML models, ad-hoc analysis
 
 ```python
-from g2.features.derivatives import add_derivative_features
+from gefion.features.derivatives import add_derivative_features
 
 # Fetch data your way
 df = pd.read_sql("SELECT * FROM computed_features WHERE ...", conn)
@@ -44,7 +44,7 @@ model.fit(X, y)
 **Use when**: Proven valuable, want to materialize/cache, production ML
 
 ```python
-from g2.features.calc_store import (
+from gefion.features.calc_store import (
     ensure_derivative_feature_definitions,
     compute_derivative_features,
 )
@@ -208,6 +208,6 @@ Concavity:  [  -,   -, -1.0, -1.0, -1.0, -1.0, -0.5]  # Negative = decelerating
 
 ## See Also
 
-- [src/g2/features/derivatives.py](../src/g2/features/derivatives.py) - Utility library
-- [src/g2/features/calc_store.py](../src/g2/features/calc_store.py) - Calc store integration
+- [src/gefion/features/derivatives.py](../src/gefion/features/derivatives.py) - Utility library
+- [src/gefion/features/calc_store.py](../src/gefion/features/calc_store.py) - Calc store integration
 - [tests/test_derivative_features.py](../tests/test_derivative_features.py) - Tests and examples

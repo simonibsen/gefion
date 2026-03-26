@@ -8,7 +8,7 @@ how to configure them, and how to create new ones.
 ### Strategies vs Configs
 
 **Strategies** are Python classes that implement trading logic. They are defined
-in code (`src/g2/strategies/`) and cannot be modified at runtime.
+in code (`src/gefion/strategies/`) and cannot be modified at runtime.
 
 **Configs** are parameterized instances of strategies stored in the database.
 They allow you to create variations without modifying code:
@@ -509,10 +509,10 @@ To add a new strategy, you must write Python code.
 
 ### Step 1: Create Strategy Class
 
-Create a new file in `src/g2/strategies/`:
+Create a new file in `src/gefion/strategies/`:
 
 ```python
-# src/g2/strategies/my_strategy.py
+# src/gefion/strategies/my_strategy.py
 """My custom trading strategy."""
 
 from datetime import date
@@ -581,7 +581,7 @@ class MyStrategy:
 
 ### Step 2: Register in Dispatcher
 
-Add to `BUILTIN_STRATEGIES` in `src/g2/strategies/dispatcher.py`:
+Add to `BUILTIN_STRATEGIES` in `src/gefion/strategies/dispatcher.py`:
 
 ```python
 BUILTIN_STRATEGIES = {
@@ -602,7 +602,7 @@ BUILTIN_STRATEGIES = {
 
 ### Step 3: Add CLI Parameters (Optional)
 
-If you want CLI support for parameters, add to `src/g2/cli.py`
+If you want CLI support for parameters, add to `src/gefion/cli.py`
 in the `backtest_run` function.
 
 ### Step 4: Seed Database
@@ -616,7 +616,7 @@ g2 db-init
 Or manually:
 
 ```python
-from g2.strategies.dispatcher import seed_builtin_strategies
+from gefion.strategies.dispatcher import seed_builtin_strategies
 seed_builtin_strategies(conn)
 ```
 

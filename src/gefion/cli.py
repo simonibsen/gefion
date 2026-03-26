@@ -4466,7 +4466,7 @@ def init(
     """
     with create_span("cli.init"):
         if not json_output:
-            emit("=== g2 init ===")
+            emit("=== gefion init ===")
         _db_init_impl(db_url, json_output)
         if not json_output:
             emit("")

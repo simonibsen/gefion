@@ -3076,7 +3076,7 @@ This project adheres to contemporary industry standards for maintainability, rel
   - CI/CD simplified (one image to test)
   - Follows PyTorch/TensorFlow official patterns
 
-**Evidence**: [src/g2/training/device.py](../src/g2/training/device.py)
+**Evidence**: [src/gefion/training/device.py](../src/gefion/training/device.py)
 
 #### 3. Test-Driven Development (TDD)
 

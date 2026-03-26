@@ -69,7 +69,7 @@ If you're experiencing slow performance, check:
 
 1. **Connection Pooling**: Make sure you're using the connection pool:
    ```python
-   from g2.db import pool
+   from gefion.db import pool
    pool.init_pool(db_url, min_size=2, max_size=10)
    ```
 

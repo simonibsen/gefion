@@ -1,4 +1,4 @@
-# Claude Code Guidelines for g2
+# Claude Code Guidelines for Gefion
 
 ## TDD Required (MANDATORY)
 
@@ -16,7 +16,7 @@ For any new feature, file, or code change:
 
 ### What This Means in Practice
 
-- **NEVER** create a new file in `src/g2/` without first creating its test file
+- **NEVER** create a new file in `src/gefion/` without first creating its test file
 - **NEVER** add a new function without first writing a test for it
 - **NEVER** modify behavior without first writing a test that captures the expected change
 
@@ -24,7 +24,7 @@ For any new feature, file, or code change:
 
 ```
 WRONG ORDER:
-1. Create src/g2/ui/views/newview.py
+1. Create src/gefion/ui/views/newview.py
 2. Write render_newview() function
 3. Add test later (or forget)
 
@@ -32,7 +32,7 @@ CORRECT ORDER:
 1. Add "newview.py" to expected_views list in tests/test_ui_components.py
 2. Add test_newview_has_render_function() test
 3. Run pytest - see tests FAIL
-4. Create src/g2/ui/views/newview.py with render_newview()
+4. Create src/gefion/ui/views/newview.py with render_newview()
 5. Run pytest - see tests PASS
 ```
 
@@ -69,12 +69,12 @@ List test files and test cases that will be created/modified:
 
 ## Implementation Files
 List source files to create/modify AFTER tests:
-- `src/g2/module/feature.py` - FeatureClass, helper_function
+- `src/gefion/module/feature.py` - FeatureClass, helper_function
 
 ## Implementation Steps
 1. Write test_feature_does_x in tests/test_feature.py
 2. Run pytest - verify it FAILS
-3. Create src/g2/module/feature.py with minimal implementation
+3. Create src/gefion/module/feature.py with minimal implementation
 4. Run pytest - verify it PASSES
 5. Write test_feature_handles_y
 6. Run pytest - verify it FAILS
@@ -101,7 +101,7 @@ Before exiting plan mode, verify:
 - Add docstrings for public functions
 
 ### Observability
-- New modules should import from `g2.observability`
+- New modules should import from `gefion.observability`
 - Use `@traced` decorator for significant operations
 - Add logging with `logger = logging.getLogger(__name__)`
 - Child spans MUST propagate parent context — orphaned spans are defects
@@ -120,7 +120,7 @@ Before exiting plan mode, verify:
 
 ## Active Technologies
 - Python 3.10+ + Streamlit (UI framework), subprocess (process execution) (001-ui-reliability)
-- JSONL files in `~/.g2/` (conversation history, error log); PostgreSQL (system state queries) (001-ui-reliability)
+- JSONL files in `~/.gefion/` (conversation history, error log); PostgreSQL (system state queries) (001-ui-reliability)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)

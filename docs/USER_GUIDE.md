@@ -440,9 +440,9 @@ The **AI Actions** page (second item in the sidebar) is the primary interaction 
 - **CLI commands**: Type `gefion health` or any g2 command — executes directly and streams output.
 - **MCP tool shortcuts**: Type a tool name like `data_update` — mapped to the corresponding CLI command.
 
-**Conversation history** persists across page refreshes and server restarts. Previous exchanges are displayed as a chat thread. Click "Clear History" to start fresh. History is stored in `~/.g2/ai_history.jsonl` (capped at 100 exchanges).
+**Conversation history** persists across page refreshes and server restarts. Previous exchanges are displayed as a chat thread. Click "Clear History" to start fresh. History is stored in `~/.gefion/ai_history.jsonl` (capped at 100 exchanges).
 
-**Error indicator**: If errors occur during the session, an expandable "Errors (N)" badge appears at the top of the page showing all session errors with timestamps. Errors are also logged to `~/.g2/ui_errors.jsonl` for diagnosis from Claude Code.
+**Error indicator**: If errors occur during the session, an expandable "Errors (N)" badge appears at the top of the page showing all session errors with timestamps. Errors are also logged to `~/.gefion/ui_errors.jsonl` for diagnosis from Claude Code.
 
 ### Other Views
 
@@ -458,7 +458,7 @@ The **AI Actions** page (second item in the sidebar) is the primary interaction 
 
 - The UI is best launched from a regular terminal (not from within Claude Code) — AI prompts via `claude -p` work correctly this way.
 - If launched from Claude Code, CLI commands still work but AI prompts may fail due to session nesting.
-- Errors from the UI session can be read anytime via `cat ~/.g2/ui_errors.jsonl`.
+- Errors from the UI session can be read anytime via `cat ~/.gefion/ui_errors.jsonl`.
 
 ## Verification
 - Run tests: `make test` (DB tests skipped) or `ENABLE_DB_TESTS=1 make test-db` with the DB running.

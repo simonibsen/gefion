@@ -24,8 +24,8 @@ All changes maintain backward compatibility, follow TDD principles with comprehe
 - Verifies performance, correctness, and large dataset handling
 
 **Code Changes**:
-- Modified: `src/g2/db/ingest.py:262-354`
-- Fixed: `src/g2/db/schema.py:22-30`
+- Modified: `src/gefion/db/ingest.py:262-354`
+- Fixed: `src/gefion/db/schema.py:22-30`
 
 **Technical Details**:
 ```python
@@ -54,7 +54,7 @@ ON CONFLICT (...) DO UPDATE/NOTHING
 - `tests/test_indicators_performance.py` (4 end-to-end tests)
 
 **Code Changes**:
-- Modified: `src/g2/indicators/local.py:136-164`
+- Modified: `src/gefion/indicators/local.py:136-164`
 
 **Technical Details**:
 ```python
@@ -84,7 +84,7 @@ for record in records:
 - Tests initialization, reuse, concurrency, performance, and cleanup
 
 **Code Changes**:
-- Added: `src/g2/db/pool.py` (new module)
+- Added: `src/gefion/db/pool.py` (new module)
 - Dependency: Added `psycopg-pool>=3.1` to `pyproject.toml`
 
 **Technical Details**:
@@ -148,13 +148,13 @@ For a typical workflow:
 ## Files Modified/Added
 
 ### Modified Files:
-- `src/g2/db/ingest.py` - Batch INSERT implementation
-- `src/g2/db/schema.py` - TimescaleDB extension handling
-- `src/g2/indicators/local.py` - DataFrame iteration optimization
+- `src/gefion/db/ingest.py` - Batch INSERT implementation
+- `src/gefion/db/schema.py` - TimescaleDB extension handling
+- `src/gefion/indicators/local.py` - DataFrame iteration optimization
 - `pyproject.toml` - Added psycopg-pool dependency
 
 ### Added Files:
-- `src/g2/db/pool.py` - Connection pool module (NEW)
+- `src/gefion/db/pool.py` - Connection pool module (NEW)
 - `tests/test_batch_insert_performance.py` - INSERT performance tests (NEW)
 - `tests/test_indicators_performance.py` - Indicator performance tests (NEW)
 - `tests/test_iterrows_optimization.py` - DataFrame optimization test (NEW)
@@ -218,7 +218,7 @@ pytest tests/ -v
 ### Using Connection Pooling
 
 ```python
-from g2.db import pool
+from gefion.db import pool
 
 # Initialize pool (once at application startup)
 pool.init_pool("postgresql://user:pass@host/db", min_size=2, max_size=10)

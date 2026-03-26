@@ -12,19 +12,19 @@ Successfully implemented **3 critical performance optimizations** using Test-Dri
 ## ✅ What Was Completed
 
 ### 1. Batch INSERT Operations
-- **File**: `src/g2/db/ingest.py`
+- **File**: `src/gefion/db/ingest.py`
 - **Change**: Replaced row-by-row INSERTs with batched multi-row VALUES clauses
 - **Impact**: 1000 rows now insert in 0.12s instead of 1.54s
 - **Tests**: `tests/test_batch_insert_performance.py` (3 tests)
 
 ### 2. DataFrame Iteration Optimization
-- **File**: `src/g2/indicators/local.py`
+- **File**: `src/gefion/indicators/local.py`
 - **Change**: Replaced `iterrows()` with `to_dict('records')`
 - **Impact**: 1000 rows process in 13.2ms instead of 75.6ms
 - **Tests**: `tests/test_indicators_performance.py` (4 tests)
 
 ### 3. Connection Pooling
-- **File**: `src/g2/db/pool.py` (NEW)
+- **File**: `src/gefion/db/pool.py` (NEW)
 - **Change**: Added psycopg-pool for connection reuse
 - **Impact**: 20 operations complete in 14ms instead of 388ms
 - **Tests**: `tests/test_connection_pool.py` (7 tests)
@@ -152,7 +152,7 @@ print(f"Computed indicators in {time.time() - start:.3f}s")
 # Should be < 0.5s for 1000 rows
 
 # Monitor connection pool
-from g2.db import pool
+from gefion.db import pool
 p = pool.get_pool()
 print(f"Pool size: {len(p._pool)} connections")
 ```

@@ -15,15 +15,15 @@ Successfully completed **6 out of 10** planned performance optimizations using s
 - **Impact**: Database inserts now use efficient batch operations
 - **Performance**: 1000 rows in 0.12s (was 1.54s)
 - **Files Modified**:
-  - `src/g2/db/ingest.py:262-354`
-  - `src/g2/db/schema.py:22-30`
+  - `src/gefion/db/ingest.py:262-354`
+  - `src/gefion/db/schema.py:22-30`
 - **Tests**: `tests/test_batch_insert_performance.py` (3 tests passing)
 
 #### 2. DataFrame Iteration Optimization ⚡ **5.7x faster**
 - **Status**: ✅ Complete
 - **Impact**: Indicator computation optimized
 - **Performance**: 1000 rows processed in 13.2ms (was 75.6ms)
-- **Files Modified**: `src/g2/indicators/local.py:136-164`
+- **Files Modified**: `src/gefion/indicators/local.py:136-164`
 - **Tests**: `tests/test_indicators_performance.py` (4 tests passing)
 
 #### 3. Connection Pooling ⚡ **28.3x faster**
@@ -31,7 +31,7 @@ Successfully completed **6 out of 10** planned performance optimizations using s
 - **Impact**: Database connection reuse eliminates overhead
 - **Performance**: 20 operations in 14ms (was 388ms)
 - **Files Added**:
-  - `src/g2/db/pool.py` (NEW)
+  - `src/gefion/db/pool.py` (NEW)
 - **Dependencies**: Added `psycopg-pool>=3.1`
 - **Tests**: `tests/test_connection_pool.py` (7 tests passing)
 
@@ -44,8 +44,8 @@ Successfully completed **6 out of 10** planned performance optimizations using s
 - **Impact**: Prevents memory exhaustion in large batch jobs
 - **Implementation**: Added `maxsize=200` to producer-consumer queues
 - **Files Modified**:
-  - `src/g2/ingest/indicators.py:122`
-  - `src/g2/ingest/universe.py:113`
+  - `src/gefion/ingest/indicators.py:122`
+  - `src/gefion/ingest/universe.py:113`
 - **Tests**: `tests/test_queue_backpressure.py` (5 tests passing)
 - **Benefit**: Provides backpressure when fetchers outpace writers
 
@@ -56,7 +56,7 @@ Successfully completed **6 out of 10** planned performance optimizations using s
 - **After**:
   - Local mode: Uses `min(8, cpu_count)` workers
   - API mode: Respects rate limits with `calls_per_minute // 30`
-- **Files Modified**: `src/g2/cli.py:108-132`
+- **Files Modified**: `src/gefion/cli.py:108-132`
 - **Tests**: `tests/test_auto_indicator_workers.py` (6 tests passing)
 - **Expected Improvement**: 2-4x better throughput on multi-core systems
 
@@ -72,7 +72,7 @@ CREATE INDEX IF NOT EXISTS stock_ohlcv_data_id_date_idx
 CREATE INDEX IF NOT EXISTS computed_features_feature_data_date_idx
     ON computed_features(feature_id, data_id, date DESC);
 ```
-- **File to Modify**: `src/g2/db/schema.py`
+- **File to Modify**: `src/gefion/db/schema.py`
 
 ---
 
@@ -122,15 +122,15 @@ $ ENABLE_DB_TESTS=1 pytest tests/test_batch_insert_performance.py tests/test_con
 
 ### Modified Files (6 files)
 1. `pyproject.toml` - Added `psycopg-pool>=3.1` dependency
-2. `src/g2/db/ingest.py` - Batch INSERT implementation
-3. `src/g2/db/schema.py` - TimescaleDB extension handling
-4. `src/g2/indicators/local.py` - DataFrame iteration optimization
-5. `src/g2/ingest/indicators.py` - Queue size limit
-6. `src/g2/ingest/universe.py` - Queue size limit
-7. `src/g2/cli.py` - Worker auto-sizing
+2. `src/gefion/db/ingest.py` - Batch INSERT implementation
+3. `src/gefion/db/schema.py` - TimescaleDB extension handling
+4. `src/gefion/indicators/local.py` - DataFrame iteration optimization
+5. `src/gefion/ingest/indicators.py` - Queue size limit
+6. `src/gefion/ingest/universe.py` - Queue size limit
+7. `src/gefion/cli.py` - Worker auto-sizing
 
 ### New Files (10 files)
-1. `src/g2/db/pool.py` - Connection pooling module
+1. `src/gefion/db/pool.py` - Connection pooling module
 2. `tests/test_batch_insert_performance.py` - INSERT performance tests
 3. `tests/test_indicators_performance.py` - Indicator performance tests
 4. `tests/test_iterrows_optimization.py` - DataFrame benchmark
@@ -195,7 +195,7 @@ $ ENABLE_DB_TESTS=1 pytest tests/test_batch_insert_performance.py tests/test_con
 
 ### Using Connection Pooling
 ```python
-from g2.db import pool
+from gefion.db import pool
 
 # Initialize pool once at startup
 pool.init_pool(db_url, min_size=2, max_size=10)

@@ -25,7 +25,7 @@ incremental/full mode, CLI preview, and background process execution.
 ### ~~UI Error Feedback Loop~~ ✅
 **Completed**: 2026-03-01
 
-Errors during UI sessions are logged to `~/.g2/ui_errors.jsonl`. When `gefion ui`
+Errors during UI sessions are logged to `~/.gefion/ui_errors.jsonl`. When `gefion ui`
 exits, a summary is printed to stdout so Claude Code can see and diagnose
 failures. Hooks in `data.py` (background process failures) and `cli.py`
 (session start/end). Module: `g2.ui.errors`.
@@ -35,7 +35,7 @@ failures. Hooks in `data.py` (background process failures) and `cli.py`
 
 Systematic hardening of the Streamlit UI assistant view:
 - Renamed to "AI Actions", promoted to 2nd sidebar position
-- Persistent conversation history (`~/.g2/ai_history.jsonl`, 100 exchange cap)
+- Persistent conversation history (`~/.gefion/ai_history.jsonl`, 100 exchange cap)
 - In-UI error surfacing (count badge + expandable list)
 - Form submission, auto-refresh, Run button fixes
 - Fixed 8 broken MCP_TOOL_MAP CLI mappings + regression tests

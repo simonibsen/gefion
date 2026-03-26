@@ -120,21 +120,38 @@ if pg_isready -h localhost -p "$DB_PORT" -q 2>/dev/null; then
         fi
     fi
 
-    # Rename user if needed
-    USER_EXISTS=$(psql -h localhost -p "$DB_PORT" -U "$OLD_DB_USER" -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$NEW_DB_USER'" 2>/dev/null || echo "0")
-    if [[ "$USER_EXISTS" != "1" ]]; then
-        echo "  Renaming DB user: $OLD_DB_USER → $NEW_DB_USER"
-        if [[ "$DRY_RUN" == "false" ]]; then
-            psql -h localhost -p "$DB_PORT" -U "$OLD_DB_USER" -d postgres -c \
-                "ALTER ROLE $OLD_DB_USER RENAME TO $NEW_DB_USER;" 2>&1
-            psql -h localhost -p "$DB_PORT" -U "$NEW_DB_USER" -d postgres -c \
-                "ALTER ROLE $NEW_DB_USER WITH PASSWORD '$NEW_DB_PASS';" 2>&1
-            echo "  User renamed and password updated"
-        else
-            echo "  Would rename user and update password"
-        fi
+    # Create new user and transfer ownership (can't rename session user)
+    echo "  Creating new DB user '$NEW_DB_USER' and transferring ownership"
+    if [[ "$DRY_RUN" == "false" ]]; then
+        psql -h localhost -p "$DB_PORT" -U "$OLD_DB_USER" -d postgres -c "
+            DO \$\$ BEGIN
+                IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$NEW_DB_USER') THEN
+                    CREATE ROLE $NEW_DB_USER WITH LOGIN PASSWORD '$NEW_DB_PASS' SUPERUSER CREATEDB;
+                END IF;
+            END \$\$;
+            GRANT ALL PRIVILEGES ON DATABASE $NEW_DB TO $NEW_DB_USER;
+        " 2>&1
+        # Transfer table ownership in the main database
+        psql -h localhost -p "$DB_PORT" -U "$OLD_DB_USER" -d "$NEW_DB" -c "
+            DO \$\$
+            DECLARE r RECORD;
+            BEGIN
+                FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+                    EXECUTE 'ALTER TABLE public.' || quote_ident(r.tablename) || ' OWNER TO $NEW_DB_USER';
+                END LOOP;
+                FOR r IN SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public' LOOP
+                    EXECUTE 'ALTER SEQUENCE public.' || quote_ident(r.sequence_name) || ' OWNER TO $NEW_DB_USER';
+                END LOOP;
+            END\$\$;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO $NEW_DB_USER;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO $NEW_DB_USER;
+            GRANT ALL ON ALL TABLES IN SCHEMA public TO $NEW_DB_USER;
+            GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO $NEW_DB_USER;
+        " 2>&1
+        echo "  User '$NEW_DB_USER' created and ownership transferred"
+        echo "  Update .env with new credentials: $NEW_DB_USER / $NEW_DB_PASS"
     else
-        echo "  User '$NEW_DB_USER' already exists — skipping"
+        echo "  Would create user '$NEW_DB_USER' and transfer ownership"
     fi
 else
     echo "  PostgreSQL not running — skipping database migration"

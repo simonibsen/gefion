@@ -41,13 +41,13 @@
 - Textual TUI (in development on `siUI` branch)
 
 ### UI Error Feedback Loop
-- Errors logged to `~/.g2/ui_errors.jsonl` during UI sessions (background process failures, exceptions)
+- Errors logged to `~/.gefion/ui_errors.jsonl` during UI sessions (background process failures, exceptions)
 - On `gefion ui` exit, prints error summary to stdout — visible to Claude Code for diagnosis
 - `g2.ui.errors` module: `log_ui_error()`, `read_session_errors()`, `clear_errors()`
 
 ### UI Reliability (branch: `001-ui-reliability`)
 - **AI Actions page**: Renamed from "AI Prompts", promoted to 2nd position in sidebar
-- **Conversation history**: Persistent chat thread (`~/.g2/ai_history.jsonl`), capped at 100 exchanges, survives refresh
+- **Conversation history**: Persistent chat thread (`~/.gefion/ai_history.jsonl`), capped at 100 exchanges, survives refresh
 - **Error surfacing**: Session error count badge + expandable error list in UI (no external monitoring needed)
 - **Command execution**: Form submission (no Enter needed), auto-refresh, Run button always available
 - **CLI mapping correctness**: Fixed 8 broken MCP_TOOL_MAP entries, regression tests validate all mappings against `gefion --help`

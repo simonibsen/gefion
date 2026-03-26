@@ -2,7 +2,7 @@
 
 ## Summary
 
-Fixed "chunk not found" errors in feature computation by adding automatic chunk range detection and data filtering in [insert_computed_features](../src/g2/db/ingest.py#L629-L766). The system now automatically filters out data that falls outside the available TimescaleDB chunk range instead of failing with errors.
+Fixed "chunk not found" errors in feature computation by adding automatic chunk range detection and data filtering in [insert_computed_features](../src/gefion/db/ingest.py#L629-L766). The system now automatically filters out data that falls outside the available TimescaleDB chunk range instead of failing with errors.
 
 ## The Bug
 
@@ -47,12 +47,12 @@ Added automatic chunk creation before inserts:
 
 ### 1. Automatic Chunk Creation in insert_computed_features
 
-Added chunk creation logic in [ingest.py:691-718](../src/g2/db/ingest.py#L691-L718):
+Added chunk creation logic in [ingest.py:691-718](../src/gefion/db/ingest.py#L691-L718):
 
 ```python
 # Ensure chunks exist for the date range we're about to insert
 # This prevents "chunk not found" errors by creating missing chunks automatically
-from g2.utils.timescale import ensure_chunks_for_date_range
+from gefion.utils.timescale import ensure_chunks_for_date_range
 try:
     # Find the date range of data we're inserting
     dates = [dt for _, _, dt, _, _ in prepared]
@@ -87,7 +87,7 @@ except Exception as e:
 
 ### 2. TimescaleDB Utility Module
 
-Created [g2/utils/timescale.py](../src/g2/utils/timescale.py) with helper functions:
+Created [g2/utils/timescale.py](../src/gefion/utils/timescale.py) with helper functions:
 
 - `get_chunk_date_range(conn, hypertable_name)`: Query chunk date ranges
 - `filter_rows_by_chunk_range(rows, date_column, min_date, max_date)`: Filter data rows
@@ -98,7 +98,7 @@ These utilities can be used throughout the codebase for chunk management.
 
 ### 3. Enhanced db-tune Command
 
-Updated [db-tune](../src/g2/cli.py#L647-L754) to report chunk ranges:
+Updated [db-tune](../src/gefion/cli.py#L647-L754) to report chunk ranges:
 
 ```bash
 g2 db-tune --show-chunk-ranges
@@ -326,9 +326,9 @@ The automatic filtering approach provides the best default behavior:
 
 ## Files Changed
 
-- [src/g2/db/ingest.py](../src/g2/db/ingest.py): Added chunk range filtering
-- [src/g2/utils/timescale.py](../src/g2/utils/timescale.py): New utility module
-- [src/g2/cli.py](../src/g2/cli.py): Enhanced db-tune command
+- [src/gefion/db/ingest.py](../src/gefion/db/ingest.py): Added chunk range filtering
+- [src/gefion/utils/timescale.py](../src/gefion/utils/timescale.py): New utility module
+- [src/gefion/cli.py](../src/gefion/cli.py): Enhanced db-tune command
 - [scripts/extend_hypertable_chunks.py](../scripts/extend_hypertable_chunks.py): New script
 - [tests/test_chunk_range_safety.py](../tests/test_chunk_range_safety.py): New tests
 - [docs/bugfix_chunk_not_found.md](../docs/bugfix_chunk_not_found.md): This document

@@ -216,10 +216,10 @@ You can also use the backtesting engine programmatically:
 
 ```python
 from datetime import date
-from g2.backtest.data_loader import load_price_data_for_backtest
-from g2.backtest.engine import BacktestEngine
-from g2.strategies.momentum import MomentumStrategy
-from g2.config import load_settings
+from gefion.backtest.data_loader import load_price_data_for_backtest
+from gefion.backtest.engine import BacktestEngine
+from gefion.strategies.momentum import MomentumStrategy
+from gefion.config import load_settings
 
 # Load settings
 settings = load_settings()
@@ -416,10 +416,10 @@ class MyStrategy:
 
 ### Step 1: Create the Strategy File
 
-Create a new file in `src/g2/strategies/`:
+Create a new file in `src/gefion/strategies/`:
 
 ```python
-# src/g2/strategies/my_strategy.py
+# src/gefion/strategies/my_strategy.py
 """
 My Custom Trading Strategy.
 
@@ -514,7 +514,7 @@ class MyCustomStrategy:
 
 ### Step 2: Register the Strategy
 
-Add your strategy to `BUILTIN_STRATEGIES` in `src/g2/strategies/dispatcher.py`:
+Add your strategy to `BUILTIN_STRATEGIES` in `src/gefion/strategies/dispatcher.py`:
 
 ```python
 BUILTIN_STRATEGIES: Dict[str, Dict[str, Any]] = {
@@ -628,9 +628,9 @@ class MLPredictionStrategy:
 
 | File | Purpose |
 |------|---------|
-| `src/g2/strategies/*.py` | Strategy implementations |
-| `src/g2/strategies/dispatcher.py` | Registry and loading logic |
-| `src/g2/strategies/__init__.py` | Package exports |
+| `src/gefion/strategies/*.py` | Strategy implementations |
+| `src/gefion/strategies/dispatcher.py` | Registry and loading logic |
+| `src/gefion/strategies/__init__.py` | Package exports |
 | `tests/test_strategy_*.py` | Strategy tests |
 
 ### Future: Live Trading
@@ -944,10 +944,10 @@ g2 backtest run --strategy ml_signal \
 
 ```python
 from datetime import date
-from g2.backtest.engine import BacktestEngine
-from g2.backtest.data_loader import load_price_data_for_backtest
-from g2.strategies.ml_signal import MLSignalStrategy
-from g2.config import load_settings
+from gefion.backtest.engine import BacktestEngine
+from gefion.backtest.data_loader import load_price_data_for_backtest
+from gefion.strategies.ml_signal import MLSignalStrategy
+from gefion.config import load_settings
 
 settings = load_settings()
 
@@ -1081,8 +1081,8 @@ This approach is being implemented as `MLFilterStrategy` - see strategy registry
 
 ## References
 
-- Backtest engine implementation: `src/g2/backtest/engine.py`
-- Momentum strategy: `src/g2/strategies/momentum.py`
-- Data loader: `src/g2/backtest/data_loader.py`
-- Metrics calculation: `src/g2/backtest/metrics.py`
+- Backtest engine implementation: `src/gefion/backtest/engine.py`
+- Momentum strategy: `src/gefion/strategies/momentum.py`
+- Data loader: `src/gefion/backtest/data_loader.py`
+- Metrics calculation: `src/gefion/backtest/metrics.py`
 - Tests: `tests/test_backtest_engine.py`, `tests/test_backtest_cli.py`

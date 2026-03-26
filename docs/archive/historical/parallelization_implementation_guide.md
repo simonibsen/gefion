@@ -77,7 +77,7 @@ def _process_function_group_with_connection(
     # ... other params
 ):
     """Wrapper that acquires own connection for thread safety."""
-    from g2.db import pool as db_pool
+    from gefion.db import pool as db_pool
 
     with db_pool.get_connection() as conn:
         conn.autocommit = True

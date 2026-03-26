@@ -327,7 +327,7 @@ sql/
     ├── 003_*.sql
     └── 004_*.sql
 
-src/g2/
+src/gefion/
 ├── db/
 │   └── migrate.py                # Migration logic
 └── cli.py                        # db-migrate command
@@ -357,4 +357,4 @@ A: No, migrations run sequentially to maintain order and dependencies.
 
 - [Performance Optimizations](PERFORMANCE_OPTIMIZATIONS.md)
 - [Database Schema](../sql/schema.sql)
-- [Migration Source Code](../src/g2/db/migrate.py)
+- [Migration Source Code](../src/gefion/db/migrate.py)

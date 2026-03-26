@@ -208,8 +208,8 @@ g2 features-compute --symbols AAPL,MSFT,GOOG --max-workers 4
 
 ## Files Modified
 
-- [src/g2/utils/adaptive.py](../src/g2/utils/adaptive.py): Added safety mechanisms
-- [src/g2/cli.py](../src/g2/cli.py): Updated limiter instantiation with safety params
+- [src/gefion/utils/adaptive.py](../src/gefion/utils/adaptive.py): Added safety mechanisms
+- [src/gefion/cli.py](../src/gefion/cli.py): Updated limiter instantiation with safety params
 - [docs/safety_improvements.md](../docs/safety_improvements.md): This document
 
 ## Expected Behavior

@@ -31,8 +31,8 @@ Optional:
 ### 1. Install and Configure
 
 ```bash
-# Create Python environment and install g2
-make venv                               # Creates .venv + installs g2 + dependencies
+# Create Python environment and install gefion
+make venv                               # Creates .venv + installs gefion + dependencies
 source .venv/bin/activate               # Activate venv (Windows: .venv\Scripts\activate)
 
 # Configure environment variables
@@ -52,18 +52,18 @@ docker compose ps postgres              # Verify it's healthy (wait ~10 seconds)
 ### 3. Initialize Schema and Seed Data
 
 ```bash
-psql -d g2 -f sql/schema.sql            # Create tables, hypertables, indexes
-g2 seed-features                        # Seed technical indicator definitions (RSI, MACD, Bollinger Bands, etc.)
+psql -d gefion -f sql/schema.sql            # Create tables, hypertables, indexes
+gefion seed-features                        # Seed technical indicator definitions (RSI, MACD, Bollinger Bands, etc.)
 ```
 
 ### 4. Test with Sample Data (Offline)
 
 ```bash
 # Ingest sample IBM data (offline, uses bundled fixture)
-g2 prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_adjusted.json
+gefion prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_adjusted.json
 
 # Compute RSI indicator
-g2 run-features --features indicator_rsi_14 --symbols IBM --local
+gefion run-features --features indicator_rsi_14 --symbols IBM --local
 ```
 
 ✅ **Success!** You now have price data and computed features in the database.
@@ -82,10 +82,10 @@ Ingest daily OHLCV data and compute technical indicators:
 
 ```bash
 # Update prices for NASDAQ stocks (live API)
-g2 data-update --exchange NASDAQ --limit 50 --timeframe auto
+gefion data-update --exchange NASDAQ --limit 50 --timeframe auto
 
 # Compute all indicators for those stocks
-g2 feat-compute --exchange NASDAQ --limit 50 --local
+gefion feat-compute --exchange NASDAQ --limit 50 --local
 ```
 
 **Learn more:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) - Full CLI reference
@@ -98,24 +98,24 @@ Train quantile regression models to predict return distributions:
 # Prerequisites: Have price data + features in database (see above)
 
 # Quick validation - run full e2e test (~2-5 minutes)
-g2 ml e2e-test --limit 10
+gefion ml e2e-test --limit 10
 
 # Or step-by-step:
 
 # 1. Build dataset
-g2 ml dataset-build --name mvp --version v1 --symbols AAPL,MSFT --horizons 7,30 --export
+gefion ml dataset-build --name mvp --version v1 --symbols AAPL,MSFT --horizons 7,30 --export
 
 # 2. Train model (predicts q10/q50/q90 quantiles)
-g2 ml train --dataset-name mvp --dataset-version v1 --model-name model --model-version $(date +%Y%m%d)
+gefion ml train --dataset-name mvp --dataset-version v1 --model-name model --model-version $(date +%Y%m%d)
 
 # 3. Train ensemble (combines XGBoost + LightGBM)
-g2 ml train-ensemble --dataset-name mvp --dataset-version v1 --model-name ensemble --model-version $(date +%Y%m%d)
+gefion ml train-ensemble --dataset-name mvp --dataset-version v1 --model-name ensemble --model-version $(date +%Y%m%d)
 
 # 4. Generate predictions
-g2 ml predict --model-name model --model-version $(date +%Y%m%d) --symbols AAPL,MSFT
+gefion ml predict --model-name model --model-version $(date +%Y%m%d) --symbols AAPL,MSFT
 
 # 5. Evaluate performance (calibration metrics)
-g2 ml eval --model-name model --model-version $(date +%Y%m%d) --start-date 2024-01-01 --end-date 2024-11-30
+gefion ml eval --model-name model --model-version $(date +%Y%m%d) --start-date 2024-01-01 --end-date 2024-11-30
 ```
 
 **Additional ML commands:**
@@ -166,10 +166,10 @@ Import and use:
 
 ```bash
 # Import function to database
-g2 feat-fx-import --dir feature-functions
+gefion feat-fx-import --dir feature-functions
 
 # Register feature definition
-g2 feat-def-register --definition '{
+gefion feat-def-register --definition '{
   "name": "daily_price_change_pct",
   "function_name": "price_change_pct",
   "params": {},
@@ -181,7 +181,7 @@ g2 feat-def-register --definition '{
 }'
 
 # Compute for stocks
-g2 feat-compute --features daily_price_change_pct --symbols AAPL,MSFT --local
+gefion feat-compute --features daily_price_change_pct --symbols AAPL,MSFT --local
 ```
 
 ### Ingesting New Data Sources
@@ -214,7 +214,7 @@ Store in `feature-functions/news_sentiment_fetcher.json`:
 ### Step 2: Import Function to Database
 
 ```bash
-g2 feat-fx-import --dir feature-functions
+gefion feat-fx-import --dir feature-functions
 ```
 
 This stores the function in the `feature_functions` table, making it available to the dispatcher.
@@ -225,7 +225,7 @@ Register three features: sentiment score, relevance, and article count:
 
 ```bash
 # Sentiment score (weighted by relevance)
-g2 feat-def-register --definition '{
+gefion feat-def-register --definition '{
   "name": "news_sentiment_score",
   "function_name": "news_sentiment_fetcher",
   "params": {"column": "sentiment_score"},
@@ -237,7 +237,7 @@ g2 feat-def-register --definition '{
 }'
 
 # Average relevance score
-g2 feat-def-register --definition '{
+gefion feat-def-register --definition '{
   "name": "news_relevance_score",
   "function_name": "news_sentiment_fetcher",
   "params": {"column": "relevance_score"},
@@ -249,7 +249,7 @@ g2 feat-def-register --definition '{
 }'
 
 # Article count (volume indicator)
-g2 feat-def-register --definition '{
+gefion feat-def-register --definition '{
   "name": "news_article_count",
   "function_name": "news_sentiment_fetcher",
   "params": {"column": "article_count"},
@@ -265,7 +265,7 @@ g2 feat-def-register --definition '{
 
 ```bash
 # Fetch and store sentiment data (respects 5 calls/min rate limit)
-g2 feat-compute --features news_sentiment_score,news_relevance_score,news_article_count \
+gefion feat-compute --features news_sentiment_score,news_relevance_score,news_article_count \
   --symbols AAPL,MSFT,GOOGL --local
 ```
 
@@ -328,7 +328,7 @@ All features in `computed_features` for the specified symbols and date range are
 
 ```bash
 # All available features will be included (news sentiment + technical indicators)
-g2 ml dataset-build --name sentiment_test --version v1 \
+gefion ml dataset-build --name sentiment_test --version v1 \
   --symbols AAPL,MSFT,GOOGL --horizons 7,30 --export
 
 # Features CSV will include columns for all computed features:
@@ -573,7 +573,7 @@ Observability quick start (Tempo):
 ```bash
 docker compose -f docker/tempo/docker-compose.tempo.yml up -d
 export $(cat .env.example | xargs)
-g2 span-check
+gefion span-check
 ```
 
 Tip: during development, run `gefion span-check` after performance-sensitive changes to see recent traces and grab the printed Tempo API link for the selected trace.
@@ -607,14 +607,14 @@ make db-health                          # Check database health
 
 # Development
 make venv                               # Create/upgrade virtualenv
-g2 --help                               # Show all CLI commands
-g2 ml --help                            # Show ML subcommands
+gefion --help                               # Show all CLI commands
+gefion ml --help                            # Show ML subcommands
 
 # Feature Management
-g2 feat-fx-export --dir feature-functions    # Export functions to git
-g2 feat-fx-import --dir feature-functions    # Import functions from git
-g2 feat-def-export --dir feature-definitions # Export definitions to git
-g2 feat-def-import --dir feature-definitions # Import definitions from git
+gefion feat-fx-export --dir feature-functions    # Export functions to git
+gefion feat-fx-import --dir feature-functions    # Import functions from git
+gefion feat-def-export --dir feature-definitions # Export definitions to git
+gefion feat-def-import --dir feature-definitions # Import definitions from git
 ```
 
 ## Project Status

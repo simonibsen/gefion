@@ -127,7 +127,7 @@ Major features MUST include documentation updates as part of the implementation.
 - **docs/USER_GUIDE.md**: Update for any new or changed CLI commands
 - **docs/ML_QUICKSTART.md**: Update if ML pipeline behavior changes
 - **docs/ARCHITECTURE.md**: Update if the feature introduces new modules, tables, or data flows
-- **What counts as a major feature**: New CLI commands, new modules in `src/g2/`, new database tables, new MCP tools, new strategies, or changes to existing user-facing behavior
+- **What counts as a major feature**: New CLI commands, new modules in `src/gefion/`, new database tables, new MCP tools, new strategies, or changes to existing user-facing behavior
 - **What does NOT require doc updates**: Internal refactors with no behavior change, bug fixes, test-only changes, dependency bumps
 - **`.specify/` is version-controlled**: All files under `.specify/` (memory, specs, templates, scripts) MUST be committed to git and kept consistent across branches
 

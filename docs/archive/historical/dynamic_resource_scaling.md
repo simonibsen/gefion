@@ -108,7 +108,7 @@ If you start other processes during feature computation, the system detects redu
 
 ### ResourceAwareAdaptiveLimiter
 
-Located in: [src/g2/utils/adaptive.py](../src/g2/utils/adaptive.py)
+Located in: [src/gefion/utils/adaptive.py](../src/gefion/utils/adaptive.py)
 
 Key methods:
 - `_calculate_optimal_workers_and_writers()`: Calculates optimal configuration
@@ -118,7 +118,7 @@ Key methods:
 
 ### Integration Points
 
-1. **CLI** ([src/g2/cli.py](../src/g2/cli.py)):
+1. **CLI** ([src/gefion/cli.py](../src/gefion/cli.py)):
    - Creates `ResourceAwareAdaptiveLimiter` instead of `AdaptiveLimiter`
    - Passes available DB connections to limiter
    - Retrieves dynamic writer_workers via `limiter.get_writer_workers()`

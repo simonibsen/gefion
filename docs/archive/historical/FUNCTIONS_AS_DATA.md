@@ -4,7 +4,7 @@
 
 **Current State:**
 - Feature *definitions* are data (in `feature_definitions` table)
-- Feature *implementations* are code (Python functions in `src/g2/features/`)
+- Feature *implementations* are code (Python functions in `src/gefion/features/`)
 
 **Proposed State:**
 - Feature definitions AND implementations are data
@@ -18,7 +18,7 @@
 **Current workflow:**
 ```bash
 # Want to try a new feature? Requires code change.
-1. Edit src/g2/features/custom.py
+1. Edit src/gefion/features/custom.py
 2. Write compute_custom_feature() function
 3. Register function: register_compute_function('custom', compute_custom_feature)
 4. pip install -e .  # Reinstall package
@@ -277,7 +277,7 @@ ADD COLUMN implementation_id INTEGER REFERENCES function_implementations(id);
 
 ```python
 # Current: Import functions statically
-from g2.features.derivatives import compute_derivatives
+from gefion.features.derivatives import compute_derivatives
 register_compute_function('derivative', compute_derivatives)
 
 # New: Load functions dynamically

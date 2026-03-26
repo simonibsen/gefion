@@ -319,7 +319,7 @@ CREATE TABLE IF NOT EXISTS experiment_trials (
 ## Python API
 
 ```python
-from g2.experiments import (
+from gefion.experiments import (
     ExperimentConfig,
     ExperimentRunner,
     GridSearch,

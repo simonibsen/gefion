@@ -124,7 +124,7 @@ computed_features (
 
 **Key Components**:
 
-- **Sandboxing** ([dispatcher.py](../src/g2/ingest/dispatcher.py)):
+- **Sandboxing** ([dispatcher.py](../src/gefion/ingest/dispatcher.py)):
   - Restricted `__builtins__` (no `open`, `exec`, `eval`)
   - Limited imports (pandas, numpy, talib allowed)
   - No network or filesystem access
@@ -414,7 +414,7 @@ Experiment C (threshold_tuning)
 ### Module Structure
 
 ```
-src/g2/experiments/
+src/gefion/experiments/
 ├── __init__.py          # Public API exports
 ├── core.py              # ExperimentConfig, ExperimentRunner
 ├── search.py            # GridSearch, RandomSearch, BayesianSearch

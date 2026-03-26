@@ -95,16 +95,16 @@ $ ENABLE_DB_TESTS=1 pytest tests/test_*_performance.py tests/test_connection_poo
 
 ### Files Modified (9 files)
 1. `pyproject.toml` - Added `psycopg-pool>=3.1`
-2. `src/g2/db/ingest.py` - Batch INSERT implementation
-3. `src/g2/db/schema.py` - TimescaleDB + composite indexes
-4. `src/g2/indicators/local.py` - DataFrame optimization
-5. `src/g2/ingest/indicators.py` - Queue limits
-6. `src/g2/ingest/universe.py` - Queue limits
-7. `src/g2/cli.py` - Worker auto-sizing
+2. `src/gefion/db/ingest.py` - Batch INSERT implementation
+3. `src/gefion/db/schema.py` - TimescaleDB + composite indexes
+4. `src/gefion/indicators/local.py` - DataFrame optimization
+5. `src/gefion/ingest/indicators.py` - Queue limits
+6. `src/gefion/ingest/universe.py` - Queue limits
+7. `src/gefion/cli.py` - Worker auto-sizing
 
 ### Files Created (13 files)
-1. `src/g2/db/pool.py` - Connection pooling (NEW)
-2. `src/g2/db/cache.py` - Query result caching (NEW)
+1. `src/gefion/db/pool.py` - Connection pooling (NEW)
+2. `src/gefion/db/cache.py` - Query result caching (NEW)
 3. `tests/test_batch_insert_performance.py` (NEW)
 4. `tests/test_indicators_performance.py` (NEW)
 5. `tests/test_iterrows_optimization.py` (NEW)
@@ -123,7 +123,7 @@ $ ENABLE_DB_TESTS=1 pytest tests/test_*_performance.py tests/test_connection_poo
 
 ### 1. Connection Pooling
 ```python
-from g2.db import pool
+from gefion.db import pool
 
 # Initialize once
 pool.init_pool(db_url, min_size=2, max_size=10)
@@ -139,7 +139,7 @@ pool.close_pool()
 
 ### 2. Query Result Caching
 ```python
-from g2.db.cache import StockMetadataCache
+from gefion.db.cache import StockMetadataCache
 
 # Pre-fetch once before parallel processing
 cache = StockMetadataCache()

@@ -57,7 +57,7 @@ The generic feature dispatcher provides a unified, metadata-driven approach to c
 ### Computing Features
 
 ```python
-from g2.features.dispatcher import compute_features
+from gefion.features.dispatcher import compute_features
 
 with psycopg.connect(db_url) as conn:
     # Compute all indicators for a stock
@@ -86,7 +86,7 @@ with psycopg.connect(db_url) as conn:
 ### Registering Compute Functions
 
 ```python
-from g2.features.dispatcher import register_compute_function
+from gefion.features.dispatcher import register_compute_function
 
 def compute_my_features(source_rows, feature_specs):
     """
@@ -263,13 +263,13 @@ def compute_fundamentals(source_rows, feature_specs):
 
 2. **Register it**:
 ```python
-from g2.features.dispatcher import register_compute_function
+from gefion.features.dispatcher import register_compute_function
 register_compute_function('fundamental', compute_fundamentals)
 ```
 
 3. **Define features**:
 ```python
-from g2.db.ingest import ensure_feature_definitions
+from gefion.db.ingest import ensure_feature_definitions
 
 defs = [{
     'name': 'fundamental_pe_ratio',
@@ -330,12 +330,12 @@ compute_features(
 
 ## Files
 
-- [src/g2/features/dispatcher.py](../src/g2/features/dispatcher.py) - Generic dispatcher
-- [src/g2/features/derivatives.py](../src/g2/features/derivatives.py) - Derivative compute function
-- [src/g2/indicators/local.py](../src/g2/indicators/local.py) - Indicator compute function
+- [src/gefion/features/dispatcher.py](../src/gefion/features/dispatcher.py) - Generic dispatcher
+- [src/gefion/features/derivatives.py](../src/gefion/features/derivatives.py) - Derivative compute function
+- [src/gefion/indicators/local.py](../src/gefion/indicators/local.py) - Indicator compute function
 - [tests/test_feature_dispatcher.py](../tests/test_feature_dispatcher.py) - Dispatcher tests
 - [tests/test_compute_derivatives.py](../tests/test_compute_derivatives.py) - Derivative tests
-- [src/g2/cli.py](../src/g2/cli.py) - CLI integration (features-compute command)
+- [src/gefion/cli.py](../src/gefion/cli.py) - CLI integration (features-compute command)
 
 ## See Also
 

@@ -36,8 +36,8 @@ Tests like `test_cli_features_run_local_happy.py` fail because they:
 For tests that need feature functions loaded:
 
 ```python
-from g2.db import schema
-from g2.cli_helpers import upsert_feature_function
+from gefion.db import schema
+from gefion.cli_helpers import upsert_feature_function
 from psycopg.types.json import Json
 
 # 1. Create feature_functions table

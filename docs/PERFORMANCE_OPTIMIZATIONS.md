@@ -97,7 +97,7 @@ Current index scan statistics (from pg_stat_user_tables):
 1. **Parallel Symbol Processing** (code-level)
    - Current: Sequential processing in data_update (one symbol at a time)
    - Opportunity: Parallelize feature computation across symbols
-   - Location: `src/g2/cli.py:3321`
+   - Location: `src/gefion/cli.py:3321`
 
 2. **Connection Pool Tuning**
    - Monitor connection pool usage under load
