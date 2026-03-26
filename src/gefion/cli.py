@@ -734,7 +734,7 @@ def ml_dataset_delete(
         # Error: Cannot delete dataset. 2 model(s) depend on it:
         #   - my_model v1 (trained 2025-01-15)
         #   - my_model v2 (trained 2025-01-20)
-        # Delete these models first with: g2 ml model-delete --name <name> --version <version>
+        # Delete these models first with: gefion ml model-delete --name <name> --version <version>
     """
     import shutil
 
@@ -777,7 +777,7 @@ def ml_dataset_delete(
                     f"Cannot delete dataset '{name} {version}'. "
                     f"{len(dependent_models)} model(s) depend on it:\n{model_list}\n\n"
                     f"Delete these models first with:\n"
-                    f"  g2 ml model-delete --name <model_name> --version <model_version>",
+                    f"  gefion ml model-delete --name <model_name> --version <model_version>",
                     json_output=json_output,
                 )
                 return
@@ -1252,7 +1252,7 @@ def ml_train(
     out_dir: Path = typer.Option(Path("models"), help="Output directory for model artifacts"),
     warm_start: bool = typer.Option(False, "--warm-start", help="Continue training from base model (10-100x faster)"),
     base_model: Optional[Path] = typer.Option(None, "--base-model", help="Path to base model for warm-start (required if --warm-start)"),
-    # Hyperparameter options (use values from 'g2 ml tune' for optimal results)
+    # Hyperparameter options (use values from 'gefion ml tune' for optimal results)
     learning_rate: Optional[float] = typer.Option(
         None, "--learning-rate",
         help="Learning rate (step size). Lower = more stable but slower. Range: 0.001-0.3. Default: 0.1"
@@ -1300,7 +1300,7 @@ def ml_train(
         gefion ml train --dataset-name nasdaq_50 --dataset-version 2025-01 \\
             --model-name nasdaq_xgb --model-version v1 --algorithm xgboost
 
-        # Train with tuned hyperparameters (from 'g2 ml tune')
+        # Train with tuned hyperparameters (from 'gefion ml tune')
         gefion ml train --dataset-name nasdaq_50 --dataset-version 2025-01 \\
             --model-name nasdaq_xgb --model-version v1 --algorithm xgboost \\
             --learning-rate 0.05 --n-estimators 200 --max-depth 8
@@ -1546,7 +1546,7 @@ def ml_predict(
         if algorithm and algorithm.startswith("classifier_"):
             emit_error(
                 f"Model '{model_name}/{model_version}' is a classifier (algorithm={algorithm}).\n"
-                f"Use 'g2 ml predict-classifier --model-path {artifact_uri}' instead.",
+                f"Use 'gefion ml predict-classifier --model-path {artifact_uri}' instead.",
                 json_output=json_output,
             )
             return
@@ -1555,7 +1555,7 @@ def ml_predict(
         if algorithm == "ensemble":
             emit_error(
                 f"Model '{model_name}/{model_version}' is an ensemble.\n"
-                f"Use 'g2 ml predict-ensemble --model-name {model_name} --model-version {model_version}' instead.",
+                f"Use 'gefion ml predict-ensemble --model-name {model_name} --model-version {model_version}' instead.",
                 json_output=json_output,
             )
             return
@@ -1650,7 +1650,7 @@ def ml_predict(
             if not dates_to_process:
                 emit_error(
                     f"No trading days with features found between {start_date} and {end_date}. "
-                    f"Run 'g2 data-update' to compute features.",
+                    f"Run 'gefion data-update' to compute features.",
                     json_output=json_output,
                 )
                 return
@@ -1770,13 +1770,13 @@ def ml_predict(
                         emit_error(
                             f"No features found for {current_date}. "
                             f"Latest available: {latest_date}. "
-                            f"Run 'g2 data-update' to compute features for more recent dates.",
+                            f"Run 'gefion data-update' to compute features for more recent dates.",
                             json_output=json_output,
                         )
                     else:
                         emit_error(
                             f"No features found for {current_date}. "
-                            f"Run 'g2 data-update' to compute features first.",
+                            f"Run 'gefion data-update' to compute features first.",
                             json_output=json_output,
                         )
                     return
@@ -2439,7 +2439,7 @@ def ml_calibrate(
             if not predictions_data:
                 emit_error(
                     f"No predictions found for calibration period {start_date} to {end_date}. "
-                    f"Run 'g2 ml predict' for this period first.",
+                    f"Run 'gefion ml predict' for this period first.",
                     json_output=json_output,
                 )
                 return
@@ -2671,7 +2671,7 @@ def ml_tune(
     if not manifest_path.exists():
         emit_error(
             f"Dataset not found: {manifest_path}\n"
-            f"Build dataset first with: g2 ml dataset-build --name {dataset_name} --version {dataset_version} --export",
+            f"Build dataset first with: gefion ml dataset-build --name {dataset_name} --version {dataset_version} --export",
             json_output=json_output
         )
         return
@@ -3117,13 +3117,13 @@ def ml_predict_classifier(
                         emit_error(
                             f"No features found for {pred_date}. "
                             f"Latest available: {latest_date}. "
-                            f"Run 'g2 data-update' to compute features for more recent dates.",
+                            f"Run 'gefion data-update' to compute features for more recent dates.",
                             json_output=json_output,
                         )
                     else:
                         emit_error(
                             f"No features found for {pred_date}. "
-                            f"Run 'g2 data-update' to compute features first.",
+                            f"Run 'gefion data-update' to compute features first.",
                             json_output=json_output,
                         )
                     return
@@ -3585,13 +3585,13 @@ def ml_predict_ensemble(
                         emit_error(
                             f"No features found for {pred_date}. "
                             f"Latest available: {latest_date}. "
-                            f"Run 'g2 data-update' to compute features for more recent dates.",
+                            f"Run 'gefion data-update' to compute features for more recent dates.",
                             json_output=json_output,
                         )
                     else:
                         emit_error(
                             f"No features found for {pred_date}. "
-                            f"Run 'g2 data-update' to compute features first.",
+                            f"Run 'gefion data-update' to compute features first.",
                             json_output=json_output,
                         )
                     return
@@ -4224,7 +4224,7 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                 emit(f"  ⚠️  Pending migrations: {pending}")
                 for m in migrations.get("pending_list", []):
                     emit(f"      - {m['version']}_{m['name']}")
-                emit("  Run 'g2 db-migrate' to apply pending migrations")
+                emit("  Run 'gefion db-migrate' to apply pending migrations")
             else:
                 emit(f"  ✓ Pending migrations: 0")
 
@@ -4391,7 +4391,7 @@ def health_check(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
-    Check health of g2 infrastructure services.
+    Check health of Gefion infrastructure services.
 
     Checks PostgreSQL, Tempo, and Docker availability with helpful error messages
     and suggestions for fixing issues.
@@ -4451,7 +4451,7 @@ def init(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """
-    Initialize g2 — the single command to get a working system.
+    Initialize Gefion — the single command to get a working system.
 
     Sets up the database schema, runs migrations, imports feature functions
     and definitions from git, seeds strategies, and verifies infrastructure
@@ -4853,7 +4853,7 @@ def _db_migrate_impl(db_url, migrations_dir, dry_run, status, verify, repair, js
                     if issues:
                         emit(f"{len(issues)} migration(s) have issues. Run:")
                         for issue in issues:
-                            emit(f"  g2 db-migrate --repair {issue['version']}")
+                            emit(f"  gefion db-migrate --repair {issue['version']}")
                     else:
                         emit("All migrations verified successfully.")
                 return
@@ -5996,8 +5996,8 @@ def _features_compute_impl(
                     "  → Or compute all features: --all-features\n"
                     "\n"
                     "First, ensure features are defined:\n"
-                    "  → Run: g2 feat-def-list\n"
-                    "  → Or import definitions: g2 feat-def-import --dir feature-definitions",
+                    "  → Run: gefion feat-def-list\n"
+                    "  → Or import definitions: gefion feat-def-import --dir feature-definitions",
                     json_output=json_output
                 )
                 return
@@ -6013,9 +6013,9 @@ def _features_compute_impl(
                     "No stocks found in database.\n"
                     "\n"
                     "To fix this:\n"
-                    "  → Ingest a single stock: g2 prices-ingest --symbol AAPL\n"
-                    "  → Or ingest a universe: g2 universe-ingest --exchange NASDAQ --limit 10\n"
-                    "  → Or run full workflow: g2 data-update --exchange NASDAQ --limit 10",
+                    "  → Ingest a single stock: gefion prices-ingest --symbol AAPL\n"
+                    "  → Or ingest a universe: gefion universe-ingest --exchange NASDAQ --limit 10\n"
+                    "  → Or run full workflow: gefion data-update --exchange NASDAQ --limit 10",
                     json_output=json_output
                 )
                 return
@@ -6622,7 +6622,7 @@ def update_all(
     all active features (indicators, derivatives, etc.) in one step.
 
     Feature definitions must exist in the database before running this command.
-    Use 'g2 feat-def-import' to import feature definitions from JSON files.
+    Use 'gefion feat-def-import' to import feature definitions from JSON files.
 
     Examples:
         # First time setup: import feature definitions
@@ -6692,7 +6692,7 @@ def _update_all_impl(
                             emit(warning_msg)
                             for m in pending:
                                 emit(f"  - {m['version']}_{m['name']}")
-                            emit("  Run 'g2 db-migrate' to apply migrations before proceeding.")
+                            emit("  Run 'gefion db-migrate' to apply migrations before proceeding.")
                             emit("")
                         set_attributes(main_span, pending_migrations=len(pending), migrations_warning=True)
     except Exception:
@@ -6868,7 +6868,7 @@ def _update_all_impl(
             price_live.__exit__(None, None, None)
 
     # Features - compute ALL active features
-    # Feature definitions must already exist (imported via g2 feat-def-import)
+    # Feature definitions must already exist (imported via gefion feat-def-import)
     active_feature_defs: Optional[int] = None
     with create_span("data_update.feature_defs") as defs_span:
         try:
@@ -7295,7 +7295,7 @@ def backtest_run(
         if not price_data:
             emit_error(
                 "No price data found for specified parameters.\n"
-                "Try: g2 data-update --exchange NASDAQ --limit 50",
+                "Try: gefion data-update --exchange NASDAQ --limit 50",
                 json_output=json_output
             )
             raise typer.Exit(1)
@@ -8079,7 +8079,7 @@ def mcp_setup(
             if not server_path.exists():
                 emit_error(
                     f"MCP server not found at {server_path}. "
-                    "Are you running this from the g2 project directory?",
+                    "Are you running this from the Gefion project directory?",
                     json_output=json_output
                 )
                 raise typer.Exit(1)
@@ -8201,7 +8201,7 @@ def mcp_setup(
                     console.print("\nThe 'g2' MCP server should now be available")
                 else:
                     console.print("\n[dim]All configurations are already correct. No changes needed.[/dim]")
-                console.print("\n[dim]To update configs, run: g2 mcp-setup --force[/dim]")
+                console.print("\n[dim]To update configs, run: gefion mcp-setup --force[/dim]")
 
         except typer.Exit:
             raise
@@ -8572,7 +8572,7 @@ def experiment_propose(
                 "experiment_id": experiment_id,
                 "name": name,
                 "status": "proposed",
-                "message": f"Experiment #{experiment_id} proposed. Use 'g2 experiment approve --id {experiment_id}' to approve."
+                "message": f"Experiment #{experiment_id} proposed. Use 'gefion experiment approve --id {experiment_id}' to approve."
             })
         else:
             console = Console()
@@ -8584,7 +8584,7 @@ def experiment_propose(
             if goal_type:
                 console.print(f"  Goal: {goal_type} {goal_target}")
             console.print()
-            console.print(f"[dim]To approve: g2 experiment approve --id {experiment_id}[/dim]")
+            console.print(f"[dim]To approve: gefion experiment approve --id {experiment_id}[/dim]")
 
     except Exception as e:
         emit_error(f"Failed to propose experiment: {e}", json_output=json_output)
@@ -8677,7 +8677,7 @@ def experiment_pending(
                 console.print(f"  Trials: {exp.get('total_trials', 0)}")
                 if exp.get('goal_type'):
                     console.print(f"  Goal: {exp['goal_type']} {exp.get('goal_target')}")
-                console.print(f"  [dim]Approve: g2 experiment approve --id {exp['id']}[/dim]")
+                console.print(f"  [dim]Approve: gefion experiment approve --id {exp['id']}[/dim]")
                 console.print()
 
     except Exception as e:
@@ -8703,12 +8703,12 @@ def experiment_approve(
             emit_json({
                 "experiment_id": experiment_id,
                 "status": "approved",
-                "message": f"Experiment #{experiment_id} approved. Use 'g2 experiment run --id {experiment_id}' to run."
+                "message": f"Experiment #{experiment_id} approved. Use 'gefion experiment run --id {experiment_id}' to run."
             })
         else:
             console = Console()
             console.print(f"[bold green]Experiment #{experiment_id} approved[/bold green]")
-            console.print(f"[dim]To run: g2 experiment run --id {experiment_id}[/dim]")
+            console.print(f"[dim]To run: gefion experiment run --id {experiment_id}[/dim]")
 
     except ValueError as e:
         emit_error(str(e), json_output=json_output)
@@ -9000,7 +9000,7 @@ def experiment_chain(
             console.print(f"  Parent: #{parent_id}")
             console.print(f"  Depends on: {depends_on}")
             console.print(f"  Status: proposed")
-            console.print("\nApprove with: g2 experiment approve --id", child_id)
+            console.print("\nApprove with: gefion experiment approve --id", child_id)
 
     except ValueError as e:
         emit_error(str(e), json_output=json_output)
@@ -9123,7 +9123,7 @@ def chart_price(
         from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
-        emit("Install with: pip install 'g2[charts]'", json_output=json_output, error=True)
+        emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
         raise typer.Exit(1)
 
     from datetime import datetime
@@ -9192,7 +9192,7 @@ def chart_predictions(
         from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
-        emit("Install with: pip install 'g2[charts]'", json_output=json_output, error=True)
+        emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
         raise typer.Exit(1)
 
     with db_connection(None) as conn:
@@ -9262,7 +9262,7 @@ def chart_features(
         from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
-        emit("Install with: pip install 'g2[charts]'", json_output=json_output, error=True)
+        emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
         raise typer.Exit(1)
 
     from datetime import datetime
@@ -9339,7 +9339,7 @@ def chart_compare(
         from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
-        emit("Install with: pip install 'g2[charts]'", json_output=json_output, error=True)
+        emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
         raise typer.Exit(1)
 
     from datetime import datetime, timedelta
@@ -9687,7 +9687,7 @@ def launch_ui(
 ) -> None:
     """Launch the Streamlit web UI.
 
-    Opens an interactive web interface for g2 with:
+    Opens an interactive web interface for Gefion with:
     - Charts and visualizations
     - AI-powered analysis (Claude)
     - ML pipeline management
@@ -9740,7 +9740,7 @@ def launch_ui(
             emit(f"UI failed to start: {e}", error=True)
             raise typer.Exit(1)
         except FileNotFoundError:
-            emit("Streamlit not installed. Install with: pip install 'g2[ui]'", error=True)
+            emit("Streamlit not installed. Install with: pip install 'gefion[ui]'", error=True)
             raise typer.Exit(1)
 
         # Print error summary if any errors were logged during the session

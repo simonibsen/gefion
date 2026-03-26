@@ -19,10 +19,10 @@ def test_pool_default_enables_prepare(monkeypatch):
         pass
 
     dummy = DummyPool()
-    dummy._g2_prepare_statements = True
+    dummy._gefion_prepare_statements = True
     monkeypatch.setattr(pool, "_pool", dummy)
 
     assert pool.should_prepare_statements() is True
 
-    dummy._g2_prepare_statements = False
+    dummy._gefion_prepare_statements = False
     assert pool.should_prepare_statements() is False

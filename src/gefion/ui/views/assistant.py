@@ -76,7 +76,7 @@ def _param_to_flag(param: str) -> str:
 
 
 UI_OPERATOR_PROMPT = (
-    "You are responding to a request from the g2 web UI. "
+    "You are responding to a request from the Gefion web UI. "
     "You are an OPERATOR — use Gefion MCP tools to answer questions and "
     "execute operations. Do NOT modify source code, create files, or "
     "perform developer operations. Focus on data analysis, ML workflows, "
@@ -147,7 +147,7 @@ def _is_command(text: str) -> bool:
     if not parts:
         return False
     first = parts[0]
-    # Starts with g2 CLI prefix
+    # Starts with gefion CLI prefix
     if first in ("g2", "gefion"):
         return True
     # Is a known MCP tool name
@@ -722,7 +722,7 @@ def render_assistant():
     st.subheader("Ask AI / Run Command")
     st.caption(
         "Type a natural language request (routed to Claude with Gefion MCP tools) "
-        "or a direct command (e.g. `g2 data-update --exchange NASDAQ`)."
+        "or a direct command (e.g. `gefion data-update --exchange NASDAQ`)."
     )
 
     history = read_exchanges()

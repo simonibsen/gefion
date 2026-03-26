@@ -210,7 +210,7 @@ def create_pinball_loss_scorer(quantile: float):
     """Create an sklearn-compatible scorer using pinball loss.
 
     Uses ``sklearn.metrics.make_scorer`` with the pinball loss from
-    ``g2.ml.evaluation``.  Returns a scorer where higher is better
+    ``gefion.ml.evaluation``.  Returns a scorer where higher is better
     (negated loss), consistent with sklearn convention.
 
     Args:

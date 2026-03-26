@@ -21,7 +21,7 @@ Usage:
 
 Configuration:
     OTEL_ENABLED: Enable/disable OpenTelemetry (default: false)
-    OTEL_SERVICE_NAME: Service name for traces (default: g2)
+    OTEL_SERVICE_NAME: Service name for traces (default: gefion)
     OTEL_EXPORTER: Exporter type - otlp or console (default: otlp)
     OTEL_OTLP_ENDPOINT: OTLP endpoint (default: http://localhost:4317)
     OTEL_SAMPLING_RATE: Sampling rate 0.0-1.0 (default: 1.0)

@@ -50,7 +50,7 @@ def _check_plotly():
     if not PLOTLY_AVAILABLE:
         raise ImportError(
             "plotly is required for charts. "
-            "Install with: pip install 'g2[charts]'"
+            "Install with: pip install 'gefion[charts]'"
         )
 
 

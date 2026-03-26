@@ -1,10 +1,10 @@
-# G2 MCP Server
+# Gefion MCP Server
 
 Natural language interface to the g2 ML platform using the Model Context Protocol (MCP).
 
 ## What is this?
 
-The G2 MCP Server lets you interact with g2's ML pipeline through natural language in Claude Desktop, while still having full access to the CLI for scripting and automation.
+The G2 MCP Server lets you interact with Gefion's ML pipeline through natural language in Claude Desktop, while still having full access to the CLI for scripting and automation.
 
 **Example conversation:**
 ```

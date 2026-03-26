@@ -347,7 +347,7 @@ def db_connection(url: Optional[str], autocommit: bool = True):
                 "\n"
                 "Create the database:\n"
                 "  → Run: docker compose up -d\n"
-                "  → Run: g2 db-init\n"
+                "  → Run: gefion db-init\n"
                 "\n"
                 "See: docs/USER_GUIDE.md#database-setup"
             ) from e

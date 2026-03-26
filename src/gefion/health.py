@@ -1,5 +1,5 @@
 """
-Service health checks for g2 infrastructure.
+Service health checks for Gefion infrastructure.
 
 Provides functions to check if required services (PostgreSQL, Tempo, etc.)
 are running and accessible, with helpful error messages and suggestions.
@@ -328,7 +328,7 @@ def check_grafana_health(endpoint: str | None = None, timeout: int = 2) -> Dict[
 
 def check_all_services() -> Dict[str, Dict[str, Any]]:
     """
-    Check health of all g2 services.
+    Check health of all Gefion services.
 
     Returns:
         Dict mapping service name to health status

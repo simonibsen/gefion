@@ -14,7 +14,7 @@ class MarketMovers:
 
 
 @dataclass
-class G2Insights:
+class GefionInsights:
     """Cached Gefion insights data."""
     pred_count: int = 0
     pred_date: Optional[str] = None
@@ -99,12 +99,12 @@ def get_market_movers() -> Optional[MarketMovers]:
 
 
 @st.cache_data(ttl=60)
-def get_g2_insights() -> Optional[G2Insights]:
+def get_gefion_insights() -> Optional[GefionInsights]:
     """Get Gefion insights data with 60-second cache."""
     try:
         from gefion.ui.components.database import get_connection
 
-        insights = G2Insights()
+        insights = GefionInsights()
 
         with get_connection() as conn:
             with conn.cursor() as cur:
@@ -171,7 +171,7 @@ def render_dashboard():
     st.markdown("Welcome to Gefion — your AI-powered trading analysis platform.")
 
     # System status section
-    st.header("System Status", help="Current state of the g2 system")
+    st.header("System Status", help="Current state of the Gefion system")
 
     from gefion.ui.components.status import render_system_status
     render_system_status()
@@ -256,7 +256,7 @@ def render_dashboard():
     # Gefion Insights section
     st.header("Gefion Insights")
 
-    insights = get_g2_insights()
+    insights = get_gefion_insights()
 
     if insights is None:
         st.warning("Could not load Gefion insights")
@@ -314,7 +314,7 @@ def render_dashboard():
         st.markdown("""
         ### Welcome to Gefion!
 
-        **g2** is a comprehensive trading analysis platform that combines:
+        **Gefion** is a comprehensive trading analysis platform that combines:
         - :material/bar_chart: **Charts** - Candlesticks, comparisons, volatility analysis
         - :material/bolt: **AI Actions** - Example queries for Claude Code
         - :material/model_training: **ML Predictions** - Quantile regression and trend classification

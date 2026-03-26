@@ -48,7 +48,7 @@ DEFAULT_SEARCH_SPACES = {
 
 
 def create_study(
-    study_name: str = "g2_tuning",
+    study_name: str = "gefion_tuning",
     direction: str = "minimize",
     storage: Optional[str] = None,
 ) -> "optuna.Study":
@@ -67,7 +67,7 @@ def create_study(
         import optuna
     except ImportError:
         raise ImportError(
-            "Optuna not installed. Install with: pip install 'g2[ml_extended]'"
+            "Optuna not installed. Install with: pip install 'gefion[ml_extended]'"
         )
 
     # Suppress Optuna's verbose logging
@@ -187,7 +187,7 @@ def tune_quantile_model(
             import optuna
         except ImportError:
             raise ImportError(
-                "Optuna not installed. Install with: pip install 'g2[ml_extended]'"
+                "Optuna not installed. Install with: pip install 'gefion[ml_extended]'"
             )
 
         search_space = get_search_space(algorithm, custom_space)
@@ -339,7 +339,7 @@ def tune_classifier(
             import optuna
         except ImportError:
             raise ImportError(
-                "Optuna not installed. Install with: pip install 'g2[ml_extended]'"
+                "Optuna not installed. Install with: pip install 'gefion[ml_extended]'"
             )
 
         from sklearn.preprocessing import LabelEncoder

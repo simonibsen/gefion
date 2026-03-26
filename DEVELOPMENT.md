@@ -36,7 +36,7 @@ def test_something():
 - Minimum: 488 tests passing
 - Test command:
   ```bash
-  ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest tests/
+  ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" OTEL_ENABLED=false .venv/bin/python -m pytest tests/
   ```
 
 ### 4. Code Quality
@@ -80,7 +80,7 @@ Every new module should include observability from the start:
 
 **Example:**
 ```python
-from g2.observability import create_span, traced
+from gefion.observability import create_span, traced
 import logging
 
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ def process_parallel(items):
             pool.map(process_item, items)  # Spans here are ORPHANED!
 
 # GOOD: Propagate context to threads
-from g2.ingest.universe import propagate_context
+from gefion.ingest.universe import propagate_context
 
 @propagate_context
 def process_item_with_context(item):
@@ -133,7 +133,7 @@ def process_item_with_context(item):
         ...
 ```
 
-Use `propagate_context` decorator (from `g2.ingest.universe`) when spawning work in thread pools to maintain trace hierarchy.
+Use `propagate_context` decorator (from `gefion.ingest.universe`) when spawning work in thread pools to maintain trace hierarchy.
 
 ## Git Hooks
 
@@ -154,8 +154,8 @@ This installs all hooks from `scripts/hooks/` to `.git/hooks/`.
 - Displays development rules reminder
 
 ### pre-commit Hook
-- Checks new Python files in `src/g2/` for observability imports
-- Warns if files are missing `from g2.observability import` or `import logging`
+- Checks new Python files in `src/gefion/` for observability imports
+- Warns if files are missing `from gefion.observability import` or `import logging`
 - Reminds about span parenting for thread context propagation
 - Currently a warning only (does not block commit)
 
@@ -184,17 +184,17 @@ All hooks are stored in `scripts/hooks/` and installed to `.git/hooks/`.
 
 ### Run full test suite
 ```bash
-ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest tests/
+ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" OTEL_ENABLED=false .venv/bin/python -m pytest tests/
 ```
 
 ### Run specific test file
 ```bash
-ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest tests/test_filename.py -v
+ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" OTEL_ENABLED=false .venv/bin/python -m pytest tests/test_filename.py -v
 ```
 
 ### Run tests with coverage
 ```bash
-ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://g2:g2pass@localhost:6432/g2" OTEL_ENABLED=false .venv/bin/python -m pytest tests/ --cov=src/g2
+ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" OTEL_ENABLED=false .venv/bin/python -m pytest tests/ --cov=src/gefion
 ```
 
 ## Database Setup

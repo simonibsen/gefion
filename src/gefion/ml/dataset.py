@@ -199,7 +199,7 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
             cur.execute("SELECT COUNT(*) FROM computed_features LIMIT 1")
             total_features = cur.fetchone()[0]
             if total_features == 0:
-                emit_progress("⚠️  WARNING: computed_features table is empty. Run 'g2 feat-compute' first.")
+                emit_progress("⚠️  WARNING: computed_features table is empty. Run 'gefion feat-compute' first.")
     except Exception:
         pass  # Table might not exist yet
 

@@ -46,7 +46,7 @@ def _compute_shap_importance_impl(
         import shap
     except ImportError:
         raise ImportError(
-            "SHAP not installed. Install with: pip install 'g2[ml_extended]'"
+            "SHAP not installed. Install with: pip install 'gefion[ml_extended]'"
         )
 
     model_path = Path(model_path)

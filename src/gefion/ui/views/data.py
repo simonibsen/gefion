@@ -464,10 +464,10 @@ def render_update_section():
 
         # Show equivalent CLI commands
         st.code(f"""# Fetch prices
-g2 prices-ingest --symbol {symbol.upper()} --timeframe full
+gefion prices-ingest --symbol {symbol.upper()} --timeframe full
 
 # Compute features
-g2 feat-compute --symbols {symbol.upper()} --all-features""", language="bash")
+gefion feat-compute --symbols {symbol.upper()} --all-features""", language="bash")
 
         with st.status(f"Updating {symbol.upper()}...", expanded=True) as status:
             # Phase indicator

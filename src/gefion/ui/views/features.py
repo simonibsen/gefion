@@ -49,7 +49,7 @@ def render_definitions_tab():
     # Show CLI command reference
     with st.expander("CLI Commands"):
         st.code("""# List all feature definitions
-g2 feat-def-list
+gefion feat-def-list
 
 # Show details for a specific feature
 g2 feat-def-show indicator_rsi_14
@@ -58,7 +58,7 @@ g2 feat-def-show indicator_rsi_14
 g2 feat-def-export --dir feature-definitions/
 
 # Import definitions from JSON files
-g2 feat-def-import --dir feature-definitions/""", language="bash")
+gefion feat-def-import --dir feature-definitions/""", language="bash")
 
     # Filters
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -318,7 +318,7 @@ g2 feat-fx-list
 g2 feat-fx-export --dir feature-functions/
 
 # Import functions from JSON files
-g2 feat-fx-import --dir feature-functions/""", language="bash")
+gefion feat-fx-import --dir feature-functions/""", language="bash")
 
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -617,7 +617,7 @@ def render_coverage_tab():
     # Show CLI command reference
     with st.expander("CLI Commands"):
         st.code("""# Compute features for symbols
-g2 feat-compute --symbols AAPL,MSFT --all-features
+gefion feat-compute --symbols AAPL,MSFT --all-features
 
 # Trim feature data by date
 g2 feat-trim --before 2020-01-01
@@ -947,7 +947,7 @@ def delete_feature_definition(name: str) -> bool:
 def save_definition_to_json(defn: dict) -> tuple[bool, str]:
     """Save a feature definition to JSON file and import to database.
 
-    Writes to feature-definitions/{name}.json and runs g2 feat-def-import.
+    Writes to feature-definitions/{name}.json and runs gefion feat-def-import.
 
     Returns:
         Tuple of (success, message)
@@ -990,7 +990,7 @@ def save_definition_to_json(defn: dict) -> tuple[bool, str]:
 def save_function_to_json(func: dict) -> tuple[bool, str]:
     """Save a feature function to JSON file and import to database.
 
-    Writes to feature-functions/{name}.json and runs g2 feat-fx-import.
+    Writes to feature-functions/{name}.json and runs gefion feat-fx-import.
 
     Returns:
         Tuple of (success, message)

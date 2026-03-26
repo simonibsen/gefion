@@ -1416,7 +1416,7 @@ def render_strategy_configs():
 
         **CLI:**
         ```bash
-        g2 backtest compare --strategies momentum,momentum_aggressive,ml_filter_h7 \\
+        gefion backtest compare --strategies momentum,momentum_aggressive,ml_filter_h7 \\
           --symbols AAPL,MSFT --start-date 2024-01-01 --end-date 2024-12-01
         ```
         """)

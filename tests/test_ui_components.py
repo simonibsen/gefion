@@ -81,7 +81,7 @@ class TestUIStructure:
     def test_dashboard_has_cached_insights_data(self, ui_dir):
         """Dashboard should cache g2 insights data."""
         content = (ui_dir / "views" / "dashboard.py").read_text()
-        assert "def get_g2_insights(" in content
+        assert "def get_gefion_insights(" in content
 
     def test_dashboard_insights_handles_missing_ml_tables(self, ui_dir):
         """Dashboard insights should handle missing ML tables gracefully.
@@ -1220,7 +1220,7 @@ class TestParseStreamEvent:
             "message": {
                 "content": [{
                     "type": "tool_use",
-                    "name": "mcp__g2__health_check",
+                    "name": "mcp__gefion__health_check",
                     "input": {"verbose": True},
                 }]
             }
@@ -1228,7 +1228,7 @@ class TestParseStreamEvent:
         result = parse_stream_event(event)
         assert result is not None
         assert result["type"] == "tool_use"
-        assert result["tool"] == "mcp__g2__health_check"
+        assert result["tool"] == "mcp__gefion__health_check"
 
     def test_parse_text_event(self):
         """Text events should return the text content."""

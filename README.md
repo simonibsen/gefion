@@ -38,7 +38,7 @@ source .venv/bin/activate               # Activate venv (Windows: .venv\Scripts\
 # Configure environment variables
 cp .env.example .env
 # Edit .env and set:
-#   DATABASE_URL=postgresql://gefion:gefionpass@localhost:5432/g2
+#   DATABASE_URL=postgresql://gefion:gefionpass@localhost:5432/gefion
 #   ALPHAVANTAGE_API_KEY=your_key_here
 ```
 

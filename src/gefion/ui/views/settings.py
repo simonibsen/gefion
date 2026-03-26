@@ -7,7 +7,7 @@ import os
 def render_settings():
     """Render the settings page."""
     st.markdown("# :material/settings: Settings")
-    st.markdown("Configure g2 settings and preferences.")
+    st.markdown("Configure Gefion settings and preferences.")
 
     tab1, tab2 = st.tabs([":material/database: Database", ":material/info: About"])
 
@@ -28,7 +28,7 @@ def render_database_settings():
     )
 
     st.markdown("### Connection String")
-    st.code(db_url.replace(":g2pass@", ":****@"))  # Mask password
+    st.code(db_url.replace(":gefionpass@", ":****@"))  # Mask password
 
     # Test connection
     if st.button("Test Connection"):
@@ -96,12 +96,12 @@ def render_database_settings():
 
 def render_about():
     """Render about section."""
-    st.subheader("About g2")
+    st.subheader("About Gefion")
 
     st.markdown("""
     ## Gefion Trading Analysis Platform
 
-    **g2** is a comprehensive trading analysis platform that combines:
+    **Gefion** is a comprehensive trading analysis platform that combines:
 
     - :material/bar_chart: **Charts** - Professional Plotly visualizations
     - :material/bolt: **AI Actions** - Example queries for Claude Code
@@ -130,8 +130,8 @@ def render_about():
 
     ### Links
 
-    - [Documentation](https://github.com/your-repo/g2)
-    - [Report Issues](https://github.com/your-repo/g2/issues)
+    - [Documentation](https://github.com/simonibsen/gefion)
+    - [Report Issues](https://github.com/simonibsen/gefion/issues)
 
     ### Version
 

@@ -1,16 +1,16 @@
 version: '3.8'
 
 services:
-  # MCP Server (includes g2 CLI)
+  # MCP Server (includes gefion CLI)
   mcp-server:
     build:
       context: ..
       dockerfile: mcp-server/Dockerfile
-    container_name: g2-mcp-server
+    container_name: gefion-mcp-server
     stdin_open: true  # Required for MCP stdio
     tty: false
     environment:
-      DATABASE_URL: postgresql://g2:g2pass@postgres:5432/g2
+      DATABASE_URL: postgresql://gefion:gefionpass@postgres:5432/gefion
       ALPHAVANTAGE_API_KEY: ${ALPHAVANTAGE_API_KEY:-}
     volumes:
       # Mount directories for persistent storage
@@ -22,16 +22,16 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - g2-network
+      - gefion-network
 
   # PostgreSQL database (shared with main g2)
   postgres:
     image: timescale/timescaledb:latest-pg15
-    container_name: g2-postgres
+    container_name: gefion-postgres
     environment:
-      POSTGRES_DB: g2
-      POSTGRES_USER: g2
-      POSTGRES_PASSWORD: g2pass
+      POSTGRES_DB: gefion
+      POSTGRES_USER: gefion
+      POSTGRES_PASSWORD: gefionpass
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -43,10 +43,10 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - g2-network
+      - gefion-network
 
 networks:
-  g2-network:
+  gefion-network:
     driver: bridge
 
 volumes:

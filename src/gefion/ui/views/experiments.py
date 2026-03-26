@@ -139,7 +139,7 @@ def render_list_section():
 
     except Exception as e:
         st.error(f"Error loading experiments: {e}")
-        st.info("The experiments table may not exist. Run `g2 db-migrate` to create it.")
+        st.info("The experiments table may not exist. Run `gefion db-migrate` to create it.")
 
 
 def render_propose_section():
@@ -306,7 +306,7 @@ def render_propose_section():
         ]
 
         # Show CLI command
-        cli_cmd = (f"g2 experiment propose --name {name} --strategy {strategy} "
+        cli_cmd = (f"gefion experiment propose --name {name} --strategy {strategy} "
                    f"--search-method {search_method} --max-trials {max_trials} "
                    f"--objective {objective}")
         st.code(cli_cmd, language="bash")
@@ -460,7 +460,7 @@ def approve_experiment(exp_id: int):
 
     cmd = [sys.executable, "-m", "gefion.cli", "experiment", "approve", "--id", str(exp_id)]
 
-    st.code(f"g2 experiment approve --id {exp_id}", language="bash")
+    st.code(f"gefion experiment approve --id {exp_id}", language="bash")
 
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
@@ -497,7 +497,7 @@ def run_experiment(exp_id: int):
 
     cmd = [sys.executable, "-m", "gefion.cli", "experiment", "run", "--id", str(exp_id), "--json"]
 
-    st.code(f"g2 experiment run --id {exp_id}", language="bash")
+    st.code(f"gefion experiment run --id {exp_id}", language="bash")
 
     with st.status(f"Running experiment #{exp_id}...", expanded=True) as status:
         status_text = st.empty()
@@ -552,7 +552,7 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
     if show_trials:
         cmd.append("--show-trials")
 
-    cli_cmd = f"g2 experiment results --id {exp_id}"
+    cli_cmd = f"gefion experiment results --id {exp_id}"
     if show_trials:
         cli_cmd += " --show-trials"
     st.code(cli_cmd, language="bash")

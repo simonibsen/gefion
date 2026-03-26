@@ -16,10 +16,10 @@ import argparse
 from datetime import date
 from typing import List, Optional
 
-from g2.backtest.data_loader import load_price_data_for_backtest
-from g2.backtest.engine import BacktestEngine
-from g2.strategies.momentum import MomentumStrategy
-from g2.config import load_settings
+from gefion.backtest.data_loader import load_price_data_for_backtest
+from gefion.backtest.engine import BacktestEngine
+from gefion.strategies.momentum import MomentumStrategy
+from gefion.config import load_settings
 
 
 def parse_date(date_str: str) -> date:

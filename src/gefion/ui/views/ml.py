@@ -597,7 +597,7 @@ def render_dataset_section():
             cli_features = f" \\\n    --exclude-features {exclude_str}"
 
         # Show equivalent CLI command
-        cli_cmd = (f"g2 ml dataset-build --name {dataset_name} --version {dataset_version} "
+        cli_cmd = (f"gefion ml dataset-build --name {dataset_name} --version {dataset_version} "
                    f"--exchange {exchange} --limit {limit} --horizons {horizons_str} "
                    f"--lookback-days {lookback_days} --format {export_format} --export --force{cli_features}")
         st.code(cli_cmd, language="bash")
@@ -772,7 +772,7 @@ def render_dataset_section():
                     st.rerun()
 
         # Show CLI command
-        st.code("g2 ml dataset-inspect --name <name> --version <version>", language="bash")
+        st.code("gefion ml dataset-inspect --name <name> --version <version>", language="bash")
 
 
 def _get_next_model_version(name: str, base_version: str) -> str:
@@ -1188,7 +1188,7 @@ def render_train_section():
                     hyperparams_cli += f" --{cli_flag} {value}"
 
             cli_subcommand = "train"
-            cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
+            cli_cmd = (f"gefion ml {cli_subcommand} --dataset-name {dataset_name} "
                        f"--dataset-version {dataset_version} --model-name {model_name} "
                        f"--model-version {model_version} --algorithm {algorithm} "
                        f"--device {train_device}{warm_start_cli}{hyperparams_cli}")
@@ -1206,7 +1206,7 @@ def render_train_section():
                 "--json",
             ]
             cli_subcommand = "train-classifier"
-            cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
+            cli_cmd = (f"gefion ml {cli_subcommand} --dataset-name {dataset_name} "
                        f"--dataset-version {dataset_version} --model-name {model_name} "
                        f"--model-version {model_version} --algorithm {algorithm} "
                        f"--device {train_device} --horizon {horizon}")
@@ -1230,7 +1230,7 @@ def render_train_section():
                 weights_cli = f" --weights {weights_str}"
 
             cli_subcommand = "train-ensemble"
-            cli_cmd = (f"g2 ml {cli_subcommand} --dataset-name {dataset_name} "
+            cli_cmd = (f"gefion ml {cli_subcommand} --dataset-name {dataset_name} "
                        f"--dataset-version {dataset_version} --model-name {model_name} "
                        f"--model-version {model_version} --algorithms {algos_str}{weights_cli}")
 
@@ -1351,7 +1351,7 @@ def render_train_section():
                     st.rerun()
 
         # Show CLI command
-        st.code("g2 ml model-inspect --name <name> --version <version>", language="bash")
+        st.code("gefion ml model-inspect --name <name> --version <version>", language="bash")
 
 
 # Hyperparameter descriptions for user education
@@ -1459,7 +1459,7 @@ def _render_tune_section_inline(
             f"Dataset `{dataset_name}` v`{dataset_version}` doesn't have exported files. "
             "Rebuild with `--export` flag."
         )
-        st.code(f"g2 ml dataset-build --name {dataset_name} --version {dataset_version} --export", language="bash")
+        st.code(f"gefion ml dataset-build --name {dataset_name} --version {dataset_version} --export", language="bash")
         return
 
     col1, col2 = st.columns(2)
@@ -1527,7 +1527,7 @@ def _render_tune_section_inline(
         if model_type == "quantile":
             cmd.extend(["--quantile", str(quantile)])
 
-        cli_cmd = f"g2 ml tune --dataset-name {dataset_name} --dataset-version {dataset_version} " \
+        cli_cmd = f"gefion ml tune --dataset-name {dataset_name} --dataset-version {dataset_version} " \
                   f"--algorithm {algorithm} --model-type {model_type} --horizon {horizon} " \
                   f"--n-trials {n_trials} --timeout {timeout}"
         if model_type == "quantile":
@@ -1635,7 +1635,7 @@ def _render_tune_section(datasets: list):
             "No datasets with exported files found. "
             "Build a dataset with `--export` flag first."
         )
-        st.code("g2 ml dataset-build --name <name> --version <version> --export", language="bash")
+        st.code("gefion ml dataset-build --name <name> --version <version> --export", language="bash")
         return
 
     dataset_options = [f"{ds['name']} ({ds['version']})" for ds in datasets_with_files]
@@ -1914,7 +1914,7 @@ def render_predict_section():
             # Warn if date is in the future or after latest features
             if latest_feature_date and prediction_date > latest_feature_date:
                 st.warning(f"⚠️ Latest features are from **{latest_feature_date}**. "
-                          f"Run `g2 data-update` to compute features for more recent dates.")
+                          f"Run `gefion data-update` to compute features for more recent dates.")
         else:
             pred_end_date = st.date_input(
                 "End Date",
@@ -2012,7 +2012,7 @@ def render_predict_section():
             model_arg = f"--model-path {artifact_uri}"
         else:
             model_arg = f"--model-name {model_name} --model-version {model_version}"
-        cli_cmd = f"g2 ml {predict_cmd} {model_arg} {date_arg} {symbols_arg}"
+        cli_cmd = f"gefion ml {predict_cmd} {model_arg} {date_arg} {symbols_arg}"
         st.code(cli_cmd, language="bash")
 
         with st.status("Generating predictions...", expanded=True) as status:
@@ -2204,7 +2204,7 @@ def render_predict_section():
                             key="pred_inspect_symbol",
                         )
                         if inspect_symbol != "Select...":
-                            st.code(f"g2 ml predict-inspect --symbol {inspect_symbol}", language="bash")
+                            st.code(f"gefion ml predict-inspect --symbol {inspect_symbol}", language="bash")
                 else:
                     st.info("No predictions found matching filters.")
 
@@ -2273,7 +2273,7 @@ def render_evaluate_section():
         ]
 
         # Show equivalent CLI command
-        cli_cmd = (f"g2 ml eval --model-name {model_name} --model-version {model_version} "
+        cli_cmd = (f"gefion ml eval --model-name {model_name} --model-version {model_version} "
                    f"--start-date {start_date} --end-date {end_date}")
         st.code(cli_cmd, language="bash")
 

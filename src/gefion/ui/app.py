@@ -1,5 +1,5 @@
 """
-Gefion Trading Analysis UI - Main Streamlit Application.
+Gefion UI - Main Streamlit Application.
 
 A comprehensive interface for stock analysis, ML predictions, and backtesting.
 """
@@ -8,7 +8,7 @@ import streamlit as st
 
 # Page config must be first Streamlit command
 st.set_page_config(
-    page_title="Gefion Trading Analysis",
+    page_title="Gefion",
     page_icon=":material/trending_up:",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -78,7 +78,7 @@ def main():
                 st.rerun()
 
         st.markdown("---")
-        st.caption("Gefion Trading Analysis v1.0")
+        st.caption("Gefion v0.1.0")
 
     # Main content area based on selected page
     current_page = st.session_state.current_page

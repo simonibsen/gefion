@@ -1,7 +1,7 @@
 """
 g2 Streamlit UI package.
 
-Launch with: g2 ui
+Launch with: gefion ui
 Or directly: streamlit run src/g2/ui/app.py
 """
 

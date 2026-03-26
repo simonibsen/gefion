@@ -1,5 +1,5 @@
 """
-g2 package scaffold.
+gefion package scaffold.
 
 This project grows incrementally using TDD. Keep changes small and capture
 decisions in docs/dev-journal.md.
