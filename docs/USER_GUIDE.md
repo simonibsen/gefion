@@ -1,4 +1,4 @@
-# G2 User Guide
+# Gefion User Guide
 
 ## ML overview (conceptual)
 

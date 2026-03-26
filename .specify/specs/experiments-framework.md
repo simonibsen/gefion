@@ -49,20 +49,20 @@ proposed → approved → running → completed
 
 **Exploratory (no goal):**
 ```bash
-g2 experiment propose --name "explore_momentum" --objective sharpe_ratio ...
+gefion experiment propose --name "explore_momentum" --objective sharpe_ratio ...
 # Runs all trials, reports best result
 ```
 
 **Targeted (achieve goal):**
 ```bash
-g2 experiment propose --name "achieve_sharpe_2" \
+gefion experiment propose --name "achieve_sharpe_2" \
   --goal-type achieve --goal-target 2.0 --early-stop ...
 # Stops when Sharpe >= 2.0
 ```
 
 **Improvement (beat baseline):**
 ```bash
-g2 experiment propose --name "improve_by_20pct" \
+gefion experiment propose --name "improve_by_20pct" \
   --goal-type improve --baseline 1.5 --goal-target 1.8 --early-stop ...
 # Stops when Sharpe improves from 1.5 to 1.8
 ```
@@ -72,7 +72,7 @@ g2 experiment propose --name "improve_by_20pct" \
 ### Propose Experiment
 
 ```bash
-g2 experiment propose \
+gefion experiment propose \
   --name "momentum_optimization" \
   --strategy momentum \
   --search-space '{"lookback_days": {"type": "int", "low": 5, "high": 30}}' \
@@ -141,37 +141,37 @@ g2 experiment propose \
 
 ```bash
 # All experiments
-g2 experiment list
+gefion experiment list
 
 # Filter by status
-g2 experiment list --status proposed
-g2 experiment list --status completed
+gefion experiment list --status proposed
+gefion experiment list --status completed
 
 # Filter by type
-g2 experiment list --type strategy_params
+gefion experiment list --type strategy_params
 
 # Limit results
-g2 experiment list --limit 10
+gefion experiment list --limit 10
 
 # JSON output
-g2 experiment list --json
+gefion experiment list --json
 ```
 
 ### Approve/Reject
 
 ```bash
 # Approve for execution
-g2 experiment approve --id 1
+gefion experiment approve --id 1
 
 # Reject with reason
-g2 experiment reject --id 1 --reason "Too many trials"
+gefion experiment reject --id 1 --reason "Too many trials"
 ```
 
 ### Run Experiment
 
 ```bash
 # Run an approved experiment
-g2 experiment run --id 1
+gefion experiment run --id 1
 ```
 
 Executes all trials (or until goal achieved with `--early-stop`), tracks progress, stores results.
@@ -180,13 +180,13 @@ Executes all trials (or until goal achieved with `--early-stop`), tracks progres
 
 ```bash
 # Summary
-g2 experiment results --id 1
+gefion experiment results --id 1
 
 # Include all trial details
-g2 experiment results --id 1 --show-trials
+gefion experiment results --id 1 --show-trials
 
 # JSON output
-g2 experiment results --id 1 --json
+gefion experiment results --id 1 --json
 ```
 
 **Output includes:**
@@ -199,7 +199,7 @@ g2 experiment results --id 1 --json
 ### Get Status
 
 ```bash
-g2 experiment status --id 1
+gefion experiment status --id 1
 ```
 
 Shows full experiment details including config, progress, and results.
@@ -210,24 +210,24 @@ Chain experiments where child uses parent's output:
 
 ```bash
 # Run initial optimization
-g2 experiment propose --name "coarse_search" \
+gefion experiment propose --name "coarse_search" \
   --search-space '{"lookback_days": {"type": "int", "low": 5, "high": 50, "step": 5}}' \
   ...
-g2 experiment approve --id 1
-g2 experiment run --id 1
+gefion experiment approve --id 1
+gefion experiment run --id 1
 
 # Chain a fine-tuning experiment
-g2 experiment chain \
+gefion experiment chain \
   --parent-id 1 \
   --name "fine_tune" \
   --search-space '{"lookback_days": {"type": "int", "low": 13, "high": 17}}' \
   --depends-on best_params
 
 # List children
-g2 experiment children --parent-id 1
+gefion experiment children --parent-id 1
 
 # Get parent info
-g2 experiment parent --id 2
+gefion experiment parent --id 2
 ```
 
 **depends_on options:**
@@ -369,22 +369,22 @@ print(f"Best score: {results['best_score']}")
    → Experiment #42 created (status: proposed)
 
 3. User reviews:
-   g2 experiment list --status proposed
+   gefion experiment list --status proposed
    → Shows experiment details, estimated trials
 
 4. User approves:
-   g2 experiment approve --id 42
+   gefion experiment approve --id 42
 
 5. AI runs experiment:
-   g2 experiment run --id 42
+   gefion experiment run --id 42
    → Executes trials, tracks results
 
 6. AI reports results:
-   g2 experiment results --id 42
+   gefion experiment results --id 42
    → Best: lookback_days=15, Sharpe 1.8 (up from 1.2)
 
 7. AI proposes follow-up (chaining):
-   g2 experiment chain --parent-id 42 \
+   gefion experiment chain --parent-id 42 \
      --name "fine_tune" \
      --search-space '{"entry_threshold": {"type": "float", ...}}'
 ```

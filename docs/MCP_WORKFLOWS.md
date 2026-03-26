@@ -1,4 +1,4 @@
-# G2 MCP Server Workflows
+# Gefion MCP Server Workflows
 
 Comprehensive end-to-end workflows for using the G2 MCP Server through Claude Desktop.
 
