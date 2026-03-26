@@ -727,7 +727,7 @@ def render_dataset_section():
                 model_count = ds.get("model_count", 0)
                 st.caption(f"Created: {created_str}")
                 if model_count > 0:
-                    st.caption(f"🔗 {model_count} model(s)")
+                    st.caption(f"{model_count} model(s)")
 
             with col3:
                 if st.button("", icon=":material/search:", key=f"inspect_{ds['id']}", help="Inspect dataset"):
@@ -736,7 +736,7 @@ def render_dataset_section():
             with col4:
                 if ds.get("model_count", 0) > 0:
                     st.button(
-                        "Delete", icon=":material/delete:",
+                        "", icon=":material/delete:",
                         key=f"del_{ds['id']}",
                         disabled=True,
                         help=f"Cannot delete: {ds['model_count']} model(s) depend on this dataset",
