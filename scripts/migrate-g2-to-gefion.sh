@@ -15,6 +15,16 @@
 
 set -euo pipefail
 
+# Load .env if it exists
+if [[ -f .env ]]; then
+    set -a
+    source .env
+    set +a
+fi
+
+# Set PGPASSWORD so psql doesn't prompt
+export PGPASSWORD="${POSTGRES_PASSWORD:-g2pass}"
+
 DRY_RUN=false
 if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=true
