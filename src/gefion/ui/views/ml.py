@@ -693,13 +693,10 @@ def render_dataset_section():
 
     # Dataset management
     st.markdown("---")
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        st.subheader("Manage Datasets")
-    with col2:
-        if st.button("", icon=":material/refresh:", key="refresh_datasets", help="Refresh dataset list"):
-            _get_datasets.clear()
-            st.rerun()
+    st.subheader("Manage Datasets")
+    if st.button("Refresh", icon=":material/refresh:", key="refresh_datasets", help="Refresh dataset list"):
+        _get_datasets.clear()
+        st.rerun()
 
     datasets = _get_datasets()
 
