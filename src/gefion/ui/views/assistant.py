@@ -740,7 +740,7 @@ def render_assistant():
             "[data-testid='stForm'] {border: none; padding: 0;}"
             "[data-testid='stTextInput'] input {"
             "  border: 1px solid #ccc; border-radius: 4px;"
-            "  background-color: #fff;"
+            "  background-color: #f0f2f6;"
             "}"
             "[data-testid='stTextInput'] input:focus {"
             "  border-color: #4a7cf7; box-shadow: 0 0 0 1px #4a7cf7;"
