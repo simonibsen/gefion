@@ -30,6 +30,11 @@ st.markdown("""
         padding: 10px;
         border-radius: 5px;
     }
+
+    /* Center sidebar title */
+    [data-testid="stSidebar"] h1 {
+        text-align: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -61,7 +66,7 @@ def main():
 
     # Sidebar navigation
     with st.sidebar:
-        st.markdown("# :material/trending_up: Gefion")
+        st.markdown("# :material/model_training: Gefion :material/stars_2:")
         st.markdown("---")
 
         # Navigation buttons
