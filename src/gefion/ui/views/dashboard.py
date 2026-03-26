@@ -168,7 +168,7 @@ def get_g2_insights() -> Optional[G2Insights]:
 def render_dashboard():
     """Render the main dashboard."""
     st.markdown("# :material/grid_view: Dashboard")
-    st.markdown("Welcome to g2 - your AI-powered trading analysis platform.")
+    st.markdown("Welcome to Gefion — your AI-powered trading analysis platform.")
 
     # System status section
     st.header("System Status", help="Current state of the g2 system")
@@ -312,7 +312,7 @@ def render_dashboard():
     # Help section
     with st.expander(":material/info: Getting Started", expanded=False):
         st.markdown("""
-        ### Welcome to g2!
+        ### Welcome to Gefion!
 
         **g2** is a comprehensive trading analysis platform that combines:
         - :material/bar_chart: **Charts** - Candlesticks, comparisons, volatility analysis

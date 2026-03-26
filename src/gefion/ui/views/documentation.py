@@ -148,7 +148,7 @@ def search_docs(query: str) -> List[Tuple[str, str, str, str, str, int]]:
 def render_docs():
     """Render the documentation page."""
     st.markdown("# :material/menu_book: Documentation")
-    st.markdown("Guides and theory for g2 quantitative trading platform.")
+    st.markdown("Guides and theory for Gefion quantitative trading platform.")
 
     # Search box
     search_query = st.text_input(
@@ -240,12 +240,12 @@ def render_whitepaper():
         "The Theory of Technical Analysis",
         "Machine Learning: From Rules to Probabilities",
         "Bridging Technical Analysis and ML",
-        "The g2 Platform: A Practical Implementation",
+        "The Gefion Platform: A Practical Implementation",
         "Case Study: Quantile Regression for Risk-Aware Prediction",
         "Multi-Model Integration",
         "Conclusion",
         "References",
-        "Appendix: Getting Started with g2",
+        "Appendix: Getting Started with Gefion",
     ]
 
     # Show table of contents
@@ -265,7 +265,7 @@ def render_whitepaper():
 
 def render_quickstart():
     """Render the quick start / user guide."""
-    st.subheader("Getting Started with g2")
+    st.subheader("Getting Started with Gefion")
 
     content = load_doc("USER_GUIDE.md")
 
@@ -279,7 +279,7 @@ def render_quickstart():
 
     1. **Database**: TimescaleDB running via Docker
     2. **API Key**: AlphaVantage API key in `.env`
-    3. **Python**: Virtual environment with g2 installed
+    3. **Python**: Virtual environment with Gefion installed
 
     ```bash
     # Start database
@@ -289,7 +289,7 @@ def render_quickstart():
     source .venv/bin/activate
 
     # Verify installation
-    g2 --help
+    Gefion --help
     ```
     """)
 
@@ -322,7 +322,7 @@ def render_ml_docs():
     st.subheader("Machine Learning Pipeline")
 
     st.info("""
-    g2 predicts **return distributions** (q10/q50/q90) instead of single values.
+    Gefion predicts **return distributions** (q10/q50/q90) instead of single values.
     This enables risk-aware position sizing and portfolio construction.
     """)
 
@@ -336,7 +336,7 @@ def render_ml_docs():
 
     # Key ML sections
     key_sections = [
-        "What is g2's ML Pipeline?",
+        "What is Gefion's ML Pipeline?",
         "Prerequisites",
         "Quick Start (5 Minutes)",
         "Production Workflow",
@@ -363,7 +363,7 @@ def render_ml_docs():
         st.markdown("""
         **Build Dataset**
         ```bash
-        g2 ml dataset-build \\
+        Gefion ml dataset-build \\
           --name demo --version v1 \\
           --exchange NASDAQ --limit 50 \\
           --horizons 7,30 --export
@@ -374,7 +374,7 @@ def render_ml_docs():
         st.markdown("""
         **Train Model**
         ```bash
-        g2 ml train \\
+        Gefion ml train \\
           --dataset-name demo \\
           --dataset-version v1 \\
           --model-name test \\
@@ -388,7 +388,7 @@ def render_strategies_docs():
     st.subheader("Trading Strategies")
 
     st.info("""
-    g2 provides 9 built-in trading strategies: 7 rule-based and 2 ML-integrated.
+    Gefion provides 9 built-in trading strategies: 7 rule-based and 2 ML-integrated.
     Strategies are Python classes; configs are parameterized instances for comparison.
     """)
 
@@ -530,7 +530,7 @@ def render_experiments_docs():
         st.markdown("""
         **Propose Experiment**
         ```bash
-        g2 experiment propose \\
+        Gefion experiment propose \\
           --name "momentum_opt" \\
           --strategy momentum \\
           --search-space '{"lookback_days": \\
@@ -545,16 +545,16 @@ def render_experiments_docs():
         **Approve & Run**
         ```bash
         # List pending
-        g2 experiment list --status proposed
+        Gefion experiment list --status proposed
 
         # Approve
-        g2 experiment approve --id 1
+        Gefion experiment approve --id 1
 
         # Run
-        g2 experiment run --id 1
+        Gefion experiment run --id 1
 
         # View results
-        g2 experiment results --id 1
+        Gefion experiment results --id 1
         ```
         """)
 
@@ -591,13 +591,13 @@ def render_troubleshooting():
         **No Data Found**
         ```bash
         # Update data for your exchange
-        g2 data-update --exchange NASDAQ --limit 50
+        Gefion data-update --exchange NASDAQ --limit 50
         ```
 
         **ML Model Not Found**
         ```bash
         # List available models
-        g2 ml model-list
+        Gefion ml model-list
 
         # Check model artifacts exist
         ls -la models/
@@ -606,10 +606,10 @@ def render_troubleshooting():
         **Feature Computation Errors**
         ```bash
         # Check feature definitions
-        g2 feat-def-list
+        Gefion feat-def-list
 
         # Recompute features
-        g2 feat-compute --exchange NASDAQ --local --refresh-existing
+        Gefion feat-compute --exchange NASDAQ --local --refresh-existing
         ```
         """)
         return
@@ -625,7 +625,7 @@ def render_troubleshooting():
     st.markdown("### Getting Help")
     st.markdown("""
     - **System Status**: Check the sidebar for quick status
-    - **CLI Help**: Run `g2 --help` or `g2 <command> --help`
+    - **CLI Help**: Run `gefion --help` or `gefion <command> --help`
     - **Logs**: Check Docker logs with `docker compose logs postgres`
     - **AI Assistant**: Use the AI Assistant page for example queries
     """)

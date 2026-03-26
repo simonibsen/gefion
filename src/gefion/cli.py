@@ -9713,7 +9713,7 @@ def launch_ui(
             emit("UI app not found. Please reinstall gefion.", error=True)
             raise typer.Exit(1)
 
-        emit(f"Starting g2 UI on http://{host}:{port}")
+        emit(f"Starting Gefion UI on http://{host}:{port}")
         emit("Press Ctrl+C to stop")
 
         cmd = [
