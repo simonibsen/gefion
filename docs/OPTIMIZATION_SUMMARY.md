@@ -106,7 +106,7 @@ Applied migration `005_add_called_by_column.sql` to fix 100% feature computation
 
 Applied migration:
 ```bash
-.venv/bin/g2 db-migrate
+.venv/bin/gefion db-migrate
 # Output: Migration 006 applied successfully
 ```
 

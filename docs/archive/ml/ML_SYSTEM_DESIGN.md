@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The g2 ML system will predict **return distributions** (not point estimates) for multiple time horizons, enabling probabilistic assessment of price movements. This document captures the architecture decisions, schema design, and implementation approach.
+The Gefion ML system will predict **return distributions** (not point estimates) for multiple time horizons, enabling probabilistic assessment of price movements. This document captures the architecture decisions, schema design, and implementation approach.
 
 ---
 
@@ -613,20 +613,20 @@ label, score = compute_signal_strength(
 
 ```bash
 # Generate predictions for all symbols
-g2 predict --horizon 30 --symbols AAPL,MSFT,GOOGL
+gefion predict --horizon 30 --symbols AAPL,MSFT,GOOGL
 
 # Generate for entire universe
-g2 predict --horizon 30 --universe nasdaq
+gefion predict --horizon 30 --universe nasdaq
 
 # Generate all horizons
-g2 predict --horizons 7,30,90 --symbols AAPL
+gefion predict --horizons 7,30,90 --symbols AAPL
 ```
 
 ### Signal Assessment
 
 ```bash
 # Assess single signal
-g2 signal-assess --symbol AAPL --target 5.0 --horizon 30
+gefion signal-assess --symbol AAPL --target 5.0 --horizon 30
 
 # Output:
 # Symbol: AAPL
@@ -641,7 +641,7 @@ g2 signal-assess --symbol AAPL --target 5.0 --horizon 30
 
 ```bash
 # Find all stocks with strong signals for +5% in 30d
-g2 signal-screen --target 5.0 --horizon 30 --min-strength 70
+gefion signal-screen --target 5.0 --horizon 30 --min-strength 70
 
 # Output: Top 20 stocks ranked by signal strength
 ```
@@ -650,7 +650,7 @@ g2 signal-screen --target 5.0 --horizon 30 --min-strength 70
 
 ```bash
 # Validate model performance
-g2 model-validate --model-id 1 --start 2020-01-01 --end 2024-01-01
+gefion model-validate --model-id 1 --start 2020-01-01 --end 2024-01-01
 
 # Output:
 # Calibration Metrics:

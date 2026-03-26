@@ -32,7 +32,7 @@ docker compose -f docker/tempo/docker-compose.tempo.yml ps
 curl http://localhost:3000/api/health
 ```
 
-### 3. Enable Tracing in g2
+### 3. Enable Tracing in Gefion
 
 ```bash
 export $(cat .env.example | xargs)
@@ -42,10 +42,10 @@ export OTEL_EXPORTER=otlp
 export OTEL_OTLP_ENDPOINT=http://localhost:4317
 ```
 
-### 4. Run g2 Command
+### 4. Run Gefion Command
 
 ```bash
-g2 feat-compute --symbols AAPL --function-names indicator
+gefion feat-compute --symbols AAPL --function-names indicator
 ```
 
 ### 5. View Traces in Grafana
@@ -54,7 +54,7 @@ g2 feat-compute --symbols AAPL --function-names indicator
 2. Click "Explore" (compass icon on left sidebar)
 3. Select "Tempo" from the datasource dropdown
 4. Click "Search" tab
-5. Set "Service Name" = "g2"
+5. Set "Service Name" = "gefion"
 6. Click "Run query"
 7. Click on any trace to see the waterfall view
 
@@ -63,7 +63,7 @@ g2 feat-compute --symbols AAPL --function-names indicator
 ### Search Capabilities
 
 **By service:**
-- Service Name = "g2"
+- Service Name = "gefion"
 
 **By operation:**
 - Span Name = "compute_features"
@@ -88,13 +88,13 @@ g2 feat-compute --symbols AAPL --function-names indicator
 
 **Find slow feature computations:**
 1. Search tab
-2. Service Name = "g2"
+2. Service Name = "gefion"
 3. Span Name = "compute_features"
 4. Min Duration = "5s"
 
 **Find errors:**
 1. Search tab
-2. Service Name = "g2"
+2. Service Name = "gefion"
 3. Tags: `error=true` or `status.code=ERROR`
 
 **Compare symbols:**
@@ -113,7 +113,7 @@ Run the test script:
 
 Then in Grafana:
 1. Go to Explore → Tempo
-2. Search for service "g2"
+2. Search for service "gefion"
 3. You should see a trace with spans:
    - `test_parent`
    - `test_child_1`
@@ -122,7 +122,7 @@ Then in Grafana:
 You can also sanity-check via the CLI:
 
 ```bash
-g2 span-check
+gefion span-check
 ```
 
 ## Configuration Options
@@ -153,7 +153,7 @@ docker compose -f docker/tempo/docker-compose.tempo.yml restart tempo
 curl http://localhost:3200/metrics | grep tempo_distributor_spans_received_total
 ```
 
-**Check g2 configuration:**
+**Check Gefion configuration:**
 ```bash
 echo $OTEL_ENABLED  # Should be: true
 echo $OTEL_EXPORTER  # Should be: otlp
@@ -214,4 +214,4 @@ Or add Tempo services to your existing `docker-compose.yml`.
 
 - [Grafana Tempo Documentation](https://grafana.com/docs/tempo/latest/)
 - [OpenTelemetry OTLP](https://opentelemetry.io/docs/reference/specification/protocol/otlp/)
-- [g2 Observability Documentation](docs/OBSERVABILITY.md)
+- [Gefion Observability Documentation](docs/OBSERVABILITY.md)

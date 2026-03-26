@@ -2,7 +2,7 @@
 
 ## Overview
 
-g2 handles 5,600+ stocks with daily ingestion and indicator computation. Key optimizations ensure efficient resource usage and fast processing.
+gefion handles 5,600+ stocks with daily ingestion and indicator computation. Key optimizations ensure efficient resource usage and fast processing.
 
 ## Data Ingestion
 

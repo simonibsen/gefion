@@ -47,7 +47,7 @@ def compute_derivatives(
 
 **New Command:**
 ```bash
-g2 features-compute [options]
+gefion features-compute [options]
 ```
 
 **Capabilities:**
@@ -59,13 +59,13 @@ g2 features-compute [options]
 **Examples:**
 ```bash
 # Compute all indicators for AAPL
-g2 features-compute --symbols AAPL --function-names indicator
+gefion features-compute --symbols AAPL --function-names indicator
 
 # Compute specific features
-g2 features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
+gefion features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
 
 # Full refresh
-g2 features-compute --all-features --full
+gefion features-compute --all-features --full
 ```
 
 ### 4. Integration Helper ([indicators.py](../src/gefion/ingest/indicators.py))
@@ -252,13 +252,13 @@ with psycopg.connect(db_url) as conn:
 
 ```bash
 # Compute indicators for AAPL
-g2 features-compute --symbols AAPL --function-names indicator
+gefion features-compute --symbols AAPL --function-names indicator
 
 # Compute derivatives for all stocks
-g2 features-compute --function-names derivative --full
+gefion features-compute --function-names derivative --full
 
 # Compute specific features
-g2 features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
+gefion features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
 ```
 
 ---

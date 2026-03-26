@@ -8,7 +8,7 @@ Fixed a critical deadlock bug in [dispatcher.py:186-237](../src/gefion/features/
 
 ### Symptoms
 
-Production g2 process on sloth machine became completely stuck:
+Production Gefion process on sloth machine became completely stuck:
 - No CPU usage
 - No database activity
 - Process unresponsive to signals

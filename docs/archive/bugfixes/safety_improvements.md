@@ -177,7 +177,7 @@ pytest tests/test_resource_aware_adaptive_limiter.py -v
 
 1. **Deploy with conservative settings:**
    ```bash
-   g2 features-compute --all-features --max-workers 8
+   gefion features-compute --all-features --max-workers 8
    ```
    - Hard limit prevents over-scaling
    - Emergency brake will protect if memory gets low
@@ -197,7 +197,7 @@ pytest tests/test_resource_aware_adaptive_limiter.py -v
 Testing the safety mechanisms:
 ```bash
 # Test with limited resources
-g2 features-compute --symbols AAPL,MSFT,GOOG --max-workers 4
+gefion features-compute --symbols AAPL,MSFT,GOOG --max-workers 4
 
 # Test emergency brake (simulate low memory - requires manual testing)
 # Monitor output for emergency brake messages

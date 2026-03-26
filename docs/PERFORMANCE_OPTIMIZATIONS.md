@@ -128,7 +128,7 @@ Current index scan statistics (from pg_stat_user_tables):
 
 1. **Benchmark feature computation** with and without the new index:
    ```bash
-   g2 data-update --exchange NASDAQ --limit 10
+   gefion data-update --exchange NASDAQ --limit 10
    ```
 
 2. **Monitor compression ratio** as data grows:
@@ -153,20 +153,20 @@ Current index scan statistics (from pg_stat_user_tables):
 
 ### New Databases
 ```bash
-g2 db-init
-g2 db-tune --compress-after-days 30
+gefion db-init
+gefion db-tune --compress-after-days 30
 ```
 
 ### Existing Databases
 ```bash
 # Run migrations (includes performance optimization index)
-g2 db-migrate
+gefion db-migrate
 
 # Enable compression
-g2 db-tune --compress-after-days 30
+gefion db-tune --compress-after-days 30
 
 # Update statistics
-psql -d g2 -c "VACUUM ANALYZE;"
+psql -d gefion -c "VACUUM ANALYZE;"
 ```
 
 See [Database Migrations Guide](DATABASE_MIGRATIONS.md) for details.

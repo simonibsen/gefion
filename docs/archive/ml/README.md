@@ -1,6 +1,6 @@
 # ML Documentation Index (Source of Truth)
 
-This folder contains g2's ML vision, system design, and execution roadmap. To avoid duplicated/contradictory plans, treat the documents as follows:
+This folder contains Gefion's ML vision, system design, and execution roadmap. To avoid duplicated/contradictory plans, treat the documents as follows:
 
 ## Canonical docs
 

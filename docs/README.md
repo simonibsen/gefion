@@ -1,8 +1,8 @@
-# g2 Documentation
+# Gefion Documentation
 
 ## Quick Start
 
-- **[USER_GUIDE.md](USER_GUIDE.md)** - How to use g2 CLI
+- **[USER_GUIDE.md](USER_GUIDE.md)** - How to use Gefion CLI
 - **[ML_QUICKSTART.md](ML_QUICKSTART.md)** - End-to-end ML workflow guide
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
 

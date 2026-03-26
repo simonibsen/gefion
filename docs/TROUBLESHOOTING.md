@@ -32,7 +32,7 @@ If you prefer to fix it manually:
 
 ```bash
 # Connect to your database
-psql -U g2 -d g2
+psql -U gefion -d gefion
 
 # Drop the problematic table
 DROP TABLE IF EXISTS stock_ohlcv CASCADE;
@@ -40,8 +40,8 @@ DROP TABLE IF EXISTS stock_ohlcv CASCADE;
 # Exit psql
 \q
 
-# Run g2 command again - it will recreate the table properly
-g2 universe-ingest --exchange nasdaq --json
+# Run Gefion command again - it will recreate the table properly
+gefion universe-ingest --exchange nasdaq --json
 ```
 
 ### Prevention
@@ -56,7 +56,7 @@ The issue has been fixed in the codebase. The `create_stock_ohlcv_table()` funct
 You can verify the fix worked by checking:
 
 ```bash
-psql -U g2 -d g2 -c "SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name = 'stock_ohlcv';"
+psql -U Gefion -d Gefion -c "SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name = 'stock_ohlcv';"
 ```
 
 You should see one row indicating the table is now a hypertable.
@@ -75,7 +75,7 @@ If you're experiencing slow performance, check:
 
 2. **Worker Count**: Let auto-sizing work, or manually adjust:
    ```bash
-   g2 universe-ingest --fetch-workers 4 --writer-workers 2
+   gefion universe-ingest --fetch-workers 4 --writer-workers 2
    ```
 
 3. **Database Indexes**: Ensure composite indexes exist:

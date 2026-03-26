@@ -2,9 +2,9 @@
 
 **Abstract**
 
-This white paper explores the evolution of technical analysis from rule-based pattern recognition to probabilistic machine learning models. We examine the theoretical foundations of both approaches, their strengths and limitations, and demonstrate how modern ML techniques can enhance traditional technical analysis while preserving its core insights. Using g2, a database-first quantitative platform, we illustrate a practical implementation that bridges classical technical indicators with contemporary machine learning methods.
+This white paper explores the evolution of technical analysis from rule-based pattern recognition to probabilistic machine learning models. We examine the theoretical foundations of both approaches, their strengths and limitations, and demonstrate how modern ML techniques can enhance traditional technical analysis while preserving its core insights. Using Gefion, a database-first quantitative platform, we illustrate a practical implementation that bridges classical technical indicators with contemporary machine learning methods.
 
-**Author**: g2 Development Team
+**Author**: Gefion Development Team
 **Target Audience**: Quantitative analysts, algorithmic traders, data scientists, software engineers
 **Date**: December 2024 (Last Updated: December 2024)
 
@@ -16,7 +16,7 @@ This white paper explores the evolution of technical analysis from rule-based pa
 2. [The Theory of Technical Analysis](#the-theory-of-technical-analysis)
 3. [Machine Learning: From Rules to Probabilities](#machine-learning-from-rules-to-probabilities)
 4. [Bridging Technical Analysis and ML](#bridging-technical-analysis-and-ml)
-5. [The g2 Platform: A Practical Implementation](#the-g2-platform-a-practical-implementation)
+5. [The Gefion Platform: A Practical Implementation](#the-gefion-platform-a-practical-implementation)
 6. [Case Study: Quantile Regression for Risk-Aware Prediction](#case-study-quantile-regression-for-risk-aware-prediction)
 7. [Future Directions: Multi-Model Integration](#future-directions-multi-model-integration)
 8. [Conclusion](#conclusion)
@@ -229,11 +229,11 @@ This is the power of learned interactions.
 
 ---
 
-## The g2 Platform: A Practical Implementation
+## The Gefion Platform: A Practical Implementation
 
 ### Design Philosophy: Database-First Architecture
 
-g2 implements a **database-first** approach where features and functions are stored as data, not code. This architectural choice has profound implications for research velocity and reproducibility.
+gefion implements a **database-first** approach where features and functions are stored as data, not code. This architectural choice has profound implications for research velocity and reproducibility.
 
 **Traditional Approach** (code-first):
 ```python
@@ -244,7 +244,7 @@ def compute_rsi(prices, period=14):
 # Changing period requires code edit
 ```
 
-**g2 Approach** (database-first):
+**Gefion Approach** (database-first):
 ```json
 {
   "name": "indicator_rsi_14",
@@ -301,7 +301,7 @@ Benefits:
 
 ### Extensibility: Adding Custom Features
 
-One of g2's strengths is the ease of adding new data sources. Let's walk through an example.
+One of Gefion's strengths is the ease of adding new data sources. Let's walk through an example.
 
 **Scenario**: Incorporate news sentiment from AlphaVantage News Sentiment API.
 
@@ -339,10 +339,10 @@ def compute(rows, specs):
 **Step 2**: Import and register:
 ```bash
 # Import function to database
-g2 feat-fx-import --dir feature-functions
+gefion feat-fx-import --dir feature-functions
 
 # Register feature definition
-g2 feat-def-register --definition '{
+gefion feat-def-register --definition '{
   "name": "news_sentiment_score",
   "function_name": "news_sentiment_fetcher",
   "params": {"column": "sentiment_score"},
@@ -353,13 +353,13 @@ g2 feat-def-register --definition '{
 }'
 
 # Compute for stocks
-g2 feat-compute --features news_sentiment_score --symbols AAPL,MSFT,GOOGL --local
+gefion feat-compute --features news_sentiment_score --symbols AAPL,MSFT,GOOGL --local
 ```
 
 **Step 3**: Use in ML training:
 ```bash
 # Sentiment automatically included in dataset build
-g2 ml dataset-build --name sentiment_test --version v1 \
+gefion ml dataset-build --name sentiment_test --version v1 \
   --symbols AAPL,MSFT,GOOGL --horizons 7,30 --export
 
 # Features CSV now contains: indicator_rsi_14, indicator_macd, news_sentiment_score, ...
@@ -369,36 +369,36 @@ The database-first architecture means **no code changes** to the ML pipeline. Ne
 
 ### Full Pipeline Integration
 
-g2 provides end-to-end workflow from data ingestion to predictions:
+gefion provides end-to-end workflow from data ingestion to predictions:
 
 ```bash
 # 1. Ingest price data
-g2 data-update --exchange NASDAQ --limit 100 --timeframe auto
+gefion data-update --exchange NASDAQ --limit 100 --timeframe auto
 
 # 2. Compute all technical indicators
-g2 feat-compute --exchange NASDAQ --limit 100 --local
+gefion feat-compute --exchange NASDAQ --limit 100 --local
 
 # 3. Build ML dataset
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name nasdaq100 --version v1 \
   --exchange NASDAQ --limit 100 \
   --horizons 7,30,90 \
   --export
 
 # 4. Train quantile regression model
-g2 ml train \
+gefion ml train \
   --dataset-name nasdaq100 --dataset-version v1 \
   --model-name prod_model --model-version 20241214 \
   --algorithm xgboost
 
 # 5. Generate predictions
-g2 ml predict \
+gefion ml predict \
   --model-name prod_model --model-version 20241214 \
   --prediction-date 2024-12-14 \
   --exchange NASDAQ --limit 100
 
 # 6. Evaluate calibration
-g2 ml eval \
+gefion ml eval \
   --model-name prod_model --model-version 20241214 \
   --start-date 2024-01-01 --end-date 2024-12-01
 ```
@@ -509,7 +509,7 @@ Quantile regression predicts **how much** prices might move. But sometimes we ca
 - Will this stock show momentum (strong trend)?
 - Or is it range-bound (mean reversion)?
 
-g2 includes **trend classification** alongside quantile regression:
+gefion includes **trend classification** alongside quantile regression:
 
 **Labels** (derived from forward returns and thresholds):
 - `strong_up`: r > 5%
@@ -535,17 +535,17 @@ predictions = model.predict_proba(X_test)
 
 ### Model Ensembles (Implemented)
 
-g2 supports combining multiple algorithms for improved prediction accuracy:
+gefion supports combining multiple algorithms for improved prediction accuracy:
 
 ```bash
 # Train ensemble with XGBoost + LightGBM
-g2 ml train-ensemble \
+gefion ml train-ensemble \
   --dataset-name nasdaq100 --dataset-version v1 \
   --model-name ensemble_model --model-version 20241214 \
   --algorithms xgboost,lightgbm
 
 # Generate ensemble predictions
-g2 ml predict-ensemble \
+gefion ml predict-ensemble \
   --model-name ensemble_model --model-version 20241214 \
   --symbols AAPL,MSFT,GOOGL
 ```
@@ -583,7 +583,7 @@ This dual-model approach combines:
 
 ### Cross-Sectional Features (Implemented)
 
-g2 supports both **time-series features** (stock's own history) and **cross-sectional features** (stock vs peers):
+gefion supports both **time-series features** (stock's own history) and **cross-sectional features** (stock vs peers):
 
 **Time-series features**:
 - RSI, MACD, Bollinger Bands
@@ -626,9 +626,9 @@ This enables **sector rotation strategies**: Buy stocks outperforming their sect
 
 5. **Future is Multi-Model**: Combining quantile regression (risk assessment) with trend classification (screening) and cross-sectional features (sector rotation) creates a comprehensive system.
 
-### The g2 Philosophy
+### The Gefion Philosophy
 
-g2 embodies a pragmatic approach to quantitative analysis:
+gefion embodies a pragmatic approach to quantitative analysis:
 - **Start with proven indicators** (RSI, MACD) - don't reinvent the wheel
 - **Let models discover interactions** - avoid hard-coded rules
 - **Quantify uncertainty** - distributions beat point estimates
@@ -655,7 +655,7 @@ The debate between "technical analysis vs machine learning" is a false dichotomy
 
 As computing power and data availability continue to increase, we expect the integration to deepen. Deep learning models may eventually learn features directly from raw price data, bypassing hand-crafted indicators. But for now, the hybrid approach—ML trained on technical indicators—represents the practical state-of-the-art.
 
-g2 is our contribution to this evolution: a platform that makes rigorous, reproducible, ML-driven technical analysis accessible to quantitative analysts and algorithmic traders.
+gefion is our contribution to this evolution: a platform that makes rigorous, reproducible, ML-driven technical analysis accessible to quantitative analysts and algorithmic traders.
 
 ---
 
@@ -673,14 +673,14 @@ g2 is our contribution to this evolution: a platform that makes rigorous, reprod
 
 ---
 
-## Appendix: Getting Started with g2
+## Appendix: Getting Started with Gefion
 
 ### Installation
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/g2.git
-cd g2
+git clone https://github.com/simonibsen/gefion.git
+cd gefion
 
 # Create virtual environment
 python -m venv .venv
@@ -688,7 +688,7 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 # Install dependencies
 pip install -e .
-pip install 'g2[ml_extended]'  # For XGBoost/LightGBM
+pip install gefion[ml_extended]'  # For XGBoost/LightGBM
 
 # Start TimescaleDB
 docker compose up -d postgres
@@ -696,8 +696,8 @@ docker compose up -d postgres
 # Initialize schema
 cp .env.example .env
 # Edit .env to add ALPHAVANTAGE_API_KEY
-psql -d g2 -f sql/schema.sql
-g2 seed-features
+psql -d gefion -f sql/schema.sql
+gefion seed-features
 ```
 
 ### Quick ML Workflow
@@ -705,30 +705,30 @@ g2 seed-features
 **Option 1: Automated E2E Test** (validates entire pipeline):
 ```bash
 # Run all steps automatically with quality validation
-g2 ml e2e-test --exchange NASDAQ --limit 10
+gefion ml e2e-test --exchange NASDAQ --limit 10
 ```
 
 **Option 2: Manual Steps**:
 ```bash
 # 1. Ingest data
-g2 data-update --exchange NASDAQ --limit 50
+gefion data-update --exchange NASDAQ --limit 50
 
 # 2. Build dataset (features computed automatically during data-update)
-g2 ml dataset-build --name demo --version v1 \
+gefion ml dataset-build --name demo --version v1 \
   --exchange NASDAQ --limit 50 \
   --horizons 7,30 --export
 
 # 3. Train model
-g2 ml train --dataset-name demo --dataset-version v1 \
+gefion ml train --dataset-name demo --dataset-version v1 \
   --model-name test --model-version 20241214 \
   --algorithm xgboost
 
 # 4. Generate predictions (date auto-detected)
-g2 ml predict --model-name test --model-version 20241214 \
+gefion ml predict --model-name test --model-version 20241214 \
   --exchange NASDAQ --limit 50
 
 # 5. Evaluate
-g2 ml eval --model-name test --model-version 20241214 \
+gefion ml eval --model-name test --model-version 20241214 \
   --start-date 2024-01-01 --end-date 2024-12-01
 ```
 
@@ -742,4 +742,4 @@ g2 ml eval --model-name test --model-version 20241214 \
 
 ---
 
-**For questions, feedback, or contributions**: https://github.com/your-org/g2
+**For questions, feedback, or contributions**: https://github.com/simonibsen/gefion

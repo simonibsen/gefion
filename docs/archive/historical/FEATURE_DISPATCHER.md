@@ -152,16 +152,16 @@ The new `features-compute` command uses the dispatcher:
 
 ```bash
 # Compute all indicators for AAPL
-g2 features-compute --symbols AAPL --function-names indicator
+gefion features-compute --symbols AAPL --function-names indicator
 
 # Compute specific features for multiple stocks
-g2 features-compute --symbols AAPL,MSFT --features indicator_rsi_14,derivative_rsi_14_slope_5
+gefion features-compute --symbols AAPL,MSFT --features indicator_rsi_14,derivative_rsi_14_slope_5
 
 # Full refresh of all features for all stocks
-g2 features-compute --all-features --full
+gefion features-compute --all-features --full
 
 # Incremental computation (only new dates)
-g2 features-compute --symbols AAPL --function-names indicator,derivative --incremental
+gefion features-compute --symbols AAPL --function-names indicator,derivative --incremental
 ```
 
 ## Incremental vs Full Refresh

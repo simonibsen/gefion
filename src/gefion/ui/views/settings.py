@@ -99,7 +99,7 @@ def render_about():
     st.subheader("About g2")
 
     st.markdown("""
-    ## g2 Trading Analysis Platform
+    ## Gefion Trading Analysis Platform
 
     **g2** is a comprehensive trading analysis platform that combines:
 
@@ -135,7 +135,7 @@ def render_about():
 
     ### Version
 
-    g2 Trading Analysis v1.0
+    Gefion v1.0
 
     ---
 

@@ -127,14 +127,14 @@ gefion ml eval --model-name model --model-version $(date +%Y%m%d) --start-date 2
 
 ### 💬 Natural Language Interface (MCP Server)
 
-Interact with g2 using natural language via Model Context Protocol:
+Interact with Gefion using natural language via Model Context Protocol:
 
 ```text
 You: "Update NASDAQ data for the top 100 stocks"
-Assistant: [Runs g2 data-update --exchange NASDAQ --limit 100]
+Assistant: [Runs Gefion data-update --exchange NASDAQ --limit 100]
 
 You: "Build a dataset with AAPL, MSFT, GOOGL for 7 and 30 day horizons"
-Assistant: [Runs g2 ml dataset-build ...]
+Assistant: [Runs Gefion ml dataset-build ...]
 
 You: "Show me predictions for AAPL from the last week"
 Assistant: [Queries database and displays results]
@@ -144,7 +144,7 @@ Assistant: [Queries database and displays results]
 
 ## Creating Custom Features & Data Sources
 
-g2's DB-first architecture makes it easy to add custom indicators, alternative data, or new data sources without modifying code.
+Gefion's DB-first architecture makes it easy to add custom indicators, alternative data, or new data sources without modifying code.
 
 ### Custom Technical Indicators
 
@@ -397,7 +397,7 @@ The dispatcher will:
 
 - **API fetcher functions**: `feature-functions/` directory → imported to `feature_functions` table
 - **Feature definitions**: Registered in `feature_definitions` table
-- **Dispatcher**: `src/g2/ingest/dispatcher.py` - loads and executes functions
+- **Dispatcher**: `src/gefion/ingest/dispatcher.py` - loads and executes functions
 - **Data storage**: `computed_features` table (or custom table if needed)
 
 ### Alternative: Custom Table for Complex Data
@@ -478,8 +478,8 @@ graph TB
     end
 
     subgraph "CLI Commands"
-        DataUpdate[g2 data-update]
-        FeaturesCompute[g2 feat-compute]
+        DataUpdate[Gefion data-update]
+        FeaturesCompute[Gefion feat-compute]
     end
 
     subgraph "Application Layer"

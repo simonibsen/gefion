@@ -1,6 +1,6 @@
 # Trading Strategies Guide
 
-This guide covers g2's trading strategies system: the theory behind each strategy,
+This guide covers Gefion's trading strategies system: the theory behind each strategy,
 how to configure them, and how to create new ones.
 
 ## Architecture Overview
@@ -69,7 +69,7 @@ persistent market anomalies.
 | rebalance_days | int | 5 | Days between rebalancing |
 
 ```bash
-g2 backtest run --strategy momentum --lookback-days 10 --top-n 5
+gefion backtest run --strategy momentum --lookback-days 10 --top-n 5
 ```
 
 ---
@@ -89,7 +89,7 @@ g2 backtest run --strategy momentum --lookback-days 10 --top-n 5
 | max_positions | int | 5 | Maximum concurrent positions |
 
 ```bash
-g2 backtest run --strategy mean_reversion --rsi-oversold 25 --rsi-overbought 75
+gefion backtest run --strategy mean_reversion --rsi-oversold 25 --rsi-overbought 75
 ```
 
 ---
@@ -107,7 +107,7 @@ g2 backtest run --strategy mean_reversion --rsi-oversold 25 --rsi-overbought 75
 | slow_period | int | 200 | Slow moving average period |
 
 ```bash
-g2 backtest run --strategy ma_crossover --fast-period 20 --slow-period 50
+gefion backtest run --strategy ma_crossover --fast-period 20 --slow-period 50
 ```
 
 ---
@@ -125,7 +125,7 @@ strong buying interest and potential [trend continuation](https://en.wikipedia.o
 | volume_threshold | float | 1.5 | Volume multiplier required for confirmation |
 
 ```bash
-g2 backtest run --strategy breakout --lookback-days 30 --volume-threshold 2.0
+gefion backtest run --strategy breakout --lookback-days 30 --volume-threshold 2.0
 ```
 
 ---
@@ -145,7 +145,7 @@ short the outperformer.
 | exit_zscore | float | 0.5 | Z-score threshold to exit trade |
 
 ```bash
-g2 backtest run --strategy pairs_trading --entry-zscore 2.5
+gefion backtest run --strategy pairs_trading --entry-zscore 2.5
 ```
 
 ---
@@ -164,7 +164,7 @@ reversals.
 | divergence_lookback | int | 10 | Days to detect divergence pattern |
 
 ```bash
-g2 backtest run --strategy rsi_divergence --divergence-lookback 15
+gefion backtest run --strategy rsi_divergence --divergence-lookback 15
 ```
 
 ---
@@ -183,14 +183,14 @@ periods of high volatility. Trade the expansion by entering when bands widen.
 | squeeze_threshold | float | 0.05 | Band width to detect squeeze |
 
 ```bash
-g2 backtest run --strategy volatility_contraction --squeeze-threshold 0.04
+gefion backtest run --strategy volatility_contraction --squeeze-threshold 0.04
 ```
 
 ---
 
 ### ML-Integrated Strategies
 
-g2's ML strategies use trained machine learning models to generate or filter
+Gefion's ML strategies use trained machine learning models to generate or filter
 trading signals. These strategies require:
 
 1. **Trained models** - Use `gefion ml train` or `gefion ml train-ensemble`
@@ -200,7 +200,7 @@ See [ML Quickstart](ML_QUICKSTART.md) for training workflow.
 
 #### Understanding ML Model Types
 
-g2 supports two types of ML models:
+gefion supports two types of ML models:
 
 ##### Quantile Regression Models
 
@@ -271,7 +271,7 @@ trade them directly without additional filters.
 
 ```bash
 # Buy stocks where expected 7-day return (q50) > 3%
-g2 backtest run --strategy ml_signal \
+gefion backtest run --strategy ml_signal \
   --model-name quantile --model-version 20260103-ensemble \
   --horizon-days 7 \
   --prediction-type quantile \
@@ -284,7 +284,7 @@ g2 backtest run --strategy ml_signal \
 
 ```bash
 # Buy stocks predicted as weak_up or strong_up
-g2 backtest run --strategy ml_signal \
+gefion backtest run --strategy ml_signal \
   --model-name trend_classifier --model-version 20260103 \
   --horizon-days 30 \
   --prediction-type classifier \
@@ -375,7 +375,7 @@ Decision: PASS (not strongly negative) → Execute buy
 
 ```bash
 # Momentum + ML confirmation: only buy momentum signals with positive outlook
-g2 backtest run --strategy ml_filter \
+gefion backtest run --strategy ml_filter \
   --base-strategy momentum \
   --model-name quantile --model-version 20260103-ensemble \
   --filter-mode confirm \
@@ -386,7 +386,7 @@ g2 backtest run --strategy ml_filter \
 
 ```bash
 # Mean reversion + ML veto: block only high-risk reversals
-g2 backtest run --strategy ml_filter \
+gefion backtest run --strategy ml_filter \
   --base-strategy mean_reversion \
   --model-name quantile --model-version 20260103-ensemble \
   --filter-mode veto \
@@ -431,21 +431,21 @@ Compare different ML configurations:
 
 ```bash
 # Create configs for different horizons
-g2 strategy create-config --name ml_signal_h7 --strategy ml_signal \
+gefion strategy create-config --name ml_signal_h7 --strategy ml_signal \
   --params '{"model_name": "quantile", "model_version": "20260103-ensemble", "horizon_days": 7, "return_threshold": 0.02}'
 
-g2 strategy create-config --name ml_signal_h30 --strategy ml_signal \
+gefion strategy create-config --name ml_signal_h30 --strategy ml_signal \
   --params '{"model_name": "quantile", "model_version": "20260103-ensemble", "horizon_days": 30, "return_threshold": 0.05}'
 
 # Create configs for different filter modes
-g2 strategy create-config --name ml_filter_confirm --strategy ml_filter \
+gefion strategy create-config --name ml_filter_confirm --strategy ml_filter \
   --params '{"base_strategy": "momentum", "model_name": "quantile", "filter_mode": "confirm", "min_q50": 0.02}'
 
-g2 strategy create-config --name ml_filter_veto --strategy ml_filter \
+gefion strategy create-config --name ml_filter_veto --strategy ml_filter \
   --params '{"base_strategy": "momentum", "model_name": "quantile", "filter_mode": "veto", "max_q10": -0.10}'
 
 # Compare them
-g2 backtest compare \
+gefion backtest compare \
   --strategies ml_signal_h7,ml_signal_h30,ml_filter_confirm,ml_filter_veto \
   --symbols AAPL,MSFT,GOOGL --start-date 2024-01-01 --end-date 2024-12-01
 ```
@@ -459,7 +459,7 @@ g2 backtest compare \
 Use the CLI:
 
 ```bash
-g2 strategy create-config \
+gefion strategy create-config \
   --name momentum_aggressive \
   --strategy momentum \
   --params '{"lookback_days": 10, "top_n": 5}' \
@@ -471,7 +471,7 @@ Or use the UI: **Backtesting → Strategy Configs → Create New Config**
 ### Listing Configs
 
 ```bash
-g2 strategy configs
+gefion strategy configs
 ```
 
 ### Using Configs in Backtests
@@ -480,10 +480,10 @@ Configs can be used anywhere strategy names are accepted:
 
 ```bash
 # Single config
-g2 backtest run --strategy momentum_aggressive --symbols AAPL,MSFT
+gefion backtest run --strategy momentum_aggressive --symbols AAPL,MSFT
 
 # Compare configs
-g2 backtest compare \
+gefion backtest compare \
   --strategies momentum,momentum_aggressive,momentum_conservative \
   --symbols AAPL,MSFT,GOOGL \
   --start-date 2024-01-01 --end-date 2024-12-01
@@ -494,7 +494,7 @@ g2 backtest compare \
 Configs can be removed from the database:
 
 ```bash
-g2 strategy delete-config --name momentum_aggressive
+gefion strategy delete-config --name momentum_aggressive
 ```
 
 Or use the UI: **Backtesting → Strategy Configs → Unregister**
@@ -588,7 +588,7 @@ BUILTIN_STRATEGIES = {
     # ... existing strategies ...
 
     "my_strategy": {
-        "module_path": "g2.strategies.my_strategy",
+        "module_path": "gefion.strategies.my_strategy",
         "class_name": "MyStrategy",
         "description": "My custom trading strategy",
         "default_params": {
@@ -610,7 +610,7 @@ in the `backtest_run` function.
 Run to update the strategy registry:
 
 ```bash
-g2 db-init
+gefion db-init
 ```
 
 Or manually:
@@ -623,7 +623,7 @@ seed_builtin_strategies(conn)
 ### Step 5: Test
 
 ```bash
-g2 backtest run --strategy my_strategy --symbols AAPL,MSFT \
+gefion backtest run --strategy my_strategy --symbols AAPL,MSFT \
   --start-date 2024-01-01 --end-date 2024-12-01
 ```
 

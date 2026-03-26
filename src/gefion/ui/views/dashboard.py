@@ -15,7 +15,7 @@ class MarketMovers:
 
 @dataclass
 class G2Insights:
-    """Cached g2 insights data."""
+    """Cached Gefion insights data."""
     pred_count: int = 0
     pred_date: Optional[str] = None
     bullish: list = field(default_factory=list)  # [(sym, q50, q90, horizon), ...]
@@ -100,7 +100,7 @@ def get_market_movers() -> Optional[MarketMovers]:
 
 @st.cache_data(ttl=60)
 def get_g2_insights() -> Optional[G2Insights]:
-    """Get g2 insights data with 60-second cache."""
+    """Get Gefion insights data with 60-second cache."""
     try:
         from gefion.ui.components.database import get_connection
 
@@ -253,13 +253,13 @@ def render_dashboard():
 
     st.markdown("---")
 
-    # g2 Insights section
-    st.header("g2 Insights")
+    # Gefion Insights section
+    st.header("Gefion Insights")
 
     insights = get_g2_insights()
 
     if insights is None:
-        st.warning("Could not load g2 insights")
+        st.warning("Could not load Gefion insights")
     else:
         col1, col2, col3 = st.columns(3)
 

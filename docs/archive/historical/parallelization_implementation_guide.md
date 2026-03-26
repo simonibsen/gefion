@@ -199,10 +199,10 @@ Enable parallel function execution with the CLI flag:
 
 ```bash
 # Enable parallel function execution (uses cpu_count - 2 workers)
-g2 features-compute --all-features --parallel-functions
+gefion features-compute --all-features --parallel-functions
 
 # Limit parallel function workers
-g2 features-compute --all-features --parallel-functions --max-parallel-functions 4
+gefion features-compute --all-features --parallel-functions --max-parallel-functions 4
 ```
 
 **Note**: Parallel function execution is disabled by default for safety. Enable it when you have:

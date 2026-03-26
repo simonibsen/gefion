@@ -7,7 +7,7 @@
 
 ## Project Vision
 
-g2 modernizes the rule-based technical analysis approach from the legacy Folly project by applying PyTorch-based machine learning to predict trend signal strength. Rather than manually crafting rules to identify momentum patterns, g2 will learn these patterns from historical data and provide probabilistic predictions for multiple time horizons.
+gefion modernizes the rule-based technical analysis approach from the legacy Folly project by applying PyTorch-based machine learning to predict trend signal strength. Rather than manually crafting rules to identify momentum patterns, Gefion will learn these patterns from historical data and provide probabilistic predictions for multiple time horizons.
 
 ## Evolution from Folly
 
@@ -22,7 +22,7 @@ g2 modernizes the rule-based technical analysis approach from the legacy Folly p
 - **Storage**: MySQL database with time-series tables and calculated indicators
 - **Limitation**: Manual rule creation without data-driven optimization or backtesting
 
-### What g2 Will Do (ML Approach)
+### What Gefion Will Do (ML Approach)
 - **Enhanced Data Sources**: Leverage AlphaVantage API for pre-calculated indicators, eliminating custom computation
 - **Modern Storage**: Use performant time-series database (PostgreSQL with TimescaleDB)
 - **PyTorch Models**: Train neural networks to predict trend signal strength instead of hand-coding rules
@@ -33,7 +33,7 @@ g2 modernizes the rule-based technical analysis approach from the legacy Folly p
 
 ## Core Problem Statement
 
-g2 provides **two complementary prediction systems** for trend following:
+gefion provides **two complementary prediction systems** for trend following:
 
 ### System 1: Return Distribution Prediction (Quantile Regression)
 
@@ -142,7 +142,7 @@ The multi-output approach directly answers your use case: "Given current conditi
 
 **Schema Design (Current Implementation):**
 
-g2 uses a normalized, registry-based design for efficient storage and flexible feature engineering:
+gefion uses a normalized, registry-based design for efficient storage and flexible feature engineering:
 
 ```sql
 -- Stock dimension table (normalized design using integer IDs)
@@ -1361,10 +1361,10 @@ models/
 
 ```python
 # 1. Train new model version
-$ g2 train --version v1.1.0
+$ Gefion train --version v1.1.0
 
 # 2. Validate new model on holdout set
-$ g2 validate --version v1.1.0 --compare-to v1.0.0
+$ Gefion validate --version v1.1.0 --compare-to v1.0.0
 # Output:
 # v1.1.0 metrics:
 #   - Quantile loss: 0.0234 (v1.0.0: 0.0245) ✓ 4.5% improvement
@@ -1372,11 +1372,11 @@ $ g2 validate --version v1.1.0 --compare-to v1.0.0
 #   - Directional accuracy: 57.3% (v1.0.0: 56.1%) ✓
 
 # 3. A/B test in shadow mode (run both models, compare outputs)
-$ g2 shadow-mode --new-version v1.1.0 --baseline v1.0.0 --duration 7days
+$ Gefion shadow-mode --new-version v1.1.0 --baseline v1.0.0 --duration 7days
 # Generate predictions with both models daily, log discrepancies
 
 # 4. Promote to production if metrics improve
-$ g2 promote --version v1.1.0
+$ Gefion promote --version v1.1.0
 # Updates symlink: production/current -> v1.1.0
 ```
 
@@ -1438,7 +1438,7 @@ class ModelComparator:
 
 ```python
 # If v1.1.0 shows degraded performance in production
-$ g2 rollback --to v1.0.0
+$ Gefion rollback --to v1.0.0
 # Immediately updates symlink back to previous version
 # Log incident for post-mortem
 ```
@@ -1662,10 +1662,10 @@ class AlertManager:
 
 ```python
 # Generate weekly performance report
-$ g2 report --period last-7-days
+$ Gefion report --period last-7-days
 
 # Output:
-# ===== g2 Weekly Report (2025-01-08 to 2025-01-14) =====
+# ===== Gefion Weekly Report (2025-01-08 to 2025-01-14) =====
 #
 # Prediction Performance:
 #   - 7-day directional accuracy: 56.3% (target: >55%)  ✓
@@ -2739,13 +2739,13 @@ This is much more flexible than creating a new feature provider class for every 
 **Example: Adding VIX**
 ```bash
 # Step 1: Implement VIX ingestion
-$ g2 ingest-vix --start-date 2020-01-01
+$ Gefion ingest-vix --start-date 2020-01-01
 
 # Step 2: Enable market_context provider
 $ vim config/features.yaml  # Set enabled: true
 
 # Step 3: Retrain (model grows from N to N+60 inputs)
-$ g2 train --version v2.0
+$ Gefion train --version v2.0
 
 # Step 4: Feature snapshot saved automatically
 $ cat models/model_v2.0_features.json
@@ -3189,7 +3189,7 @@ This project adheres to contemporary industry standards for maintainability, rel
 
 ### Comparison to Legacy Folly Project
 
-| Aspect | Folly (Perl, 2000s) | g2 (Python, 2024) |
+| Aspect | Folly (Perl, 2000s) | Gefion (Python, 2024) |
 |--------|---------------------|------------------------|
 | **Testing** | None | TDD with pytest |
 | **Type Safety** | None | MyPy strict mode |
@@ -3248,4 +3248,4 @@ Key insights to carry forward:
 - **Whipsaw awareness**: PSAR works best when ADX > 30 (strong trend context matters)
 - **Industry context**: Relative strength vs sector/industry could be valuable features
 
-These domain insights from Folly should inform feature engineering in g2.
+These domain insights from Folly should inform feature engineering in Gefion.

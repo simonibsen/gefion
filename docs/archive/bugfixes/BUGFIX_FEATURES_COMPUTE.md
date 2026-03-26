@@ -120,7 +120,7 @@ $ ENABLE_DB_TESTS=1 .venv/bin/python -m pytest tests/test_features_dispatcher.py
 
 ### Production Validation
 ```bash
-$ .venv/bin/g2 features-compute --symbols=AAPL --full
+$ .venv/bin/gefion features-compute --symbols=AAPL --full
 Total: 30 rows inserted across 1 stocks  ✓
 
 $ psql -c "SELECT fd.name, COUNT(*) FROM computed_features cf JOIN feature_definitions fd ON fd.id = cf.feature_id GROUP BY fd.name;"
