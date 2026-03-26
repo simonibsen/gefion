@@ -118,15 +118,15 @@ def render_definition_row(defn: dict):
             st.caption(params_str[:40] + "..." if len(params_str) > 40 else params_str)
 
     with col3:
-        if st.button("View", key=f"view_{defn['name']}",  icon=":material/visibility:", help="View details"):
+        if st.button("", key=f"view_{defn['name']}",  icon=":material/visibility:", help="View details"):
             st.session_state[f"show_detail_{defn['name']}"] = True
 
     with col4:
-        if st.button("Edit", key=f"edit_{defn['name']}",  icon=":material/edit:", help="Edit definition"):
+        if st.button("", key=f"edit_{defn['name']}",  icon=":material/edit:", help="Edit definition"):
             st.session_state[f"edit_definition_{defn['name']}"] = True
 
     with col5:
-        if st.button("Delete", key=f"del_{defn['name']}",  icon=":material/delete:", help="Delete definition"):
+        if st.button("", key=f"del_{defn['name']}",  icon=":material/delete:", help="Delete definition"):
             st.session_state[f"confirm_delete_{defn['name']}"] = True
 
     # Show detail modal if requested
@@ -367,11 +367,11 @@ def render_function_row(func: dict):
         st.markdown(f"{enabled_icon} **{name}** (v{version})")
 
     with col2:
-        if st.button("Edit", key=f"edit_func_{func_key}",  icon=":material/edit:", help="Edit function"):
+        if st.button("", key=f"edit_func_{func_key}",  icon=":material/edit:", help="Edit function"):
             st.session_state[f"edit_function_{func_key}"] = True
 
     with col3:
-        if st.button("View", key=f"view_func_{func_key}",  icon=":material/visibility:", help="View details"):
+        if st.button("", key=f"view_func_{func_key}",  icon=":material/visibility:", help="View details"):
             st.session_state[f"view_function_{func_key}"] = not st.session_state.get(f"view_function_{func_key}", False)
 
     # Show edit form if requested

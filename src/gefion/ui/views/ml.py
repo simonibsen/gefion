@@ -697,7 +697,7 @@ def render_dataset_section():
     with col1:
         st.subheader("Manage Datasets")
     with col2:
-        if st.button("Refresh", icon=":material/refresh:", key="refresh_datasets", help="Refresh dataset list"):
+        if st.button("", icon=":material/refresh:", key="refresh_datasets", help="Refresh dataset list"):
             _get_datasets.clear()
             st.rerun()
 
@@ -730,7 +730,7 @@ def render_dataset_section():
                     st.caption(f"🔗 {model_count} model(s)")
 
             with col3:
-                if st.button("Inspect", icon=":material/search:", key=f"inspect_{ds['id']}", help="Inspect dataset"):
+                if st.button("", icon=":material/search:", key=f"inspect_{ds['id']}", help="Inspect dataset"):
                     st.session_state[f"inspecting_{ds['id']}"] = True
 
             with col4:
@@ -742,7 +742,7 @@ def render_dataset_section():
                         help=f"Cannot delete: {ds['model_count']} model(s) depend on this dataset",
                     )
                 else:
-                    if st.button("Delete", icon=":material/delete:", key=f"del_{ds['id']}", help="Delete dataset"):
+                    if st.button("", icon=":material/delete:", key=f"del_{ds['id']}", help="Delete dataset"):
                         # Run delete command
                         env = os.environ.copy()
                         env["OTEL_ENABLED"] = "false"
@@ -1316,11 +1316,11 @@ def render_train_section():
                 st.caption(f"Created: {created_str}")
 
             with col3:
-                if st.button("Inspect", icon=":material/search:", key=f"inspect_model_{model['id']}", help="Inspect model"):
+                if st.button("", icon=":material/search:", key=f"inspect_model_{model['id']}", help="Inspect model"):
                     st.session_state[f"inspecting_model_{model['id']}"] = True
 
             with col4:
-                if st.button("Delete", icon=":material/delete:", key=f"del_model_{model['id']}", help="Delete model"):
+                if st.button("", icon=":material/delete:", key=f"del_model_{model['id']}", help="Delete model"):
                     # Run delete command
                     env = os.environ.copy()
                     env["OTEL_ENABLED"] = "false"
