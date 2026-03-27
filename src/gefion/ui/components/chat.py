@@ -280,127 +280,122 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
         page_context: Optional dict from the page's get_page_context() function.
             Keys: page_name, summary, filters, data_stats, empty_states, errors, suggestions
     """
-    # Inject JS to hide Ask button via iframe component (bypasses CSP)
-    import streamlit.components.v1 as components
-    components.html(_CHAT_BAR_HIDE_BUTTON_JS, height=0)
-
     page_name = (page_context or {}).get("page_name", "page")
     msg_key = f"_chat_{page_name}_messages"
-    pending_key = f"_chat_{page_name}_pending"
 
     if msg_key not in st.session_state:
         st.session_state[msg_key] = []
 
-    # Show suggestions as hints if chat is empty
     suggestions = (page_context or {}).get("suggestions", [])
-
-    # Chat panel — expandable conversation history
     messages = st.session_state[msg_key]
-    if messages:
-        with st.expander(f"Page Chat ({len(messages)} messages)", expanded=len(messages) <= 4):
-            for msg in messages[-10:]:
-                ts = msg.get("timestamp", "")[-8:]  # HH:MM:SS
-                if msg["role"] == "user":
-                    st.markdown(f"> **You** ({ts}): {msg['content']}")
-                else:
-                    content = msg["content"]
-                    # Long responses get their own expander
-                    if len(content) > 300:
-                        st.markdown(f"**AI** ({ts}):")
-                        with st.expander("Show full response", expanded=False):
-                            st.markdown(content)
-                    else:
-                        st.markdown(f"**AI** ({ts}): {content}")
-                st.markdown("")  # spacing
-            if len(messages) > 1:
-                if st.button("Clear chat", key=f"_chat_clear_{page_name}"):
-                    st.session_state[msg_key] = []
-                    st.rerun()
 
-    # Chat input
+    # --- Input FIRST (always at top) ---
     placeholder = "Ask about this page..."
     if suggestions and not messages:
         placeholder = suggestions[0]
 
     with st.form(f"chat_form_{page_name}", clear_on_submit=True, border=False):
-        chat_input = st.text_input(
-            "Ask",
-            placeholder=placeholder,
-            key=f"_chat_input_{page_name}",
-            label_visibility="collapsed",
-        )
-        submitted = st.form_submit_button("Ask")
+        col1, col2 = st.columns([9, 1])
+        with col1:
+            chat_input = st.text_input(
+                "Ask",
+                placeholder=placeholder,
+                key=f"_chat_input_{page_name}",
+                label_visibility="collapsed",
+            )
+        with col2:
+            submitted = st.form_submit_button(">")
 
+    # --- Conversation history BELOW input ---
+    if messages:
+        for msg in reversed(messages[-8:]):
+            ts = msg.get("timestamp", "")[-8:]
+            if msg["role"] == "user":
+                st.caption(f"You ({ts})")
+                st.markdown(f"> {msg['content']}")
+            else:
+                st.caption(f"AI ({ts})")
+                content = msg["content"]
+                if len(content) > 500:
+                    st.markdown(content[:500] + "...")
+                    with st.expander("Show full response"):
+                        st.markdown(content)
+                else:
+                    st.markdown(content)
+        if len(messages) > 1:
+            if st.button("Clear chat", key=f"_chat_clear_{page_name}"):
+                st.session_state[msg_key] = []
+                st.rerun()
+
+    st.markdown("---")
+
+    # --- Handle submission ---
     if submitted and chat_input:
-        # Add user message
         st.session_state[msg_key].append({
-            "role": "user",
-            "content": chat_input,
+            "role": "user", "content": chat_input,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         })
 
-        # Build context prompt and route command
         context_prompt = _build_context_prompt(page_context)
         cmd_args, display_cmd, mode = parse_command_input(
-            chat_input,
-            context_prompt=context_prompt,
+            chat_input, context_prompt=context_prompt,
             session_key=f"_chat_{page_name}_ai_active",
         )
 
-        if mode == "ai":
-            import subprocess
-            try:
-                result = subprocess.run(
-                    cmd_args, capture_output=True, text=True, timeout=60,
-                    env={**__import__("os").environ, "OTEL_ENABLED": "false"},
-                )
-                response_text = ""
-                for line in (result.stderr or "").splitlines():
-                    event = parse_stream_event(line)
-                    if event and event["type"] == "result":
-                        response_text = event.get("result", "")
-                        break
-                    elif event and event["type"] == "text":
-                        response_text += event.get("text", "")
-                if not response_text:
-                    response_text = result.stdout.strip() or "No response received."
-                st.session_state[msg_key].append({
-                    "role": "assistant", "content": response_text,
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                })
-            except subprocess.TimeoutExpired:
-                st.session_state[msg_key].append({
-                    "role": "assistant", "content": "Request timed out after 60 seconds.",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                })
-            except Exception as e:
-                st.session_state[msg_key].append({
-                    "role": "assistant", "content": f"Error: {e}",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                })
-        elif mode in ("cli", "mcp"):
-            import subprocess
-            try:
-                result = subprocess.run(
-                    cmd_args, capture_output=True, text=True, timeout=120,
-                    env={**__import__("os").environ, "OTEL_ENABLED": "false"},
-                )
-                output = result.stdout.strip() or result.stderr.strip() or "Command completed."
-                if len(output) > 2000:
-                    output = output[:2000] + "\n... (truncated)"
-                st.session_state[msg_key].append({
-                    "role": "assistant", "content": f"```\n{output}\n```",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                })
-            except subprocess.TimeoutExpired:
-                st.session_state[msg_key].append({
-                    "role": "assistant", "content": "Command timed out.",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                })
-            except Exception as e:
-                st.session_state[msg_key].append({
-                    "role": "assistant", "content": f"Error running command: {e}",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                })
-
+        response = _execute_chat_command(cmd_args, mode)
+        st.session_state[msg_key].append({
+            "role": "assistant", "content": response,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        })
         st.rerun()
+
+
+def _execute_chat_command(cmd_args: List[str], mode: str) -> str:
+    """Execute a command and return the response text."""
+    import subprocess
+    import os
+
+    env = {**os.environ, "OTEL_ENABLED": "false"}
+    # Strip CLAUDECODE to avoid nested session errors
+    env.pop("CLAUDECODE", None)
+
+    timeout = 60 if mode == "ai" else 120
+
+    try:
+        result = subprocess.run(
+            cmd_args, capture_output=True, text=True,
+            timeout=timeout, env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return "Request timed out."
+    except Exception as e:
+        return f"Error: {e}"
+
+    if mode == "ai":
+        # Parse stream-json: collect text events, prefer final result
+        text_parts = []
+        final_result = ""
+        for line in (result.stderr or "").splitlines():
+            event = parse_stream_event(line)
+            if not event:
+                continue
+            if event["type"] == "result":
+                final_result = event.get("result", "")
+            elif event["type"] == "text":
+                text_parts.append(event.get("text", ""))
+
+        # Prefer the final result field, fall back to concatenated text
+        if final_result:
+            return final_result
+        if text_parts:
+            return "".join(text_parts)
+        # Last resort: stdout (but not raw stderr)
+        return result.stdout.strip() or "No response received."
+    else:
+        # CLI/MCP: return stdout
+        output = result.stdout.strip()
+        if not output:
+            output = result.stderr.strip() or "Command completed."
+        if len(output) > 2000:
+            output = output[:2000] + "\n... (truncated)"
+        return f"```\n{output}\n```"
