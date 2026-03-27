@@ -245,10 +245,10 @@ def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
 
 _CHAT_BAR_HIDE_BUTTON_JS = """
 <script>
-// Hide the Ask button in the chat form by finding the input with our placeholder
 (function() {
+    const doc = window.parent.document;
     function hideAskButton() {
-        const inputs = document.querySelectorAll('input[aria-label="Ask"]');
+        const inputs = doc.querySelectorAll('input[aria-label="Ask"]');
         inputs.forEach(input => {
             const form = input.closest('[data-testid="stForm"]');
             if (form) {
@@ -265,12 +265,9 @@ _CHAT_BAR_HIDE_BUTTON_JS = """
             }
         });
     }
-    // Run after Streamlit renders
     setTimeout(hideAskButton, 100);
     setTimeout(hideAskButton, 500);
-    setTimeout(hideAskButton, 1500);
-    // Also observe DOM changes
-    new MutationObserver(hideAskButton).observe(document.body, {childList: true, subtree: true});
+    new MutationObserver(hideAskButton).observe(doc.body, {childList: true, subtree: true});
 })();
 </script>
 """
@@ -283,8 +280,9 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
         page_context: Optional dict from the page's get_page_context() function.
             Keys: page_name, summary, filters, data_stats, empty_states, errors, suggestions
     """
-    # Inject JS to hide Ask button and clean up form styling
-    st.markdown(_CHAT_BAR_HIDE_BUTTON_JS, unsafe_allow_html=True)
+    # Inject JS to hide Ask button via iframe component (bypasses CSP)
+    import streamlit.components.v1 as components
+    components.html(_CHAT_BAR_HIDE_BUTTON_JS, height=0)
 
     page_name = (page_context or {}).get("page_name", "page")
     msg_key = f"_chat_{page_name}_messages"
