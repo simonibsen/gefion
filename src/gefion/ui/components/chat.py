@@ -245,29 +245,13 @@ def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
 
 _CHAT_BAR_CSS = """
 <style>
-/* Pin the last stForm (the chat form) to viewport bottom */
-.main [data-testid="stForm"]:last-of-type {
-    position: fixed !important;
-    bottom: 0 !important;
-    left: var(--sidebar-width, 245px) !important;
-    right: 0 !important;
-    z-index: 999 !important;
-    background: #ffffff !important;
-    border-top: 1px solid #e0e0e0 !important;
-    padding: 10px 24px !important;
-    margin: 0 !important;
-    box-shadow: 0 -2px 8px rgba(0,0,0,0.08) !important;
+/* Compact the chat form — remove extra padding/margins */
+div[data-testid="stForm"]:has(> div input[aria-label="Ask"]) {
+    border: none !important;
+    padding: 0 !important;
 }
-/* Slim down the form internals */
-.main [data-testid="stForm"]:last-of-type [data-testid="stFormSubmitButton"] {
+div[data-testid="stForm"]:has(> div input[aria-label="Ask"]) [data-testid="stFormSubmitButton"] {
     display: none !important;
-}
-.main [data-testid="stForm"]:last-of-type [data-baseweb="input"] {
-    background: #f8f9fa;
-}
-/* Prevent page content from hiding behind the fixed bar */
-.main .block-container {
-    padding-bottom: 70px !important;
 }
 </style>
 """
@@ -316,25 +300,20 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                     st.session_state[msg_key] = []
                     st.rerun()
 
-    # Chat input
-    with st.container():
-        placeholder = "Ask about this page..."
-        if suggestions and not messages:
-            placeholder = suggestions[0]
+    # Chat input — compact bar at bottom of page
+    st.markdown("---")
+    placeholder = "Ask about this page..."
+    if suggestions and not messages:
+        placeholder = suggestions[0]
 
-        with st.form(f"chat_form_{page_name}", clear_on_submit=True):
-            chat_input = st.text_input(
-                "Ask",
-                placeholder=placeholder,
-                key=f"_chat_input_{page_name}",
-                label_visibility="collapsed",
-            )
-            # Hide the submit button visually
-            st.markdown(
-                "<style>[data-testid='stFormSubmitButton'] {display: none;}</style>",
-                unsafe_allow_html=True,
-            )
-            submitted = st.form_submit_button("Send")
+    with st.form(f"chat_form_{page_name}", clear_on_submit=True, border=False):
+        chat_input = st.text_input(
+            "Ask",
+            placeholder=placeholder,
+            key=f"_chat_input_{page_name}",
+            label_visibility="collapsed",
+        )
+        submitted = st.form_submit_button("Ask", use_container_width=True)
 
         if submitted and chat_input:
             # Add user message

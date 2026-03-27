@@ -104,13 +104,14 @@ class TestParseStreamEvent:
         assert result["type"] == "result"
 
 
-class TestChatWidgetCSS:
-    """Chat widget must include fixed-position styling."""
+class TestChatWidgetRendering:
+    """Chat widget rendering requirements."""
 
-    def test_chat_css_has_fixed_position(self):
+    def test_chat_renders_form_with_input(self):
         content = (UI_DIR / "components" / "chat.py").read_text()
-        assert "position: fixed" in content
-        assert "bottom:" in content
+        assert "st.form(" in content
+        assert "st.text_input(" in content
+        assert "Ask about this page" in content
 
     def test_chat_has_page_context_param(self):
         """render_chat_widget must accept a page_context parameter."""
