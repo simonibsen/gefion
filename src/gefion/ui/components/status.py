@@ -81,7 +81,7 @@ def get_system_stats() -> Optional[SystemStats]:
                     pass
 
                 try:
-                    cur.execute("SELECT COUNT(*) FROM quantile_predictions")
+                    cur.execute("SELECT COUNT(*) FROM predictions")
                     prediction_count = cur.fetchone()[0]
                 except Exception:
                     pass

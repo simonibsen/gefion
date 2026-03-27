@@ -40,8 +40,7 @@ def test_ml_init_calls_schema_init(monkeypatch):
     assert called["db_url"] == "postgresql://example"
     assert called["autocommit"] is True
     assert "ml_models" in called["tables"]
-    assert "quantile_predictions" in called["tables"]
-    assert "trend_class_predictions" in called["tables"]
+    assert "predictions" in called["tables"]
 
 
 def test_ml_device_command_runs_without_torch_installed():

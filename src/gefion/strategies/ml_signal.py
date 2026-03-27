@@ -49,16 +49,20 @@ def get_predictions_for_date(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT s.symbol, qp.q10, qp.q50, qp.q90
-                    FROM quantile_predictions qp
-                    JOIN stocks s ON qp.data_id = s.id
-                    JOIN ml_models m ON qp.model_id = m.id
-                    WHERE m.name = %s
+                    SELECT s.symbol,
+                           (p.prediction_values->>'q10')::NUMERIC,
+                           (p.prediction_values->>'q50')::NUMERIC,
+                           (p.prediction_values->>'q90')::NUMERIC
+                    FROM predictions p
+                    JOIN stocks s ON p.data_id = s.id
+                    JOIN ml_models m ON p.model_id = m.id
+                    WHERE p.prediction_type = 'quantile'
+                      AND m.name = %s
                       AND m.version = %s
-                      AND qp.prediction_date = %s
-                      AND qp.horizon_days = %s
+                      AND p.prediction_date = %s
+                      AND p.horizon_days = %s
                       AND m.active = TRUE
-                    ORDER BY qp.q50 DESC
+                    ORDER BY (p.prediction_values->>'q50')::NUMERIC DESC
                     """,
                     (model_name, model_version, prediction_date, horizon_days),
                 )
@@ -103,18 +107,24 @@ def get_classifier_predictions_for_date(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT s.symbol, tcp.predicted_class,
-                           tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral,
-                           tcp.p_weak_down, tcp.p_strong_down, tcp.margin
-                    FROM trend_class_predictions tcp
-                    JOIN stocks s ON tcp.data_id = s.id
-                    JOIN ml_models m ON tcp.model_id = m.id
-                    WHERE m.name = %s
+                    SELECT s.symbol,
+                           p.prediction_values->>'predicted_class',
+                           (p.prediction_values->>'p_strong_up')::NUMERIC,
+                           (p.prediction_values->>'p_weak_up')::NUMERIC,
+                           (p.prediction_values->>'p_neutral')::NUMERIC,
+                           (p.prediction_values->>'p_weak_down')::NUMERIC,
+                           (p.prediction_values->>'p_strong_down')::NUMERIC,
+                           (p.prediction_values->>'margin')::NUMERIC
+                    FROM predictions p
+                    JOIN stocks s ON p.data_id = s.id
+                    JOIN ml_models m ON p.model_id = m.id
+                    WHERE p.prediction_type = 'trend_class'
+                      AND m.name = %s
                       AND m.version = %s
-                      AND tcp.prediction_date = %s
-                      AND tcp.horizon_days = %s
+                      AND p.prediction_date = %s
+                      AND p.horizon_days = %s
                       AND m.active = TRUE
-                    ORDER BY tcp.margin DESC
+                    ORDER BY (p.prediction_values->>'margin')::NUMERIC DESC
                     """,
                     (model_name, model_version, prediction_date, horizon_days),
                 )

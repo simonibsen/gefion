@@ -30,7 +30,7 @@ class TestDbCleanupCommand:
         result = runner.invoke(app, ["db-cleanup", "--help"])
         assert "computed_features" in result.output
         assert "stock_ohlcv" in result.output
-        assert "quantile_predictions" in result.output
+        assert "predictions" in result.output
 
 
 class TestDbCleanupDryRun:

@@ -90,6 +90,9 @@ app.add_typer(experiment_app, name="experiment", cls=SortedGroup)
 chart_app = typer.Typer(help="Chart and visualization commands (price/predictions/features)")
 app.add_typer(chart_app, name="chart", cls=SortedGroup)
 
+data_app = typer.Typer(help="Data management commands (cull)")
+app.add_typer(data_app, name="data", cls=SortedGroup)
+
 
 def emit(
     message: str,
@@ -487,8 +490,7 @@ def ml_init(
                     "ml_datasets",
                     "ml_runs",
                     "ml_models",
-                    "quantile_predictions",
-                    "trend_class_predictions",
+                    "predictions",
                     "prediction_outcomes",
                     "model_performance",
                 ],
@@ -969,7 +971,7 @@ def ml_model_inspect(
         gefion ml model-inspect --name quantile --version 20260101 --json
     """
     with db_connection(db_url) as conn:
-        init_schema_tables(conn, ["ml_models", "ml_datasets", "quantile_predictions", "model_performance"])
+        init_schema_tables(conn, ["ml_models", "ml_datasets", "predictions", "model_performance"])
 
         with conn.cursor() as cur:
             # Fetch model info with dataset join
@@ -1016,7 +1018,7 @@ def ml_model_inspect(
                 cur.execute(
                     """
                     SELECT horizon_days, COUNT(*), MIN(prediction_date), MAX(prediction_date)
-                    FROM quantile_predictions
+                    FROM predictions
                     WHERE model_id = %s
                     GROUP BY horizon_days
                     ORDER BY horizon_days
@@ -1156,7 +1158,7 @@ def ml_model_delete(
     import shutil
 
     with db_connection(db_url) as conn:
-        init_schema_tables(conn, ["ml_models", "quantile_predictions", "trend_predictions", "model_performance"])
+        init_schema_tables(conn, ["ml_models", "predictions", "model_performance"])
 
         with conn.cursor() as cur:
             # Find the model
@@ -1179,16 +1181,7 @@ def ml_model_delete(
             prediction_count = 0
             try:
                 cur.execute(
-                    "SELECT COUNT(*) FROM quantile_predictions WHERE model_id = %s",
-                    (model_id,),
-                )
-                prediction_count += cur.fetchone()[0]
-            except Exception:
-                pass
-
-            try:
-                cur.execute(
-                    "SELECT COUNT(*) FROM trend_predictions WHERE model_id = %s",
+                    "SELECT COUNT(*) FROM predictions WHERE model_id = %s",
                     (model_id,),
                 )
                 prediction_count += cur.fetchone()[0]
@@ -1197,12 +1190,7 @@ def ml_model_delete(
 
             # Delete predictions
             try:
-                cur.execute("DELETE FROM quantile_predictions WHERE model_id = %s", (model_id,))
-            except Exception:
-                pass
-
-            try:
-                cur.execute("DELETE FROM trend_predictions WHERE model_id = %s", (model_id,))
+                cur.execute("DELETE FROM predictions WHERE model_id = %s", (model_id,))
             except Exception:
                 pass
 
@@ -1804,20 +1792,22 @@ def ml_predict(
 
                         cur.execute(
                             """
-                            INSERT INTO quantile_predictions
-                              (model_id, data_id, prediction_date, horizon_days, q10, q50, q90,
-                               model_version, run_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
+                            INSERT INTO predictions
+                              (model_id, data_id, prediction_date, horizon_days,
+                               prediction_type, prediction_values, metadata, run_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
                             DO UPDATE SET
-                              q10 = EXCLUDED.q10,
-                              q50 = EXCLUDED.q50,
-                              q90 = EXCLUDED.q90,
-                              model_version = EXCLUDED.model_version,
+                              prediction_values = EXCLUDED.prediction_values,
+                              metadata = EXCLUDED.metadata,
                               run_id = EXCLUDED.run_id,
                               created_at = NOW();
                             """,
-                            (model_id, int(data_id), current_date, horizon, q10, q50, q90, model_version, run_id),
+                            (model_id, int(data_id), current_date, horizon,
+                             'quantile',
+                             Json({"q10": float(q10), "q50": float(q50), "q90": float(q90)}),
+                             Json({"model_version": model_version}),
+                             run_id),
                         )
                         date_predictions += 1
                         grand_total_predictions += 1
@@ -1876,6 +1866,7 @@ def ml_predict_list(
     model_version: Optional[str] = typer.Option(None, "--model-version", help="Filter by model version"),
     symbol: Optional[str] = typer.Option(None, "--symbol", help="Filter by symbol"),
     prediction_date: Optional[str] = typer.Option(None, "--date", help="Filter by prediction date (YYYY-MM-DD)"),
+    prediction_type: Optional[str] = typer.Option(None, "--type", help="Filter by prediction type (e.g. quantile, trend_class)"),
     limit: int = typer.Option(50, help="Maximum number of results"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
@@ -1894,9 +1885,12 @@ def ml_predict_list(
 
         # Filter by symbol
         gefion ml predict-list --symbol AAPL
+
+        # Filter by prediction type
+        gefion ml predict-list --type quantile
     """
     with db_connection(db_url) as conn:
-        init_schema_tables(conn, ["quantile_predictions", "ml_models", "stocks"])
+        init_schema_tables(conn, ["predictions", "ml_models", "stocks"])
 
         with conn.cursor() as cur:
             # Build query with optional filters
@@ -1913,21 +1907,24 @@ def ml_predict_list(
                 conditions.append("s.symbol = %s")
                 params.append(symbol)
             if prediction_date:
-                conditions.append("qp.prediction_date = %s")
+                conditions.append("p.prediction_date = %s")
                 params.append(prediction_date)
+            if prediction_type:
+                conditions.append("p.prediction_type = %s")
+                params.append(prediction_type)
 
             where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
             params.append(limit)
 
             cur.execute(
                 f"""
-                SELECT m.name, m.version, s.symbol, qp.prediction_date,
-                       qp.horizon_days, qp.q10, qp.q50, qp.q90
-                FROM quantile_predictions qp
-                JOIN ml_models m ON qp.model_id = m.id
-                JOIN stocks s ON qp.data_id = s.id
+                SELECT m.name, m.version, s.symbol, p.prediction_date,
+                       p.horizon_days, p.prediction_type, p.prediction_values
+                FROM predictions p
+                JOIN ml_models m ON p.model_id = m.id
+                JOIN stocks s ON p.data_id = s.id
                 {where_clause}
-                ORDER BY qp.prediction_date DESC, s.symbol, qp.horizon_days
+                ORDER BY p.prediction_date DESC, s.symbol, p.horizon_days
                 LIMIT %s
                 """,
                 params,
@@ -1938,18 +1935,28 @@ def ml_predict_list(
                 emit("No predictions found matching criteria", json_output=json_output)
                 return
 
-            predictions = [
-                {
+            predictions = []
+            for r in rows:
+                p_type = r[5]
+                p_values = r[6] or {}
+                entry = {
                     "model": f"{r[0]} {r[1]}",
                     "symbol": r[2],
                     "date": str(r[3]),
                     "horizon": r[4],
-                    "q10": float(r[5]) if r[5] else None,
-                    "q50": float(r[6]) if r[6] else None,
-                    "q90": float(r[7]) if r[7] else None,
+                    "type": p_type,
                 }
-                for r in rows
-            ]
+                if p_type == "quantile":
+                    entry["q10"] = float(p_values["q10"]) if "q10" in p_values else None
+                    entry["q50"] = float(p_values["q50"]) if "q50" in p_values else None
+                    entry["q90"] = float(p_values["q90"]) if "q90" in p_values else None
+                elif p_type == "trend_class":
+                    entry["predicted_class"] = p_values.get("predicted_class")
+                    entry["margin"] = float(p_values["margin"]) if "margin" in p_values else None
+                    entry["entropy"] = float(p_values["entropy"]) if "entropy" in p_values else None
+                else:
+                    entry.update(p_values)
+                predictions.append(entry)
 
             if json_output:
                 emit(
@@ -1969,19 +1976,29 @@ def ml_predict_list(
                 table.add_column("Symbol")
                 table.add_column("Date")
                 table.add_column("Horizon")
-                table.add_column("Q10", justify="right")
-                table.add_column("Q50", justify="right")
-                table.add_column("Q90", justify="right")
+                table.add_column("Type")
+                table.add_column("Values", justify="right")
 
                 for p in predictions:
+                    if p.get("type") == "quantile":
+                        values_str = (
+                            f"q10={p['q10']:.2%} q50={p['q50']:.2%} q90={p['q90']:.2%}"
+                            if p.get("q50") is not None else "-"
+                        )
+                    elif p.get("type") == "trend_class":
+                        cls = p.get("predicted_class", "?")
+                        margin = p.get("margin")
+                        values_str = f"{cls} (margin={margin:.3f})" if margin is not None else cls
+                    else:
+                        values_str = str({k: v for k, v in p.items() if k not in ("model", "symbol", "date", "horizon", "type")})
+
                     table.add_row(
                         p["model"],
                         p["symbol"],
                         p["date"],
                         f"{p['horizon']}d",
-                        f"{p['q10']:.2%}" if p["q10"] else "-",
-                        f"{p['q50']:.2%}" if p["q50"] else "-",
-                        f"{p['q90']:.2%}" if p["q90"] else "-",
+                        p.get("type", "-"),
+                        values_str,
                     )
 
                 console.print(table)
@@ -2009,7 +2026,7 @@ def ml_predict_inspect(
         gefion ml predict-inspect --symbol AAPL --model-name quantile --date 2025-12-03
     """
     with db_connection(db_url) as conn:
-        init_schema_tables(conn, ["quantile_predictions", "ml_models", "stocks", "stock_ohlcv"])
+        init_schema_tables(conn, ["predictions", "ml_models", "stocks", "stock_ohlcv"])
 
         with conn.cursor() as cur:
             # Find the stock
@@ -2021,7 +2038,7 @@ def ml_predict_inspect(
             data_id = row[0]
 
             # Build query for predictions
-            conditions = ["qp.data_id = %s"]
+            conditions = ["p.data_id = %s"]
             params = [data_id]
 
             if model_name:
@@ -2031,19 +2048,20 @@ def ml_predict_inspect(
                 conditions.append("m.version = %s")
                 params.append(model_version)
             if prediction_date:
-                conditions.append("qp.prediction_date = %s")
+                conditions.append("p.prediction_date = %s")
                 params.append(prediction_date)
 
             where_clause = " AND ".join(conditions)
 
             cur.execute(
                 f"""
-                SELECT m.name, m.version, qp.prediction_date, qp.horizon_days,
-                       qp.q10, qp.q50, qp.q90, qp.created_at
-                FROM quantile_predictions qp
-                JOIN ml_models m ON qp.model_id = m.id
-                WHERE {where_clause}
-                ORDER BY qp.prediction_date DESC, qp.horizon_days
+                SELECT m.name, m.version, p.prediction_date, p.horizon_days,
+                       p.prediction_values->>'q10', p.prediction_values->>'q50',
+                       p.prediction_values->>'q90', p.created_at
+                FROM predictions p
+                JOIN ml_models m ON p.model_id = m.id
+                WHERE {where_clause} AND p.prediction_type = 'quantile'
+                ORDER BY p.prediction_date DESC, p.horizon_days
                 LIMIT 20
                 """,
                 params,
@@ -2179,18 +2197,22 @@ def ml_eval(
 
         emit(f"Evaluating {model_name} {model_version} from {start_date} to {end_date}...", json_output=json_output)
 
-        # Fetch predictions from quantile_predictions
+        # Fetch predictions from predictions table
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT qp.data_id, qp.prediction_date, qp.horizon_days, qp.q10, qp.q50, qp.q90,
+                SELECT p.data_id, p.prediction_date, p.horizon_days,
+                       (p.prediction_values->>'q10')::numeric,
+                       (p.prediction_values->>'q50')::numeric,
+                       (p.prediction_values->>'q90')::numeric,
                        s.symbol
-                FROM quantile_predictions qp
-                JOIN stocks s ON qp.data_id = s.id
-                WHERE qp.model_id = %s
-                  AND qp.prediction_date >= %s
-                  AND qp.prediction_date <= %s
-                ORDER BY qp.prediction_date, qp.data_id, qp.horizon_days;
+                FROM predictions p
+                JOIN stocks s ON p.data_id = s.id
+                WHERE p.model_id = %s
+                  AND p.prediction_date >= %s
+                  AND p.prediction_date <= %s
+                  AND p.prediction_type = 'quantile'
+                ORDER BY p.prediction_date, p.data_id, p.horizon_days;
                 """,
                 (model_id, start_date, end_date),
             )
@@ -2423,14 +2445,18 @@ def ml_calibrate(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT qp.data_id, qp.prediction_date, qp.horizon_days,
-                           qp.q10, qp.q50, qp.q90, s.symbol
-                    FROM quantile_predictions qp
-                    JOIN stocks s ON qp.data_id = s.id
-                    WHERE qp.model_id = %s
-                      AND qp.prediction_date >= %s
-                      AND qp.prediction_date <= %s
-                    ORDER BY qp.prediction_date, qp.data_id, qp.horizon_days;
+                    SELECT p.data_id, p.prediction_date, p.horizon_days,
+                           (p.prediction_values->>'q10')::numeric,
+                           (p.prediction_values->>'q50')::numeric,
+                           (p.prediction_values->>'q90')::numeric,
+                           s.symbol
+                    FROM predictions p
+                    JOIN stocks s ON p.data_id = s.id
+                    WHERE p.model_id = %s
+                      AND p.prediction_date >= %s
+                      AND p.prediction_date <= %s
+                      AND p.prediction_type = 'quantile'
+                    ORDER BY p.prediction_date, p.data_id, p.horizon_days;
                     """,
                     (model_id, start_date, end_date),
                 )
@@ -3005,7 +3031,7 @@ def ml_predict_classifier(
         return
 
     with db_connection(db_url) as conn:
-        init_schema_tables(conn, ["trend_class_predictions"])
+        init_schema_tables(conn, ["predictions"])
 
         # Build universe of symbols
         if exchange or (not sym_list and limit):
@@ -3172,22 +3198,31 @@ def ml_predict_classifier(
 
                     cur.execute(
                         """
-                        INSERT INTO trend_class_predictions
-                          (model_id, data_id, prediction_date, horizon_days, predicted_class,
-                           p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin, entropy)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (model_id, data_id, prediction_date, horizon_days) DO UPDATE SET
-                          predicted_class = EXCLUDED.predicted_class,
-                          p_strong_up = EXCLUDED.p_strong_up,
-                          p_weak_up = EXCLUDED.p_weak_up,
-                          p_neutral = EXCLUDED.p_neutral,
-                          p_weak_down = EXCLUDED.p_weak_down,
-                          p_strong_down = EXCLUDED.p_strong_down,
-                          margin = EXCLUDED.margin,
-                          entropy = EXCLUDED.entropy;
+                        INSERT INTO predictions
+                          (model_id, data_id, prediction_date, horizon_days,
+                           prediction_type, prediction_values, metadata, run_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
+                        DO UPDATE SET
+                          prediction_values = EXCLUDED.prediction_values,
+                          metadata = EXCLUDED.metadata,
+                          run_id = EXCLUDED.run_id,
+                          created_at = NOW();
                         """,
-                        (model_id, int(data_id), pred_date, horizon, predicted_class,
-                         p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin, entropy),
+                        (model_id, int(data_id), pred_date, horizon,
+                         'trend_class',
+                         Json({
+                             "predicted_class": predicted_class,
+                             "p_strong_up": p_strong_up,
+                             "p_weak_up": p_weak_up,
+                             "p_neutral": p_neutral,
+                             "p_weak_down": p_weak_down,
+                             "p_strong_down": p_strong_down,
+                             "entropy": entropy,
+                             "margin": margin,
+                         }),
+                         Json({}),
+                         None),
                     )
                     total_predictions += 1
 
@@ -3658,20 +3693,22 @@ def ml_predict_ensemble(
 
                         cur.execute(
                             """
-                            INSERT INTO quantile_predictions
-                              (model_id, data_id, prediction_date, horizon_days, q10, q50, q90,
-                               model_version, run_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
+                            INSERT INTO predictions
+                              (model_id, data_id, prediction_date, horizon_days,
+                               prediction_type, prediction_values, metadata, run_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
                             DO UPDATE SET
-                              q10 = EXCLUDED.q10,
-                              q50 = EXCLUDED.q50,
-                              q90 = EXCLUDED.q90,
-                              model_version = EXCLUDED.model_version,
+                              prediction_values = EXCLUDED.prediction_values,
+                              metadata = EXCLUDED.metadata,
                               run_id = EXCLUDED.run_id,
                               created_at = NOW();
                             """,
-                            (model_id, int(data_id), pred_date, horizon, q10, q50, q90, model_version, run_id),
+                            (model_id, int(data_id), pred_date, horizon,
+                             'quantile',
+                             Json({"q10": float(q10), "q50": float(q50), "q90": float(q90)}),
+                             Json({"model_version": model_version}),
+                             run_id),
                         )
                         total_predictions += 1
 
@@ -4367,7 +4404,7 @@ def _span_check_impl(
 def span_check(
     backend: str = typer.Option("tempo", help="Trace backend (default: tempo)"),
     tempo_url: Optional[str] = typer.Option(None, help="Tempo base URL (default: $TEMPO_URL or http://localhost:3200)"),
-    service_name: Optional[str] = typer.Option(None, help="Service name tag (default: $OTEL_SERVICE_NAME or g2)"),
+    service_name: Optional[str] = typer.Option(None, help="Service name tag (default: $OTEL_SERVICE_NAME or gefion)"),
     limit: int = typer.Option(10, min=1, max=100, help="Number of recent traces to inspect"),
     trace_id: Optional[str] = typer.Option(None, help="Specific trace ID to inspect (default: most recent)"),
     show_spans: bool = typer.Option(True, "--show-spans/--no-show-spans", help="Print a span list"),
@@ -4614,7 +4651,7 @@ def db_cleanup(
     Remove orphaned data from database tables.
 
     Cleans up data that references non-existent stocks (e.g., after stocks table was reset).
-    This includes computed_features, stock_ohlcv, quantile_predictions, and trend_class_predictions.
+    This includes computed_features, stock_ohlcv, and predictions.
 
     Examples:
         # Preview what would be deleted
@@ -4629,15 +4666,13 @@ def db_cleanup(
         orphan_queries = [
             ("computed_features", "DELETE FROM computed_features WHERE data_id NOT IN (SELECT id FROM stocks)"),
             ("stock_ohlcv", "DELETE FROM stock_ohlcv WHERE data_id NOT IN (SELECT id FROM stocks)"),
-            ("quantile_predictions", "DELETE FROM quantile_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
-            ("trend_class_predictions", "DELETE FROM trend_class_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+            ("predictions", "DELETE FROM predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
         ]
 
         count_queries = [
             ("computed_features", "SELECT COUNT(*) FROM computed_features WHERE data_id NOT IN (SELECT id FROM stocks)"),
             ("stock_ohlcv", "SELECT COUNT(*) FROM stock_ohlcv WHERE data_id NOT IN (SELECT id FROM stocks)"),
-            ("quantile_predictions", "SELECT COUNT(*) FROM quantile_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
-            ("trend_class_predictions", "SELECT COUNT(*) FROM trend_class_predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
+            ("predictions", "SELECT COUNT(*) FROM predictions WHERE data_id NOT IN (SELECT id FROM stocks)"),
         ]
 
         try:
@@ -8071,10 +8106,10 @@ def mcp_setup(
                 cli_config = Path.home() / ".claude.json"
                 config_files.append(('cli', cli_config))
 
-            # Get absolute path to g2 project root
+            # Get absolute path to gefion project root
             cli_file = Path(__file__).resolve()
-            g2_root = cli_file.parent.parent.parent
-            server_path = g2_root / "mcp-server" / "server.py"
+            project_root = cli_file.parent.parent.parent
+            server_path = project_root / "mcp-server" / "server.py"
 
             if not server_path.exists():
                 emit_error(
@@ -8117,14 +8152,14 @@ def mcp_setup(
                     with open(config_file, 'r') as f:
                         existing_config = json.load(f)
 
-                    # Check if g2 server already configured
+                    # Check if gefion server already configured
                     if "mcpServers" in existing_config and "gefion" in existing_config.get("mcpServers", {}):
-                        existing_g2_config = existing_config["mcpServers"]["gefion"]
+                        existing_gefion_config = existing_config["mcpServers"]["gefion"]
 
                         # Compare configurations (ignoring key order)
-                        if (existing_g2_config.get("command") == expected_config["command"] and
-                            existing_g2_config.get("args") == expected_config["args"] and
-                            existing_g2_config.get("env", {}) == expected_config["env"]):
+                        if (existing_gefion_config.get("command") == expected_config["command"] and
+                            existing_gefion_config.get("args") == expected_config["args"] and
+                            existing_gefion_config.get("env", {}) == expected_config["env"]):
                             # Configuration is already correct - idempotent success
                             config_unchanged = True
                         elif not force:
@@ -8198,7 +8233,7 @@ def mcp_setup(
                         console.print("• Restart Claude Desktop App")
                     if any(r['target'] == 'cli' and not r['config_unchanged'] for r in results):
                         console.print("• Restart Claude Code CLI or OpenAI-compatible tools")
-                    console.print("\nThe 'g2' MCP server should now be available")
+                    console.print("\nThe 'gefion' MCP server should now be available")
                 else:
                     console.print("\n[dim]All configurations are already correct. No changes needed.[/dim]")
                 console.print("\n[dim]To update configs, run: gefion mcp-setup --force[/dim]")
@@ -9752,6 +9787,104 @@ def launch_ui(
                 if err.get("context"):
                     for k, v in err["context"].items():
                         emit(f"    {k}: {v}")
+
+
+# =============================================================================
+# DATA MANAGEMENT COMMANDS
+# =============================================================================
+
+@data_app.command("cull")
+def data_cull(
+    before: str = typer.Argument(..., help="Delete data before this date (YYYY-MM-DD)"),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols to filter (default: all)"),
+    dry_run: bool = typer.Option(True, "--dry-run/--confirm", help="Preview changes (default) or execute"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete old data in dependency order: predictions → features → OHLCV.
+
+    By default, runs in dry-run mode showing what would be deleted.
+    Pass --confirm to actually execute the deletion.
+    """
+    from datetime import date as date_type, datetime
+    from gefion.db.cull import plan_cull, execute_cull
+    from gefion.cli_helpers import db_connection
+
+    try:
+        before_date = datetime.strptime(before, "%Y-%m-%d").date()
+    except ValueError:
+        emit_error(f"Invalid date format: {before}. Expected YYYY-MM-DD.", json_output=json_output)
+        raise typer.Exit(1)
+
+    symbol_list = [s.strip() for s in symbols.split(",")] if symbols else None
+
+    try:
+        with db_connection(None) as conn:
+            if dry_run:
+                plan = plan_cull(conn, before_date=before_date, symbols=symbol_list)
+
+                if json_output:
+                    emit("Data Cull Plan (dry run)", data={
+                        "before_date": str(before_date),
+                        "symbols": symbol_list,
+                        "tables": plan,
+                        "total_rows": sum(plan.values()),
+                        "dry_run": True,
+                    }, json_output=True)
+                else:
+                    from rich.console import Console
+                    from rich.table import Table
+                    console = Console()
+
+                    if not plan:
+                        console.print(f"\n[green]No data found before {before_date}.[/green]")
+                        return
+
+                    table = Table(title=f"Data Cull Plan — before {before_date} (DRY RUN)")
+                    table.add_column("Table", style="cyan")
+                    table.add_column("Rows to Delete", justify="right", style="red")
+
+                    for tbl, count in plan.items():
+                        table.add_row(tbl, f"{count:,}")
+
+                    table.add_row("[bold]Total[/bold]", f"[bold]{sum(plan.values()):,}[/bold]")
+                    console.print(table)
+                    console.print("\n[dim]Run with --confirm to execute.[/dim]")
+            else:
+                result = execute_cull(conn, before_date=before_date, symbols=symbol_list)
+
+                if json_output:
+                    emit("Data Cull Complete", data={
+                        "before_date": str(before_date),
+                        "symbols": symbol_list,
+                        "deleted": result,
+                        "total_rows": sum(result.values()),
+                        "dry_run": False,
+                    }, json_output=True)
+                else:
+                    from rich.console import Console
+                    from rich.table import Table
+                    console = Console()
+
+                    if not result:
+                        console.print(f"\n[green]No data found before {before_date}.[/green]")
+                        return
+
+                    table = Table(title=f"Data Cull Results — before {before_date}")
+                    table.add_column("Table", style="cyan")
+                    table.add_column("Rows Deleted", justify="right", style="red")
+
+                    for tbl, count in result.items():
+                        table.add_row(tbl, f"{count:,}")
+
+                    table.add_row("[bold]Total[/bold]", f"[bold]{sum(result.values()):,}[/bold]")
+                    console.print(table)
+
+    except Exception as exc:
+        import traceback
+        emit_error(f"Data cull failed: {exc}", json_output=json_output)
+        if os.environ.get("DEBUG"):
+            traceback.print_exc()
+        raise typer.Exit(1)
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper

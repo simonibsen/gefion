@@ -34,10 +34,11 @@ class TestPredictListCommand:
                 pass
 
             def fetchall(self):
-                # Return sample predictions
+                # Return sample predictions from unified predictions table
+                # Columns: name, version, symbol, prediction_date, horizon_days, prediction_type, prediction_values
                 return [
-                    ("quantile", "v1", "AAPL", date(2025, 12, 3), 7, 0.01, 0.02, 0.03),
-                    ("quantile", "v1", "AAPL", date(2025, 12, 3), 30, 0.02, 0.04, 0.06),
+                    ("quantile", "v1", "AAPL", date(2025, 12, 3), 7, "quantile", {"q10": 0.01, "q50": 0.02, "q90": 0.03}),
+                    ("quantile", "v1", "AAPL", date(2025, 12, 3), 30, "quantile", {"q10": 0.02, "q50": 0.04, "q90": 0.06}),
                 ]
 
             def __enter__(self):

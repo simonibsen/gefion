@@ -251,24 +251,24 @@ CREATE TABLE IF NOT EXISTS ml_models (
 );
 CREATE INDEX IF NOT EXISTS ml_models_active_idx ON ml_models(active, name);
 
--- Quantile predictions (hypertable)
-CREATE TABLE IF NOT EXISTS quantile_predictions (
+-- Unified predictions table (hypertable)
+-- Stores both quantile and trend_class predictions with JSONB values
+CREATE TABLE IF NOT EXISTS predictions (
     model_id INTEGER NOT NULL REFERENCES ml_models(id),
     data_id INTEGER NOT NULL REFERENCES stocks(id),
     prediction_date DATE NOT NULL,
     horizon_days INTEGER NOT NULL,
-    q10 NUMERIC(10,4),
-    q50 NUMERIC(10,4),
-    q90 NUMERIC(10,4),
-    model_version TEXT,
-    features_snapshot JSONB,
-    created_at TIMESTAMP DEFAULT NOW(),
+    prediction_type TEXT NOT NULL,
+    prediction_values JSONB NOT NULL,
+    metadata JSONB DEFAULT '{}',
     run_id INTEGER REFERENCES ml_runs(id),
-    PRIMARY KEY (model_id, data_id, prediction_date, horizon_days),
-    CONSTRAINT check_quantile_order CHECK (q10 <= q50 AND q50 <= q90),
-    CONSTRAINT check_horizon_positive CHECK (horizon_days > 0)
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (model_id, data_id, prediction_date, horizon_days, prediction_type),
+    CONSTRAINT check_horizon_positive CHECK (horizon_days > 0),
+    CONSTRAINT check_prediction_type CHECK (prediction_type IN ('quantile', 'trend_class'))
 );
-SELECT create_hypertable('quantile_predictions', 'prediction_date', if_not_exists => TRUE);
+SELECT create_hypertable('predictions', 'prediction_date', if_not_exists => TRUE);
+SELECT set_chunk_time_interval('predictions', INTERVAL '30 days');
 
 -- Prediction outcomes for evaluation
 CREATE TABLE IF NOT EXISTS prediction_outcomes (
@@ -303,34 +303,17 @@ CREATE TABLE IF NOT EXISTS model_performance (
 );
 CREATE INDEX IF NOT EXISTS model_performance_name_horizon_idx ON model_performance(model_name, horizon_days);
 
--- Trend class predictions (hypertable)
-CREATE TABLE IF NOT EXISTS trend_class_predictions (
-    model_id INTEGER NOT NULL REFERENCES ml_models(id),
-    data_id INTEGER NOT NULL REFERENCES stocks(id),
-    prediction_date DATE NOT NULL,
-    horizon_days INTEGER NOT NULL,
-    predicted_class TEXT NOT NULL,
-    weak_threshold NUMERIC(8,6),
-    strong_threshold NUMERIC(8,6),
-    p_strong_up NUMERIC(5,4),
-    p_weak_up NUMERIC(5,4),
-    p_neutral NUMERIC(5,4),
-    p_weak_down NUMERIC(5,4),
-    p_strong_down NUMERIC(5,4),
-    entropy NUMERIC(8,6),
-    margin NUMERIC(5,4),
-    created_at TIMESTAMP DEFAULT NOW(),
-    run_id INTEGER REFERENCES ml_runs(id),
-    PRIMARY KEY (model_id, data_id, prediction_date, horizon_days)
-);
-SELECT create_hypertable('trend_class_predictions', 'prediction_date', if_not_exists => TRUE);
-
-CREATE INDEX IF NOT EXISTS quantile_predictions_symbol_date_idx
-    ON quantile_predictions(data_id, prediction_date, horizon_days);
+CREATE INDEX IF NOT EXISTS predictions_symbol_date_idx
+    ON predictions(data_id, prediction_date, horizon_days);
+CREATE INDEX IF NOT EXISTS predictions_type_idx
+    ON predictions(prediction_type, prediction_date DESC);
+CREATE INDEX IF NOT EXISTS predictions_run_id_idx
+    ON predictions(run_id);
 CREATE INDEX IF NOT EXISTS prediction_outcomes_symbol_date_idx
     ON prediction_outcomes(data_id, prediction_date, horizon_days);
-CREATE INDEX IF NOT EXISTS trend_class_predictions_symbol_date_idx
-    ON trend_class_predictions(data_id, prediction_date, horizon_days);
+-- Legacy index name kept for reference (now covered by predictions_symbol_date_idx)
+-- quantile_predictions_symbol_date_idx
+-- trend_class_predictions_symbol_date_idx
 
 -- =============================================================================
 -- VOLATILITY THRESHOLDS
@@ -358,7 +341,7 @@ CREATE INDEX IF NOT EXISTS volatility_thresholds_symbol_date_idx
 -- SIGNAL STRENGTH VIEW
 -- =============================================================================
 
--- Dynamic signal strength computation from quantile + classifier predictions
+-- Dynamic signal strength computation from unified predictions table
 CREATE OR REPLACE VIEW signal_strength_view AS
 WITH params AS (
     SELECT
@@ -368,74 +351,58 @@ WITH params AS (
 ),
 quantile_signals AS (
     SELECT
-        qp.data_id,
-        qp.prediction_date,
-        qp.horizon_days,
-        qp.q10,
-        qp.q50,
-        qp.q90,
-        qp.q90 - qp.q10 AS iqr_width,
+        p.data_id,
+        p.prediction_date,
+        p.horizon_days,
+        (p.prediction_values->>'q10')::NUMERIC(10,4) AS q10,
+        (p.prediction_values->>'q50')::NUMERIC(10,4) AS q50,
+        (p.prediction_values->>'q90')::NUMERIC(10,4) AS q90,
+        (p.prediction_values->>'q90')::NUMERIC(10,4) - (p.prediction_values->>'q10')::NUMERIC(10,4) AS iqr_width,
         vt.strong_threshold,
         vt.weak_threshold,
         vt.historical_volatility,
         GREATEST(-1, LEAST(1,
-            qp.q50 / NULLIF(vt.strong_threshold, 0)
+            (p.prediction_values->>'q50')::NUMERIC / NULLIF(vt.strong_threshold, 0)
         )) AS quantile_component,
         CASE
             WHEN vt.historical_volatility > 0 THEN
                 GREATEST(0, LEAST(1,
-                    1 - ((qp.q90 - qp.q10) / (vt.historical_volatility * 2))
+                    1 - (((p.prediction_values->>'q90')::NUMERIC - (p.prediction_values->>'q10')::NUMERIC) / (vt.historical_volatility * 2))
                 ))
             ELSE 0.5
         END AS quantile_confidence
-    FROM quantile_predictions qp
+    FROM predictions p
     LEFT JOIN LATERAL (
         SELECT strong_threshold, weak_threshold, historical_volatility
         FROM volatility_thresholds
-        WHERE data_id = qp.data_id
-          AND horizon_days = qp.horizon_days
-          AND calculation_date <= qp.prediction_date
+        WHERE data_id = p.data_id
+          AND horizon_days = p.horizon_days
+          AND calculation_date <= p.prediction_date
         ORDER BY calculation_date DESC
         LIMIT 1
     ) vt ON TRUE
+    WHERE p.prediction_type = 'quantile'
 ),
 classifier_signals AS (
     SELECT
-        tcp.data_id,
-        tcp.prediction_date,
-        tcp.horizon_days,
-        tcp.predicted_class,
-        tcp.p_strong_down,
-        tcp.p_weak_down,
-        tcp.p_neutral,
-        tcp.p_weak_up,
-        tcp.p_strong_up,
-        (COALESCE(tcp.p_strong_up, 0) * 1.0 +
-         COALESCE(tcp.p_weak_up, 0) * 0.5 +
-         COALESCE(tcp.p_neutral, 0) * 0.0 +
-         COALESCE(tcp.p_weak_down, 0) * -0.5 +
-         COALESCE(tcp.p_strong_down, 0) * -1.0) AS classifier_component,
-        GREATEST(
-            COALESCE(tcp.p_strong_up, 0),
-            COALESCE(tcp.p_weak_up, 0),
-            COALESCE(tcp.p_neutral, 0),
-            COALESCE(tcp.p_weak_down, 0),
-            COALESCE(tcp.p_strong_down, 0)
-        ) - (
-            CASE
-                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_strong_up
-                THEN GREATEST(tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down)
-                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_weak_up
-                THEN GREATEST(tcp.p_strong_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down)
-                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_neutral
-                THEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_weak_down, tcp.p_strong_down)
-                WHEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down, tcp.p_strong_down) = tcp.p_weak_down
-                THEN GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_strong_down)
-                ELSE GREATEST(tcp.p_strong_up, tcp.p_weak_up, tcp.p_neutral, tcp.p_weak_down)
-            END
-        ) AS margin,
-        COALESCE(tcp.margin, 0.5) AS classifier_confidence
-    FROM trend_class_predictions tcp
+        p.data_id,
+        p.prediction_date,
+        p.horizon_days,
+        p.prediction_values->>'predicted_class' AS predicted_class,
+        (p.prediction_values->>'p_strong_down')::NUMERIC(5,4) AS p_strong_down,
+        (p.prediction_values->>'p_weak_down')::NUMERIC(5,4) AS p_weak_down,
+        (p.prediction_values->>'p_neutral')::NUMERIC(5,4) AS p_neutral,
+        (p.prediction_values->>'p_weak_up')::NUMERIC(5,4) AS p_weak_up,
+        (p.prediction_values->>'p_strong_up')::NUMERIC(5,4) AS p_strong_up,
+        (COALESCE((p.prediction_values->>'p_strong_up')::NUMERIC, 0) * 1.0 +
+         COALESCE((p.prediction_values->>'p_weak_up')::NUMERIC, 0) * 0.5 +
+         COALESCE((p.prediction_values->>'p_neutral')::NUMERIC, 0) * 0.0 +
+         COALESCE((p.prediction_values->>'p_weak_down')::NUMERIC, 0) * -0.5 +
+         COALESCE((p.prediction_values->>'p_strong_down')::NUMERIC, 0) * -1.0) AS classifier_component,
+        COALESCE((p.prediction_values->>'margin')::NUMERIC, 0.5) AS margin,
+        COALESCE((p.prediction_values->>'margin')::NUMERIC, 0.5) AS classifier_confidence
+    FROM predictions p
+    WHERE p.prediction_type = 'trend_class'
 )
 SELECT
     COALESCE(qs.data_id, cs.data_id) AS data_id,
@@ -577,10 +544,9 @@ CREATE INDEX IF NOT EXISTS idx_trials_score ON experiment_trials(score DESC);
 \echo '  - ml_datasets'
 \echo '  - ml_runs'
 \echo '  - ml_models'
-\echo '  - quantile_predictions (hypertable)'
+\echo '  - predictions (hypertable, unified quantile + trend_class)'
 \echo '  - prediction_outcomes (hypertable)'
 \echo '  - model_performance'
-\echo '  - trend_class_predictions (hypertable)'
 \echo '  - volatility_thresholds (hypertable)'
 \echo '  - experiments'
 \echo '  - experiment_trials'

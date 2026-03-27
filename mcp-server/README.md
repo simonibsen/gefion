@@ -1,18 +1,18 @@
 # Gefion MCP Server
 
-Natural language interface to the g2 ML platform using the Model Context Protocol (MCP).
+Natural language interface to the gefion ML platform using the Model Context Protocol (MCP).
 
 ## What is this?
 
-The G2 MCP Server lets you interact with Gefion's ML pipeline through natural language in Claude Desktop, while still having full access to the CLI for scripting and automation.
+The Gefion MCP Server lets you interact with Gefion's ML pipeline through natural language in Claude Desktop, while still having full access to the CLI for scripting and automation.
 
 **Example conversation:**
 ```
 You: "Build a dataset with AAPL, MSFT, GOOGL for 7 and 30 day horizons"
-Claude: [Creates dataset using g2 ml dataset-build]
+Claude: [Creates dataset using gefion ml dataset-build]
 
 You: "Train a quantile regression model on that dataset"
-Claude: [Trains model using g2 ml train]
+Claude: [Trains model using gefion ml train]
 
 You: "What are the latest predictions for AAPL?"
 Claude: [Queries database and shows predictions]
@@ -90,26 +90,26 @@ The `system_status` tool provides comprehensive analysis with actionable suggest
       "type": "stale_data",
       "description": "Price data is 358 days old (last: 2024-01-01)",
       "priority": "high",
-      "command": "g2 data-update --exchange NASDAQ --limit 10"
+      "command": "gefion data-update --exchange NASDAQ --limit 10"
     },
     {
       "type": "unregistered_feature_definitions",
       "description": "18 feature definition(s) on disk not imported to database",
       "priority": "medium",
-      "command": "g2 feat-def-import --directory feature-definitions"
+      "command": "gefion feat-def-import --directory feature-definitions"
     },
     {
       "type": "no_features",
       "description": "Features not computed (0 rows)",
       "priority": "medium",
-      "command": "g2 feat-compute --symbols AAPL,MSFT --all-features"
+      "command": "gefion feat-compute --symbols AAPL,MSFT --all-features"
     }
   ],
   "next_steps": [
-    "1. Update price data: g2 data-update",
-    "2. Compute features: g2 feat-compute",
-    "3. Build ML dataset: g2 ml dataset-build",
-    "4. Train model: g2 ml train"
+    "1. Update price data: gefion data-update",
+    "2. Compute features: gefion feat-compute",
+    "3. Build ML dataset: gefion ml dataset-build",
+    "4. Train model: gefion ml train"
   ]
 }
 ```
@@ -250,9 +250,9 @@ Or disable tracing:
 
 The easiest way to set up the MCP server:
 
-1. **Install g2 with ML dependencies:**
+1. **Install gefion with ML dependencies:**
    ```bash
-   cd /path/to/g2
+   cd /path/to/gefion
    pip install -e ".[ml_extended]"
    ```
 
@@ -264,7 +264,7 @@ The easiest way to set up the MCP server:
 
 3. **Run the setup command:**
    ```bash
-   g2 mcp-setup
+   gefion mcp-setup
    ```
 
    This automatically:
@@ -275,20 +275,20 @@ The easiest way to set up the MCP server:
 
    Optional flags:
    ```bash
-   g2 mcp-setup --db-url postgresql://user:pass@localhost/db
-   g2 mcp-setup --api-key your_api_key_here
-   g2 mcp-setup --force  # Overwrite existing configuration
+   gefion mcp-setup --db-url postgresql://user:pass@localhost/db
+   gefion mcp-setup --api-key your_api_key_here
+   gefion mcp-setup --force  # Overwrite existing configuration
    ```
 
 4. **Start PostgreSQL:**
    ```bash
-   cd /path/to/g2
+   cd /path/to/gefion
    docker compose up -d postgres
    ```
 
 5. **Restart your AI assistant**
 
-   The g2 tools should now appear in the tool list.
+   The gefion tools should now appear in the tool list.
 
 ### Manual Setup
 
@@ -305,9 +305,9 @@ If you prefer to configure manually:
    ```json
    {
      "mcpServers": {
-       "g2": {
+       "gefion": {
          "command": "python",
-         "args": ["/absolute/path/to/g2/mcp-server/server.py"],
+         "args": ["/absolute/path/to/gefion/mcp-server/server.py"],
          "env": {
            "DATABASE_URL": "postgresql://gefion:gefionpass@localhost:5432/gefion",
            "ALPHAVANTAGE_API_KEY": "your_api_key_here"
@@ -323,7 +323,7 @@ If you prefer to configure manually:
 
 1. **Build the Docker image:**
    ```bash
-   cd /path/to/g2
+   cd /path/to/gefion
    docker build -t gefion-mcp-server -f mcp-server/Dockerfile .
    ```
 
@@ -337,11 +337,11 @@ If you prefer to configure manually:
    ```json
    {
      "mcpServers": {
-       "g2": {
+       "gefion": {
          "command": "docker",
          "args": [
            "compose",
-           "-f", "/absolute/path/to/g2/mcp-server/docker-compose.yml",
+           "-f", "/absolute/path/to/gefion/mcp-server/docker-compose.yml",
            "run", "--rm", "mcp-server"
          ]
        }
@@ -442,13 +442,13 @@ use local computation.
            │ MCP stdio protocol
            ▼
 ┌─────────────────────┐
-│  MCP Server         │  ← Translates to g2 commands
+│  MCP Server         │  ← Translates to gefion commands
 │  (server.py)        │
 └──────────┬──────────┘
-           │ subprocess.run(['g2', 'ml', ...])
+           │ subprocess.run(['gefion', 'ml', ...])
            ▼
 ┌─────────────────────┐
-│  g2 CLI             │  ← ML pipeline (unchanged)
+│  gefion CLI             │  ← ML pipeline (unchanged)
 └──────────┬──────────┘
            │
            ▼
@@ -458,8 +458,8 @@ use local computation.
 ```
 
 **Key Points:**
-- MCP server is a thin wrapper around g2 CLI
-- All g2 commands still work directly (for scripts, cron jobs, etc.)
+- MCP server is a thin wrapper around gefion CLI
+- All gefion commands still work directly (for scripts, cron jobs, etc.)
 - Natural language → MCP tools → `gefion --json` commands
 - Database queries use psql for flexibility
 
@@ -715,7 +715,7 @@ Results:
    # macOS
    cat ~/Library/Application\ Support/Claude/claude_desktop_config.json
 
-   # Verify g2 path is correct and absolute
+   # Verify gefion path is correct and absolute
    ```
 
 2. **Check logs:**
@@ -725,29 +725,29 @@ Results:
 
 3. **Test server manually:**
    ```bash
-   cd /path/to/g2/mcp-server
+   cd /path/to/gefion/mcp-server
    python server.py
    # Should wait for input (MCP uses stdio)
    # Press Ctrl+C to exit
    ```
 
-### "Command not found: g2"
+### "Command not found: gefion"
 
-**Cause:** g2 not in PATH or not installed in the Python environment.
+**Cause:** gefion not in PATH or not installed in the Python environment.
 
 **Solutions:**
 
 1. **Check installation:**
    ```bash
-   which g2
-   pip show g2
+   which gefion
+   pip show gefion
    ```
 
 2. **Use absolute path in config:**
    ```json
    {
      "command": "/absolute/path/to/.venv/bin/python",
-     "args": ["/absolute/path/to/g2/mcp-server/server.py"]
+     "args": ["/absolute/path/to/gefion/mcp-server/server.py"]
    }
    ```
 
@@ -814,23 +814,23 @@ Results:
 
 ## Direct CLI Access
 
-You can still use g2 CLI directly for scripting, automation, and batch operations:
+You can still use gefion CLI directly for scripting, automation, and batch operations:
 
 ```bash
 # Cron job example: daily predictions
-0 9 * * * cd /path/to/g2 && .venv/bin/g2 ml predict \
+0 9 * * * cd /path/to/gefion && .venv/bin/gefion ml predict \
   --model-name prod_model --model-version 20251214 \
   --prediction-date $(date +\%Y-\%m-\%d) \
   --exchange NASDAQ --limit 500
 
 # Batch dataset building
 for exchange in NASDAQ NYSE; do
-  g2 ml dataset-build --name "${exchange}_full" --version v1 \
+  gefion ml dataset-build --name "${exchange}_full" --version v1 \
     --exchange $exchange --export
 done
 
 # Weekly model retraining
-g2 ml train --dataset-name nasdaq_full --dataset-version v1 \
+gefion ml train --dataset-name nasdaq_full --dataset-version v1 \
   --model-name prod_model --model-version $(date +\%Y\%m\%d)
 ```
 
@@ -865,7 +865,7 @@ python server.py
 - **Database credentials:** Never commit `.env` or config files with real credentials
 - **API keys:** Use environment variables, not hardcoded values
 - **SQL injection:** The query tools use parameterized queries (safe)
-- **Sandboxing:** MCP server runs with same permissions as g2 CLI
+- **Sandboxing:** MCP server runs with same permissions as gefion CLI
 
 ## Performance
 
@@ -876,20 +876,20 @@ python server.py
 
 ## Contributing
 
-See main g2 CONTRIBUTING.md for development workflow.
+See main gefion CONTRIBUTING.md for development workflow.
 
 For MCP server specific issues:
-1. Check existing issues: https://github.com/your-org/g2/issues
+1. Check existing issues: https://github.com/your-org/gefion/issues
 2. Include MCP server version, Claude Desktop version, OS
 3. Attach logs from Claude Desktop developer console
 
 ## License
 
-Same as g2 project (see LICENSE file in root directory).
+Same as gefion project (see LICENSE file in root directory).
 
 ## Resources
 
-- **g2 Documentation:** [../docs/](../docs/)
+- **gefion Documentation:** [../docs/](../docs/)
 - **MCP Protocol:** https://modelcontextprotocol.io/
 - **Claude Desktop:** https://claude.ai/download
-- **g2 ML Quickstart:** [../docs/ML_QUICKSTART.md](../docs/ML_QUICKSTART.md)
+- **gefion ML Quickstart:** [../docs/ML_QUICKSTART.md](../docs/ML_QUICKSTART.md)

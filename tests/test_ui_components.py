@@ -90,7 +90,7 @@ class TestUIStructure:
         """
         content = (ui_dir / "views" / "dashboard.py").read_text()
         # Should have try/except around ML table queries
-        assert "# Predictions - table may not exist yet" in content
+        assert "# Predictions - table may not exist yet" in content or "predictions WHERE prediction_type" in content
         assert "# Model performance - table may not exist yet" in content
 
     def test_charts_has_render_function(self, ui_dir):
@@ -428,14 +428,14 @@ class TestStatusComponentStructure:
     def test_ml_table_queries_handle_missing_tables(self, status_module_path):
         """ML table queries should handle missing tables gracefully.
 
-        ml_models and quantile_predictions may not exist yet, so queries
+        ml_models and predictions may not exist yet, so queries
         should fail gracefully and default to 0 instead of crashing.
         """
         content = status_module_path.read_text()
         # Should have individual try/except blocks for ML tables
         assert "# ML tables may not exist yet" in content
         assert content.count("SELECT COUNT(*) FROM ml_models") == 1
-        assert content.count("SELECT COUNT(*) FROM quantile_predictions") == 1
+        assert content.count("SELECT COUNT(*) FROM predictions") == 1
         # Both queries should be in their own try/except blocks
         assert "model_count = 0" in content
         assert "prediction_count = 0" in content

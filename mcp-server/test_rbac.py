@@ -21,10 +21,10 @@ class TestRoleConfiguration:
     """Test role detection from environment variable."""
 
     def test_default_role_is_operator(self):
-        """When G2_MCP_ROLE is not set, default to operator (safer default)."""
+        """When GEFION_MCP_ROLE is not set, default to operator (safer default)."""
         with patch.dict(os.environ, {}, clear=True):
-            # Remove G2_MCP_ROLE if present
-            os.environ.pop('G2_MCP_ROLE', None)
+            # Remove GEFION_MCP_ROLE if present
+            os.environ.pop('GEFION_MCP_ROLE', None)
 
             # Import after env is set
             import importlib
@@ -34,8 +34,8 @@ class TestRoleConfiguration:
             assert server.MCP_ROLE == "operator"
 
     def test_operator_role_from_env(self):
-        """When G2_MCP_ROLE=operator, role should be operator."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'operator'}):
+        """When GEFION_MCP_ROLE=operator, role should be operator."""
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
             import importlib
             import server
             importlib.reload(server)
@@ -43,8 +43,8 @@ class TestRoleConfiguration:
             assert server.MCP_ROLE == "operator"
 
     def test_developer_role_from_env(self):
-        """When G2_MCP_ROLE=developer, role should be developer."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'developer'}):
+        """When GEFION_MCP_ROLE=developer, role should be developer."""
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'developer'}):
             import importlib
             import server
             importlib.reload(server)
@@ -57,7 +57,7 @@ class TestToolFiltering:
 
     def test_dev_status_available_for_developer(self):
         """Developer role should see dev_status tool."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'developer'}):
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'developer'}):
             import importlib
             import server
             importlib.reload(server)
@@ -69,7 +69,7 @@ class TestToolFiltering:
 
     def test_dev_status_blocked_for_operator(self):
         """Operator role should NOT see dev_status tool."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'operator'}):
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
             import importlib
             import server
             importlib.reload(server)
@@ -81,7 +81,7 @@ class TestToolFiltering:
 
     def test_query_database_available_for_operator(self):
         """Operator role should see query_database tool."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'operator'}):
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
             import importlib
             import server
             importlib.reload(server)
@@ -93,7 +93,7 @@ class TestToolFiltering:
 
     def test_all_operational_tools_available_for_operator(self):
         """Operator role should see all operational tools."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'operator'}):
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
             import importlib
             import server
             importlib.reload(server)
@@ -123,7 +123,7 @@ class TestAccessDenied:
 
     def test_dev_status_call_denied_for_operator(self):
         """Calling dev_status as operator should return access denied."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'operator'}):
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
             import importlib
             import server
             importlib.reload(server)
@@ -139,7 +139,7 @@ class TestAccessDenied:
 
     def test_dev_status_call_allowed_for_developer(self):
         """Calling dev_status as developer should work."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'developer'}):
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'developer'}):
             import importlib
             import server
             importlib.reload(server)
@@ -161,7 +161,7 @@ class TestGetRoleInfo:
 
     def test_get_role_info_returns_operator(self):
         """get_role_info should return operator role and guidelines."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'operator'}):
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
             import importlib
             import server
             importlib.reload(server)
@@ -182,7 +182,7 @@ class TestGetRoleInfo:
 
     def test_get_role_info_returns_developer(self):
         """get_role_info should return developer role."""
-        with patch.dict(os.environ, {'G2_MCP_ROLE': 'developer'}):
+        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'developer'}):
             import importlib
             import server
             importlib.reload(server)
@@ -198,7 +198,7 @@ class TestGetRoleInfo:
     def test_get_role_info_available_in_tool_list(self):
         """get_role_info should appear in tool list for both roles."""
         for role in ["developer", "operator"]:
-            with patch.dict(os.environ, {'G2_MCP_ROLE': role}):
+            with patch.dict(os.environ, {'GEFION_MCP_ROLE': role}):
                 import importlib
                 import server
                 importlib.reload(server)

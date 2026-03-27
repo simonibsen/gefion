@@ -224,6 +224,46 @@ class TestMLSignalStrategyClassifier:
         assert "AAPL" in buy_symbols
 
 
+class TestMLSignalUnifiedPredictionsTable:
+    """Test that ML signal queries use the unified predictions table."""
+
+    def test_get_predictions_queries_unified_table(self):
+        """get_predictions_for_date should query from 'predictions' table."""
+        import inspect
+        from gefion.strategies.ml_signal import get_predictions_for_date
+
+        source = inspect.getsource(get_predictions_for_date)
+        assert "FROM predictions " in source or "FROM predictions\n" in source
+        assert "prediction_type = 'quantile'" in source
+        assert "quantile_predictions" not in source
+
+    def test_get_classifier_predictions_queries_unified_table(self):
+        """get_classifier_predictions_for_date should query from 'predictions' table."""
+        import inspect
+        from gefion.strategies.ml_signal import get_classifier_predictions_for_date
+
+        source = inspect.getsource(get_classifier_predictions_for_date)
+        assert "FROM predictions " in source or "FROM predictions\n" in source
+        assert "prediction_type = 'trend_class'" in source
+        assert "trend_class_predictions" not in source
+
+    def test_quantile_predictions_extracts_jsonb_fields(self):
+        """get_predictions_for_date should extract q10/q50/q90 from JSONB."""
+        import inspect
+        from gefion.strategies.ml_signal import get_predictions_for_date
+
+        source = inspect.getsource(get_predictions_for_date)
+        assert "prediction_values" in source
+
+    def test_classifier_predictions_extracts_jsonb_fields(self):
+        """get_classifier_predictions_for_date should extract class/probs from JSONB."""
+        import inspect
+        from gefion.strategies.ml_signal import get_classifier_predictions_for_date
+
+        source = inspect.getsource(get_classifier_predictions_for_date)
+        assert "prediction_values" in source
+
+
 class TestMLSignalStrategyRegistration:
     """Test strategy registration in dispatcher."""
 

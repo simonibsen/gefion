@@ -109,11 +109,13 @@ def get_gefion_insights() -> Optional[GefionInsights]:
         with get_connection() as conn:
             with conn.cursor() as cur:
                 # Predictions - table may not exist yet
+                # Predictions - table may not exist yet
                 try:
                     cur.execute("""
                         SELECT COUNT(*), MAX(prediction_date)
-                        FROM quantile_predictions
-                        WHERE prediction_date >= CURRENT_DATE - INTERVAL '7 days'
+                        FROM predictions
+                        WHERE prediction_type = 'quantile'
+                          AND prediction_date >= CURRENT_DATE - INTERVAL '7 days'
                     """)
                     pred_count, pred_date = cur.fetchone()
                     insights.pred_count = pred_count or 0
@@ -121,12 +123,19 @@ def get_gefion_insights() -> Optional[GefionInsights]:
 
                     if insights.pred_count > 0:
                         cur.execute("""
-                            SELECT s.symbol, qp.q50, qp.q90, qp.horizon_days
-                            FROM quantile_predictions qp
-                            JOIN stocks s ON qp.data_id = s.id
-                            WHERE qp.prediction_date = (SELECT MAX(prediction_date) FROM quantile_predictions)
-                              AND qp.horizon_days = 7
-                            ORDER BY qp.q50 DESC
+                            SELECT s.symbol,
+                                   (p.prediction_values->>'q50')::NUMERIC,
+                                   (p.prediction_values->>'q90')::NUMERIC,
+                                   p.horizon_days
+                            FROM predictions p
+                            JOIN stocks s ON p.data_id = s.id
+                            WHERE p.prediction_type = 'quantile'
+                              AND p.prediction_date = (
+                                  SELECT MAX(prediction_date) FROM predictions
+                                  WHERE prediction_type = 'quantile'
+                              )
+                              AND p.horizon_days = 7
+                            ORDER BY (p.prediction_values->>'q50')::NUMERIC DESC
                             LIMIT 3
                         """)
                         insights.bullish = list(cur.fetchall())

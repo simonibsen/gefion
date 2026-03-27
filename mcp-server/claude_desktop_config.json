@@ -2,7 +2,7 @@
   "mcpServers": {
     "gefion": {
       "command": "python",
-      "args": ["/Users/YOUR_USERNAME/src/g2/mcp-server/server.py"],
+      "args": ["/Users/YOUR_USERNAME/src/gefion/mcp-server/server.py"],
       "env": {
         "DATABASE_URL": "postgresql://gefion:gefionpass@localhost:5432/gefion",
         "ALPHAVANTAGE_API_KEY": "your_api_key_here"

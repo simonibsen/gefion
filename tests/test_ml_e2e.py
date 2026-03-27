@@ -140,6 +140,28 @@ class TestE2EPredictionDateQuery:
             assert result["count"] == 20
 
 
+class TestE2EUsesUnifiedPredictionsTable:
+    """Tests that e2e module uses the unified predictions table."""
+
+    def test_quality_check_queries_unified_table(self):
+        """_run_quality_check should query 'predictions' not 'quantile_predictions'."""
+        import inspect
+        from gefion.ml.e2e import _run_quality_check
+
+        source = inspect.getsource(_run_quality_check)
+        assert "FROM predictions " in source or "FROM predictions\n" in source
+        assert "quantile_predictions" not in source
+
+    def test_cleanup_deletes_from_unified_table(self):
+        """_run_cleanup should delete from 'predictions' not 'quantile_predictions'."""
+        import inspect
+        from gefion.ml.e2e import _run_cleanup
+
+        source = inspect.getsource(_run_cleanup)
+        assert "DELETE FROM predictions" in source
+        assert "DELETE FROM quantile_predictions" not in source
+
+
 class TestPredictClassifierCommand:
     """Tests for the ml predict-classifier command."""
 

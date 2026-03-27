@@ -33,14 +33,14 @@ def test_ml_predict_accepts_symbols_or_exchange():
 
 
 def test_ml_predict_stores_quantile_predictions():
-    """Test that ml predict stores predictions in quantile_predictions table."""
-    # After predict, should have rows in quantile_predictions
+    """Test that ml predict stores predictions in unified predictions table."""
+    # After predict, should have rows in predictions with prediction_type='quantile'
     pass  # TODO: Implement with actual DB fixture
 
 
 def test_ml_predict_stores_trend_predictions():
-    """Test that ml predict stores trend classifications if model supports it."""
-    # After predict, should have rows in trend_class_predictions
+    """Test that ml predict stores trend classifications in unified predictions table."""
+    # After predict, should have rows in predictions with prediction_type='trend_class'
     pass  # TODO: Implement with actual DB fixture
 
 
@@ -164,3 +164,21 @@ class TestPredictDateRange:
         )
         assert result.exit_code != 0
         assert "before" in result.output.lower()
+
+
+class TestPredictListTypeFilter:
+    """Tests for predict-list --type option."""
+
+    def test_predict_list_has_type_option(self):
+        """predict-list should accept a --type option for filtering prediction_type."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["ml", "predict-list", "--help"])
+        assert result.exit_code == 0
+        assert "--type" in result.output
+
+    def test_predict_list_type_option_described(self):
+        """--type option should mention prediction type in its help text."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["ml", "predict-list", "--help"])
+        assert result.exit_code == 0
+        assert "prediction" in result.output.lower()

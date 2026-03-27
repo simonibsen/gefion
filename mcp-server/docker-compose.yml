@@ -24,7 +24,7 @@ services:
     networks:
       - gefion-network
 
-  # PostgreSQL database (shared with main g2)
+  # PostgreSQL database (shared with main gefion)
   postgres:
     image: timescale/timescaledb:latest-pg15
     container_name: gefion-postgres
@@ -38,7 +38,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ../sql:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U g2 -d g2"]
+      test: ["CMD-SHELL", "pg_isready -U gefion -d gefion"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -62,8 +62,8 @@ volumes:
 # View logs:
 #   docker-compose logs -f mcp-server
 
-# Run g2 command in container:
-#   docker-compose run --rm mcp-server g2 ml dataset-build --help
+# Run gefion command in container:
+#   docker-compose run --rm mcp-server gefion ml dataset-build --help
 
 # Stop services:
 #   docker-compose down

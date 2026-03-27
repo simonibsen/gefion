@@ -104,14 +104,18 @@ def fetch_predictions_for_chart(
         List of dicts with keys: date, q10, q50, q90
     """
     query = """
-        SELECT qp.prediction_date, qp.q10, qp.q50, qp.q90
-        FROM quantile_predictions qp
-        JOIN stocks s ON qp.data_id = s.id
-        JOIN ml_models m ON qp.model_id = m.id
-        WHERE s.symbol = %s
+        SELECT p.prediction_date,
+               (p.prediction_values->>'q10')::NUMERIC,
+               (p.prediction_values->>'q50')::NUMERIC,
+               (p.prediction_values->>'q90')::NUMERIC
+        FROM predictions p
+        JOIN stocks s ON p.data_id = s.id
+        JOIN ml_models m ON p.model_id = m.id
+        WHERE p.prediction_type = 'quantile'
+          AND s.symbol = %s
           AND m.name = %s
-          AND qp.horizon_days = %s
-        ORDER BY qp.prediction_date ASC
+          AND p.horizon_days = %s
+        ORDER BY p.prediction_date ASC
     """
 
     with conn.cursor() as cur:

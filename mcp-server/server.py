@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-G2 MCP Server - Natural language interface to g2 ML platform.
+Gefion MCP Server - Natural language interface to gefion ML platform.
 
 Provides MCP tools for:
 - ML workflow (dataset build, train, predict, evaluate)
@@ -22,23 +22,23 @@ from typing import Any, Dict, List, Optional, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Add parent directory to path to import g2 modules
+# Add parent directory to path to import gefion modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-# Import g2 health check module
+# Import gefion health check module
 try:
-    from g2 import health
+    from gefion import health
 except ImportError:
-    # Fallback if g2 module not in path
+    # Fallback if gefion module not in path
     health = None
 
 
-class G2Executor:
-    """Execute g2 CLI commands and return JSON results."""
+class GefionExecutor:
+    """Execute gefion CLI commands and return JSON results."""
 
     def __init__(self, db_url: Optional[str] = None, api_key: Optional[str] = None):
         self.env = {}
@@ -48,8 +48,8 @@ class G2Executor:
             self.env['ALPHAVANTAGE_API_KEY'] = api_key
 
     async def run(self, *args: str) -> Dict[str, Any]:
-        """Run g2 command with --json flag and return parsed output."""
-        cmd = ['g2'] + list(args) + ['--json']
+        """Run gefion command with --json flag and return parsed output."""
+        cmd = ['gefion'] + list(args) + ['--json']
 
         try:
             result = subprocess.run(
@@ -159,7 +159,7 @@ def check_service_health(service: str) -> Dict[str, Any]:
     if health is None:
         return {
             "running": True,
-            "message": f"{service} health check unavailable (g2.health module not found)",
+            "message": f"{service} health check unavailable (gefion.health module not found)",
             "warning": "Health checks disabled"
         }
 
@@ -208,7 +208,7 @@ def format_service_error(service: str, health_status: Dict[str, Any]) -> str:
 
 # Initialize server and health cache
 app = Server("gefion-mcp-server")
-executor = G2Executor()
+executor = GefionExecutor()
 health_cache = HealthCheckCache(ttl_seconds=60)
 
 
@@ -217,7 +217,7 @@ health_cache = HealthCheckCache(ttl_seconds=60)
 # ============================================================================
 
 # Role configuration from environment (default: operator for safety)
-MCP_ROLE = os.environ.get('G2_MCP_ROLE', 'operator').lower()
+MCP_ROLE = os.environ.get('GEFION_MCP_ROLE', 'operator').lower()
 if MCP_ROLE not in ('developer', 'operator'):
     MCP_ROLE = 'operator'  # Default to operator for invalid values
 
@@ -346,7 +346,7 @@ async def list_tools() -> List[Tool]:
             description=(
                 "Generate predictions for symbols on a specific date. "
                 "Fetches features from database, loads model artifacts, generates q10/q50/q90 predictions. "
-                "Stores results in quantile_predictions table."
+                "Stores results in predictions table."
             ),
             inputSchema={
                 "type": "object",
@@ -539,7 +539,7 @@ async def list_tools() -> List[Tool]:
             description=(
                 "Generate predictions using a trained ensemble model. "
                 "Loads each base model, generates predictions, computes weighted average. "
-                "Stores results in quantile_predictions table."
+                "Stores results in predictions table."
             ),
             inputSchema={
                 "type": "object",
@@ -588,14 +588,16 @@ async def list_tools() -> List[Tool]:
         Tool(
             name="query_predictions",
             description=(
-                "Query stored predictions from database. "
-                "Returns predictions with symbol, date, horizon, and quantile values (q10/q50/q90)."
+                "Query stored predictions from the unified predictions table. "
+                "Returns predictions with symbol, date, horizon, and prediction values. "
+                "Use prediction_type to filter by 'quantile' or 'trend_class'."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "symbol": {"type": "string", "description": "Filter by symbol (e.g., AAPL)"},
                     "model_name": {"type": "string", "description": "Filter by model name"},
+                    "prediction_type": {"type": "string", "description": "Filter by prediction type ('quantile' or 'trend_class')", "default": "quantile"},
                     "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
                     "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
                     "horizon": {"type": "integer", "description": "Filter by horizon in days (7, 30, or 90)"},
@@ -829,7 +831,7 @@ async def list_tools() -> List[Tool]:
                 "properties": {
                     "limit": {"type": "integer", "description": "Number of recent traces to inspect (1-100)", "default": 10},
                     "trace_id": {"type": "string", "description": "Specific trace ID to inspect (default: most recent)"},
-                    "service_name": {"type": "string", "description": "Service name tag to filter by", "default": "g2"},
+                    "service_name": {"type": "string", "description": "Service name tag to filter by", "default": "gefion"},
                     "backend": {"type": "string", "description": "Trace backend to use (default: tempo)", "default": "tempo"},
                     "backend_url": {"type": "string", "description": "Backend base URL (default: http://localhost:3200 for Tempo)"},
                     "show_spans": {"type": "boolean", "description": "Include detailed span list in output", "default": True},
@@ -849,7 +851,7 @@ async def list_tools() -> List[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "service_name": {"type": "string", "description": "Service name to search for", "default": "g2"},
+                    "service_name": {"type": "string", "description": "Service name to search for", "default": "gefion"},
                     "tags": {"type": "string", "description": "Tags to filter by (e.g., 'symbol=AAPL' or 'function_name=indicator')"},
                     "min_duration": {"type": "string", "description": "Minimum duration (e.g., '1s', '500ms')"},
                     "max_duration": {"type": "string", "description": "Maximum duration (e.g., '10s', '5000ms')"},
@@ -2008,41 +2010,62 @@ async def _ml_e2e_test(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _query_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
     """Query predictions from database using SQL."""
     # Build SQL query
-    where_clauses = []
+    prediction_type = args.get('prediction_type', 'quantile')
+    where_clauses = [f"p.prediction_type = '{prediction_type}'"]
     if args.get('symbol'):
         where_clauses.append(f"s.symbol = '{args['symbol']}'")
     if args.get('model_name'):
         where_clauses.append(f"m.name = '{args['model_name']}'")
     if args.get('start_date'):
-        where_clauses.append(f"qp.prediction_date >= '{args['start_date']}'")
+        where_clauses.append(f"p.prediction_date >= '{args['start_date']}'")
     if args.get('end_date'):
-        where_clauses.append(f"qp.prediction_date <= '{args['end_date']}'")
+        where_clauses.append(f"p.prediction_date <= '{args['end_date']}'")
     if args.get('horizon'):
-        where_clauses.append(f"qp.horizon_days = {args['horizon']}")
+        where_clauses.append(f"p.horizon_days = {args['horizon']}")
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     limit = args.get('limit', 100)
 
-    sql = f"""
-        SELECT
-            s.symbol,
-            qp.prediction_date,
-            qp.horizon_days,
-            qp.q10,
-            qp.q50,
-            qp.q90,
-            (qp.q90 - qp.q10) as iqr,
-            m.name as model_name,
-            m.version as model_version
-        FROM quantile_predictions qp
-        JOIN stocks s ON qp.data_id = s.id
-        JOIN ml_models m ON qp.model_id = m.id
-        WHERE {where_sql}
-        ORDER BY qp.prediction_date DESC, s.symbol, qp.horizon_days
-        LIMIT {limit}
-    """
+    if prediction_type == 'quantile':
+        sql = f"""
+            SELECT
+                s.symbol,
+                p.prediction_date,
+                p.horizon_days,
+                (p.prediction_values->>'q10')::NUMERIC,
+                (p.prediction_values->>'q50')::NUMERIC,
+                (p.prediction_values->>'q90')::NUMERIC,
+                ((p.prediction_values->>'q90')::NUMERIC - (p.prediction_values->>'q10')::NUMERIC) as iqr,
+                m.name as model_name,
+                m.version as model_version
+            FROM predictions p
+            JOIN stocks s ON p.data_id = s.id
+            JOIN ml_models m ON p.model_id = m.id
+            WHERE {where_sql}
+            ORDER BY p.prediction_date DESC, s.symbol, p.horizon_days
+            LIMIT {limit}
+        """
+    else:
+        sql = f"""
+            SELECT
+                s.symbol,
+                p.prediction_date,
+                p.horizon_days,
+                p.prediction_values->>'predicted_class',
+                (p.prediction_values->>'p_strong_up')::NUMERIC,
+                (p.prediction_values->>'p_weak_up')::NUMERIC,
+                (p.prediction_values->>'margin')::NUMERIC,
+                m.name as model_name,
+                m.version as model_version
+            FROM predictions p
+            JOIN stocks s ON p.data_id = s.id
+            JOIN ml_models m ON p.model_id = m.id
+            WHERE {where_sql}
+            ORDER BY p.prediction_date DESC, s.symbol, p.horizon_days
+            LIMIT {limit}
+        """
 
-    # Execute via psql (g2 doesn't have a direct SQL query command)
+    # Execute via psql (gefion doesn't have a direct SQL query command)
     import os
     db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:5432/gefion')
 
@@ -2065,7 +2088,7 @@ async def _query_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
         predictions = []
         for line in lines:
             parts = line.split(',')
-            if len(parts) >= 8:
+            if prediction_type == 'quantile' and len(parts) >= 8:
                 predictions.append({
                     'symbol': parts[0],
                     'prediction_date': parts[1],
@@ -2074,6 +2097,18 @@ async def _query_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
                     'q50': float(parts[4]),
                     'q90': float(parts[5]),
                     'iqr': float(parts[6]),
+                    'model_name': parts[7],
+                    'model_version': parts[8] if len(parts) > 8 else None,
+                })
+            elif prediction_type == 'trend_class' and len(parts) >= 8:
+                predictions.append({
+                    'symbol': parts[0],
+                    'prediction_date': parts[1],
+                    'horizon_days': int(parts[2]),
+                    'predicted_class': parts[3],
+                    'p_strong_up': float(parts[4]),
+                    'p_weak_up': float(parts[5]),
+                    'margin': float(parts[6]),
                     'model_name': parts[7],
                     'model_version': parts[8] if len(parts) > 8 else None,
                 })
@@ -2418,7 +2453,7 @@ async def _query_database(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _span_check(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Check recent traces using g2 span-check command (backend-agnostic)."""
+    """Check recent traces using gefion span-check command (backend-agnostic)."""
     async def _check():
         cmd = ['span-check']
 
@@ -2451,7 +2486,7 @@ async def _trace_search(args: Dict[str, Any]) -> Dict[str, Any]:
 
     backend = args.get('backend', 'tempo')
     backend_url = args.get('backend_url', 'http://localhost:3200')
-    service_name = args.get('service_name', 'g2')
+    service_name = args.get('service_name', 'gefion')
     limit = args.get('limit', 20)
 
     # Currently only Tempo is implemented, but structured for future backends
@@ -2587,7 +2622,7 @@ async def _get_tempo_trace_detail(
                     })
 
         # Count span types
-        app_span_count = sum(1 for s in spans if 'g2.observability' in s.get('scope', ''))
+        app_span_count = sum(1 for s in spans if 'gefion.observability' in s.get('scope', ''))
         db_span_count = sum(1 for s in spans if 'opentelemetry.instrumentation' in s.get('scope', ''))
         error_count = sum(1 for s in spans if s.get('status', {}).get('code') in ['STATUS_CODE_ERROR', 2, '2'])
 
@@ -2818,12 +2853,12 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
     # 2. Analyze Data State (if PostgreSQL is up)
     if infra_health.get("postgres", {}).get("running", False):
         try:
-            # Get data metrics via g2 CLI
+            # Get data metrics via gefion CLI
             db_check = await executor.run('db-health')
 
             # Query for data freshness
             query_result = subprocess.run(
-                ['g2', 'query-database', '--sql',
+                ['gefion', 'query-database', '--sql',
                  "SELECT "
                  "(SELECT COUNT(*) FROM stocks) as total_stocks, "
                  "(SELECT COUNT(*) FROM stock_ohlcv) as ohlcv_rows, "
@@ -2867,7 +2902,7 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
                                     "type": "stale_data",
                                     "description": f"Price data is {days_old} days old (last: {latest_date_str})",
                                     "priority": "high" if days_old > 7 else "medium",
-                                    "command": "g2 data-update --exchange NASDAQ --limit 10"
+                                    "command": "gefion data-update --exchange NASDAQ --limit 10"
                                 })
 
                         # Check for missing data
@@ -2876,14 +2911,14 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
                                 "type": "no_data",
                                 "description": "No stocks in database",
                                 "priority": "critical",
-                                "command": "g2 data-update --exchange NASDAQ --limit 10"
+                                "command": "gefion data-update --exchange NASDAQ --limit 10"
                             })
                         elif ohlcv_rows == 0:
                             status_result["issues"].append({
                                 "type": "no_prices",
                                 "description": "No price data ingested",
                                 "priority": "high",
-                                "command": "g2 data-update --exchange NASDAQ --limit 10"
+                                "command": "gefion data-update --exchange NASDAQ --limit 10"
                             })
 
                         # Check for missing features
@@ -2892,7 +2927,7 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
                                 "type": "no_features",
                                 "description": "Features not computed (0 rows)",
                                 "priority": "medium",
-                                "command": "g2 feat-compute --symbols AAPL,MSFT --all-features"
+                                "command": "gefion feat-compute --symbols AAPL,MSFT --all-features"
                             })
 
                 except (json.JSONDecodeError, IndexError, ValueError) as e:
@@ -2911,7 +2946,7 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
 
             # Count feature definitions in DB
             feat_def_db_result = subprocess.run(
-                ['g2', 'query-database', '--sql',
+                ['gefion', 'query-database', '--sql',
                  "SELECT COUNT(*) FROM feature_definitions",
                  '--json'],
                 capture_output=True,
@@ -2935,7 +2970,7 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
                                 "type": "unregistered_feature_definitions",
                                 "description": f"{unregistered} feature definition(s) on disk not imported to database",
                                 "priority": "medium",
-                                "command": "g2 feat-def-import --directory feature-definitions"
+                                "command": "gefion feat-def-import --directory feature-definitions"
                             })
 
                 except (json.JSONDecodeError, IndexError, ValueError) as e:
@@ -2949,7 +2984,7 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
 
             # Count feature functions in DB
             feat_fx_db_result = subprocess.run(
-                ['g2', 'query-database', '--sql',
+                ['gefion', 'query-database', '--sql',
                  "SELECT COUNT(*) FROM feature_functions",
                  '--json'],
                 capture_output=True,
@@ -2973,7 +3008,7 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
                                 "type": "unregistered_feature_functions",
                                 "description": f"{unregistered} feature function(s) on disk not imported to database",
                                 "priority": "medium",
-                                "command": "g2 feat-fx-import --directory feature-functions"
+                                "command": "gefion feat-fx-import --directory feature-functions"
                             })
 
                 except (json.JSONDecodeError, IndexError, ValueError) as e:
@@ -2986,7 +3021,7 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
         # Check for stale/missing fundamentals data (sector, industry)
         try:
             fundamentals_result = subprocess.run(
-                ['g2', 'query-database', '--sql',
+                ['gefion', 'query-database', '--sql',
                  "SELECT "
                  "(SELECT COUNT(*) FROM stocks WHERE sector IS NULL) as missing_sector, "
                  "(SELECT COUNT(*) FROM stocks) as total_stocks, "
@@ -3018,14 +3053,14 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
                                 "type": "missing_fundamentals",
                                 "description": f"No stocks have fundamentals data (sector/industry)",
                                 "priority": "low",
-                                "command": "g2 fundamentals-update"
+                                "command": "gefion fundamentals-update"
                             })
                         elif missing_sector > 0 and has_fundamentals > 0:
                             status_result["issues"].append({
                                 "type": "incomplete_fundamentals",
                                 "description": f"{missing_sector} stocks missing sector/industry data",
                                 "priority": "low",
-                                "command": "g2 fundamentals-update"
+                                "command": "gefion fundamentals-update"
                             })
 
                         # Check for stale fundamentals (>30 days old)
@@ -3040,7 +3075,7 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
                                         "type": "stale_fundamentals",
                                         "description": f"Fundamentals data is {days_old} days old",
                                         "priority": "low",
-                                        "command": "g2 fundamentals-update"
+                                        "command": "gefion fundamentals-update"
                                     })
                             except (ValueError, TypeError):
                                 pass
@@ -3074,8 +3109,8 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
     if not sorted_issues:
         status_result["next_steps"] = [
             "✅ System is healthy and up-to-date",
-            "Optional: Run 'g2 ml dataset-build' to create ML datasets",
-            "Optional: Train models with 'g2 ml train'"
+            "Optional: Run 'gefion ml dataset-build' to create ML datasets",
+            "Optional: Train models with 'gefion ml train'"
         ]
         status_result["status"] = "healthy"
     else:
@@ -3087,14 +3122,14 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
             steps.append("1. Fix infrastructure: Start required services")
 
         if any(t in ["no_data", "no_prices", "stale_data"] for t in issue_types):
-            steps.append(f"{len(steps)+1}. Update price data: g2 data-update")
+            steps.append(f"{len(steps)+1}. Update price data: gefion data-update")
 
         if "no_features" in issue_types:
-            steps.append(f"{len(steps)+1}. Compute features: g2 feat-compute")
+            steps.append(f"{len(steps)+1}. Compute features: gefion feat-compute")
 
         if steps:
-            steps.append(f"{len(steps)+1}. Build ML dataset: g2 ml dataset-build")
-            steps.append(f"{len(steps)+1}. Train model: g2 ml train")
+            steps.append(f"{len(steps)+1}. Build ML dataset: gefion ml dataset-build")
+            steps.append(f"{len(steps)+1}. Train model: gefion ml train")
 
         status_result["next_steps"] = steps
         status_result["status"] = "needs_attention"
@@ -3576,7 +3611,7 @@ async def _backtest_compare(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
     """Propose a new experiment for approval."""
     async def _propose():
-        cmd = ["g2", "experiment", "propose"]
+        cmd = ["gefion", "experiment", "propose"]
 
         # Required arguments
         cmd.extend(["--name", args["name"]])
@@ -3615,7 +3650,7 @@ async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_list(args: Dict[str, Any]) -> Dict[str, Any]:
     """List experiments with optional filters."""
     async def _list():
-        cmd = ["g2", "experiment", "list"]
+        cmd = ["gefion", "experiment", "list"]
 
         if args.get("status"):
             cmd.extend(["--status", args["status"]])
@@ -3633,7 +3668,7 @@ async def _experiment_list(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_approve(args: Dict[str, Any]) -> Dict[str, Any]:
     """Approve an experiment for execution."""
     async def _approve():
-        cmd = ["g2", "experiment", "approve", "--id", str(args["experiment_id"])]
+        cmd = ["gefion", "experiment", "approve", "--id", str(args["experiment_id"])]
         executor = CLIExecutor()
         return await executor.run(*cmd)
 
@@ -3643,7 +3678,7 @@ async def _experiment_approve(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_run(args: Dict[str, Any]) -> Dict[str, Any]:
     """Run an approved experiment."""
     async def _run():
-        cmd = ["g2", "experiment", "run", "--id", str(args["experiment_id"])]
+        cmd = ["gefion", "experiment", "run", "--id", str(args["experiment_id"])]
         executor = CLIExecutor()
         return await executor.run(*cmd)
 
@@ -3653,7 +3688,7 @@ async def _experiment_run(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_results(args: Dict[str, Any]) -> Dict[str, Any]:
     """Get results for a completed experiment."""
     async def _results():
-        cmd = ["g2", "experiment", "results", "--id", str(args["experiment_id"])]
+        cmd = ["gefion", "experiment", "results", "--id", str(args["experiment_id"])]
 
         if args.get("show_trials"):
             cmd.append("--show-trials")
@@ -3668,7 +3703,7 @@ async def _experiment_chain(args: Dict[str, Any]) -> Dict[str, Any]:
     """Create a child experiment chained to a parent."""
     async def _chain():
         cmd = [
-            "g2", "experiment", "chain",
+            "gefion", "experiment", "chain",
             "--parent-id", str(args["parent_id"]),
             "--name", args["name"],
             "--search-space", args["search_space"],
@@ -3698,7 +3733,7 @@ async def _experiment_chain(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_children(args: Dict[str, Any]) -> Dict[str, Any]:
     """List child experiments of a parent."""
     async def _children():
-        cmd = ["g2", "experiment", "children", "--parent-id", str(args["parent_id"])]
+        cmd = ["gefion", "experiment", "children", "--parent-id", str(args["parent_id"])]
         executor = CLIExecutor()
         return await executor.run(*cmd)
 
@@ -3708,7 +3743,7 @@ async def _experiment_children(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_status(args: Dict[str, Any]) -> Dict[str, Any]:
     """Get detailed status of an experiment."""
     async def _status():
-        cmd = ["g2", "experiment", "status", "--id", str(args["experiment_id"])]
+        cmd = ["gefion", "experiment", "status", "--id", str(args["experiment_id"])]
         executor = CLIExecutor()
         return await executor.run(*cmd)
 
@@ -3722,7 +3757,7 @@ async def _experiment_status(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _chart_price(args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate candlestick price chart with rich context."""
     async def _generate():
-        cmd = ["g2", "chart", "price", args["symbol"], "--json", "--no-open"]
+        cmd = ["gefion", "chart", "price", args["symbol"], "--json", "--no-open"]
         if args.get("start_date"):
             cmd.extend(["--start-date", args["start_date"]])
         if args.get("end_date"):
@@ -3738,7 +3773,7 @@ async def _chart_price(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _chart_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate prediction chart with rich context."""
     async def _generate():
-        cmd = ["g2", "chart", "predictions", args["symbol"],
+        cmd = ["gefion", "chart", "predictions", args["symbol"],
                "--model", args["model"], "--json", "--no-open"]
         if args.get("horizon"):
             cmd.extend(["--horizon", str(args["horizon"])])
@@ -3751,7 +3786,7 @@ async def _chart_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _chart_features(args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate feature overlay chart with rich context."""
     async def _generate():
-        cmd = ["g2", "chart", "features", args["symbol"],
+        cmd = ["gefion", "chart", "features", args["symbol"],
                "--features", args["features"], "--json", "--no-open"]
         if args.get("start_date"):
             cmd.extend(["--start-date", args["start_date"]])

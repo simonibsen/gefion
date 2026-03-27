@@ -2103,15 +2103,15 @@ def render_predict_section():
                 # Get filter options
                 cur.execute("""
                     SELECT DISTINCT m.name, m.version
-                    FROM quantile_predictions qp
-                    JOIN ml_models m ON qp.model_id = m.id
+                    FROM predictions p
+                    JOIN ml_models m ON p.model_id = m.id
                     ORDER BY m.name, m.version DESC
                 """)
                 model_opts = [f"{r[0]} {r[1]}" for r in cur.fetchall()]
 
                 cur.execute("""
                     SELECT DISTINCT prediction_date
-                    FROM quantile_predictions
+                    FROM predictions
                     ORDER BY prediction_date DESC
                     LIMIT 30
                 """)
@@ -2151,7 +2151,7 @@ def render_predict_section():
                         params.extend(parts)
 
                 if filter_date != "All":
-                    conditions.append("qp.prediction_date = %s")
+                    conditions.append("p.prediction_date = %s")
                     params.append(filter_date)
 
                 if filter_symbol:
@@ -2163,17 +2163,17 @@ def render_predict_section():
                 cur.execute(f"""
                     SELECT
                         s.symbol,
-                        qp.prediction_date,
-                        qp.horizon_days,
-                        qp.q10,
-                        qp.q50,
-                        qp.q90,
+                        p.prediction_date,
+                        p.horizon_days,
+                        (p.prediction_values->>'q10')::NUMERIC,
+                        (p.prediction_values->>'q50')::NUMERIC,
+                        (p.prediction_values->>'q90')::NUMERIC,
                         m.name || ' ' || m.version as model
-                    FROM quantile_predictions qp
-                    JOIN stocks s ON qp.data_id = s.id
-                    JOIN ml_models m ON qp.model_id = m.id
+                    FROM predictions p
+                    JOIN stocks s ON p.data_id = s.id
+                    JOIN ml_models m ON p.model_id = m.id
                     {where_clause}
-                    ORDER BY qp.prediction_date DESC, s.symbol, qp.horizon_days
+                    ORDER BY p.prediction_date DESC, s.symbol, p.horizon_days
                     LIMIT 200
                 """, params)
                 predictions = cur.fetchall()

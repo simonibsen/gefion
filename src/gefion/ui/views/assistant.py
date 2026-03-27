@@ -312,8 +312,9 @@ def check_conditions() -> Optional[SystemConditions]:
                 try:
                     cur.execute("""
                         SELECT COUNT(*), MAX(prediction_date)
-                        FROM quantile_predictions
-                        WHERE prediction_date > CURRENT_DATE - INTERVAL '7 days'
+                        FROM predictions
+                        WHERE prediction_type = 'quantile'
+                          AND prediction_date > CURRENT_DATE - INTERVAL '7 days'
                     """)
                     row = cur.fetchone()
                     cond.prediction_count = row[0]
@@ -324,7 +325,7 @@ def check_conditions() -> Optional[SystemConditions]:
                         pred_age = (date.today() - row[1]).days
                         cond.predictions_aging = pred_age > 2
                 except Exception as e:
-                    logger.debug("Could not query quantile_predictions: %s", e)
+                    logger.debug("Could not query predictions: %s", e)
 
                 # 5. Calibration quality (from latest model_performance)
                 try:
