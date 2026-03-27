@@ -385,7 +385,7 @@ def _execute_chat_command(cmd_args: List[str], mode: str) -> str:
     # Strip CLAUDECODE to avoid nested session errors
     env.pop("CLAUDECODE", None)
 
-    timeout = 60 if mode == "ai" else 120
+    timeout = 120 if mode == "ai" else 120
 
     try:
         result = subprocess.run(

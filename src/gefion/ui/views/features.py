@@ -38,7 +38,7 @@ def get_page_context():
 
 def get_project_root() -> Path:
     """Get the project root directory (where feature-definitions/ lives)."""
-    # Navigate up from src/g2/ui/views to project root
+    # Navigate up from src/gefion/ui/views to project root
     return Path(__file__).parent.parent.parent.parent.parent
 
 
@@ -74,10 +74,10 @@ def render_definitions_tab():
 gefion feat-def-list
 
 # Show details for a specific feature
-g2 feat-def-show indicator_rsi_14
+gefion feat-def-show indicator_rsi_14
 
 # Export definitions to JSON files
-g2 feat-def-export --dir feature-definitions/
+gefion feat-def-export --dir feature-definitions/
 
 # Import definitions from JSON files
 gefion feat-def-import --dir feature-definitions/""", language="bash")
@@ -334,10 +334,10 @@ def render_functions_tab():
     # Show CLI command reference
     with st.expander("CLI Commands"):
         st.code("""# List all registered functions
-g2 feat-fx-list
+gefion feat-fx-list
 
 # Export functions to JSON files
-g2 feat-fx-export --dir feature-functions/
+gefion feat-fx-export --dir feature-functions/
 
 # Import functions from JSON files
 gefion feat-fx-import --dir feature-functions/""", language="bash")
@@ -642,10 +642,10 @@ def render_coverage_tab():
 gefion feat-compute --symbols AAPL,MSFT --all-features
 
 # Trim feature data by date
-g2 feat-trim --before 2020-01-01
+gefion feat-trim --before 2020-01-01
 
 # Query feature data
-g2 query-database --sql "SELECT * FROM computed_features LIMIT 10" """, language="bash")
+gefion query-database --sql "SELECT * FROM computed_features LIMIT 10"""", language="bash")
 
     col1, col2 = st.columns([3, 1])
     with col1:
