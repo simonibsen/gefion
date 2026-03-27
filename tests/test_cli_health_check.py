@@ -7,7 +7,7 @@ import json
 from unittest.mock import patch, MagicMock
 from typer.testing import CliRunner
 
-from g2.cli import app
+from gefion.cli import app
 
 
 runner = CliRunner()
@@ -34,7 +34,7 @@ def test_health_check_all_services_healthy():
         }
     }
 
-    with patch('g2.cli.health.check_all_services', return_value=mock_health_status):
+    with patch('gefion.cli.health.check_all_services', return_value=mock_health_status):
         result = runner.invoke(app, ["health"])
 
     assert result.exit_code == 0
@@ -66,7 +66,7 @@ def test_health_check_postgres_not_running():
         }
     }
 
-    with patch('g2.cli.health.check_all_services', return_value=mock_health_status):
+    with patch('gefion.cli.health.check_all_services', return_value=mock_health_status):
         result = runner.invoke(app, ["health"])
 
     # Should still exit successfully but show errors
@@ -95,7 +95,7 @@ def test_health_check_json_output():
         }
     }
 
-    with patch('g2.cli.health.check_all_services', return_value=mock_health_status):
+    with patch('gefion.cli.health.check_all_services', return_value=mock_health_status):
         result = runner.invoke(app, ["health", "--json"])
 
     assert result.exit_code == 0
@@ -116,7 +116,7 @@ def test_health_check_specific_service():
         "version": "PostgreSQL 16.0"
     }
 
-    with patch('g2.cli.health.check_postgres_health', return_value=mock_health_status):
+    with patch('gefion.cli.health.check_postgres_health', return_value=mock_health_status):
         result = runner.invoke(app, ["health", "--service", "postgres"])
 
     assert result.exit_code == 0
@@ -135,7 +135,7 @@ def test_health_check_service_with_suggestion():
         "suggestion": "Start PostgreSQL:\n  docker compose up -d postgres"
     }
 
-    with patch('g2.cli.health.check_postgres_health', return_value=mock_health_status):
+    with patch('gefion.cli.health.check_postgres_health', return_value=mock_health_status):
         result = runner.invoke(app, ["health", "--service", "postgres"])
 
     assert result.exit_code == 0  # Health check itself doesn't fail

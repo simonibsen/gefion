@@ -4,7 +4,7 @@
 
 ## Model Evaluation Gotcha
 
-When evaluating predictions with `g2 ml eval`, the evaluation period must allow enough time for the horizon to complete. For example, 7-day predictions from 2026-01-30 can't be evaluated until price data exists for 2026-02-06.
+When evaluating predictions with `gefion ml eval`, the evaluation period must allow enough time for the horizon to complete. For example, 7-day predictions from 2026-01-30 can't be evaluated until price data exists for 2026-02-06.
 
 **Workaround**: Generate backfill predictions for historical dates:
 ```bash

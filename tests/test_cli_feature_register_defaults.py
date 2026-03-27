@@ -1,6 +1,6 @@
 import pytest
 
-from g2 import cli
+from gefion import cli
 
 
 def test_normalize_feature_definition_defaults_and_rejects_legacy():

@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "g2"
+name = "gefion"
 version = "0.1.0"
-description = "Technical analysis + ML data pipeline inspired by folly and gefjon"
+description = "Quantitative trading analysis and ML pipeline — named after the Norse goddess Gefion"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -48,11 +48,12 @@ gpu = [
     "torch>=2.0",
 ]
 all = [
-    "g2[dev,ml_extended,charts,ui,gpu]",
+    "gefion[dev,ml_extended,charts,ui,gpu]",
 ]
 
 [project.scripts]
-g2 = "g2.cli:entrypoint"
+gefion = "gefion.cli:entrypoint"
+gf = "gefion.cli:entrypoint"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

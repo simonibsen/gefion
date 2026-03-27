@@ -4,7 +4,7 @@
 
 **Current State:**
 - Feature *definitions* are data (in `feature_definitions` table)
-- Feature *implementations* are code (Python functions in `src/g2/features/`)
+- Feature *implementations* are code (Python functions in `src/gefion/features/`)
 
 **Proposed State:**
 - Feature definitions AND implementations are data
@@ -18,7 +18,7 @@
 **Current workflow:**
 ```bash
 # Want to try a new feature? Requires code change.
-1. Edit src/g2/features/custom.py
+1. Edit src/gefion/features/custom.py
 2. Write compute_custom_feature() function
 3. Register function: register_compute_function('custom', compute_custom_feature)
 4. pip install -e .  # Reinstall package
@@ -277,7 +277,7 @@ ADD COLUMN implementation_id INTEGER REFERENCES function_implementations(id);
 
 ```python
 # Current: Import functions statically
-from g2.features.derivatives import compute_derivatives
+from gefion.features.derivatives import compute_derivatives
 register_compute_function('derivative', compute_derivatives)
 
 # New: Load functions dynamically
@@ -378,7 +378,7 @@ def register_feature_implementation(
         'implementation_id': impl_id,
         'status': 'pending_review',
         'test_results': test_results,
-        'next_steps': 'Run: g2 functions-review --id ' + str(impl_id)
+        'next_steps': 'Run: Gefion functions-review --id ' + str(impl_id)
     }
 
 @server.tool()
@@ -774,10 +774,10 @@ def compile_function_sandboxed(source_code: str) -> Callable:
 
 ```bash
 # List pending implementations
-g2 functions-review --status pending
+gefion functions-review --status pending
 
 # Review implementation
-g2 functions-review --id 123
+gefion functions-review --id 123
 
 # Shows:
 # - Source code (syntax highlighted)
@@ -786,10 +786,10 @@ g2 functions-review --id 123
 # - Comparison with existing version
 
 # Approve
-g2 functions-approve --id 123
+gefion functions-approve --id 123
 
 # Reject
-g2 functions-reject --id 123 --reason "Uses inefficient algorithm"
+gefion functions-reject --id 123 --reason "Uses inefficient algorithm"
 ```
 
 ---
@@ -912,7 +912,7 @@ if test_result['stats']['std'] > 0:
 ### Step 4: Human Reviews
 
 ```bash
-$ g2 functions-review --id 456
+$ Gefion functions-review --id 456
 
 Function: exponential_momentum
 Version: 2024-12-03-v1
@@ -939,7 +939,7 @@ Comparison with current implementation:
 
 [A]pprove  [R]eject  [T]est more  [C]ompare
 
-$ g2 functions-approve --id 456
+$ Gefion functions-approve --id 456
 ✅ Implementation approved and activated
 ```
 
@@ -947,7 +947,7 @@ $ g2 functions-approve --id 456
 
 ```bash
 # Feature definition can now use this implementation
-g2 features-register --definition '{
+gefion features-register --definition '{
     "name": "momentum_exp_20",
     "function_name": "exponential_momentum",
     "params": {"span": 20},
@@ -956,7 +956,7 @@ g2 features-register --definition '{
 }'
 
 # Compute it
-g2 features-compute --features momentum_exp_20
+gefion features-compute --features momentum_exp_20
 ```
 
 ---

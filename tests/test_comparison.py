@@ -14,7 +14,7 @@ class TestCompareStrategies:
 
     def test_compare_strategies_returns_dict(self):
         """compare_strategies returns dict with strategy names as keys."""
-        from g2.backtest.comparison import compare_strategies
+        from gefion.backtest.comparison import compare_strategies
 
         # Create minimal price data
         price_data = _create_sample_price_data()
@@ -31,7 +31,7 @@ class TestCompareStrategies:
 
     def test_compare_strategies_returns_metrics(self):
         """Each strategy result contains expected metrics."""
-        from g2.backtest.comparison import compare_strategies
+        from gefion.backtest.comparison import compare_strategies
 
         price_data = _create_sample_price_data()
 
@@ -57,7 +57,7 @@ class TestCompareStrategies:
 
     def test_compare_strategies_all_strategies(self):
         """Can compare all available strategies."""
-        from g2.backtest.comparison import compare_strategies, AVAILABLE_STRATEGIES
+        from gefion.backtest.comparison import compare_strategies, AVAILABLE_STRATEGIES
 
         price_data = _create_sample_price_data(days=60)
 
@@ -74,7 +74,7 @@ class TestCompareStrategies:
 
     def test_compare_strategies_invalid_strategy(self):
         """Invalid strategy name raises ValueError."""
-        from g2.backtest.comparison import compare_strategies
+        from gefion.backtest.comparison import compare_strategies
 
         price_data = _create_sample_price_data()
 
@@ -91,7 +91,7 @@ class TestRankStrategies:
 
     def test_rank_strategies_by_sharpe(self):
         """rank_strategies orders strategies by Sharpe ratio (descending)."""
-        from g2.backtest.comparison import rank_strategies
+        from gefion.backtest.comparison import rank_strategies
 
         comparison = {
             "strategy_a": {"sharpe_ratio": 1.5, "total_return": 0.10},
@@ -108,7 +108,7 @@ class TestRankStrategies:
 
     def test_rank_strategies_by_return(self):
         """rank_strategies can order by total_return."""
-        from g2.backtest.comparison import rank_strategies
+        from gefion.backtest.comparison import rank_strategies
 
         comparison = {
             "strategy_a": {"sharpe_ratio": 1.5, "total_return": 0.10},
@@ -125,7 +125,7 @@ class TestRankStrategies:
 
     def test_rank_strategies_ascending(self):
         """rank_strategies can order ascending (for drawdown)."""
-        from g2.backtest.comparison import rank_strategies
+        from gefion.backtest.comparison import rank_strategies
 
         comparison = {
             "strategy_a": {"max_drawdown": -0.15},
@@ -147,7 +147,7 @@ class TestGetAvailableStrategies:
 
     def test_available_strategies_dict(self):
         """AVAILABLE_STRATEGIES is a dict of strategy names to classes."""
-        from g2.backtest.comparison import AVAILABLE_STRATEGIES
+        from gefion.backtest.comparison import AVAILABLE_STRATEGIES
 
         assert isinstance(AVAILABLE_STRATEGIES, dict)
         assert len(AVAILABLE_STRATEGIES) >= 6  # We have 7 strategies
@@ -167,7 +167,7 @@ class TestFormatComparisonTable:
 
     def test_format_comparison_returns_rows(self):
         """format_comparison_table returns list of rows for table display."""
-        from g2.backtest.comparison import format_comparison_table
+        from gefion.backtest.comparison import format_comparison_table
 
         comparison = {
             "momentum": {

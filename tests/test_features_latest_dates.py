@@ -1,6 +1,6 @@
 from datetime import date
 
-from g2.features.dispatcher import _latest_dates_for_features
+from gefion.features.dispatcher import _latest_dates_for_features
 
 
 def test_latest_dates_for_features_returns_correct_dict(monkeypatch):

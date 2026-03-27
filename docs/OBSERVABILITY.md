@@ -1,6 +1,6 @@
 # OpenTelemetry Observability (Grafana Tempo)
 
-This document describes how to use OpenTelemetry with Grafana Tempo for performance monitoring and investigation in the g2 system.
+This document describes how to use OpenTelemetry with Grafana Tempo for performance monitoring and investigation in the Gefion system.
 
 ## Quick Links
 
@@ -9,7 +9,7 @@ This document describes how to use OpenTelemetry with Grafana Tempo for performa
 
 ## Overview
 
-The g2 system includes toggle-able OpenTelemetry instrumentation that can be enabled on-demand. When enabled, it traces:
+The Gefion system includes toggle-able OpenTelemetry instrumentation that can be enabled on-demand. When enabled, it traces:
 
 - **CLI commands** (e.g. `cli.feat-compute`, `cli.data-update`)
 - **Feature computation pipeline** (e.g. `compute_features`, `process_function_group`, `insert_computed_features`)
@@ -35,29 +35,29 @@ export $(cat .env.example | xargs)
 3. Run a command:
 
 ```bash
-g2 feat-compute --symbols AAPL --function-names indicator --profile
+gefion feat-compute --symbols AAPL --function-names indicator --profile
 ```
 
 4. Sanity-check ingestion:
 
 ```bash
-g2 span-check
+gefion span-check
 ```
 
-`g2 span-check` prints recent traces plus a direct Tempo API link for the selected trace, which is handy during development performance checks.
+`gefion span-check` prints recent traces plus a direct Tempo API link for the selected trace, which is handy during development performance checks.
 
 5. View traces:
 
 - Open http://localhost:3000
 - Explore → Tempo
-- Query: `service.name = "g2"`
+- Query: `service.name = "gefion"`
 
 ## Development Use
 
 After performance-sensitive changes, run:
 
 ```bash
-g2 span-check
+gefion span-check
 ```
 
 Use the printed Tempo API link to inspect the selected trace details without hunting in the UI, then compare traces before/after your change.
@@ -67,7 +67,7 @@ Use the printed Tempo API link to inspect the selected trace details without hun
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OTEL_ENABLED` | `false` | Enable/disable OpenTelemetry |
-| `OTEL_SERVICE_NAME` | `g2` | Service name in traces |
+| `OTEL_SERVICE_NAME` | `gefion` | Service name in traces |
 | `OTEL_EXPORTER` | `otlp` | Exporter type: `otlp` or `console` |
 | `OTEL_OTLP_ENDPOINT` | `http://localhost:4317` | Tempo OTLP gRPC endpoint |
 | `OTEL_SAMPLING_RATE` | `1.0` | Sampling rate (0.0-1.0) |
@@ -102,7 +102,7 @@ Quick checks to confirm the Tempo API is responding and receiving traces:
 
 ```bash
 curl -s http://localhost:3200/api/search
-curl -s "http://localhost:3200/api/search?tags=service.name=g2&limit=5"
+curl -s "http://localhost:3200/api/search?tags=service.name=gefion&limit=5"
 ```
 
 ## Troubleshooting
@@ -112,6 +112,6 @@ No traces appearing:
 - Confirm services: `docker compose -f docker/tempo/docker-compose.tempo.yml ps`
 - Confirm Grafana: `curl -s http://localhost:3000/api/health`
 - Confirm Tempo API: `curl -s http://localhost:3200/api/search`
-- Confirm g2 config: `env | rg '^OTEL_'`
-- Run: `g2 span-check` (shows trace counts + span counts)
+- Confirm Gefion config: `env | rg '^OTEL_'`
+- Run: `gefion span-check` (shows trace counts + span counts)
 - Check Tempo logs: `docker compose -f docker/tempo/docker-compose.tempo.yml logs tempo`

@@ -2,18 +2,18 @@
 
 ## Summary
 
-Fixed a critical deadlock bug in [dispatcher.py:186-237](../src/g2/features/dispatcher.py#L186-L237) where writer threads that failed to acquire database connections would exit silently, leaving events unset and causing the main thread to wait forever.
+Fixed a critical deadlock bug in [dispatcher.py:186-237](../src/gefion/features/dispatcher.py#L186-L237) where writer threads that failed to acquire database connections would exit silently, leaving events unset and causing the main thread to wait forever.
 
 ## The Bug
 
 ### Symptoms
 
-Production g2 process on sloth machine became completely stuck:
+Production Gefion process on sloth machine became completely stuck:
 - No CPU usage
 - No database activity
 - Process unresponsive to signals
 - py-spy stack trace showed:
-  - MainThread waiting at [dispatcher.py:323](../src/g2/features/dispatcher.py#L323) in `evt.wait()`
+  - MainThread waiting at [dispatcher.py:323](../src/gefion/features/dispatcher.py#L323) in `evt.wait()`
   - Worker threads stuck waiting for writer threads to complete
 
 ### Root Cause
@@ -22,7 +22,7 @@ In the `writer_loop()` function, if `db_pool.get_connection()` failed:
 
 ```python
 def writer_loop():
-    from g2.db import pool as db_pool
+    from gefion.db import pool as db_pool
     try:
         with db_pool.get_connection() as writer_conn:  # <-- Can fail here
             # ... process queue items and set events ...
@@ -116,7 +116,7 @@ connections_per_worker = 1 + writer_workers
 max_workers = available_db_connections // connections_per_worker
 ```
 
-This is already implemented in [adaptive.py:154-164](../src/g2/utils/adaptive.py#L154-L164).
+This is already implemented in [adaptive.py:154-164](../src/gefion/utils/adaptive.py#L154-L164).
 
 ### 3. Monitor Writer Errors
 

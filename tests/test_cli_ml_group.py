@@ -1,6 +1,6 @@
 from typer.testing import CliRunner
 
-from g2 import cli
+from gefion import cli
 
 
 def test_ml_group_help_exists():

@@ -1,6 +1,6 @@
 # MCP Server Production Deployment
 
-Guide for deploying the g2 MCP server in production with role-based access control.
+Guide for deploying the Gefion MCP server in production with role-based access control.
 
 ## Roles
 
@@ -77,11 +77,11 @@ Run the MCP server in a directory without access to source code:
 
 ```bash
 # Create isolated deployment directory
-mkdir -p /opt/g2-mcp
-cp mcp-server/server.py /opt/g2-mcp/
+mkdir -p /opt/gefion-mcp
+cp mcp-server/server.py /opt/gefion-mcp/
 
 # Run from isolated directory
-cd /opt/g2-mcp
+cd /opt/gefion-mcp
 python server.py
 ```
 
@@ -92,12 +92,12 @@ Example `claude_desktop_config.json` for production:
 ```json
 {
   "mcpServers": {
-    "g2-prod": {
+    "gefion-prod": {
       "command": "python",
-      "args": ["/opt/g2-mcp/server.py"],
+      "args": ["/opt/gefion-mcp/server.py"],
       "env": {
         "G2_MCP_ROLE": "operator",
-        "DATABASE_URL": "postgresql://g2:password@db.example.com:5432/g2"
+        "DATABASE_URL": "postgresql://gefion:password@db.example.com:5432/gefion"
       }
     }
   }
@@ -111,12 +111,12 @@ When developing, explicitly enable developer role:
 ```json
 {
   "mcpServers": {
-    "g2-dev": {
+    "gefion-dev": {
       "command": "python",
-      "args": ["/path/to/g2/mcp-server/server.py"],
+      "args": ["/path/to/gefion/mcp-server/server.py"],
       "env": {
         "G2_MCP_ROLE": "developer",
-        "DATABASE_URL": "postgresql://g2:g2pass@localhost:5432/g2"
+        "DATABASE_URL": "postgresql://gefion:gefionpass@localhost:5432/gefion"
       }
     }
   }

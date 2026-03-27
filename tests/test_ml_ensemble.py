@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from g2.ml.models import train_quantile_model, save_model_artifact
+from gefion.ml.models import train_quantile_model, save_model_artifact
 
 
 # Tests for create_ensemble (combining existing models)
@@ -18,7 +18,7 @@ class TestCreateEnsemble:
 
     def test_create_ensemble_from_model_paths(self, trained_models):
         """Test creating an ensemble from multiple trained model paths."""
-        from g2.ml.ensemble import create_ensemble
+        from gefion.ml.ensemble import create_ensemble
 
         model_paths, _ = trained_models
 
@@ -36,7 +36,7 @@ class TestCreateEnsemble:
 
     def test_create_ensemble_with_custom_weights(self, trained_models):
         """Test creating ensemble with custom weights."""
-        from g2.ml.ensemble import create_ensemble
+        from gefion.ml.ensemble import create_ensemble
 
         model_paths, _ = trained_models
 
@@ -51,7 +51,7 @@ class TestCreateEnsemble:
 
     def test_create_ensemble_weights_must_sum_to_one(self, trained_models):
         """Test that weights must sum to 1.0."""
-        from g2.ml.ensemble import create_ensemble
+        from gefion.ml.ensemble import create_ensemble
 
         model_paths, _ = trained_models
 
@@ -63,7 +63,7 @@ class TestCreateEnsemble:
 
     def test_create_ensemble_weights_length_must_match(self, trained_models):
         """Test that weights length must match number of models."""
-        from g2.ml.ensemble import create_ensemble
+        from gefion.ml.ensemble import create_ensemble
 
         model_paths, _ = trained_models
 
@@ -80,7 +80,7 @@ class TestTrainEnsemble:
 
     def test_train_ensemble_with_multiple_algorithms(self, synthetic_data):
         """Test training ensemble with multiple algorithms."""
-        from g2.ml.ensemble import train_ensemble
+        from gefion.ml.ensemble import train_ensemble
 
         X, y = synthetic_data
 
@@ -102,7 +102,7 @@ class TestTrainEnsemble:
 
     def test_train_ensemble_saves_all_artifacts(self, synthetic_data, tmp_path):
         """Test that training saves all artifacts correctly."""
-        from g2.ml.ensemble import train_ensemble
+        from gefion.ml.ensemble import train_ensemble
 
         X, y = synthetic_data
 
@@ -123,7 +123,7 @@ class TestTrainEnsemble:
 
     def test_train_ensemble_with_single_algorithm_works(self, synthetic_data):
         """Test that training with single algorithm works (no ensemble, just wrapper)."""
-        from g2.ml.ensemble import train_ensemble
+        from gefion.ml.ensemble import train_ensemble
 
         X, y = synthetic_data
 
@@ -143,7 +143,7 @@ class TestPredictEnsemble:
 
     def test_predict_ensemble_returns_weighted_average(self, trained_ensemble, synthetic_data):
         """Test that ensemble predictions are weighted averages."""
-        from g2.ml.ensemble import predict_ensemble
+        from gefion.ml.ensemble import predict_ensemble
 
         ensemble, _ = trained_ensemble
         X, _ = synthetic_data
@@ -158,7 +158,7 @@ class TestPredictEnsemble:
 
     def test_predict_ensemble_preserves_quantile_ordering(self, trained_ensemble, synthetic_data):
         """Test that ensemble predictions maintain q10 <= q50 <= q90."""
-        from g2.ml.ensemble import predict_ensemble
+        from gefion.ml.ensemble import predict_ensemble
 
         ensemble, _ = trained_ensemble
         X, _ = synthetic_data
@@ -171,7 +171,7 @@ class TestPredictEnsemble:
 
     def test_predict_ensemble_with_different_weights_changes_output(self, trained_models, synthetic_data):
         """Test that different weights produce different predictions."""
-        from g2.ml.ensemble import create_ensemble, predict_ensemble
+        from gefion.ml.ensemble import create_ensemble, predict_ensemble
 
         model_paths, _ = trained_models
         X, _ = synthetic_data
@@ -194,7 +194,7 @@ class TestEnsemblePersistence:
 
     def test_save_load_roundtrip(self, trained_ensemble, tmp_path):
         """Test that saving and loading preserves ensemble."""
-        from g2.ml.ensemble import load_ensemble
+        from gefion.ml.ensemble import load_ensemble
 
         ensemble, _ = trained_ensemble
 
@@ -215,7 +215,7 @@ class TestEnsemblePersistence:
 
     def test_load_nonexistent_raises_error(self, tmp_path):
         """Test that loading non-existent ensemble raises error."""
-        from g2.ml.ensemble import load_ensemble
+        from gefion.ml.ensemble import load_ensemble
 
         with pytest.raises(FileNotFoundError):
             load_ensemble(tmp_path / "nonexistent")
@@ -227,7 +227,7 @@ class TestEnsembleObservability:
 
     def test_train_ensemble_creates_spans(self, synthetic_data, monkeypatch):
         """Test that training creates appropriate spans."""
-        from g2.ml.ensemble import train_ensemble
+        from gefion.ml.ensemble import train_ensemble
 
         # Track span names
         created_spans = []
@@ -250,7 +250,7 @@ class TestEnsembleObservability:
             return MockSpan(name)
 
         # Patch create_span
-        import g2.ml.ensemble as ensemble_module
+        import gefion.ml.ensemble as ensemble_module
         monkeypatch.setattr(ensemble_module, "create_span", mock_create_span)
 
         X, y = synthetic_data
@@ -311,7 +311,7 @@ def trained_models(synthetic_data, tmp_path):
 @pytest.fixture
 def trained_ensemble(synthetic_data, tmp_path):
     """Create a trained ensemble for testing."""
-    from g2.ml.ensemble import train_ensemble
+    from gefion.ml.ensemble import train_ensemble
 
     X, y = synthetic_data
 
@@ -333,7 +333,7 @@ class TestPredictEnsembleCLI:
 
     def test_predict_ensemble_generates_predictions(self, trained_ensemble, synthetic_data):
         """Test that predict_ensemble generates valid predictions."""
-        from g2.ml.ensemble import predict_ensemble
+        from gefion.ml.ensemble import predict_ensemble
 
         ensemble, _ = trained_ensemble
         X, _ = synthetic_data
@@ -352,7 +352,7 @@ class TestPredictEnsembleCLI:
 
     def test_predict_ensemble_with_loaded_ensemble(self, trained_ensemble, synthetic_data):
         """Test predictions work after loading ensemble from disk."""
-        from g2.ml.ensemble import load_ensemble, predict_ensemble
+        from gefion.ml.ensemble import load_ensemble, predict_ensemble
 
         _, tmp_path = trained_ensemble
         X, _ = synthetic_data

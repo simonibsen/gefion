@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-import g2.ingest.universe as universe
+import gefion.ingest.universe as universe
 
 
 def test_ingest_prices_schema_init_span(monkeypatch):

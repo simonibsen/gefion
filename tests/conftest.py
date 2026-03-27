@@ -12,8 +12,8 @@ from urllib.parse import urlparse
 import psycopg
 import pytest
 
-from g2.cli_helpers import upsert_feature_function
-from g2.db.schema import test_db_url
+from gefion.cli_helpers import upsert_feature_function
+from gefion.db.schema import test_db_url
 
 
 def pytest_sessionstart(session):
@@ -21,7 +21,7 @@ def pytest_sessionstart(session):
     Ensure the test database exists before tests run.
 
     Only runs if ENABLE_DB_TESTS=1 (i.e., database tests are enabled).
-    Creates the g2_test database if it doesn't exist and runs db-init to
+    Creates the gefion_test database if it doesn't exist and runs db-init to
     set up schema, extensions, and seed data.
     """
     if os.getenv("ENABLE_DB_TESTS") != "1":
@@ -66,7 +66,7 @@ def pytest_sessionstart(session):
 
     print(f"\nInitializing test database '{test_db_name}'...")
     result = subprocess.run(
-        [sys.executable, "-m", "g2.cli", "db-init"],
+        [sys.executable, "-m", "gefion.cli", "db-init"],
         capture_output=True,
         text=True,
         env=env,
@@ -153,7 +153,7 @@ def load_feature_functions(conn, function_names: Optional[List[str]] = None) -> 
         # Load specific functions
         load_feature_functions(conn, ["indicator_rsi", "indicator_adx"])
     """
-    from g2.cli import import_functions_from_directory
+    from gefion.cli import import_functions_from_directory
     from pathlib import Path
 
     feature_functions_dir = Path("feature-functions")

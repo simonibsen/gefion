@@ -16,7 +16,7 @@ def test_latest_dates_uses_single_batched_query():
 
     With N features, we should execute 1 query (batch), not N queries (N+1 pattern).
     """
-    from g2.features.dispatcher import _latest_dates_for_features
+    from gefion.features.dispatcher import _latest_dates_for_features
 
     # Create mock connection and cursor
     mock_cursor = MagicMock()
@@ -67,7 +67,7 @@ def test_latest_dates_scales_with_many_features():
 
     Even with 100 features, should still be 1 query.
     """
-    from g2.features.dispatcher import _latest_dates_for_features
+    from gefion.features.dispatcher import _latest_dates_for_features
 
     mock_cursor = MagicMock()
     mock_cursor.__enter__ = Mock(return_value=mock_cursor)
@@ -123,7 +123,7 @@ def test_empty_feature_list_returns_empty_dict():
 
     Should return empty dict without executing a query.
     """
-    from g2.features.dispatcher import _latest_dates_for_features
+    from gefion.features.dispatcher import _latest_dates_for_features
 
     mock_conn = Mock()
 

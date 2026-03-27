@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from g2.config import Settings, _parse_env_file, load_settings
+from gefion.config import Settings, _parse_env_file, load_settings
 
 
 def test_parse_env_file_reads_key_values(tmp_path: Path) -> None:

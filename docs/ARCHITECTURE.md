@@ -1,8 +1,8 @@
-# g2 Architecture
+# Gefion Architecture
 
 ## Overview
 
-g2 is a database-first technical analysis platform with versioned feature engineering capabilities. Feature definitions and custom feature implementations are stored in the database and exported to git for version control.
+gefion is a database-first technical analysis platform with versioned feature engineering capabilities. Feature definitions and custom feature implementations are stored in the database and exported to git for version control.
 
 **Note:** Built-in technical indicators are currently implemented in Python code for performance, but will be migrated to the database-first pattern for consistency (see ML Roadmap). This migration will enable users to modify indicator parameters without code changes.
 
@@ -124,7 +124,7 @@ computed_features (
 
 **Key Components**:
 
-- **Sandboxing** ([dispatcher.py](../src/g2/ingest/dispatcher.py)):
+- **Sandboxing** ([dispatcher.py](../src/gefion/ingest/dispatcher.py)):
   - Restricted `__builtins__` (no `open`, `exec`, `eval`)
   - Limited imports (pandas, numpy, talib allowed)
   - No network or filesystem access
@@ -200,16 +200,16 @@ exec(function_body, restricted_globals, {})
 
 ```bash
 # Export functions to git (one file per function)
-g2 feat-fx-export --dir feature-functions
+gefion feat-fx-export --dir feature-functions
 # Creates: feature-functions/indicator_v1.0.json
 
 # Export definitions to git
-g2 feat-def-export --dir feature-definitions
+gefion feat-def-export --dir feature-definitions
 # Creates: feature-definitions/indicator_rsi_14.json
 
 # Import from git (upsert on name+version)
-g2 feat-fx-import --dir feature-functions
-g2 feat-def-import --dir feature-definitions
+gefion feat-fx-import --dir feature-functions
+gefion feat-def-import --dir feature-definitions
 ```
 
 ### File Format
@@ -409,12 +409,12 @@ Experiment C (threshold_tuning)
 - **Backtest Engine**: Strategy param experiments run backtests for evaluation
 - **ML Pipeline**: Hyperparameter experiments train and evaluate models
 - **MCP Server**: AI can propose experiments via MCP tools
-- **CLI**: Full experiment management via `g2 experiment` commands
+- **CLI**: Full experiment management via `gefion experiment` commands
 
 ### Module Structure
 
 ```
-src/g2/experiments/
+src/gefion/experiments/
 ├── __init__.py          # Public API exports
 ├── core.py              # ExperimentConfig, ExperimentRunner
 ├── search.py            # GridSearch, RandomSearch, BayesianSearch
@@ -431,5 +431,5 @@ See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-fram
 - **ML Vision**: [archive/ml/HIGHLEVEL.md](archive/ml/HIGHLEVEL.md) - Long-term ML goals
 - **Security Deep Dive**: [archive/ml/SECURITY_SANDBOXING.md](archive/ml/SECURITY_SANDBOXING.md) - Threat model and mitigation
 - **Performance**: [PERFORMANCE.md](PERFORMANCE.md) - Optimization techniques
-- **User Guide**: [USER_GUIDE.md](USER_GUIDE.md) - How to use g2
+- **User Guide**: [USER_GUIDE.md](USER_GUIDE.md) - How to use Gefion
 - **Troubleshooting**: [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues

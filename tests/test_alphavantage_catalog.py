@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from g2.alphavantage.catalog import (
+from gefion.alphavantage.catalog import (
     ENDPOINTS,
     parse_cpi_monthly,
     parse_daily_adjusted,

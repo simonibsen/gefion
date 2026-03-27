@@ -11,7 +11,7 @@ from typing import List, Dict, Any
 
 
 # Import will fail until we implement - that's TDD red phase
-from g2.compute.cross_sectional import compute_rankings_by_group
+from gefion.compute.cross_sectional import compute_rankings_by_group
 
 
 class TestComputeRankingsByGroup:
@@ -178,7 +178,7 @@ class TestComputeRankingsByGroupAllGroups:
             {"symbol": "JPM", "data_id": 3, "value": 60.0, "sector": "FINANCE"},
         ]
 
-        from g2.compute.cross_sectional import compute_all_rankings
+        from gefion.compute.cross_sectional import compute_all_rankings
 
         results = compute_all_rankings(data)
 

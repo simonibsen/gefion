@@ -1,4 +1,4 @@
-# G2 MCP Server Workflows
+# Gefion MCP Server Workflows
 
 Comprehensive end-to-end workflows for using the G2 MCP Server through Claude Desktop.
 
@@ -470,18 +470,18 @@ These are sector momentum leaders with room to run.
 **daily_update.sh:**
 ```bash
 #!/bin/bash
-cd /path/to/g2
+cd /path/to/gefion
 
 # 1. Update data
-.venv/bin/g2 data-update --exchange NASDAQ --limit 500 --local
+.venv/bin/gefion data-update --exchange NASDAQ --limit 500 --local
 
 # 2. Generate predictions
 TODAY=$(date +%Y-%m-%d)
-.venv/bin/g2 ml predict \
+.venv/bin/gefion ml predict \
   --model-name momentum_v1 --model-version 20251218 \
   --prediction-date $TODAY --exchange NASDAQ --limit 500
 
-.venv/bin/g2 ml predict-classifier \
+.venv/bin/gefion ml predict-classifier \
   --model-name trend_v1 --model-version 20251218 \
   --prediction-date $TODAY --exchange NASDAQ --limit 500
 
@@ -490,7 +490,7 @@ if [ $(date +%u) -eq 5 ]; then
   END_DATE=$(date +%Y-%m-%d)
   START_DATE=$(date -d '30 days ago' +%Y-%m-%d)
 
-  .venv/bin/g2 ml eval \
+  .venv/bin/gefion ml eval \
     --model-name momentum_v1 --model-version 20251218 \
     --start-date $START_DATE --end-date $END_DATE
 fi
@@ -591,7 +591,7 @@ WHERE cf.id IS NULL
 **Fix:**
 ```
 Run feature computation for missing stocks:
-g2 feat-compute --symbols <comma-separated> --local
+gefion feat-compute --symbols <comma-separated> --local
 ```
 
 ---
@@ -649,7 +649,7 @@ Enable tracing:
 export OTEL_ENABLED=true
 export OTEL_EXPORTER=otlp
 export OTEL_OTLP_ENDPOINT=http://localhost:4317
-export OTEL_SERVICE_NAME=g2
+export OTEL_SERVICE_NAME=gefion
 ```
 
 ### Workflow 1: Health Check After Operations
@@ -678,7 +678,7 @@ I just ran a data update for NASDAQ. Check the recent traces to see:
 **Example output:**
 ```
 Trace Check Results:
-✓ Found 15 recent traces for service "g2"
+✓ Found 15 recent traces for service "gefion"
 ✓ Most recent: cli.data-update (4523ms)
 ✓ Total spans: 124
   - Application spans: 42
@@ -808,7 +808,7 @@ Trace: cli.ml-train (12.3s)
 Error details:
 - Status: STATUS_CODE_ERROR
 - Message: "Dataset 'nasdaq_momentum' version 'v2' not found"
-- Location: src/g2/ml/train.py:145
+- Location: src/gefion/ml/train.py:145
 
 Root cause: Dataset version mismatch
 
@@ -870,7 +870,7 @@ so I can catch performance issues without overhead.
 OTEL_ENABLED=true
 OTEL_EXPORTER=otlp
 OTEL_OTLP_ENDPOINT=http://tempo.production:4317
-OTEL_SERVICE_NAME=g2-production
+OTEL_SERVICE_NAME=gefion-production
 OTEL_SAMPLING_RATE=0.01  # 1% sampling = low overhead
 ```
 

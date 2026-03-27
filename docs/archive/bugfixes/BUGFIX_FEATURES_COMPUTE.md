@@ -1,7 +1,7 @@
 # Bug Fix: Features-Compute Showing 0 Inserts
 
 ## Problem
-`g2 features-compute` was showing 0 inserts for all symbols despite having price data and active feature definitions.
+`gefion features-compute` was showing 0 inserts for all symbols despite having price data and active feature definitions.
 
 ## Root Cause
 There were two critical bugs in the features dispatcher integration:
@@ -52,7 +52,7 @@ So `insert_computed_features()` would look for "indicator_rsi_14" in the row dic
 ## Solution
 
 ### Fix 1: Update compute_indicators() to Handle Dict Format
-Updated `src/g2/indicators/local.py` to accept both string and dict formats:
+Updated `src/gefion/indicators/local.py` to accept both string and dict formats:
 
 ```python
 def compute_indicators(
@@ -75,7 +75,7 @@ def compute_indicators(
 ```
 
 ### Fix 2: Build Feature Map Using Column Names
-Updated `src/g2/features/dispatcher.py` to use the "column" field from params:
+Updated `src/gefion/features/dispatcher.py` to use the "column" field from params:
 
 ```python
 # Build feature_map for insert
@@ -120,7 +120,7 @@ $ ENABLE_DB_TESTS=1 .venv/bin/python -m pytest tests/test_features_dispatcher.py
 
 ### Production Validation
 ```bash
-$ .venv/bin/g2 features-compute --symbols=AAPL --full
+$ .venv/bin/gefion features-compute --symbols=AAPL --full
 Total: 30 rows inserted across 1 stocks  ✓
 
 $ psql -c "SELECT fd.name, COUNT(*) FROM computed_features cf JOIN feature_definitions fd ON fd.id = cf.feature_id GROUP BY fd.name;"
@@ -135,7 +135,7 @@ name       | count
 - **Performance**: No performance impact - actually improves efficiency by skipping unnecessary work
 
 ## Files Changed
-1. `src/g2/indicators/local.py` - Updated compute_indicators() to handle dict format
-2. `src/g2/features/dispatcher.py` - Fixed feature_map to use column names
+1. `src/gefion/indicators/local.py` - Updated compute_indicators() to handle dict format
+2. `src/gefion/features/dispatcher.py` - Fixed feature_map to use column names
 3. `tests/test_features_dispatcher.py` - Added comprehensive tests
 4. `scripts/populate_indicator_features.sql` - Script to populate all 16 indicators with correct params

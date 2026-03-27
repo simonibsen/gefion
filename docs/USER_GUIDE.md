@@ -1,8 +1,8 @@
-# G2 User Guide
+# Gefion User Guide
 
 ## ML overview (conceptual)
 
-g2’s ML workflow (high level) is:
+Gefion’s ML workflow (high level) is:
 1. Ingest daily price data (OHLCV) into TimescaleDB
 2. Compute technical indicators/derived features and store them in the feature store
 3. Build training datasets (rolling windows) and labels (forward returns for 7/30/90d, plus optional “big move” classification labels)
@@ -16,8 +16,8 @@ For details, start at `docs/archive/ml/README.md` (index), then read `docs/archi
 Use the `ml` Docker image for training/inference with optional GPU acceleration. The image includes a CUDA-enabled PyTorch build and automatically falls back to CPU when no GPU is available.
 
 **How it works:**
-- `docker compose run --rm ml` runs the g2 CLI inside a container
-- Same commands as local g2, just prefixed with `docker compose run --rm ml`
+- `docker compose run --rm ml` runs the Gefion CLI inside a container
+- Same commands as local Gefion, just prefixed with `docker compose run --rm ml`
 - Container has ML dependencies pre-installed (XGBoost, LightGBM, PyTorch)
 - `--gpus all` exposes host NVIDIA GPUs to the container (requires nvidia-container-toolkit)
 
@@ -25,16 +25,16 @@ Use the `ml` Docker image for training/inference with optional GPU acceleration.
 
 ```bash
 # Check device (CPU or GPU)
-docker compose run --rm ml g2 ml device
+docker compose run --rm ml Gefion ml device
 
 # Train model (CPU)
-docker compose run --rm ml g2 ml train --dataset-name mvp --dataset-version v1 --model-name test --model-version 20251217
+docker compose run --rm ml Gefion ml train --dataset-name mvp --dataset-version v1 --model-name test --model-version 20251217
 
 # Train model (GPU accelerated)
-docker compose run --rm --gpus all ml g2 ml train --dataset-name mvp --dataset-version v1 --model-name test --model-version 20251217
+docker compose run --rm --gpus all ml Gefion ml train --dataset-name mvp --dataset-version v1 --model-name test --model-version 20251217
 
 # Generate predictions
-docker compose run --rm ml g2 ml predict --model-name test --model-version 20251217 --prediction-date 2024-12-14 --symbols AAPL,MSFT
+docker compose run --rm ml Gefion ml predict --model-name test --model-version 20251217 --prediction-date 2024-12-14 --symbols AAPL,MSFT
 ```
 
 **When to use Docker vs local:**
@@ -49,7 +49,7 @@ docker compose run --rm ml g2 ml predict --model-name test --model-version 20251
 
 Example (symbols):
 ```bash
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name mvp --version v1 \
   --symbols IBM,MSFT \
   --horizons 7,30,90 \
@@ -61,7 +61,7 @@ g2 ml dataset-build \
 
 Example (exchange + optional limit):
 ```bash
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name nasdaq_mvp --version v1 \
   --exchange NASDAQ --limit 100 \
   --horizons 7,30,90 \
@@ -76,7 +76,7 @@ g2 ml dataset-build \
 Train quantile regression models for each horizon:
 
 ```bash
-g2 ml train \
+gefion ml train \
   --dataset-name mvp \
   --dataset-version v1 \
   --model-name mvp_model \
@@ -88,8 +88,8 @@ g2 ml train \
 **Supported Algorithms:**
 
 - `quantile_regression` - sklearn QuantileRegressor (default, fast, linear)
-- `xgboost` - XGBoost quantile regression (requires `pip install 'g2[ml_extended]'`)
-- `lightgbm` - LightGBM quantile regression (requires `pip install 'g2[ml_extended]'`)
+- `xgboost` - XGBoost quantile regression (requires `pip install gefion[ml_extended]'`)
+- `lightgbm` - LightGBM quantile regression (requires `pip install gefion[ml_extended]'`)
 
 The command trains 3 quantile models (q10, q50, q90) per horizon and saves artifacts to `models/mvp_model_20251214_hN/`.
 
@@ -99,14 +99,14 @@ Generate predictions for symbols on a specific date:
 
 ```bash
 # Predict for specific symbols
-g2 ml predict \
+gefion ml predict \
   --model-name mvp_model \
   --model-version 20251214 \
   --prediction-date 2024-12-14 \
   --symbols IBM,MSFT,AAPL
 
 # Predict for exchange
-g2 ml predict \
+gefion ml predict \
   --model-name mvp_model \
   --model-version 20251214 \
   --prediction-date 2024-12-14 \
@@ -121,7 +121,7 @@ Fetches features from `computed_features`, generates q10/q50/q90 predictions, st
 Evaluate model calibration on historical predictions:
 
 ```bash
-g2 ml eval \
+gefion ml eval \
   --model-name mvp_model \
   --model-version 20251214 \
   --start-date 2024-01-01 \
@@ -135,7 +135,7 @@ Computes calibration metrics (q10/q50/q90 coverage, pinball loss, IQR), stores i
 Apply conformal calibration to correct quantile coverage on a holdout period:
 
 ```bash
-g2 ml calibrate \
+gefion ml calibrate \
   --model-name mvp_model \
   --model-version 20251214 \
   --start-date 2024-06-01 \
@@ -146,17 +146,17 @@ Computes additive shift corrections so predicted quantiles achieve nominal cover
 
 ## Setup
 1. Copy `.env.example` to `.env` and set:
-   - `DATABASE_URL` (e.g., `postgresql://g2:g2pass@localhost:5432/g2`)
+   - `DATABASE_URL` (e.g., `postgresql://gefion:gefionpass@localhost:5432/gefion`)
    - `ALPHAVANTAGE_API_KEY`
 2. Start TimescaleDB: `docker compose up -d postgres`
 3. Install: `python -m venv .venv && . .venv/bin/activate && pip install -e .`
 
 ## CLI Commands
-`g2 --help` for all commands. Add `--json` for machine-readable output.
+`gefion --help` for all commands. Add `--json` for machine-readable output.
 
 ### Prices
 ```bash
-g2 universe-ingest --exchange NASDAQ --timeframe auto --refresh-existing --max-workers 4 --writer-workers 1
+gefion universe-ingest --exchange NASDAQ --timeframe auto --refresh-existing --max-workers 4 --writer-workers 1
 ```
 - `--timeframe auto|compact|full`: auto skips symbols up-to-date (latest date = today) and chooses compact/full otherwise.
 - `--refresh-existing`: upserts existing dates.
@@ -164,17 +164,17 @@ g2 universe-ingest --exchange NASDAQ --timeframe auto --refresh-existing --max-w
 
 Single symbol from file:
 ```bash
-g2 prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_adjusted.json
+gefion prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_adjusted.json
 ```
 
 ### Indicators / features (tall store)
 Run indicator features (local compute by default):
 ```bash
 # Resume from last date (only compute new dates)
-g2 run-features --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local
+gefion run-features --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local
 
 # Recompute all dates (useful after fixing a feature function bug)
-g2 run-features --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing
+gefion run-features --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing
 ```
 - Writes tall rows into `computed_features` (no wide table). Add `--api` to fetch from Alpha Vantage instead of local compute.
 - `--max-workers` / `--writer-workers`: control fetch/write concurrency (local mode safe to increase).
@@ -189,34 +189,34 @@ Use `--listings-file <csv|json>` to bypass the API for universe selection and wo
 1. **Testing**: Work with a small subset of symbols without hitting the API
    ```bash
    echo "AAPL,MSFT,GOOGL" > test_symbols.csv
-   g2 data-update --listings-file test_symbols.csv --timeframe auto
+   gefion data-update --listings-file test_symbols.csv --timeframe auto
    ```
 
 2. **Reproducibility**: Lock to a specific universe for consistent backtesting
    ```bash
    # Save current NASDAQ 100 to file
-   g2 universe-list --exchange NASDAQ --limit 100 > nasdaq100_2024.csv
+   gefion universe-list --exchange NASDAQ --limit 100 > nasdaq100_2024.csv
    # Use same universe months later
-   g2 data-update --listings-file nasdaq100_2024.csv
+   gefion data-update --listings-file nasdaq100_2024.csv
    ```
 
 3. **Custom watchlist/portfolio**: Work with your own curated list of stocks
    ```bash
    # personal_portfolio.csv: AAPL,TSLA,NVDA,AMD...
-   g2 run-features --listings-file personal_portfolio.csv --local
+   gefion run-features --listings-file personal_portfolio.csv --local
    ```
 
 4. **Offline development**: Develop and test without internet or API access
    ```bash
    # Use saved listings file when API unavailable
-   g2 data-update --listings-file cached_listings.json --timeframe compact
+   gefion data-update --listings-file cached_listings.json --timeframe compact
    ```
 
 ### Feature definitions
-- Seed indicator feature metadata: `g2 seed-features` (creates `stocks`, `feature_definitions`, `computed_features`, and seeds indicator definitions).
+- Seed indicator feature metadata: `gefion seed-features` (creates `stocks`, `feature_definitions`, `computed_features`, and seeds indicator definitions).
 - Register a single feature definition from JSON:
 ```bash
-g2 register-feature --definition '{
+gefion register-feature --definition '{
   "name": "my_feature",
   "function_name": "my_fx",
   "params": {"window": 30},
@@ -237,10 +237,10 @@ Required keys: `name`, `function_name`, `store_table`, `store_column`. Optional:
 - Trim feature data (left/right):
 ```bash
 # Trim features only (doesn't touch prices by default)
-g2 trim-features --feature indicator_rsi_14,indicator_macd --before 2024-01-01
+gefion trim-features --feature indicator_rsi_14,indicator_macd --before 2024-01-01
 
 # Trim features AND underlying prices
-g2 trim-features --feature indicator_rsi_14 --before 2024-01-01 --trim-prices
+gefion trim-features --feature indicator_rsi_14 --before 2024-01-01 --trim-prices
 ```
 Deletes rows in `computed_features` for the named features before/after the given dates. Use `--trim-prices` to also trim `stock_ohlcv` in the same window.
 
@@ -249,47 +249,47 @@ Deletes rows in `computed_features` for the named features before/after the give
 Trim prices (also trims features by default):
 ```bash
 # Trim prices AND all derived features
-g2 trim-prices --before 2023-01-01 --symbols IBM,MSFT
+gefion trim-prices --before 2023-01-01 --symbols IBM,MSFT
 
 # Trim prices only (keep computed features)
-g2 trim-prices --before 2023-01-01 --symbols IBM,MSFT --no-trim-features
+gefion trim-prices --before 2023-01-01 --symbols IBM,MSFT --no-trim-features
 ```
 Removes price rows before/after the given dates. By default also trims all `computed_features` derived from those prices; use `--no-trim-features` to keep features.
 
 Drop features and data (destructive):
 ```bash
-g2 features-drop --feature indicator_rsi_14 --drop-storage
+gefion features-drop --feature indicator_rsi_14 --drop-storage
 ```
 Deletes rows from `computed_features` for the named features; with `--drop-storage` also drops non-`computed_features` store tables.
 Data-only delete (keep definitions/schema):
 ```bash
-g2 features-drop --feature indicator_rsi_14 --data-only
+gefion features-drop --feature indicator_rsi_14 --data-only
 ```
 
 ### Update everything (prices + computed_features)
 ```bash
-g2 data-update --exchange NASDAQ --timeframe auto --refresh-existing --local
+gefion data-update --exchange NASDAQ --timeframe auto --refresh-existing --local
 ```
 - Fetches listings once, ingests prices, then ingests indicators into `computed_features`.
 - Honors `--local/--api` for indicators and `--refresh-existing` to upsert.
 - Processes symbols in small chunks to reduce DB pressure; keep writer workers low (default 1).
 
 ### Features management
-- List: `g2 features-list --json`
-- Show one: `g2 features-show --feature indicator_rsi_14 --json`
-- Run features (indicators): `g2 features-run --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing`
+- List: `gefion features-list --json`
+- Show one: `gefion features-show --feature indicator_rsi_14 --json`
+- Run features (indicators): `gefion features-run --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing`
 
 ### Fundamentals (sector, industry, company name)
 Update company fundamentals from AlphaVantage OVERVIEW endpoint:
 ```bash
 # Update stale fundamentals (skips stocks updated within 30 days)
-g2 fundamentals-update
+gefion fundamentals-update
 
 # Force update all stocks
-g2 fundamentals-update --force
+gefion fundamentals-update --force
 
 # Update specific number of stocks
-g2 fundamentals-update --limit 50
+gefion fundamentals-update --limit 50
 ```
 - Stores `sector`, `industry`, `name` in the `stocks` table
 - Tracks staleness with `updated_at` timestamp
@@ -301,16 +301,16 @@ Cross-sectional features compare stocks to their peers at the same point in time
 Compute rankings for a feature:
 ```bash
 # Compute RSI rankings (market + sector rankings)
-g2 cross-sectional-compute --feature indicator_rsi_14
+gefion cross-sectional-compute --feature indicator_rsi_14
 
 # Include industry rankings
-g2 cross-sectional-compute --feature indicator_rsi_14 --industries
+gefion cross-sectional-compute --feature indicator_rsi_14 --industries
 
 # Market-only rankings (no sector/industry)
-g2 cross-sectional-compute --feature indicator_rsi_14 --no-sectors
+gefion cross-sectional-compute --feature indicator_rsi_14 --no-sectors
 
 # JSON output
-g2 cross-sectional-compute --feature indicator_rsi_14 --json
+gefion cross-sectional-compute --feature indicator_rsi_14 --json
 ```
 
 **Comparison groups:**
@@ -340,7 +340,7 @@ The experiments module enables autonomous strategy parameter optimization. AI pr
 **Propose an experiment:**
 ```bash
 # Basic: explore parameter space
-g2 experiment propose \
+gefion experiment propose \
   --name "momentum_optimization" \
   --strategy momentum \
   --search-space '{"lookback_days": {"type": "int", "low": 5, "high": 30}}' \
@@ -351,7 +351,7 @@ g2 experiment propose \
   --max-trials 50
 
 # With goal: early-stop when target achieved
-g2 experiment propose \
+gefion experiment propose \
   --name "target_sharpe_2" \
   --strategy momentum \
   --search-space '{"lookback_days": {"type": "int", "low": 5, "high": 30}}' \
@@ -373,35 +373,35 @@ g2 experiment propose \
 **Manage experiments:**
 ```bash
 # List pending approvals
-g2 experiment list --status proposed
+gefion experiment list --status proposed
 
 # Approve for execution
-g2 experiment approve --id 1
+gefion experiment approve --id 1
 
 # Run experiment (executes all trials)
-g2 experiment run --id 1
+gefion experiment run --id 1
 
 # View results
-g2 experiment results --id 1 --show-trials
+gefion experiment results --id 1 --show-trials
 
 # Get detailed status
-g2 experiment status --id 1
+gefion experiment status --id 1
 ```
 
 **Chaining experiments:**
 ```bash
 # Create child experiment that uses parent's best params
-g2 experiment chain \
+gefion experiment chain \
   --parent-id 1 \
   --name "fine_tune_thresholds" \
   --search-space '{"entry_threshold": {"type": "float", "low": 0.01, "high": 0.10}}' \
   --depends-on best_params
 
 # List children of an experiment
-g2 experiment children --parent-id 1
+gefion experiment children --parent-id 1
 
 # Get parent info
-g2 experiment parent --id 2
+gefion experiment parent --id 2
 ```
 
 **Search methods:**
@@ -417,7 +417,7 @@ See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-fram
 - API calls retry on transient errors/timeouts; local compute avoids rate limits.
 - Batch inserts are used to reduce lock contention; if you see `max_locks_per_transaction`, lower `--writer-workers` or process smaller batches.
 - Performance knobs:
-  - Timescale tuning: `g2 db-tune --chunk-days 30 --compress-after-days 60` sets chunk interval and compression policies.
+  - Timescale tuning: `gefion db-tune --chunk-days 30 --compress-after-days 60` sets chunk interval and compression policies.
   - Concurrency: keep writer workers low (1–2). Heavy commands process symbols in chunks (~50) to avoid overwhelming the DB. `features-run` always starts with 1 fetch/1 writer, then ramps fetchers up batch-by-batch on success, and backs off on errors (even when `--max-workers` is set; it’s a ceiling).
   - Use `--max-workers` and `--limit` to reduce load while testing. Larger batch sizes are better than many writers.
   - If performance drops after large ingests, run `VACUUM ANALYZE stock_ohlcv computed_features`.
@@ -428,21 +428,21 @@ See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-fram
 Launch the Streamlit UI for interactive exploration:
 
 ```bash
-g2 ui              # default port 8501
-g2 ui --port 8502  # custom port
+gefion ui              # default port 8501
+gefion ui --port 8502  # custom port
 ```
 
 ### AI Actions
 
 The **AI Actions** page (second item in the sidebar) is the primary interaction point. It supports:
 
-- **Natural language prompts**: Type a question like "Which stocks had the biggest moves?" — routed to `claude -p` with g2 MCP tools.
-- **CLI commands**: Type `g2 health` or any g2 command — executes directly and streams output.
+- **Natural language prompts**: Type a question like "Which stocks had the biggest moves?" — routed to `claude -p` with Gefion MCP tools.
+- **CLI commands**: Type `gefion health` or any Gefion command — executes directly and streams output.
 - **MCP tool shortcuts**: Type a tool name like `data_update` — mapped to the corresponding CLI command.
 
-**Conversation history** persists across page refreshes and server restarts. Previous exchanges are displayed as a chat thread. Click "Clear History" to start fresh. History is stored in `~/.g2/ai_history.jsonl` (capped at 100 exchanges).
+**Conversation history** persists across page refreshes and server restarts. Previous exchanges are displayed as a chat thread. Click "Clear History" to start fresh. History is stored in `~/.gefion/ai_history.jsonl` (capped at 100 exchanges).
 
-**Error indicator**: If errors occur during the session, an expandable "Errors (N)" badge appears at the top of the page showing all session errors with timestamps. Errors are also logged to `~/.g2/ui_errors.jsonl` for diagnosis from Claude Code.
+**Error indicator**: If errors occur during the session, an expandable "Errors (N)" badge appears at the top of the page showing all session errors with timestamps. Errors are also logged to `~/.gefion/ui_errors.jsonl` for diagnosis from Claude Code.
 
 ### Other Views
 
@@ -458,7 +458,7 @@ The **AI Actions** page (second item in the sidebar) is the primary interaction 
 
 - The UI is best launched from a regular terminal (not from within Claude Code) — AI prompts via `claude -p` work correctly this way.
 - If launched from Claude Code, CLI commands still work but AI prompts may fail due to session nesting.
-- Errors from the UI session can be read anytime via `cat ~/.g2/ui_errors.jsonl`.
+- Errors from the UI session can be read anytime via `cat ~/.gefion/ui_errors.jsonl`.
 
 ## Verification
 - Run tests: `make test` (DB tests skipped) or `ENABLE_DB_TESTS=1 make test-db` with the DB running.

@@ -11,8 +11,8 @@ from datetime import date
 import psycopg
 import pytest
 
-from g2.db import schema
-from g2.db.ingest import (
+from gefion.db import schema
+from gefion.db.ingest import (
     trim_stock_ohlcv,
     trim_all_computed_features,
     upsert_stock,

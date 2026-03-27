@@ -5,7 +5,7 @@ import pytest
 from datetime import date, timedelta
 from decimal import Decimal
 
-from g2.strategies.mean_reversion import MeanReversionStrategy
+from gefion.strategies.mean_reversion import MeanReversionStrategy
 
 
 def test_strategy_initialization():

@@ -15,7 +15,7 @@ class TestCrossSectionalComputeCommand:
 
     def test_command_exists(self):
         """Test that cross-sectional-compute command is registered."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["cross-sectional-compute", "--help"])
         assert result.exit_code == 0
@@ -23,7 +23,7 @@ class TestCrossSectionalComputeCommand:
 
     def test_help_shows_feature_option(self):
         """Test that --feature option is documented."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["cross-sectional-compute", "--help"])
         assert "--feature" in result.output
@@ -31,21 +31,21 @@ class TestCrossSectionalComputeCommand:
 
     def test_help_shows_sectors_option(self):
         """Test that --sectors/--no-sectors option is documented."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["cross-sectional-compute", "--help"])
         assert "--sectors" in result.output or "--no-sectors" in result.output
 
     def test_help_shows_industries_option(self):
         """Test that --industries option is documented."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["cross-sectional-compute", "--help"])
         assert "--industries" in result.output
 
     def test_help_shows_json_option(self):
         """Test that --json option is documented."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, ["cross-sectional-compute", "--help"])
         assert "--json" in result.output
@@ -62,7 +62,7 @@ class TestCrossSectionalComputeIntegration:
     def db_url(self):
         """Get database URL for tests."""
         import os
-        from g2.db.schema import test_db_url
+        from gefion.db.schema import test_db_url
         return test_db_url()
 
     @pytest.mark.skipif(
@@ -71,7 +71,7 @@ class TestCrossSectionalComputeIntegration:
     )
     def test_computes_rankings_for_valid_feature(self, db_url):
         """Test that command successfully computes rankings."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, [
             "cross-sectional-compute",
@@ -89,7 +89,7 @@ class TestCrossSectionalComputeIntegration:
     def test_json_output_format(self, db_url):
         """Test that --json outputs valid JSON."""
         import json
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, [
             "cross-sectional-compute",
@@ -109,7 +109,7 @@ class TestCrossSectionalComputeIntegration:
     )
     def test_nonexistent_feature_returns_error(self, db_url):
         """Test that nonexistent feature returns error message."""
-        from g2.cli import app
+        from gefion.cli import app
 
         result = runner.invoke(app, [
             "cross-sectional-compute",

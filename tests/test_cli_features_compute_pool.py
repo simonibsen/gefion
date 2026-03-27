@@ -2,7 +2,7 @@ import json
 
 from typer.testing import CliRunner
 
-from g2 import cli
+from gefion import cli
 
 runner = CliRunner()
 
@@ -97,7 +97,7 @@ def test_features_compute_uses_pool(monkeypatch):
         }
         return {"summary": {"total_inserted": 0, "total_errors": 0}}
 
-    monkeypatch.setattr("g2.cli.compute_features", fake_compute)
+    monkeypatch.setattr("gefion.cli.compute_features", fake_compute)
 
     res = runner.invoke(
         cli.app,

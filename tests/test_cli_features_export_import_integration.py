@@ -9,10 +9,10 @@ import psycopg
 import pytest
 from pathlib import Path
 from typer.testing import CliRunner
-from g2 import cli
-from g2.cli import _upsert_feature_function
-from g2.config import load_settings
-from g2.db import schema
+from gefion import cli
+from gefion.cli import _upsert_feature_function
+from gefion.config import load_settings
+from gefion.db import schema
 
 
 pytestmark = pytest.mark.skipif(

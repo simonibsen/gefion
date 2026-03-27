@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 from unittest.mock import patch, MagicMock
 
-from g2.cli import app
+from gefion.cli import app
 
 runner = CliRunner()
 
@@ -49,7 +49,7 @@ class TestE2ETestSteps:
 
     def test_step_names_are_defined(self):
         """Test that all step names are properly defined."""
-        from g2.ml.e2e import E2E_STEPS
+        from gefion.ml.e2e import E2E_STEPS
 
         expected_steps = [
             "data_update",
@@ -67,7 +67,7 @@ class TestE2ETestSteps:
 
     def test_run_e2e_test_returns_results(self):
         """Test that run_e2e_test returns structured results."""
-        from g2.ml.e2e import E2ETestResult
+        from gefion.ml.e2e import E2ETestResult
 
         # Verify result structure
         result = E2ETestResult(
@@ -88,7 +88,7 @@ class TestE2ETestCleanup:
 
     def test_cleanup_removes_test_artifacts(self):
         """Test that cleanup removes test artifacts when requested."""
-        from g2.ml.e2e import E2ETestResult
+        from gefion.ml.e2e import E2ETestResult
 
         # Result should track artifacts for cleanup
         result = E2ETestResult(
@@ -123,7 +123,7 @@ class TestE2EPredictionDateQuery:
             mock_result.stdout = "Generated 20 predictions\nPredictions generated: test_model v1"
             mock_subprocess.return_value = mock_result
 
-            from g2.ml.e2e import _run_predict
+            from gefion.ml.e2e import _run_predict
 
             # Pass explicit symbols
             symbols = ["AAPL", "MSFT", "GOOGL"]

@@ -9,9 +9,9 @@ import pytest
 import psycopg
 from typer.testing import CliRunner
 
-from g2.cli import app
-from g2.config import load_settings
-from g2.db.schema import test_db_url
+from gefion.cli import app
+from gefion.config import load_settings
+from gefion.db.schema import test_db_url
 
 
 runner = CliRunner(env={"DATABASE_URL": test_db_url()})
@@ -25,7 +25,7 @@ def require_db():
 
 def get_db_url():
     """Get database URL for tests."""
-    from g2.db.schema import test_db_url
+    from gefion.db.schema import test_db_url
     return test_db_url()
 
 
@@ -47,7 +47,7 @@ def db_url():
 @pytest.fixture(autouse=True)
 def setup_tables(db_url):
     """Setup strategy tables for testing."""
-    from g2.db.schema import (
+    from gefion.db.schema import (
         create_strategy_registry_table,
         create_strategy_configs_table,
     )
@@ -97,7 +97,7 @@ class TestStrategyListCommand:
 
     def test_strategy_list_after_seed(self, db_url):
         """strategy list shows seeded strategies."""
-        from g2.strategies.dispatcher import seed_builtin_strategies
+        from gefion.strategies.dispatcher import seed_builtin_strategies
 
         # Seed strategies
         with psycopg.connect(db_url) as conn:
@@ -144,7 +144,7 @@ class TestStrategyConfigsCommand:
 
     def test_strategy_configs_after_seed(self, db_url):
         """strategy configs shows seeded default configs."""
-        from g2.strategies.dispatcher import seed_builtin_strategies
+        from gefion.strategies.dispatcher import seed_builtin_strategies
 
         with psycopg.connect(db_url) as conn:
             seed_builtin_strategies(conn)
@@ -214,7 +214,7 @@ class TestStrategyCreateConfigCommand:
 
     def test_create_config_success(self, db_url):
         """create-config creates a new config in the database."""
-        from g2.strategies.dispatcher import seed_builtin_strategies
+        from gefion.strategies.dispatcher import seed_builtin_strategies
 
         # Seed strategies first (need registry entry)
         with psycopg.connect(db_url) as conn:
@@ -257,7 +257,7 @@ class TestStrategyCreateConfigCommand:
 
     def test_create_config_appears_in_list(self, db_url):
         """Created config appears in strategy configs list."""
-        from g2.strategies.dispatcher import seed_builtin_strategies
+        from gefion.strategies.dispatcher import seed_builtin_strategies
 
         with psycopg.connect(db_url) as conn:
             seed_builtin_strategies(conn)
@@ -293,7 +293,7 @@ class TestStrategyCreateConfigCommand:
 
     def test_create_config_duplicate_name_fails(self, db_url):
         """create-config fails if name already exists."""
-        from g2.strategies.dispatcher import seed_builtin_strategies
+        from gefion.strategies.dispatcher import seed_builtin_strategies
 
         with psycopg.connect(db_url) as conn:
             seed_builtin_strategies(conn)

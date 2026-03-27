@@ -3,9 +3,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import date
 
-import g2.cli as cli
-import g2.ingest.universe as universe
-import g2.db.ingest as ingest
+import gefion.cli as cli
+import gefion.ingest.universe as universe
+import gefion.db.ingest as ingest
 
 
 class DummySpan:

@@ -1,10 +1,10 @@
-# G2 MCP Server
+# Gefion MCP Server
 
 Natural language interface to the g2 ML platform using the Model Context Protocol (MCP).
 
 ## What is this?
 
-The G2 MCP Server lets you interact with g2's ML pipeline through natural language in Claude Desktop, while still having full access to the CLI for scripting and automation.
+The G2 MCP Server lets you interact with Gefion's ML pipeline through natural language in Claude Desktop, while still having full access to the CLI for scripting and automation.
 
 **Example conversation:**
 ```
@@ -309,7 +309,7 @@ If you prefer to configure manually:
          "command": "python",
          "args": ["/absolute/path/to/g2/mcp-server/server.py"],
          "env": {
-           "DATABASE_URL": "postgresql://g2:g2pass@localhost:5432/g2",
+           "DATABASE_URL": "postgresql://gefion:gefionpass@localhost:5432/gefion",
            "ALPHAVANTAGE_API_KEY": "your_api_key_here"
          }
        }
@@ -324,7 +324,7 @@ If you prefer to configure manually:
 1. **Build the Docker image:**
    ```bash
    cd /path/to/g2
-   docker build -t g2-mcp-server -f mcp-server/Dockerfile .
+   docker build -t gefion-mcp-server -f mcp-server/Dockerfile .
    ```
 
 2. **Start services:**
@@ -460,7 +460,7 @@ use local computation.
 **Key Points:**
 - MCP server is a thin wrapper around g2 CLI
 - All g2 commands still work directly (for scripts, cron jobs, etc.)
-- Natural language → MCP tools → `g2 --json` commands
+- Natural language → MCP tools → `gefion --json` commands
 - Database queries use psql for flexibility
 
 ## Tool Reference
@@ -753,7 +753,7 @@ Results:
 
 3. **For Docker, rebuild image:**
    ```bash
-   docker build -t g2-mcp-server -f mcp-server/Dockerfile .
+   docker build -t gefion-mcp-server -f mcp-server/Dockerfile .
    ```
 
 ### Database connection errors
@@ -761,14 +761,14 @@ Results:
 1. **Check DATABASE_URL in config:**
    ```json
    "env": {
-     "DATABASE_URL": "postgresql://g2:g2pass@localhost:5432/g2"
+     "DATABASE_URL": "postgresql://gefion:gefionpass@localhost:5432/gefion"
    }
    ```
 
 2. **Verify PostgreSQL is running:**
    ```bash
    docker compose ps postgres
-   psql postgresql://g2:g2pass@localhost:5432/g2 -c "SELECT 1"
+   psql postgresql://gefion:gefionpass@localhost:5432/gefion -c "SELECT 1"
    ```
 
 3. **Check network (Docker):**

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from g2 import cli
+from gefion import cli
 
 
 def test_ml_dataset_build_writes_manifest_and_upserts_db(tmp_path, monkeypatch):
@@ -44,7 +44,7 @@ def test_ml_dataset_build_writes_manifest_and_upserts_db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cli, "db_connection", fake_db_connection)
     monkeypatch.setattr(cli, "init_schema_tables", lambda conn, tables: calls.setdefault("tables", tables))
-    import g2.ml.store as store
+    import gefion.ml.store as store
 
     monkeypatch.setattr(store, "upsert_ml_dataset", fake_upsert_ml_dataset)
 
@@ -211,7 +211,7 @@ def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "db_connection", lambda *a, **k: DummyCtx())
     monkeypatch.setattr(cli, "init_schema_tables", lambda *a, **k: None)
 
-    import g2.ml.store as store
+    import gefion.ml.store as store
 
     def fake_upsert(conn, payload):
         # Capture the payload to verify feature_names were discovered
@@ -220,7 +220,7 @@ def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
 
     monkeypatch.setattr(store, "upsert_ml_dataset", fake_upsert)
 
-    import g2.ml.dataset as ds
+    import gefion.ml.dataset as ds
 
     def fake_export(conn, *, manifest, out_dir, on_progress=None):
         called["export"] += 1

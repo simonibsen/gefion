@@ -1,7 +1,7 @@
 from datetime import date
 
-from g2.features import dispatcher
-from g2.db import pool as db_pool
+from gefion.features import dispatcher
+from gefion.db import pool as db_pool
 
 
 def test_writer_uses_sync_commit_flag(monkeypatch):

@@ -14,12 +14,12 @@ class TestMLFilterStrategyBasics:
 
     def test_strategy_can_be_imported(self):
         """MLFilterStrategy should be importable."""
-        from g2.strategies.ml_filter import MLFilterStrategy
+        from gefion.strategies.ml_filter import MLFilterStrategy
         assert MLFilterStrategy is not None
 
     def test_strategy_wraps_base_strategy(self):
         """MLFilterStrategy should wrap a base strategy instance."""
-        from g2.strategies.ml_filter import MLFilterStrategy
+        from gefion.strategies.ml_filter import MLFilterStrategy
 
         # Create mock base strategy
         mock_base = MagicMock()
@@ -35,17 +35,17 @@ class TestMLFilterStrategyBasics:
 
     def test_factory_function_exists(self):
         """create_ml_filtered_strategy factory should exist."""
-        from g2.strategies.ml_filter import create_ml_filtered_strategy
+        from gefion.strategies.ml_filter import create_ml_filtered_strategy
         assert callable(create_ml_filtered_strategy)
 
 
 class TestMLFilterSignalFiltering:
     """Test signal filtering logic."""
 
-    @patch("g2.strategies.ml_filter.get_predictions_for_date")
+    @patch("gefion.strategies.ml_filter.get_predictions_for_date")
     def test_passes_buy_with_positive_prediction(self, mock_get_preds):
         """Buy signals should pass when ML confirms upside."""
-        from g2.strategies.ml_filter import MLFilterStrategy
+        from gefion.strategies.ml_filter import MLFilterStrategy
 
         mock_get_preds.return_value = {
             "AAPL": {"q10": 0.01, "q50": 0.05, "q90": 0.10},
@@ -76,10 +76,10 @@ class TestMLFilterSignalFiltering:
         assert signals[0]["action"] == "buy"
         assert "ML:" in signals[0]["reason"]
 
-    @patch("g2.strategies.ml_filter.get_predictions_for_date")
+    @patch("gefion.strategies.ml_filter.get_predictions_for_date")
     def test_blocks_buy_with_negative_prediction(self, mock_get_preds):
         """Buy signals should be blocked when ML predicts downside."""
-        from g2.strategies.ml_filter import MLFilterStrategy
+        from gefion.strategies.ml_filter import MLFilterStrategy
 
         mock_get_preds.return_value = {
             "AAPL": {"q10": -0.15, "q50": -0.05, "q90": 0.02},
@@ -109,10 +109,10 @@ class TestMLFilterSignalFiltering:
         # Buy signal should be filtered out
         assert len(signals) == 0
 
-    @patch("g2.strategies.ml_filter.get_predictions_for_date")
+    @patch("gefion.strategies.ml_filter.get_predictions_for_date")
     def test_always_passes_sell_signals(self, mock_get_preds):
         """Sell signals should always pass through (don't block exits)."""
-        from g2.strategies.ml_filter import MLFilterStrategy
+        from gefion.strategies.ml_filter import MLFilterStrategy
 
         # Positive prediction (but we still want to allow sells)
         mock_get_preds.return_value = {
@@ -146,10 +146,10 @@ class TestMLFilterSignalFiltering:
 class TestMLFilterModes:
     """Test different filter modes."""
 
-    @patch("g2.strategies.ml_filter.get_predictions_for_date")
+    @patch("gefion.strategies.ml_filter.get_predictions_for_date")
     def test_confirm_mode_requires_prediction(self, mock_get_preds):
         """Confirm mode should skip signals without predictions."""
-        from g2.strategies.ml_filter import MLFilterStrategy
+        from gefion.strategies.ml_filter import MLFilterStrategy
 
         # No prediction for AAPL
         mock_get_preds.return_value = {}
@@ -177,10 +177,10 @@ class TestMLFilterModes:
         # Should be filtered out (no prediction to confirm)
         assert len(signals) == 0
 
-    @patch("g2.strategies.ml_filter.get_predictions_for_date")
+    @patch("gefion.strategies.ml_filter.get_predictions_for_date")
     def test_veto_mode_allows_without_prediction(self, mock_get_preds):
         """Veto mode should allow signals without predictions."""
-        from g2.strategies.ml_filter import MLFilterStrategy
+        from gefion.strategies.ml_filter import MLFilterStrategy
 
         # No prediction for AAPL
         mock_get_preds.return_value = {}
@@ -212,10 +212,10 @@ class TestMLFilterModes:
 class TestMLFilterWithClassifier:
     """Test classifier-based filtering."""
 
-    @patch("g2.strategies.ml_filter.get_classifier_predictions_for_date")
+    @patch("gefion.strategies.ml_filter.get_classifier_predictions_for_date")
     def test_allows_bullish_class(self, mock_get_preds):
         """Should allow buy when classifier predicts bullish."""
-        from g2.strategies.ml_filter import MLFilterStrategy
+        from gefion.strategies.ml_filter import MLFilterStrategy
 
         mock_get_preds.return_value = {
             "AAPL": {
@@ -255,8 +255,8 @@ class TestMLFilterFactory:
 
     def test_creates_filtered_strategy(self):
         """Factory should create working MLFilterStrategy."""
-        from g2.strategies.ml_filter import create_ml_filtered_strategy
-        from g2.strategies.momentum import MomentumStrategy
+        from gefion.strategies.ml_filter import create_ml_filtered_strategy
+        from gefion.strategies.momentum import MomentumStrategy
 
         filtered = create_ml_filtered_strategy(
             base_strategy_class=MomentumStrategy,

@@ -1,6 +1,6 @@
 """Test latency tracking in progress reporter."""
 import time
-from g2.utils.progress import ProgressReporter
+from gefion.utils.progress import ProgressReporter
 
 
 def test_progress_reporter_tracks_write_latency():

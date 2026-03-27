@@ -2,7 +2,7 @@
 
 ## Overview
 
-The g2 feature computation system now **automatically scales workers and writer threads** based on available system resources. This eliminates the need for manual tuning and prevents system lockups from resource exhaustion.
+The Gefion feature computation system now **automatically scales workers and writer threads** based on available system resources. This eliminates the need for manual tuning and prevents system lockups from resource exhaustion.
 
 ## How It Works
 
@@ -41,7 +41,7 @@ The limiter tries different combinations of (max_workers, writer_workers) and se
 
 ```bash
 # Automatically scales based on available resources
-g2 features-compute --all-features
+gefion features-compute --all-features
 ```
 
 The system will:
@@ -67,7 +67,7 @@ You can still manually specify limits if needed:
 
 ```bash
 # Limit to specific worker counts
-g2 features-compute --all-features --max-workers 5 --writer-workers 3
+gefion features-compute --all-features --max-workers 5 --writer-workers 3
 ```
 
 The system will respect your limits but still monitor resources and scale down if needed.
@@ -79,14 +79,14 @@ The system will respect your limits but still monitor resources and scale down i
 Before:
 ```bash
 # This would consume 10 × 150MB + 80 threads = crash!
-g2 features-compute --max-workers 10 --writer-workers 8
+gefion features-compute --max-workers 10 --writer-workers 8
 ```
 
 Now:
 ```bash
 # System automatically detects it can't support 10 workers
 # and scales down to safe levels
-g2 features-compute --all-features
+gefion features-compute --all-features
 # ⚠️  Scaling down: max workers 10 → 4 (resource constraints)
 ```
 
@@ -108,7 +108,7 @@ If you start other processes during feature computation, the system detects redu
 
 ### ResourceAwareAdaptiveLimiter
 
-Located in: [src/g2/utils/adaptive.py](../src/g2/utils/adaptive.py)
+Located in: [src/gefion/utils/adaptive.py](../src/gefion/utils/adaptive.py)
 
 Key methods:
 - `_calculate_optimal_workers_and_writers()`: Calculates optimal configuration
@@ -118,7 +118,7 @@ Key methods:
 
 ### Integration Points
 
-1. **CLI** ([src/g2/cli.py](../src/g2/cli.py)):
+1. **CLI** ([src/gefion/cli.py](../src/gefion/cli.py)):
    - Creates `ResourceAwareAdaptiveLimiter` instead of `AdaptiveLimiter`
    - Passes available DB connections to limiter
    - Retrieves dynamic writer_workers via `limiter.get_writer_workers()`
@@ -170,7 +170,7 @@ pytest tests/test_resource_aware_adaptive_limiter.py -v
 
 ```bash
 # Manual tuning required
-g2 features-compute --max-workers 5 --writer-workers 2
+gefion features-compute --max-workers 5 --writer-workers 2
 
 # Too conservative = slow
 # Too aggressive = crash
@@ -181,7 +181,7 @@ g2 features-compute --max-workers 5 --writer-workers 2
 
 ```bash
 # Works optimally on any system
-g2 features-compute --all-features
+gefion features-compute --all-features
 
 # Automatically:
 # - Small laptop: 2 workers × 2 writers

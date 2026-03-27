@@ -12,7 +12,7 @@ class TestWalkForwardConfig:
 
     def test_default_config_values(self):
         """Default config has reasonable values."""
-        from g2.backtest.optimization import WalkForwardConfig
+        from gefion.backtest.optimization import WalkForwardConfig
 
         config = WalkForwardConfig()
         assert config.train_days == 252  # 1 year
@@ -22,7 +22,7 @@ class TestWalkForwardConfig:
 
     def test_config_can_be_customized(self):
         """Config values can be customized."""
-        from g2.backtest.optimization import WalkForwardConfig
+        from gefion.backtest.optimization import WalkForwardConfig
 
         config = WalkForwardConfig(
             train_days=126,
@@ -41,7 +41,7 @@ class TestWalkForwardWindow:
 
     def test_window_has_required_fields(self):
         """Window has train and test date ranges."""
-        from g2.backtest.optimization import WalkForwardWindow
+        from gefion.backtest.optimization import WalkForwardWindow
 
         window = WalkForwardWindow(
             train_start=date(2020, 1, 1),
@@ -60,7 +60,7 @@ class TestWindowGeneration:
 
     def test_generate_windows_basic(self):
         """Generate windows creates correct date ranges."""
-        from g2.backtest.optimization import WalkForwardOptimizer, WalkForwardConfig
+        from gefion.backtest.optimization import WalkForwardOptimizer, WalkForwardConfig
 
         config = WalkForwardConfig(
             train_days=252,
@@ -81,7 +81,7 @@ class TestWindowGeneration:
 
     def test_generate_windows_no_overlap_in_test(self):
         """Test periods don't overlap between windows."""
-        from g2.backtest.optimization import WalkForwardOptimizer, WalkForwardConfig
+        from gefion.backtest.optimization import WalkForwardOptimizer, WalkForwardConfig
 
         config = WalkForwardConfig(
             train_days=252,
@@ -101,7 +101,7 @@ class TestWindowGeneration:
 
     def test_generate_windows_insufficient_data(self):
         """Returns empty list if not enough data for single window."""
-        from g2.backtest.optimization import WalkForwardOptimizer, WalkForwardConfig
+        from gefion.backtest.optimization import WalkForwardOptimizer, WalkForwardConfig
 
         config = WalkForwardConfig(
             train_days=252,
@@ -123,7 +123,7 @@ class TestParameterGrid:
 
     def test_grid_expansion(self):
         """Parameter grid expands correctly."""
-        from g2.backtest.optimization import expand_param_grid
+        from gefion.backtest.optimization import expand_param_grid
 
         grid = {
             "lookback": [10, 20, 30],
@@ -140,7 +140,7 @@ class TestWalkForwardResult:
 
     def test_result_has_required_fields(self):
         """Result contains key metrics."""
-        from g2.backtest.optimization import WalkForwardResult
+        from gefion.backtest.optimization import WalkForwardResult
 
         result = WalkForwardResult(
             windows=[],
@@ -159,7 +159,7 @@ class TestOverfittingDetection:
 
     def test_overfitting_score_calculation(self):
         """Overfitting score measures in-sample vs out-of-sample degradation."""
-        from g2.backtest.optimization import calculate_overfitting_score
+        from gefion.backtest.optimization import calculate_overfitting_score
 
         # In-sample performed much better than out-of-sample
         in_sample_returns = [0.20, 0.25, 0.22]  # High returns
@@ -174,7 +174,7 @@ class TestOverfittingDetection:
 
     def test_no_overfitting_low_score(self):
         """Good strategies have low overfitting score."""
-        from g2.backtest.optimization import calculate_overfitting_score
+        from gefion.backtest.optimization import calculate_overfitting_score
 
         # Similar performance in and out of sample
         in_sample_returns = [0.10, 0.12, 0.11]
@@ -193,7 +193,7 @@ class TestOptimizationMetrics:
 
     def test_supported_metrics(self):
         """Optimizer supports standard metrics."""
-        from g2.backtest.optimization import SUPPORTED_METRICS
+        from gefion.backtest.optimization import SUPPORTED_METRICS
 
         assert "sharpe_ratio" in SUPPORTED_METRICS
         assert "total_return" in SUPPORTED_METRICS
@@ -206,7 +206,7 @@ class TestWalkForwardOptimizer:
 
     def test_optimizer_initialization(self):
         """Optimizer initializes with config."""
-        from g2.backtest.optimization import WalkForwardOptimizer, WalkForwardConfig
+        from gefion.backtest.optimization import WalkForwardOptimizer, WalkForwardConfig
 
         config = WalkForwardConfig()
         optimizer = WalkForwardOptimizer(config)
@@ -215,7 +215,7 @@ class TestWalkForwardOptimizer:
 
     def test_optimizer_run_returns_result(self):
         """Running optimizer returns WalkForwardResult."""
-        from g2.backtest.optimization import (
+        from gefion.backtest.optimization import (
             WalkForwardOptimizer,
             WalkForwardConfig,
             WalkForwardResult,

@@ -16,11 +16,11 @@ import psycopg
 from psycopg.types.json import Json
 import pytest
 
-from g2.config import load_settings
-from g2.db import schema, pool
-from g2.db.ingest import upsert_stock
-from g2.features.dispatcher import compute_features
-from g2.cli_helpers import upsert_feature_function
+from gefion.config import load_settings
+from gefion.db import schema, pool
+from gefion.db.ingest import upsert_stock
+from gefion.features.dispatcher import compute_features
+from gefion.cli_helpers import upsert_feature_function
 
 
 pytestmark = pytest.mark.skipif(
@@ -123,8 +123,8 @@ def test_writer_errors_are_propagated(db_conn, setup_db):
             main_conn.autocommit = True
 
             # Patch insert_computed_features in the dispatcher module (where it's imported)
-            from g2.features import dispatcher
-            from g2.db import ingest
+            from gefion.features import dispatcher
+            from gefion.db import ingest
             original_insert = ingest.insert_computed_features
             call_count = [0]
 
@@ -195,8 +195,8 @@ def compute(rows, specs):
         with pool.get_connection() as main_conn:
             main_conn.autocommit = True
 
-            from g2.features import dispatcher
-            from g2.db import ingest
+            from gefion.features import dispatcher
+            from gefion.db import ingest
             original_insert = ingest.insert_computed_features
 
             def always_failing_insert(*args, **kwargs):

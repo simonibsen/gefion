@@ -2,7 +2,7 @@ import json
 import os
 from typer.testing import CliRunner
 
-from g2 import cli
+from gefion import cli
 
 runner = CliRunner()
 

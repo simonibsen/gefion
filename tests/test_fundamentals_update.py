@@ -18,7 +18,7 @@ def db_conn():
     """Create test database connection."""
     if not os.getenv("ENABLE_DB_TESTS"):
         pytest.skip("Database tests not enabled (set ENABLE_DB_TESTS=1)")
-    from g2.db.schema import test_db_url
+    from gefion.db.schema import test_db_url
     db_url = test_db_url()
 
     try:
@@ -30,7 +30,7 @@ def db_conn():
 
 def test_alphavantage_client_has_fetch_overview():
     """Test that AlphaVantageClient has fetch_overview method."""
-    from g2.alphavantage.client import AlphaVantageClient
+    from gefion.alphavantage.client import AlphaVantageClient
 
     # Mock the API key
     with patch.dict(os.environ, {"ALPHAVANTAGE_API_KEY": "test_key"}):
@@ -40,7 +40,7 @@ def test_alphavantage_client_has_fetch_overview():
 
 def test_fetch_overview_returns_expected_fields():
     """Test that fetch_overview returns sector, industry, and name fields."""
-    from g2.alphavantage.client import AlphaVantageClient
+    from gefion.alphavantage.client import AlphaVantageClient
 
     mock_response = {
         "Symbol": "AAPL",
@@ -62,7 +62,7 @@ def test_fetch_overview_returns_expected_fields():
 
 def test_fundamentals_update_command_exists():
     """Test that fundamentals-update command exists in CLI."""
-    from g2.cli import app
+    from gefion.cli import app
 
     runner = TyperCliRunner()
     result = runner.invoke(app, ["fundamentals-update", "--help"])
@@ -115,7 +115,7 @@ def test_fundamentals_update_force_flag(db_conn):
 
 def test_fundamentals_staleness_threshold():
     """Test that staleness threshold is configurable (default 30 days)."""
-    from g2.cli import app
+    from gefion.cli import app
 
     runner = TyperCliRunner()
     result = runner.invoke(app, ["fundamentals-update", "--help"])

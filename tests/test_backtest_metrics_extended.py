@@ -14,7 +14,7 @@ class TestSortinoRatio:
 
     def test_sortino_ratio_basic(self):
         """Sortino ratio uses only downside deviation."""
-        from g2.backtest.metrics import calculate_sortino_ratio
+        from gefion.backtest.metrics import calculate_sortino_ratio
 
         # Equity curve with mixed returns
         equity_curve = [
@@ -34,7 +34,7 @@ class TestSortinoRatio:
 
     def test_sortino_ratio_no_downside(self):
         """Sortino ratio with no negative returns."""
-        from g2.backtest.metrics import calculate_sortino_ratio
+        from gefion.backtest.metrics import calculate_sortino_ratio
 
         # All positive returns
         equity_curve = [
@@ -51,13 +51,13 @@ class TestSortinoRatio:
 
     def test_sortino_ratio_empty_curve(self):
         """Sortino ratio handles empty equity curve."""
-        from g2.backtest.metrics import calculate_sortino_ratio
+        from gefion.backtest.metrics import calculate_sortino_ratio
 
         assert calculate_sortino_ratio([]) == 0.0
 
     def test_sortino_ratio_single_point(self):
         """Sortino ratio handles single data point."""
-        from g2.backtest.metrics import calculate_sortino_ratio
+        from gefion.backtest.metrics import calculate_sortino_ratio
 
         equity_curve = [{"date": date(2024, 1, 1), "equity": 100000.0}]
         assert calculate_sortino_ratio(equity_curve) == 0.0
@@ -68,7 +68,7 @@ class TestCalmarRatio:
 
     def test_calmar_ratio_basic(self):
         """Calmar ratio is annualized return / max drawdown."""
-        from g2.backtest.metrics import calculate_calmar_ratio
+        from gefion.backtest.metrics import calculate_calmar_ratio
 
         # Equity curve: 20% total return over ~1 year with 10% max drawdown
         equity_curve = [
@@ -87,7 +87,7 @@ class TestCalmarRatio:
 
     def test_calmar_ratio_no_drawdown(self):
         """Calmar ratio with no drawdown."""
-        from g2.backtest.metrics import calculate_calmar_ratio
+        from gefion.backtest.metrics import calculate_calmar_ratio
 
         # Monotonically increasing equity
         equity_curve = [
@@ -103,7 +103,7 @@ class TestCalmarRatio:
 
     def test_calmar_ratio_empty_curve(self):
         """Calmar ratio handles empty equity curve."""
-        from g2.backtest.metrics import calculate_calmar_ratio
+        from gefion.backtest.metrics import calculate_calmar_ratio
 
         assert calculate_calmar_ratio([]) == 0.0
 
@@ -113,7 +113,7 @@ class TestTradeMetrics:
 
     def test_win_rate_basic(self):
         """Win rate is percentage of profitable trades."""
-        from g2.backtest.metrics import calculate_trade_metrics
+        from gefion.backtest.metrics import calculate_trade_metrics
 
         trades = [
             {"symbol": "AAPL", "pnl": 100.0},   # Win
@@ -130,7 +130,7 @@ class TestTradeMetrics:
 
     def test_profit_factor_basic(self):
         """Profit factor is gross profit / gross loss."""
-        from g2.backtest.metrics import calculate_trade_metrics
+        from gefion.backtest.metrics import calculate_trade_metrics
 
         trades = [
             {"symbol": "AAPL", "pnl": 100.0},
@@ -146,7 +146,7 @@ class TestTradeMetrics:
 
     def test_avg_win_loss_ratio(self):
         """Average win/loss ratio."""
-        from g2.backtest.metrics import calculate_trade_metrics
+        from gefion.backtest.metrics import calculate_trade_metrics
 
         trades = [
             {"symbol": "AAPL", "pnl": 100.0},   # Win
@@ -163,7 +163,7 @@ class TestTradeMetrics:
 
     def test_trade_metrics_no_trades(self):
         """Trade metrics handle empty trade list."""
-        from g2.backtest.metrics import calculate_trade_metrics
+        from gefion.backtest.metrics import calculate_trade_metrics
 
         metrics = calculate_trade_metrics([])
 
@@ -174,7 +174,7 @@ class TestTradeMetrics:
 
     def test_trade_metrics_all_wins(self):
         """Trade metrics with all winning trades."""
-        from g2.backtest.metrics import calculate_trade_metrics
+        from gefion.backtest.metrics import calculate_trade_metrics
 
         trades = [
             {"symbol": "AAPL", "pnl": 100.0},
@@ -189,7 +189,7 @@ class TestTradeMetrics:
 
     def test_trade_metrics_all_losses(self):
         """Trade metrics with all losing trades."""
-        from g2.backtest.metrics import calculate_trade_metrics
+        from gefion.backtest.metrics import calculate_trade_metrics
 
         trades = [
             {"symbol": "AAPL", "pnl": -100.0},
@@ -208,7 +208,7 @@ class TestExtendedMetricsIntegration:
 
     def test_calculate_metrics_includes_extended(self):
         """calculate_metrics returns all extended metrics."""
-        from g2.backtest.metrics import calculate_metrics_extended
+        from gefion.backtest.metrics import calculate_metrics_extended
 
         equity_curve = [
             {"date": date(2024, 1, 1), "equity": 100000.0},

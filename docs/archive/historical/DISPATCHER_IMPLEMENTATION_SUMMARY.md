@@ -12,7 +12,7 @@ Implemented a generic, metadata-driven feature computation dispatcher that unifi
 
 ## What Was Built
 
-### 1. Generic Dispatcher Core ([dispatcher.py](../src/g2/features/dispatcher.py))
+### 1. Generic Dispatcher Core ([dispatcher.py](../src/gefion/features/dispatcher.py))
 
 **Key Functions:**
 - `compute_features()` - Main dispatcher entry point
@@ -27,7 +27,7 @@ Implemented a generic, metadata-driven feature computation dispatcher that unifi
 - Aggregates errors per function_type
 - Batches queries by source for efficiency
 
-### 2. Pure Derivative Compute Function ([derivatives.py](../src/g2/features/derivatives.py))
+### 2. Pure Derivative Compute Function ([derivatives.py](../src/gefion/features/derivatives.py))
 
 **New Function:**
 - `compute_derivatives()` - Pure function for computing slope and concavity
@@ -43,11 +43,11 @@ def compute_derivatives(
 
 **Pattern**: Matches `compute_indicators()` - pure function, no DB access
 
-### 3. CLI Integration ([cli.py](../src/g2/cli.py))
+### 3. CLI Integration ([cli.py](../src/gefion/cli.py))
 
 **New Command:**
 ```bash
-g2 features-compute [options]
+gefion features-compute [options]
 ```
 
 **Capabilities:**
@@ -59,16 +59,16 @@ g2 features-compute [options]
 **Examples:**
 ```bash
 # Compute all indicators for AAPL
-g2 features-compute --symbols AAPL --function-names indicator
+gefion features-compute --symbols AAPL --function-names indicator
 
 # Compute specific features
-g2 features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
+gefion features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
 
 # Full refresh
-g2 features-compute --all-features --full
+gefion features-compute --all-features --full
 ```
 
-### 4. Integration Helper ([indicators.py](../src/g2/ingest/indicators.py))
+### 4. Integration Helper ([indicators.py](../src/gefion/ingest/indicators.py))
 
 **New Function:**
 ```python
@@ -181,7 +181,7 @@ All phases completed following TDD methodology:
 - Tests initially failed (modules didn't exist)
 
 ### ✅ Phase 2: Implement Generic Dispatcher
-- Created src/g2/features/dispatcher.py
+- Created src/gefion/features/dispatcher.py
 - Implemented all core functions
 - All 16 dispatcher tests passing
 
@@ -226,7 +226,7 @@ tests/test_flat_price_handling.py ...                                    [100%]
 ### Programmatic
 
 ```python
-from g2.features.dispatcher import compute_features
+from gefion.features.dispatcher import compute_features
 import psycopg
 
 with psycopg.connect(db_url) as conn:
@@ -252,13 +252,13 @@ with psycopg.connect(db_url) as conn:
 
 ```bash
 # Compute indicators for AAPL
-g2 features-compute --symbols AAPL --function-names indicator
+gefion features-compute --symbols AAPL --function-names indicator
 
 # Compute derivatives for all stocks
-g2 features-compute --function-names derivative --full
+gefion features-compute --function-names derivative --full
 
 # Compute specific features
-g2 features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
+gefion features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
 ```
 
 ---
@@ -312,7 +312,7 @@ g2 features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
 ## Files Changed/Created
 
 ### New Files (7)
-1. `src/g2/features/dispatcher.py` - Generic dispatcher (423 lines)
+1. `src/gefion/features/dispatcher.py` - Generic dispatcher (423 lines)
 2. `tests/test_feature_dispatcher.py` - Dispatcher tests (16 tests)
 3. `tests/test_compute_derivatives.py` - Derivative tests (14 tests)
 4. `docs/FEATURE_DISPATCHER.md` - Dispatcher documentation
@@ -321,9 +321,9 @@ g2 features-compute --features indicator_rsi_14,derivative_rsi_14_slope_5
 7. `examples/derivative_features_example.py` - Pre-existing from previous work
 
 ### Modified Files (3)
-1. `src/g2/features/derivatives.py` - Added compute_derivatives() function
-2. `src/g2/ingest/indicators.py` - Added compute_indicators_via_dispatcher()
-3. `src/g2/cli.py` - Added features-compute command
+1. `src/gefion/features/derivatives.py` - Added compute_derivatives() function
+2. `src/gefion/ingest/indicators.py` - Added compute_indicators_via_dispatcher()
+3. `src/gefion/cli.py` - Added features-compute command
 
 ### Total Lines of Code
 - **Dispatcher**: ~423 lines
@@ -361,7 +361,7 @@ Successfully implemented a production-ready generic feature dispatcher that:
 
 **Next Steps**:
 - Define derivative feature_definitions for desired derivatives
-- Use `g2 features-compute` to compute derivatives from indicators
+- Use `gefion features-compute` to compute derivatives from indicators
 - Monitor performance and adjust batch sizes as needed
 - Consider parallel stock processing for large-scale computation
 

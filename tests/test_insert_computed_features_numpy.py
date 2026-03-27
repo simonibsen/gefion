@@ -4,8 +4,8 @@ import psycopg
 import pytest
 from datetime import date
 
-from g2.db import schema
-from g2.db.ingest import insert_computed_features, ensure_feature_definitions, ensure_store_targets
+from gefion.db import schema
+from gefion.db.ingest import insert_computed_features, ensure_feature_definitions, ensure_store_targets
 
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
 

@@ -8,19 +8,19 @@ Run the automated e2e test with a single command:
 
 ```bash
 # Quick smoke test (10 NASDAQ symbols, ~2-5 minutes)
-g2 ml e2e-test
+gefion ml e2e-test
 
 # Test with more symbols
-g2 ml e2e-test --limit 50
+gefion ml e2e-test --limit 50
 
 # Skip data update if data is already fresh
-g2 ml e2e-test --skip-data-update
+gefion ml e2e-test --skip-data-update
 
 # Clean up test artifacts after completion
-g2 ml e2e-test --cleanup
+gefion ml e2e-test --cleanup
 
 # Full options
-g2 ml e2e-test --exchange NASDAQ --limit 50 --name my_test --cleanup
+gefion ml e2e-test --exchange NASDAQ --limit 50 --name my_test --cleanup
 ```
 
 The command runs all 7 pipeline steps automatically:
@@ -38,11 +38,11 @@ The command runs all 7 pipeline steps automatically:
 # 1. Verify database is running
 docker compose ps
 
-# 2. Verify g2 CLI is installed
-g2 --version
+# 2. Verify Gefion CLI is installed
+gefion --version
 
 # 3. Check system status
-g2 system-status
+gefion system-status
 ```
 
 ## MCP Server
@@ -95,16 +95,16 @@ For debugging or custom testing, here are the individual steps:
 ### Step 1: Update Price Data
 
 ```bash
-g2 data-update --exchange NASDAQ --limit 50
+gefion data-update --exchange NASDAQ --limit 50
 
 # Verify
-g2 query-database --sql "SELECT COUNT(*) FROM stocks WHERE exchange = 'NASDAQ'"
+gefion query-database --sql "SELECT COUNT(*) FROM stocks WHERE exchange = 'NASDAQ'"
 ```
 
 ### Step 2: Build Dataset
 
 ```bash
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name e2e_test \
   --version v1 \
   --exchange NASDAQ \
@@ -112,13 +112,13 @@ g2 ml dataset-build \
   --horizons 7,30
 
 # Verify
-g2 query-database --sql "SELECT name, version, num_symbols FROM ml_datasets WHERE name = 'e2e_test'"
+gefion query-database --sql "SELECT name, version, num_symbols FROM ml_datasets WHERE name = 'e2e_test'"
 ```
 
 ### Step 3: Train Single Model
 
 ```bash
-g2 ml train \
+gefion ml train \
   --dataset-name e2e_test \
   --dataset-version v1 \
   --model-name e2e_xgboost \
@@ -129,7 +129,7 @@ g2 ml train \
 ### Step 4: Train Ensemble
 
 ```bash
-g2 ml train-ensemble \
+gefion ml train-ensemble \
   --dataset-name e2e_test \
   --dataset-version v1 \
   --model-name e2e_ensemble \
@@ -141,10 +141,10 @@ g2 ml train-ensemble \
 
 ```bash
 # Get latest date with features
-PRED_DATE=$(g2 query-database --sql "SELECT MAX(date) FROM computed_features" | tail -1 | tr -d ' ')
+PRED_DATE=$(gefion query-database --sql "SELECT MAX(date) FROM computed_features" | tail -1 | tr -d ' ')
 
 # Single model predictions
-g2 ml predict \
+gefion ml predict \
   --model-name e2e_xgboost \
   --model-version v1 \
   --prediction-date $PRED_DATE \
@@ -152,7 +152,7 @@ g2 ml predict \
   --limit 50
 
 # Ensemble predictions
-g2 ml predict-ensemble \
+gefion ml predict-ensemble \
   --model-name e2e_ensemble \
   --model-version v1 \
   --prediction-date $PRED_DATE \
@@ -163,7 +163,7 @@ g2 ml predict-ensemble \
 ### Step 6: Verify Predictions
 
 ```bash
-g2 query-database --sql "
+gefion query-database --sql "
 SELECT m.name, COUNT(*) as predictions
 FROM quantile_predictions qp
 JOIN ml_models m ON qp.model_id = m.id
@@ -176,9 +176,9 @@ GROUP BY m.name
 
 ```bash
 # Remove test artifacts from database
-g2 query-database --sql "DELETE FROM quantile_predictions WHERE model_id IN (SELECT id FROM ml_models WHERE name LIKE 'e2e_%')"
-g2 query-database --sql "DELETE FROM ml_models WHERE name LIKE 'e2e_%'"
-g2 query-database --sql "DELETE FROM ml_datasets WHERE name = 'e2e_test'"
+gefion query-database --sql "DELETE FROM quantile_predictions WHERE model_id IN (SELECT id FROM ml_models WHERE name LIKE 'e2e_%')"
+gefion query-database --sql "DELETE FROM ml_models WHERE name LIKE 'e2e_%'"
+gefion query-database --sql "DELETE FROM ml_datasets WHERE name = 'e2e_test'"
 
 # Remove model files
 rm -rf models/e2e_*
@@ -202,12 +202,12 @@ apt-get install libgomp1
 
 Features haven't been computed for the date:
 ```bash
-g2 data-update --exchange NASDAQ --limit 50
+gefion data-update --exchange NASDAQ --limit 50
 ```
 
 ### "Model not found"
 
 Check model was registered:
 ```bash
-g2 query-database --sql "SELECT * FROM ml_models ORDER BY created_at DESC LIMIT 5"
+gefion query-database --sql "SELECT * FROM ml_models ORDER BY created_at DESC LIMIT 5"
 ```

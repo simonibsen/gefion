@@ -5,8 +5,8 @@ import pytest
 import psycopg
 from typer.testing import CliRunner
 
-from g2 import cli
-from g2.db import schema
+from gefion import cli
+from gefion.db import schema
 
 runner = CliRunner()
 fixture_path = Path(__file__).parent / "fixtures" / "demo_time_series_daily_adjusted.json"

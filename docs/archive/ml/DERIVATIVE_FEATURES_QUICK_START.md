@@ -15,12 +15,12 @@ Just like indicators, you define which derivatives you want. Features are DATA i
 
 **Option A: Using SQL directly**
 ```bash
-psql -d g2 -f sql/derivative_features.sql
+psql -d gefion -f sql/derivative_features.sql
 ```
 
 **Option B: Using the CLI (one feature at a time)**
 ```bash
-g2 features-register --definition '{
+gefion features-register --definition '{
   "name": "derivative_rsi_14_slope_5",
   "function_name": "derivative",
   "params": {"source_feature": "indicator_rsi_14", "type": "slope", "window": 5, "method": "linreg"},
@@ -39,13 +39,13 @@ See [sql/derivative_features.sql](../sql/derivative_features.sql) for all 15 rec
 
 ```bash
 # Compute all derivatives for all stocks
-g2 features-compute --function-names derivative
+gefion features-compute --function-names derivative
 
 # Compute for specific stocks
-g2 features-compute --symbols AAPL,MSFT --function-names derivative
+gefion features-compute --symbols AAPL,MSFT --function-names derivative
 
 # Compute specific features
-g2 features-compute --features derivative_rsi_14_slope_5,derivative_macd_slope_5
+gefion features-compute --features derivative_rsi_14_slope_5,derivative_macd_slope_5
 ```
 
 ### 3. Query Results
@@ -73,7 +73,7 @@ Just like indicators, you can define any derivatives you want. Features are defi
 
 **Using CLI:**
 ```bash
-g2 features-register --definition '{
+gefion features-register --definition '{
   "name": "derivative_ema12_slope_3",
   "function_name": "derivative",
   "params": {"source_feature": "indicator_ema12", "type": "slope", "window": 3, "method": "linreg"},
@@ -108,7 +108,7 @@ INSERT INTO feature_definitions (
 
 Then compute:
 ```bash
-g2 features-compute --features derivative_ema12_slope_3
+gefion features-compute --features derivative_ema12_slope_3
 ```
 
 ## Recommended 15 Features
@@ -156,13 +156,13 @@ Derivatives work just like indicators - they're computed features:
 
 ```bash
 # 1. Ingest prices and compute indicators (existing workflow)
-g2 data-update --exchange NASDAQ --limit 10
+gefion data-update --exchange NASDAQ --limit 10
 
 # 2. Define derivative features (once) - use SQL or features-register CLI
-psql -d g2 -f sql/derivative_features.sql
+psql -d gefion -f sql/derivative_features.sql
 
 # 3. Compute derivatives (uses dispatcher)
-g2 features-compute --function-names derivative
+gefion features-compute --function-names derivative
 
 # 4. Query all features together
 ```
@@ -184,7 +184,7 @@ SELECT compute_features(data_id, ARRAY['indicator', 'derivative']);
 Or via CLI:
 ```bash
 # Compute both feature types
-g2 features-compute --function-names indicator,derivative --symbols AAPL
+gefion features-compute --function-names indicator,derivative --symbols AAPL
 ```
 
 ## Troubleshooting
@@ -193,12 +193,12 @@ g2 features-compute --function-names indicator,derivative --symbols AAPL
 Derivatives depend on indicators. Ensure indicators exist first:
 ```bash
 # Check indicators
-psql -d g2 -c "SELECT COUNT(*) FROM computed_features cf
+psql -d gefion -c "SELECT COUNT(*) FROM computed_features cf
                JOIN feature_definitions fd ON fd.id = cf.feature_id
                WHERE fd.function_name = 'indicator'"
 
 # Compute missing indicators
-g2 features-run --all-features --local
+gefion features-run --all-features --local
 ```
 
 ### "No data inserted"

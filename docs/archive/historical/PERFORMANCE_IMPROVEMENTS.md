@@ -22,8 +22,8 @@ This document tracks the Test-Driven Development (TDD) implementation of perform
 - **Speed-up**: **12.8x faster**
 
 **Files Modified**:
-- `src/g2/db/ingest.py:262-354` - Rewrote `insert_stock_ohlcv()` with batching
-- `src/g2/db/schema.py:22-30` - Fixed TimescaleDB extension handling
+- `src/gefion/db/ingest.py:262-354` - Rewrote `insert_stock_ohlcv()` with batching
+- `src/gefion/db/schema.py:22-30` - Fixed TimescaleDB extension handling
 
 **Code Changes**:
 ```python
@@ -55,7 +55,7 @@ cur.execute(f"INSERT INTO stock_ohlcv ... VALUES {','.join(values_sql)}", params
 - **Speed-up**: **5.7x faster**
 
 **Files Modified**:
-- `src/g2/indicators/local.py:136-164` - Optimized DataFrame conversion
+- `src/gefion/indicators/local.py:136-164` - Optimized DataFrame conversion
 
 **Code Changes**:
 ```python
@@ -87,7 +87,7 @@ for record in records:
 - Added `psycopg-pool>=3.1` to `pyproject.toml`
 
 **Implementation Plan**:
-1. Create `src/g2/db/pool.py` module for pool management
+1. Create `src/gefion/db/pool.py` module for pool management
 2. Add pool initialization in worker entry points
 3. Modify `ingest/indicators.py` and `ingest/universe.py` to use pooled connections
 4. Add tests for pool behavior (connection reuse, proper cleanup)

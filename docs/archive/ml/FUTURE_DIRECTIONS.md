@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines potential future enhancements to the g2 system. These are **not currently planned for immediate implementation**, but represent exciting directions the architecture naturally supports.
+This document outlines potential future enhancements to the Gefion system. These are **not currently planned for immediate implementation**, but represent exciting directions the architecture naturally supports.
 
 ---
 

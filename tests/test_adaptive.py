@@ -1,4 +1,4 @@
-from g2.utils.adaptive import AdaptiveLimiter, chunked
+from gefion.utils.adaptive import AdaptiveLimiter, chunked
 
 
 def test_chunked():

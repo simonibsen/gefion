@@ -89,7 +89,7 @@ class TestCreateCandlestickChart:
 
     def test_returns_plotly_figure(self):
         """create_candlestick_chart should return a Plotly Figure."""
-        from g2.charts.renderers import create_candlestick_chart
+        from gefion.charts.renderers import create_candlestick_chart
         import plotly.graph_objects as go
 
         ohlcv = make_ohlcv_data()
@@ -99,7 +99,7 @@ class TestCreateCandlestickChart:
 
     def test_has_candlestick_trace(self):
         """create_candlestick_chart should include a candlestick trace."""
-        from g2.charts.renderers import create_candlestick_chart
+        from gefion.charts.renderers import create_candlestick_chart
 
         ohlcv = make_ohlcv_data()
         fig = create_candlestick_chart(ohlcv, "TEST")
@@ -111,7 +111,7 @@ class TestCreateCandlestickChart:
 
     def test_has_volume_subplot(self):
         """create_candlestick_chart should include volume bars."""
-        from g2.charts.renderers import create_candlestick_chart
+        from gefion.charts.renderers import create_candlestick_chart
 
         ohlcv = make_ohlcv_data()
         fig = create_candlestick_chart(ohlcv, "TEST")
@@ -124,7 +124,7 @@ class TestCreateCandlestickChart:
 
     def test_custom_title(self):
         """create_candlestick_chart should use custom title when provided."""
-        from g2.charts.renderers import create_candlestick_chart
+        from gefion.charts.renderers import create_candlestick_chart
 
         ohlcv = make_ohlcv_data()
         fig = create_candlestick_chart(ohlcv, "TEST", title="Custom Title")
@@ -133,7 +133,7 @@ class TestCreateCandlestickChart:
 
     def test_with_indicators(self):
         """create_candlestick_chart should overlay indicators when provided."""
-        from g2.charts.renderers import create_candlestick_chart
+        from gefion.charts.renderers import create_candlestick_chart
 
         ohlcv = make_ohlcv_data()
         indicators = {
@@ -150,7 +150,7 @@ class TestCreatePredictionChart:
 
     def test_returns_plotly_figure(self):
         """create_prediction_chart should return a Plotly Figure."""
-        from g2.charts.renderers import create_prediction_chart
+        from gefion.charts.renderers import create_prediction_chart
         import plotly.graph_objects as go
 
         ohlcv = make_ohlcv_data()
@@ -161,7 +161,7 @@ class TestCreatePredictionChart:
 
     def test_has_price_trace(self):
         """create_prediction_chart should include price line."""
-        from g2.charts.renderers import create_prediction_chart
+        from gefion.charts.renderers import create_prediction_chart
 
         ohlcv = make_ohlcv_data()
         predictions = make_prediction_data()
@@ -172,7 +172,7 @@ class TestCreatePredictionChart:
 
     def test_has_prediction_bands(self):
         """create_prediction_chart should include q10/q50/q90 bands."""
-        from g2.charts.renderers import create_prediction_chart
+        from gefion.charts.renderers import create_prediction_chart
 
         ohlcv = make_ohlcv_data()
         predictions = make_prediction_data()
@@ -187,7 +187,7 @@ class TestCreateEquityCurveChart:
 
     def test_returns_plotly_figure(self):
         """create_equity_curve_chart should return a Plotly Figure."""
-        from g2.charts.renderers import create_equity_curve_chart
+        from gefion.charts.renderers import create_equity_curve_chart
         import plotly.graph_objects as go
 
         equity = make_equity_data()
@@ -197,7 +197,7 @@ class TestCreateEquityCurveChart:
 
     def test_has_equity_trace(self):
         """create_equity_curve_chart should include equity line."""
-        from g2.charts.renderers import create_equity_curve_chart
+        from gefion.charts.renderers import create_equity_curve_chart
 
         equity = make_equity_data()
         fig = create_equity_curve_chart(equity)
@@ -206,7 +206,7 @@ class TestCreateEquityCurveChart:
 
     def test_has_drawdown_subplot(self):
         """create_equity_curve_chart should include drawdown subplot by default."""
-        from g2.charts.renderers import create_equity_curve_chart
+        from gefion.charts.renderers import create_equity_curve_chart
 
         equity = make_equity_data()
         fig = create_equity_curve_chart(equity, show_drawdown=True)
@@ -216,7 +216,7 @@ class TestCreateEquityCurveChart:
 
     def test_no_drawdown_when_disabled(self):
         """create_equity_curve_chart should not show drawdown when disabled."""
-        from g2.charts.renderers import create_equity_curve_chart
+        from gefion.charts.renderers import create_equity_curve_chart
 
         equity = make_equity_data()
         fig = create_equity_curve_chart(equity, show_drawdown=False)
@@ -230,7 +230,7 @@ class TestCreateFeatureChart:
 
     def test_returns_plotly_figure(self):
         """create_feature_chart should return a Plotly Figure."""
-        from g2.charts.renderers import create_feature_chart
+        from gefion.charts.renderers import create_feature_chart
         import plotly.graph_objects as go
 
         ohlcv = make_ohlcv_data()
@@ -241,7 +241,7 @@ class TestCreateFeatureChart:
 
     def test_has_price_and_feature_traces(self):
         """create_feature_chart should include price and feature traces."""
-        from g2.charts.renderers import create_feature_chart
+        from gefion.charts.renderers import create_feature_chart
 
         ohlcv = make_ohlcv_data()
         features = make_feature_data()
@@ -291,7 +291,7 @@ class TestCreateComparisonChart:
 
     def test_returns_plotly_figure(self):
         """create_comparison_chart should return a Plotly Figure."""
-        from g2.charts.renderers import create_comparison_chart
+        from gefion.charts.renderers import create_comparison_chart
         import plotly.graph_objects as go
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT"])
@@ -301,7 +301,7 @@ class TestCreateComparisonChart:
 
     def test_has_traces_for_each_symbol(self):
         """create_comparison_chart should have a trace for each symbol."""
-        from g2.charts.renderers import create_comparison_chart
+        from gefion.charts.renderers import create_comparison_chart
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT", "GOOGL"])
         fig = create_comparison_chart(symbol_data)
@@ -311,7 +311,7 @@ class TestCreateComparisonChart:
 
     def test_normalized_by_default(self):
         """create_comparison_chart should normalize prices to base 100 by default."""
-        from g2.charts.renderers import create_comparison_chart
+        from gefion.charts.renderers import create_comparison_chart
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT"])
         fig = create_comparison_chart(symbol_data, normalize=True)
@@ -324,7 +324,7 @@ class TestCreateComparisonChart:
 
     def test_relative_strength_for_two_symbols(self):
         """create_comparison_chart should show relative strength ratio for 2 symbols."""
-        from g2.charts.renderers import create_comparison_chart
+        from gefion.charts.renderers import create_comparison_chart
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT"])
         fig = create_comparison_chart(symbol_data)
@@ -334,7 +334,7 @@ class TestCreateComparisonChart:
 
     def test_custom_title(self):
         """create_comparison_chart should use custom title when provided."""
-        from g2.charts.renderers import create_comparison_chart
+        from gefion.charts.renderers import create_comparison_chart
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT"])
         fig = create_comparison_chart(symbol_data, title="Custom Comparison")
@@ -347,7 +347,7 @@ class TestCreateCorrelationMatrix:
 
     def test_returns_plotly_figure(self):
         """create_correlation_matrix should return a Plotly Figure."""
-        from g2.charts.renderers import create_correlation_matrix
+        from gefion.charts.renderers import create_correlation_matrix
         import plotly.graph_objects as go
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT", "GOOGL"])
@@ -357,7 +357,7 @@ class TestCreateCorrelationMatrix:
 
     def test_has_heatmap_trace(self):
         """create_correlation_matrix should include a heatmap trace."""
-        from g2.charts.renderers import create_correlation_matrix
+        from gefion.charts.renderers import create_correlation_matrix
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT", "GOOGL"])
         fig = create_correlation_matrix(symbol_data)
@@ -367,7 +367,7 @@ class TestCreateCorrelationMatrix:
 
     def test_diagonal_is_one(self):
         """create_correlation_matrix diagonal should be 1.0 (self-correlation)."""
-        from g2.charts.renderers import create_correlation_matrix
+        from gefion.charts.renderers import create_correlation_matrix
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT"])
         fig = create_correlation_matrix(symbol_data)
@@ -379,7 +379,7 @@ class TestCreateCorrelationMatrix:
 
     def test_symmetric_matrix(self):
         """create_correlation_matrix should produce symmetric correlations."""
-        from g2.charts.renderers import create_correlation_matrix
+        from gefion.charts.renderers import create_correlation_matrix
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT", "GOOGL"])
         fig = create_correlation_matrix(symbol_data)
@@ -396,7 +396,7 @@ class TestCreateSectorHeatmap:
 
     def test_returns_plotly_figure(self):
         """create_sector_heatmap should return a Plotly Figure."""
-        from g2.charts.renderers import create_sector_heatmap
+        from gefion.charts.renderers import create_sector_heatmap
         import plotly.graph_objects as go
 
         sector_data = make_sector_data()
@@ -406,7 +406,7 @@ class TestCreateSectorHeatmap:
 
     def test_has_treemap_trace(self):
         """create_sector_heatmap should include a treemap trace."""
-        from g2.charts.renderers import create_sector_heatmap
+        from gefion.charts.renderers import create_sector_heatmap
 
         sector_data = make_sector_data()
         fig = create_sector_heatmap(sector_data)
@@ -416,7 +416,7 @@ class TestCreateSectorHeatmap:
 
     def test_includes_all_sectors(self):
         """create_sector_heatmap should include all sectors."""
-        from g2.charts.renderers import create_sector_heatmap
+        from gefion.charts.renderers import create_sector_heatmap
 
         sector_data = make_sector_data()
         fig = create_sector_heatmap(sector_data)
@@ -427,7 +427,7 @@ class TestCreateSectorHeatmap:
 
     def test_custom_title(self):
         """create_sector_heatmap should use custom title when provided."""
-        from g2.charts.renderers import create_sector_heatmap
+        from gefion.charts.renderers import create_sector_heatmap
 
         sector_data = make_sector_data()
         fig = create_sector_heatmap(sector_data, title="My Sectors")
@@ -440,7 +440,7 @@ class TestCreateVolatilityChart:
 
     def test_returns_plotly_figure(self):
         """create_volatility_chart should return a Plotly Figure."""
-        from g2.charts.renderers import create_volatility_chart
+        from gefion.charts.renderers import create_volatility_chart
         import plotly.graph_objects as go
 
         ohlcv = make_ohlcv_data(days=60)
@@ -450,7 +450,7 @@ class TestCreateVolatilityChart:
 
     def test_has_multiple_subplots(self):
         """create_volatility_chart should have price, volatility, and ATR subplots."""
-        from g2.charts.renderers import create_volatility_chart
+        from gefion.charts.renderers import create_volatility_chart
 
         ohlcv = make_ohlcv_data(days=60)
         fig = create_volatility_chart(ohlcv, "TEST")
@@ -460,7 +460,7 @@ class TestCreateVolatilityChart:
 
     def test_bollinger_bands_present(self):
         """create_volatility_chart should include Bollinger Bands."""
-        from g2.charts.renderers import create_volatility_chart
+        from gefion.charts.renderers import create_volatility_chart
 
         ohlcv = make_ohlcv_data(days=60)
         fig = create_volatility_chart(ohlcv, "TEST")
@@ -471,7 +471,7 @@ class TestCreateVolatilityChart:
 
     def test_custom_window(self):
         """create_volatility_chart should accept custom window parameter."""
-        from g2.charts.renderers import create_volatility_chart
+        from gefion.charts.renderers import create_volatility_chart
 
         ohlcv = make_ohlcv_data(days=60)
         # Should not raise with custom window
@@ -485,7 +485,7 @@ class TestCreateDrawdownChart:
 
     def test_returns_plotly_figure(self):
         """create_drawdown_chart should return a Plotly Figure."""
-        from g2.charts.renderers import create_drawdown_chart
+        from gefion.charts.renderers import create_drawdown_chart
         import plotly.graph_objects as go
 
         ohlcv = make_ohlcv_data(days=60)
@@ -495,7 +495,7 @@ class TestCreateDrawdownChart:
 
     def test_has_price_and_drawdown_traces(self):
         """create_drawdown_chart should have price and drawdown traces."""
-        from g2.charts.renderers import create_drawdown_chart
+        from gefion.charts.renderers import create_drawdown_chart
 
         ohlcv = make_ohlcv_data(days=60)
         fig = create_drawdown_chart(ohlcv, "TEST")
@@ -505,7 +505,7 @@ class TestCreateDrawdownChart:
 
     def test_drawdown_values_negative_or_zero(self):
         """create_drawdown_chart drawdown values should be <= 0."""
-        from g2.charts.renderers import create_drawdown_chart
+        from gefion.charts.renderers import create_drawdown_chart
 
         ohlcv = make_ohlcv_data(days=60)
         fig = create_drawdown_chart(ohlcv, "TEST")
@@ -520,7 +520,7 @@ class TestCreateDrawdownChart:
 
     def test_max_drawdown_marked(self):
         """create_drawdown_chart should mark the maximum drawdown point."""
-        from g2.charts.renderers import create_drawdown_chart
+        from gefion.charts.renderers import create_drawdown_chart
 
         ohlcv = make_ohlcv_data(days=60)
         fig = create_drawdown_chart(ohlcv, "TEST")
@@ -535,7 +535,7 @@ class TestCreateRollingReturnsChart:
 
     def test_returns_plotly_figure(self):
         """create_rolling_returns_chart should return a Plotly Figure."""
-        from g2.charts.renderers import create_rolling_returns_chart
+        from gefion.charts.renderers import create_rolling_returns_chart
         import plotly.graph_objects as go
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT"], days=120)
@@ -545,7 +545,7 @@ class TestCreateRollingReturnsChart:
 
     def test_has_traces_for_each_window(self):
         """create_rolling_returns_chart should have subplots for each window."""
-        from g2.charts.renderers import create_rolling_returns_chart
+        from gefion.charts.renderers import create_rolling_returns_chart
 
         symbol_data = make_multi_symbol_data(["AAPL", "MSFT"], days=120)
         windows = [30, 60, 90]
@@ -556,7 +556,7 @@ class TestCreateRollingReturnsChart:
 
     def test_custom_windows(self):
         """create_rolling_returns_chart should accept custom window list."""
-        from g2.charts.renderers import create_rolling_returns_chart
+        from gefion.charts.renderers import create_rolling_returns_chart
 
         symbol_data = make_multi_symbol_data(["AAPL"], days=120)
         windows = [20, 40]
@@ -567,7 +567,7 @@ class TestCreateRollingReturnsChart:
 
     def test_single_symbol(self):
         """create_rolling_returns_chart should work with single symbol."""
-        from g2.charts.renderers import create_rolling_returns_chart
+        from gefion.charts.renderers import create_rolling_returns_chart
 
         symbol_data = make_multi_symbol_data(["AAPL"], days=120)
         fig = create_rolling_returns_chart(symbol_data)
@@ -582,7 +582,7 @@ class TestPlotlyNotInstalled:
         """_check_plotly should raise ImportError with helpful message."""
         # This is hard to test since plotly IS installed
         # We just verify the check function exists
-        from g2.charts.renderers import _check_plotly
+        from gefion.charts.renderers import _check_plotly
 
         # Should not raise when plotly is installed
         _check_plotly()

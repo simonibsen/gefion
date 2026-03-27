@@ -1,5 +1,5 @@
 """Test error categorization in progress reporter."""
-from g2.utils.progress import ProgressReporter
+from gefion.utils.progress import ProgressReporter
 
 
 def test_progress_reporter_categorizes_data_errors():

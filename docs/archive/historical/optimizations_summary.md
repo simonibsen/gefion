@@ -47,10 +47,10 @@ def compute(df, cache=None):
 **Usage**:
 ```bash
 # Enable parallel function execution
-g2 features-compute --all-features --parallel-functions
+gefion features-compute --all-features --parallel-functions
 
 # Limit parallel workers
-g2 features-compute --all-features --parallel-functions --max-parallel-functions 4
+gefion features-compute --all-features --parallel-functions --max-parallel-functions 4
 ```
 
 **Expected Impact**: 2-4x speedup when you have multiple function groups

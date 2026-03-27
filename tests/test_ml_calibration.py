@@ -16,7 +16,7 @@ class TestComputeCalibrationShifts:
 
     def test_compute_calibration_shifts_perfect(self):
         """Shifts should be ~0 when predictions are perfectly calibrated."""
-        from g2.ml.calibration import compute_calibration_shifts
+        from gefion.ml.calibration import compute_calibration_shifts
 
         np.random.seed(42)
         n = 1000
@@ -39,7 +39,7 @@ class TestComputeCalibrationShifts:
 
     def test_compute_calibration_shifts_biased(self):
         """Positive shifts for a model that consistently underpredicts."""
-        from g2.ml.calibration import compute_calibration_shifts
+        from gefion.ml.calibration import compute_calibration_shifts
 
         np.random.seed(42)
         n = 500
@@ -59,7 +59,7 @@ class TestComputeCalibrationShifts:
 
     def test_compute_calibration_shifts_per_quantile(self):
         """Different quantiles should get different shift values."""
-        from g2.ml.calibration import compute_calibration_shifts
+        from gefion.ml.calibration import compute_calibration_shifts
 
         np.random.seed(42)
         n = 500
@@ -83,7 +83,7 @@ class TestApplyCalibrationShifts:
 
     def test_apply_calibration_shifts(self):
         """Predictions should be adjusted by the shift amounts."""
-        from g2.ml.calibration import apply_calibration_shifts
+        from gefion.ml.calibration import apply_calibration_shifts
 
         predictions = pd.DataFrame({
             "q10": [0.1, 0.2],
@@ -100,7 +100,7 @@ class TestApplyCalibrationShifts:
 
     def test_apply_calibration_preserves_ordering(self):
         """After shifts, q10 <= q50 <= q90 must still hold."""
-        from g2.ml.calibration import apply_calibration_shifts
+        from gefion.ml.calibration import apply_calibration_shifts
 
         predictions = pd.DataFrame({
             "q10": [0.10, 0.20],
@@ -122,7 +122,7 @@ class TestCalibrationPersistence:
 
     def test_save_calibration_json(self):
         """Should write correct JSON structure to artifact directory."""
-        from g2.ml.calibration import save_calibration
+        from gefion.ml.calibration import save_calibration
 
         shifts = {"q10": -0.023, "q50": 0.015, "q90": 0.008}
         metadata = {
@@ -150,7 +150,7 @@ class TestCalibrationPersistence:
 
     def test_load_calibration_json(self):
         """Should read and parse calibration.json correctly."""
-        from g2.ml.calibration import save_calibration, load_calibration
+        from gefion.ml.calibration import save_calibration, load_calibration
 
         shifts = {"q10": -0.01, "q50": 0.02, "q90": 0.03}
         metadata = {"num_samples": 100}
@@ -167,7 +167,7 @@ class TestCalibrationPersistence:
 
     def test_load_calibration_missing_returns_none(self):
         """Should return None gracefully when no calibration.json exists."""
-        from g2.ml.calibration import load_calibration
+        from gefion.ml.calibration import load_calibration
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = load_calibration(Path(tmpdir))
@@ -179,7 +179,7 @@ class TestCalibrationReport:
 
     def test_calibration_report(self):
         """Should produce a formatted before/after report."""
-        from g2.ml.calibration import generate_calibration_report
+        from gefion.ml.calibration import generate_calibration_report
 
         before_metrics = {"q10_calibration": 2.4, "q50_calibration": 26.2, "q90_calibration": 85.7}
         after_metrics = {"q10_calibration": 9.8, "q50_calibration": 49.1, "q90_calibration": 89.5}
@@ -203,7 +203,7 @@ class TestPinballLossScorer:
 
     def test_pinball_loss_scorer(self):
         """Scorer should be compatible with sklearn cross_val_score."""
-        from g2.ml.calibration import create_pinball_loss_scorer
+        from gefion.ml.calibration import create_pinball_loss_scorer
         from sklearn.linear_model import QuantileRegressor
         from sklearn.model_selection import cross_val_score
 

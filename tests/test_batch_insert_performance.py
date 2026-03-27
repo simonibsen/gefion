@@ -11,8 +11,8 @@ from datetime import date, timedelta
 import psycopg
 import pytest
 
-from g2.db import schema
-from g2.db.ingest import insert_stock_ohlcv, upsert_stock
+from gefion.db import schema
+from gefion.db.ingest import insert_stock_ohlcv, upsert_stock
 
 
 def create_connection():

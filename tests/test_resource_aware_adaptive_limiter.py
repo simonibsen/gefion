@@ -10,7 +10,7 @@ The ResourceAwareAdaptiveLimiter extends AdaptiveLimiter to:
 """
 import time
 from unittest.mock import Mock, MagicMock, patch
-from g2.utils.adaptive import ResourceAwareAdaptiveLimiter
+from gefion.utils.adaptive import ResourceAwareAdaptiveLimiter
 
 
 def test_resource_aware_limiter_initializes():

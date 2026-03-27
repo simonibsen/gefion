@@ -21,14 +21,14 @@ class TestGetChartOutputDir:
 
     def test_returns_path_object(self):
         """get_chart_output_dir should return a Path object."""
-        from g2.charts.output import get_chart_output_dir
+        from gefion.charts.output import get_chart_output_dir
 
         result = get_chart_output_dir()
         assert isinstance(result, Path)
 
     def test_creates_directory_if_not_exists(self):
         """get_chart_output_dir should create directory if missing."""
-        from g2.charts.output import get_chart_output_dir
+        from gefion.charts.output import get_chart_output_dir
 
         with tempfile.TemporaryDirectory() as tmpdir:
             test_path = Path(tmpdir) / "charts_test"
@@ -39,7 +39,7 @@ class TestGetChartOutputDir:
 
     def test_uses_env_var_when_set(self):
         """get_chart_output_dir should use G2_CHART_DIR env var."""
-        from g2.charts.output import get_chart_output_dir
+        from gefion.charts.output import get_chart_output_dir
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}):
@@ -48,7 +48,7 @@ class TestGetChartOutputDir:
 
     def test_defaults_to_home_directory(self):
         """get_chart_output_dir should default to ~/.g2/charts/."""
-        from g2.charts.output import get_chart_output_dir
+        from gefion.charts.output import get_chart_output_dir
 
         # Clear env var if set
         env = os.environ.copy()
@@ -64,21 +64,21 @@ class TestGenerateChartFilename:
 
     def test_includes_symbol(self):
         """generate_chart_filename should include the symbol."""
-        from g2.charts.output import generate_chart_filename
+        from gefion.charts.output import generate_chart_filename
 
         filename = generate_chart_filename("AAPL", "price")
         assert "AAPL" in filename
 
     def test_includes_chart_type(self):
         """generate_chart_filename should include the chart type."""
-        from g2.charts.output import generate_chart_filename
+        from gefion.charts.output import generate_chart_filename
 
         filename = generate_chart_filename("AAPL", "price")
         assert "price" in filename
 
     def test_includes_timestamp(self):
         """generate_chart_filename should include a timestamp."""
-        from g2.charts.output import generate_chart_filename
+        from gefion.charts.output import generate_chart_filename
 
         filename = generate_chart_filename("AAPL", "price")
         # Should contain a date pattern like 20241230
@@ -86,14 +86,14 @@ class TestGenerateChartFilename:
 
     def test_has_html_extension(self):
         """generate_chart_filename should have .html extension."""
-        from g2.charts.output import generate_chart_filename
+        from gefion.charts.output import generate_chart_filename
 
         filename = generate_chart_filename("AAPL", "price")
         assert filename.endswith(".html")
 
     def test_unique_filenames(self):
         """generate_chart_filename should generate unique filenames."""
-        from g2.charts.output import generate_chart_filename
+        from gefion.charts.output import generate_chart_filename
         import time
 
         filename1 = generate_chart_filename("AAPL", "price")
@@ -110,7 +110,7 @@ class TestSaveChartHtml:
 
     def test_saves_file_to_disk(self):
         """save_chart_html should save the figure as HTML."""
-        from g2.charts.output import save_chart_html, get_chart_output_dir
+        from gefion.charts.output import save_chart_html, get_chart_output_dir
         import plotly.graph_objects as go
 
         fig = go.Figure()
@@ -129,7 +129,7 @@ class TestSaveChartHtml:
 
     def test_returns_full_path(self):
         """save_chart_html should return the full path to saved file."""
-        from g2.charts.output import save_chart_html
+        from gefion.charts.output import save_chart_html
         import plotly.graph_objects as go
 
         fig = go.Figure()
@@ -147,7 +147,7 @@ class TestOpenInBrowser:
 
     def test_calls_webbrowser_open(self):
         """open_in_browser should call webbrowser.open with file URL."""
-        from g2.charts.output import open_in_browser
+        from gefion.charts.output import open_in_browser
 
         test_path = Path("/tmp/test_chart.html")
 

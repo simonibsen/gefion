@@ -15,7 +15,7 @@ class TestUIStructure:
     @pytest.fixture
     def ui_dir(self):
         """Get the UI source directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui"
 
     def test_ui_package_exists(self, ui_dir):
         """UI package should exist."""
@@ -81,7 +81,7 @@ class TestUIStructure:
     def test_dashboard_has_cached_insights_data(self, ui_dir):
         """Dashboard should cache g2 insights data."""
         content = (ui_dir / "views" / "dashboard.py").read_text()
-        assert "def get_g2_insights(" in content
+        assert "def get_gefion_insights(" in content
 
     def test_dashboard_insights_handles_missing_ml_tables(self, ui_dir):
         """Dashboard insights should handle missing ML tables gracefully.
@@ -197,7 +197,7 @@ class TestUIStructure:
 
     def test_documentation_search_finds_results(self):
         """Documentation search should find results for common terms."""
-        from g2.ui.views.documentation import search_docs
+        from gefion.ui.views.documentation import search_docs
 
         # Search for a term that should exist in docs
         results = search_docs("quantile")
@@ -214,14 +214,14 @@ class TestUIStructure:
 
     def test_documentation_search_empty_for_nonsense(self):
         """Documentation search should return empty for nonsense queries."""
-        from g2.ui.views.documentation import search_docs
+        from gefion.ui.views.documentation import search_docs
 
         results = search_docs("xyzzy123nonsense")
         assert len(results) == 0
 
     def test_documentation_search_requires_min_length(self):
         """Documentation search should require minimum query length."""
-        from g2.ui.views.documentation import search_docs
+        from gefion.ui.views.documentation import search_docs
 
         # Single character should return no results
         results = search_docs("a")
@@ -238,7 +238,7 @@ class TestUILaunchCommand:
 
     def test_ui_command_exists(self):
         """The ui command should be registered with correct help."""
-        from g2.cli import app
+        from gefion.cli import app
         from typer.testing import CliRunner
 
         runner = CliRunner()
@@ -252,17 +252,17 @@ class TestUILaunchCommand:
 
     def test_ui_command_has_examples(self):
         """The ui command help should include examples."""
-        from g2.cli import app
+        from gefion.cli import app
         from typer.testing import CliRunner
 
         runner = CliRunner()
         result = runner.invoke(app, ["ui", "--help"])
 
-        assert "g2 ui" in result.output
+        assert "gefion ui" in result.output
 
     def test_launch_ui_prints_error_summary(self, tmp_path):
         """launch_ui should print error summary when errors were logged during session."""
-        from g2.cli import app
+        from gefion.cli import app
         from typer.testing import CliRunner
         from unittest.mock import patch
 
@@ -281,7 +281,7 @@ class TestUILaunchCommand:
             error_file.write_text(json.dumps(entry) + "\n")
 
         runner = CliRunner()
-        with patch("g2.ui.errors._error_file", return_value=error_file):
+        with patch("gefion.ui.errors._error_file", return_value=error_file):
             with patch("subprocess.run", side_effect=mock_subprocess_run):
                 result = runner.invoke(app, ["ui"])
 
@@ -291,14 +291,14 @@ class TestUILaunchCommand:
 
     def test_launch_ui_no_summary_when_no_errors(self, tmp_path):
         """launch_ui should not print summary when no errors occurred."""
-        from g2.cli import app
+        from gefion.cli import app
         from typer.testing import CliRunner
         from unittest.mock import patch
 
         error_file = tmp_path / "ui_errors.jsonl"
 
         runner = CliRunner()
-        with patch("g2.ui.errors._error_file", return_value=error_file):
+        with patch("gefion.ui.errors._error_file", return_value=error_file):
             with patch("subprocess.run"):
                 result = runner.invoke(app, ["ui"])
 
@@ -311,7 +311,7 @@ class TestDatabaseHelperStructure:
     @pytest.fixture
     def db_module_path(self):
         """Get database module path."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "components" / "database.py"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "components" / "database.py"
 
     def test_has_get_db_pool(self, db_module_path):
         """Should have get_db_pool function."""
@@ -377,7 +377,7 @@ class TestBacktestCompareMLSupport:
     @pytest.fixture
     def ui_dir(self):
         """Get the UI source directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui"
 
     def test_compare_section_has_ml_model_selection(self, ui_dir):
         """Compare section should have ML model selection when ML strategies selected."""
@@ -401,7 +401,7 @@ class TestStatusComponentStructure:
     @pytest.fixture
     def status_module_path(self):
         """Get status module path."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "components" / "status.py"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "components" / "status.py"
 
     def test_has_render_quick_status(self, status_module_path):
         """Should have render_quick_status function."""
@@ -447,7 +447,7 @@ class TestCLICommandDisplay:
     @pytest.fixture
     def views_dir(self):
         """Get the views directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
 
     def test_data_view_shows_cli_command(self, views_dir):
         """Data view should display equivalent CLI commands."""
@@ -455,7 +455,7 @@ class TestCLICommandDisplay:
         # Should show CLI command for data update
         assert 'st.code(' in content
         assert 'language="bash"' in content
-        assert 'g2 data-update' in content or 'g2", "data-update' in content
+        assert 'gefion data-update' in content or 'gefion", "data-update' in content
 
     def test_ml_view_shows_cli_commands(self, views_dir):
         """ML view should display equivalent CLI commands for all operations."""
@@ -485,7 +485,7 @@ class TestStreamingProgress:
     @pytest.fixture
     def views_dir(self):
         """Get the views directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
 
     def test_data_view_uses_streaming(self, views_dir):
         """Data view should use subprocess.Popen for streaming output."""
@@ -513,7 +513,7 @@ class TestJSONParsingRobustness:
     @pytest.fixture
     def views_dir(self):
         """Get the views directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
 
     def test_data_view_checks_isinstance_dict(self, views_dir):
         """Data view should check if parsed JSON is a dict before using .get()."""
@@ -543,7 +543,7 @@ class TestBackgroundProcessPersistence:
     @pytest.fixture
     def views_dir(self):
         """Get the views directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
 
     def test_data_view_has_process_state_class(self, views_dir):
         """Data view should have ProcessState dataclass for tracking."""
@@ -613,7 +613,7 @@ class TestFeaturesView:
     @pytest.fixture
     def ui_dir(self):
         """Get the UI source directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui"
 
     def test_features_view_exists(self, ui_dir):
         """Features view file should exist."""
@@ -735,7 +735,7 @@ class TestBacktestStrategies:
     @pytest.fixture
     def views_dir(self):
         """Get the views directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
 
     def test_backtest_loads_strategies_from_database(self, views_dir):
         """Backtest should load strategies from database, not hardcoded list."""
@@ -796,10 +796,10 @@ class TestBacktestStrategies:
     def test_backtest_cli_command_format(self, views_dir):
         """Backtest should format CLI command correctly without truncation bugs."""
         content = (views_dir / "backtest.py").read_text()
-        # Should use cmd[3:] to skip [python, -m, g2.cli] - not buggy string slicing
+        # Should use cmd[3:] to skip [python, -m, gefion.cli] - not buggy string slicing
         assert "cli_args = cmd[3:]" in content
         # Should join with space and prefix with g2
-        assert '"g2 {' in content and "' '.join(cli_args)" in content
+        assert '"gefion {' in content and "' '.join(cli_args)" in content
 
     def test_backtest_validates_empty_symbols(self, views_dir):
         """Backtest should validate that symbols are selected."""
@@ -828,7 +828,7 @@ class TestStrategyConfigsUI:
     @pytest.fixture
     def views_dir(self):
         """Get the views directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
 
     def test_backtest_has_strategy_configs_section(self, views_dir):
         """Backtest view should have Strategy Configs section."""
@@ -891,7 +891,7 @@ class TestExperimentsUIQuery:
     @pytest.fixture
     def ui_dir(self):
         """Get the UI source directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui"
 
     def test_experiments_queries_search_method_from_config_jsonb(self, ui_dir):
         """Experiments list query should extract search_method from config JSONB.
@@ -919,7 +919,7 @@ class TestActionDashboard:
     @pytest.fixture
     def ui_dir(self):
         """Get the UI source directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui"
 
     def test_assistant_has_check_conditions_function(self, ui_dir):
         """Assistant should have check_conditions function for evaluating system state."""
@@ -1070,14 +1070,14 @@ class TestActionDashboard:
         assert "time.sleep(" in content
 
     def test_mcp_tool_map_references_valid_cli_commands(self, ui_dir):
-        """Every CLI command in MCP_TOOL_MAP must be a real g2 CLI command.
+        """Every CLI command in MCP_TOOL_MAP must be a real gefion CLI command.
 
         system-status and health-check do not exist — the real commands
         are 'health' and 'db-health'.
         """
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "g2.cli", "--help"],
+            [sys.executable, "-m", "gefion.cli", "--help"],
             capture_output=True, text=True
         )
         help_text = result.stdout
@@ -1095,26 +1095,26 @@ class TestActionDashboard:
             # Multi-word commands like "ml train" — check the first part
             base = cmd.split()[0]
             assert base in help_text, (
-                f"MCP_TOOL_MAP references '{cmd}' but '{base}' is not a g2 CLI command"
+                f"MCP_TOOL_MAP references '{cmd}' but '{base}' is not a gefion CLI command"
             )
 
     def test_proactive_actions_use_valid_cli_commands(self, ui_dir):
         """Proactive action cli_cmd values must reference real g2 commands."""
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "g2.cli", "--help"],
+            [sys.executable, "-m", "gefion.cli", "--help"],
             capture_output=True, text=True
         )
         help_text = result.stdout
 
         content = (ui_dir / "views" / "assistant.py").read_text()
         import re
-        # Pattern: cli_cmd="g2 some-command"
-        cmds = re.findall(r'cli_cmd="g2\s+([^"]+)"', content)
+        # Pattern: cli_cmd="gefion some-command"
+        cmds = re.findall(r'cli_cmd="gefion\s+([^"]+)"', content)
         for cmd in cmds:
             base = cmd.split()[0]
             assert base in help_text, (
-                f"Proactive action uses 'g2 {cmd}' but '{base}' is not a g2 CLI command"
+                f"Proactive action uses 'g2 {cmd}' but '{base}' is not a gefion CLI command"
             )
 
     def test_assistant_renders_conversation_history(self, ui_dir):
@@ -1136,7 +1136,7 @@ class TestActionDashboard:
     def test_assistant_shows_error_indicator(self, ui_dir):
         """Assistant view must display session error count from error module."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "read_session_errors" in content, "Must read errors from g2.ui.errors"
+        assert "read_session_errors" in content, "Must read errors from gefion.ui.errors"
 
     def test_assistant_has_expandable_error_list(self, ui_dir):
         """Assistant view must have an expander or section for listing session errors."""
@@ -1213,14 +1213,14 @@ class TestParseStreamEvent:
 
     def test_parse_tool_use_event(self):
         """Tool use events should be parsed with tool name and input."""
-        from g2.ui.views.assistant import parse_stream_event
+        from gefion.ui.views.assistant import parse_stream_event
         import json
         event = json.dumps({
             "type": "assistant",
             "message": {
                 "content": [{
                     "type": "tool_use",
-                    "name": "mcp__g2__health_check",
+                    "name": "mcp__gefion__health_check",
                     "input": {"verbose": True},
                 }]
             }
@@ -1228,11 +1228,11 @@ class TestParseStreamEvent:
         result = parse_stream_event(event)
         assert result is not None
         assert result["type"] == "tool_use"
-        assert result["tool"] == "mcp__g2__health_check"
+        assert result["tool"] == "mcp__gefion__health_check"
 
     def test_parse_text_event(self):
         """Text events should return the text content."""
-        from g2.ui.views.assistant import parse_stream_event
+        from gefion.ui.views.assistant import parse_stream_event
         import json
         event = json.dumps({
             "type": "assistant",
@@ -1247,7 +1247,7 @@ class TestParseStreamEvent:
 
     def test_parse_result_event(self):
         """Result events should include result text and metadata."""
-        from g2.ui.views.assistant import parse_stream_event
+        from gefion.ui.views.assistant import parse_stream_event
         import json
         event = json.dumps({
             "type": "result",
@@ -1262,7 +1262,7 @@ class TestParseStreamEvent:
 
     def test_parse_invalid_json(self):
         """Invalid JSON should return None."""
-        from g2.ui.views.assistant import parse_stream_event
+        from gefion.ui.views.assistant import parse_stream_event
         assert parse_stream_event("not json") is None
         assert parse_stream_event("") is None
 
@@ -1272,12 +1272,12 @@ class TestConversationHistory:
 
     @pytest.fixture
     def ui_dir(self):
-        return Path("src/g2/ui")
+        return Path("src/gefion/ui")
 
     def test_history_module_exists(self, ui_dir):
         """history.py must exist with required functions."""
         history_file = ui_dir / "history.py"
-        assert history_file.exists(), "src/g2/ui/history.py must exist"
+        assert history_file.exists(), "src/gefion/ui/history.py must exist"
         content = history_file.read_text()
         assert "def append_exchange(" in content
         assert "def read_exchanges(" in content
@@ -1288,14 +1288,14 @@ class TestConversationHistory:
     def tmp_history(self, tmp_path, monkeypatch):
         """Provide a temporary history file path and patch the module to use it."""
         history_file = tmp_path / "ai_history.jsonl"
-        import g2.ui.history as hist_mod
+        import gefion.ui.history as hist_mod
         monkeypatch.setattr(hist_mod, "HISTORY_FILE", history_file)
         return history_file
 
     def test_history_append_exchange(self, tmp_history):
         """append_exchange writes an Exchange record to JSONL."""
         import json
-        from g2.ui.history import append_exchange
+        from gefion.ui.history import append_exchange
 
         append_exchange(
             prompt="g2 health",
@@ -1317,7 +1317,7 @@ class TestConversationHistory:
 
     def test_history_read_exchanges(self, tmp_history):
         """read_exchanges returns list of Exchange dicts from JSONL."""
-        from g2.ui.history import append_exchange, read_exchanges
+        from gefion.ui.history import append_exchange, read_exchanges
 
         append_exchange("prompt 1", "ai", "response 1", True, 0.5)
         append_exchange("prompt 2", "cli", "response 2", False, 1.0)
@@ -1329,7 +1329,7 @@ class TestConversationHistory:
 
     def test_history_clear(self, tmp_history):
         """clear_history removes all history and returns empty list."""
-        from g2.ui.history import append_exchange, clear_history, read_exchanges
+        from gefion.ui.history import append_exchange, clear_history, read_exchanges
 
         append_exchange("prompt", "ai", "response", True, 0.5)
         assert len(read_exchanges()) == 1
@@ -1341,10 +1341,10 @@ class TestConversationHistory:
 
     def test_history_max_100_exchanges(self, tmp_history, monkeypatch):
         """Appending beyond MAX_EXCHANGES truncates oldest entries."""
-        import g2.ui.history as hist_mod
+        import gefion.ui.history as hist_mod
         monkeypatch.setattr(hist_mod, "MAX_EXCHANGES", 5)  # Use small cap for test speed
 
-        from g2.ui.history import append_exchange, read_exchanges
+        from gefion.ui.history import append_exchange, read_exchanges
 
         for i in range(7):
             append_exchange(f"prompt {i}", "cli", f"response {i}", True, 0.1)
@@ -1362,7 +1362,7 @@ class TestMLAdvancedFeatures:
     @pytest.fixture
     def views_dir(self):
         """Get the views directory."""
-        return Path(__file__).parent.parent / "src" / "g2" / "ui" / "views"
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
 
     def test_ml_has_feature_importance(self, views_dir):
         """ML view should have feature importance functionality."""

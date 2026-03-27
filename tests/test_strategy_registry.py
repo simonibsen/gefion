@@ -9,8 +9,8 @@ import psycopg
 from datetime import date, timedelta
 from typing import Dict, Any, List
 
-from g2.db import schema
-from g2.config import load_settings
+from gefion.db import schema
+from gefion.config import load_settings
 
 
 def require_db():
@@ -38,7 +38,7 @@ def conn():
 @pytest.fixture(autouse=True)
 def setup_tables(conn):
     """Setup strategy tables for testing."""
-    from g2.db.schema import (
+    from gefion.db.schema import (
         create_strategy_registry_table,
         create_strategy_configs_table,
     )
@@ -99,7 +99,7 @@ class TestStrategyRegistryTable:
                 INSERT INTO strategy_registry
                     (name, module_path, class_name, description, default_params)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy',
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy',
                      'Momentum-based strategy', '{"lookback_days": 20}')
                 RETURNING id;
             """)
@@ -113,7 +113,7 @@ class TestStrategyRegistryTable:
                 INSERT INTO strategy_registry
                     (name, module_path, class_name)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy');
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy');
             """)
 
         with pytest.raises(psycopg.errors.UniqueViolation):
@@ -122,7 +122,7 @@ class TestStrategyRegistryTable:
                     INSERT INTO strategy_registry
                         (name, module_path, class_name)
                     VALUES
-                        ('momentum', 'g2.strategies.momentum', 'MomentumStrategy');
+                        ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy');
                 """)
 
 
@@ -166,7 +166,7 @@ class TestStrategyConfigsTable:
                 INSERT INTO strategy_registry
                     (name, module_path, class_name)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy');
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy');
             """)
 
         # Then insert config
@@ -191,7 +191,7 @@ class TestStrategyConfigsTable:
                 INSERT INTO strategy_registry
                     (name, module_path, class_name)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy');
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy');
             """)
 
         # Insert two configs with different params
@@ -225,7 +225,7 @@ class TestStrategyDispatcher:
 
     def test_load_strategy_class(self, conn):
         """Can load a strategy class by name from registry."""
-        from g2.strategies.dispatcher import load_strategy_class
+        from gefion.strategies.dispatcher import load_strategy_class
 
         # Insert registry entry
         with conn.cursor() as cur:
@@ -233,25 +233,25 @@ class TestStrategyDispatcher:
                 INSERT INTO strategy_registry
                     (name, module_path, class_name, enabled)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy', true);
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy', true);
             """)
 
         strategy_class = load_strategy_class(conn, 'momentum')
 
         assert strategy_class is not None
-        from g2.strategies.momentum import MomentumStrategy
+        from gefion.strategies.momentum import MomentumStrategy
         assert strategy_class == MomentumStrategy
 
     def test_load_strategy_class_disabled(self, conn):
         """Disabled strategies are not loaded."""
-        from g2.strategies.dispatcher import load_strategy_class
+        from gefion.strategies.dispatcher import load_strategy_class
 
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO strategy_registry
                     (name, module_path, class_name, enabled)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy', false);
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy', false);
             """)
 
         strategy_class = load_strategy_class(conn, 'momentum')
@@ -259,7 +259,7 @@ class TestStrategyDispatcher:
 
     def test_get_strategy_config(self, conn):
         """Can load a strategy config with merged params."""
-        from g2.strategies.dispatcher import get_strategy_config
+        from gefion.strategies.dispatcher import get_strategy_config
 
         # Insert registry entry with default_params
         with conn.cursor() as cur:
@@ -267,7 +267,7 @@ class TestStrategyDispatcher:
                 INSERT INTO strategy_registry
                     (name, module_path, class_name, default_params, enabled)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy',
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy',
                      '{"lookback_days": 20, "top_n": 10}', true);
             """)
             # Insert config that overrides some params
@@ -290,7 +290,7 @@ class TestStrategyDispatcher:
 
     def test_get_strategy_configs(self, conn):
         """Can list all active strategy configs."""
-        from g2.strategies.dispatcher import get_strategy_configs
+        from gefion.strategies.dispatcher import get_strategy_configs
 
         # Insert registry and configs
         with conn.cursor() as cur:
@@ -298,7 +298,7 @@ class TestStrategyDispatcher:
                 INSERT INTO strategy_registry
                     (name, module_path, class_name, enabled)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy', true);
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy', true);
             """)
             cur.execute("""
                 INSERT INTO strategy_configs (name, strategy_name, params, active)
@@ -318,7 +318,7 @@ class TestStrategyDispatcher:
 
     def test_instantiate_strategy(self, conn):
         """Can instantiate a strategy from config."""
-        from g2.strategies.dispatcher import instantiate_strategy
+        from gefion.strategies.dispatcher import instantiate_strategy
 
         # Insert registry and config
         with conn.cursor() as cur:
@@ -326,7 +326,7 @@ class TestStrategyDispatcher:
                 INSERT INTO strategy_registry
                     (name, module_path, class_name, default_params, enabled)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy',
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy',
                      '{"lookback_days": 20, "top_n": 10, "rebalance_days": 5}', true);
             """)
             cur.execute("""
@@ -346,7 +346,7 @@ class TestStrategyDispatcher:
 
     def test_create_strategy_config(self, conn):
         """Can create a new strategy config."""
-        from g2.strategies.dispatcher import create_strategy_config
+        from gefion.strategies.dispatcher import create_strategy_config
 
         # Insert registry entry
         with conn.cursor() as cur:
@@ -354,7 +354,7 @@ class TestStrategyDispatcher:
                 INSERT INTO strategy_registry
                     (name, module_path, class_name, enabled)
                 VALUES
-                    ('momentum', 'g2.strategies.momentum', 'MomentumStrategy', true);
+                    ('momentum', 'gefion.strategies.momentum', 'MomentumStrategy', true);
             """)
 
         config_id = create_strategy_config(
@@ -376,7 +376,7 @@ class TestStrategyDispatcher:
 
     def test_create_strategy_config_invalid_strategy(self, conn):
         """Creating config with invalid strategy raises ValueError."""
-        from g2.strategies.dispatcher import create_strategy_config
+        from gefion.strategies.dispatcher import create_strategy_config
 
         with pytest.raises(ValueError, match="not found in registry"):
             create_strategy_config(
@@ -392,7 +392,7 @@ class TestStrategySeedData:
 
     def test_seed_builtin_strategies(self, conn):
         """seed_builtin_strategies populates both tables."""
-        from g2.strategies.dispatcher import seed_builtin_strategies
+        from gefion.strategies.dispatcher import seed_builtin_strategies
 
         seed_builtin_strategies(conn)
 
@@ -410,7 +410,7 @@ class TestStrategySeedData:
 
     def test_seed_is_idempotent(self, conn):
         """Seeding multiple times doesn't create duplicates."""
-        from g2.strategies.dispatcher import seed_builtin_strategies
+        from gefion.strategies.dispatcher import seed_builtin_strategies
 
         seed_builtin_strategies(conn)
         seed_builtin_strategies(conn)  # Second call
@@ -422,7 +422,7 @@ class TestStrategySeedData:
 
     def test_seeded_strategies_can_be_instantiated(self, conn):
         """Seeded strategies can be loaded and instantiated."""
-        from g2.strategies.dispatcher import seed_builtin_strategies, instantiate_strategy
+        from gefion.strategies.dispatcher import seed_builtin_strategies, instantiate_strategy
 
         seed_builtin_strategies(conn)
 

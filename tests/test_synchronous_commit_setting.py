@@ -15,9 +15,9 @@ import psycopg
 from psycopg.types.json import Json
 import pytest
 
-from g2.config import load_settings
-from g2.db import schema, pool
-from g2.db.ingest import upsert_stock, insert_computed_features
+from gefion.config import load_settings
+from gefion.db import schema, pool
+from gefion.db.ingest import upsert_stock, insert_computed_features
 
 
 pytestmark = pytest.mark.skipif(

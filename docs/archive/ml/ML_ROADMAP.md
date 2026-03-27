@@ -58,10 +58,10 @@ def compute_cross_sectional(
 **CLI Usage:**
 ```bash
 # Normal per-stock processing
-g2 features-compute --function-names indicator,derivative
+gefion features-compute --function-names indicator,derivative
 
 # Cross-sectional batch processing
-g2 features-compute --function-names cross_sectional --mode batch
+gefion features-compute --function-names cross_sectional --mode batch
 ```
 
 **Approach 2: Materialized Views**
@@ -129,14 +129,14 @@ python scripts/train_model.py \
     --output models/momentum_7d_v1.pkl
 
 # 2. Register model
-g2 ml-register-model \
+gefion ml-register-model \
     --name momentum_predictor \
     --version 2024-12-v1 \
     --path models/momentum_7d_v1.pkl \
     --metrics metrics.json
 
 # 3. Register prediction features (references model)
-g2 features-register --definition '{
+gefion features-register --definition '{
     "name": "prediction_momentum_7d_q50",
     "function_name": "ml_predict",
     "params": {"model_id": 42, "quantile": 0.5},
@@ -144,7 +144,7 @@ g2 features-register --definition '{
 }'
 
 # 4. Generate predictions
-g2 features-compute --function-names ml_predict --start 2024-12-01
+gefion features-compute --function-names ml_predict --start 2024-12-01
 ```
 
 **Benefits:**
@@ -323,14 +323,14 @@ WHERE date = '2024-01-15'
 **CLI Usage:**
 ```bash
 # Run backtest
-g2 backtest \
+gefion backtest \
     --strategy momentum_7d \
     --start 2020-01-01 \
     --end 2024-12-01 \
     --capital 100000
 
 # Compare strategies
-g2 backtest-compare \
+gefion backtest-compare \
     --strategies momentum_7d,value_30d,mean_reversion \
     --start 2020-01-01
 
@@ -346,7 +346,7 @@ g2 backtest-compare \
 - [ ] Implement label generation (forward returns for 7/30/90d)
 - [ ] Define point-in-time splits (walk-forward / rolling validation)
 - [ ] Add lineage tables: `ml_datasets`, `ml_runs`, `ml_models`
-- [ ] Add `g2 ml` CLI group: `ml init`, `ml dataset-build`, `ml train`, `ml predict`, `ml eval`
+- [ ] Add `gefion ml` CLI group: `ml init`, `ml dataset-build`, `ml train`, `ml predict`, `ml eval`
 - [ ] Implement 5-class trend labels (per-horizon weak/strong thresholds) and store classifier predictions
 - [ ] Register `ml_predict` compute function
 - [ ] Register trained model artifacts in `ml_models`

@@ -3,7 +3,7 @@
 import pytest
 from typer.testing import CliRunner
 
-from g2.cli import app
+from gefion.cli import app
 
 
 runner = CliRunner()
@@ -62,7 +62,7 @@ class TestModelDeleteCommand:
             def __exit__(self, *args):
                 return False
 
-        from g2 import cli
+        from gefion import cli
         monkeypatch.setattr(cli, "db_connection", lambda *a, **k: DummyConn())
         monkeypatch.setattr(cli, "init_schema_tables", lambda *a, **k: None)
 
@@ -116,7 +116,7 @@ class TestModelDeleteOutput:
             def __exit__(self, *args):
                 return False
 
-        from g2 import cli
+        from gefion import cli
         monkeypatch.setattr(cli, "db_connection", lambda *a, **k: DummyConn())
         monkeypatch.setattr(cli, "init_schema_tables", lambda *a, **k: None)
 

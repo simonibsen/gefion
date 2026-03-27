@@ -11,7 +11,7 @@ Open work items extracted from NEXT_STEPS.md, ML_ROADMAP.md, PROGRESS.md, and NO
 ### ~~Model Calibration Improvements~~ ✅
 **Completed**: 2026-02-28 (branch: `siModelCalibration`)
 
-Implemented conformal calibration via `g2 ml calibrate`. Computes additive shift
+Implemented conformal calibration via `gefion ml calibrate`. Computes additive shift
 corrections from a holdout period so predicted quantiles achieve nominal coverage
 (10%, 50%, 90%). Saves `calibration.json` alongside model artifacts; future
 predictions automatically apply the shifts.
@@ -25,7 +25,7 @@ incremental/full mode, CLI preview, and background process execution.
 ### ~~UI Error Feedback Loop~~ ✅
 **Completed**: 2026-03-01
 
-Errors during UI sessions are logged to `~/.g2/ui_errors.jsonl`. When `g2 ui`
+Errors during UI sessions are logged to `~/.gefion/ui_errors.jsonl`. When `gefion ui`
 exits, a summary is printed to stdout so Claude Code can see and diagnose
 failures. Hooks in `data.py` (background process failures) and `cli.py`
 (session start/end). Module: `g2.ui.errors`.
@@ -35,7 +35,7 @@ failures. Hooks in `data.py` (background process failures) and `cli.py`
 
 Systematic hardening of the Streamlit UI assistant view:
 - Renamed to "AI Actions", promoted to 2nd sidebar position
-- Persistent conversation history (`~/.g2/ai_history.jsonl`, 100 exchange cap)
+- Persistent conversation history (`~/.gefion/ai_history.jsonl`, 100 exchange cap)
 - In-UI error surfacing (count badge + expandable list)
 - Form submission, auto-refresh, Run button fixes
 - Fixed 8 broken MCP_TOOL_MAP CLI mappings + regression tests
@@ -83,7 +83,7 @@ g2 trade flatten --confirm
 **Discovered**: 2026-03-25
 **Severity**: Medium
 
-`g2 backup --data-types definitions` reports "Insufficient disk space. Need ~0.0 MB" with 42 GB available. The space estimation logic is broken — reports ~0.0 MB for definitions and ~919.1 MB for all data types.
+`gefion backup --data-types definitions` reports "Insufficient disk space. Need ~0.0 MB" with 42 GB available. The space estimation logic is broken — reports ~0.0 MB for definitions and ~919.1 MB for all data types.
 
 ---
 
@@ -103,7 +103,7 @@ When `stock_ohlcv` rows are deleted (e.g., culling to a 1-year window), downstre
 4. `computed_features`, `cross_sectional_features`
 5. `stock_ohlcv` (root)
 
-**Proposed solution**: A `g2 data cull --before DATE` command that:
+**Proposed solution**: A `gefion data cull --before DATE` command that:
 1. Identifies downstream artifacts overlapping the cull window
 2. Reports impact via dry-run (default)
 3. On `--confirm`, deletes in dependency order leaf → root

@@ -1,10 +1,10 @@
 # ML Quickstart Guide
 
-Complete walkthrough for training and deploying quantile regression models in g2.
+Complete walkthrough for training and deploying quantile regression models in Gefion.
 
-## What is g2's ML Pipeline?
+## What is Gefion's ML Pipeline?
 
-g2 predicts **return distributions** instead of single-value forecasts. This approach provides:
+gefion predicts **return distributions** instead of single-value forecasts. This approach provides:
 
 **Key Concepts:**
 
@@ -18,7 +18,7 @@ g2 predicts **return distributions** instead of single-value forecasts. This app
 
 Traditional models predict: "AAPL will return +3.2% in 7 days"
 
-g2 predicts: "AAPL 7-day distribution: q10=-1.5%, q50=+2.1%, q90=+5.8%"
+gefion predicts: "AAPL 7-day distribution: q10=-1.5%, q50=+2.1%, q90=+5.8%"
 
 This enables:
 - **Risk assessment**: Know downside risk (q10) and upside potential (q90)
@@ -41,7 +41,7 @@ This enables:
 1. **Database running** with prices and features:
    ```bash
    docker compose up -d postgres
-   g2 data-update --exchange NASDAQ --timeframe auto --local
+   gefion data-update --exchange NASDAQ --timeframe auto --local
    ```
 
 2. **ML dependencies installed**:
@@ -51,7 +51,7 @@ This enables:
 
 3. **Optional: XGBoost/LightGBM** (for advanced algorithms):
    ```bash
-   pip install 'g2[ml_extended]'
+   pip install gefion[ml_extended]'
    ```
 
    **macOS users**: LightGBM requires OpenMP. Install with Homebrew:
@@ -71,7 +71,7 @@ This enables:
 Export features and labels for a small universe:
 
 ```bash
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name quickstart \
   --version v1 \
   --symbols AAPL,MSFT,GOOGL,AMZN,META \
@@ -99,7 +99,7 @@ g2 ml dataset-build \
 Train quantile regression models:
 
 ```bash
-g2 ml train \
+gefion ml train \
   --dataset-name quickstart \
   --dataset-version v1 \
   --model-name quickstart_model \
@@ -122,7 +122,7 @@ g2 ml train \
 Generate predictions for today:
 
 ```bash
-g2 ml predict \
+gefion ml predict \
   --model-name quickstart_model \
   --model-version $(date +%Y%m%d) \
   --prediction-date $(date +%Y-%m-%d) \
@@ -143,7 +143,7 @@ g2 ml predict \
 Evaluate on historical predictions (if you have past predictions):
 
 ```bash
-g2 ml eval \
+gefion ml eval \
   --model-name quickstart_model \
   --model-version $(date +%Y%m%d) \
   --start-date 2024-01-01 \
@@ -179,7 +179,7 @@ Horizon: 7 days
 Apply conformal calibration to improve quantile coverage:
 
 ```bash
-g2 ml calibrate \
+gefion ml calibrate \
   --model-name quickstart_model \
   --model-version $(date +%Y%m%d) \
   --start-date 2024-06-01 \
@@ -203,7 +203,7 @@ g2 ml calibrate \
 
 ```bash
 # 1. Build dataset with larger universe
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name nasdaq_500 \
   --version v1 \
   --exchange NASDAQ \
@@ -215,7 +215,7 @@ g2 ml dataset-build \
   --export
 
 # 2. Train with XGBoost for better accuracy
-g2 ml train \
+gefion ml train \
   --dataset-name nasdaq_500 \
   --dataset-version v1 \
   --model-name nasdaq_xgb \
@@ -224,7 +224,7 @@ g2 ml train \
   --out-dir models
 
 # 3. Daily prediction cron job
-g2 ml predict \
+gefion ml predict \
   --model-name nasdaq_xgb \
   --model-version $(date +%Y%m%d) \
   --prediction-date $(date +%Y-%m-%d) \
@@ -232,7 +232,7 @@ g2 ml predict \
   --limit 500
 
 # 4. Weekly evaluation
-g2 ml eval \
+gefion ml eval \
   --model-name nasdaq_xgb \
   --model-version $(date +%Y%m%d) \
   --start-date $(date -d '30 days ago' +%Y-%m-%d) \
@@ -246,7 +246,7 @@ By default, all computed features are included in the dataset. You can customize
 **Whitelist Mode** (include only specific features):
 
 ```bash
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name selective \
   --version v1 \
   --symbols AAPL,MSFT,GOOGL \
@@ -258,7 +258,7 @@ g2 ml dataset-build \
 **Blacklist Mode** (exclude specific features):
 
 ```bash
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name filtered \
   --version v1 \
   --symbols AAPL,MSFT,GOOGL \
@@ -333,7 +333,7 @@ Combine predictions from multiple algorithms for improved accuracy. [Ensemble me
 
 ```bash
 # Train ensemble with two algorithms
-g2 ml train-ensemble \
+gefion ml train-ensemble \
   --dataset-name nasdaq_500 \
   --dataset-version v1 \
   --model-name nasdaq_ensemble \
@@ -342,7 +342,7 @@ g2 ml train-ensemble \
   --out-dir models
 
 # Train with custom weights (XGBoost weighted higher)
-g2 ml train-ensemble \
+gefion ml train-ensemble \
   --dataset-name nasdaq_500 \
   --dataset-version v1 \
   --model-name weighted_ensemble \
@@ -361,7 +361,7 @@ g2 ml train-ensemble \
 ### Generating Ensemble Predictions
 
 ```bash
-g2 ml predict-ensemble \
+gefion ml predict-ensemble \
   --model-name nasdaq_ensemble \
   --model-version $(date +%Y%m%d) \
   --prediction-date $(date +%Y-%m-%d) \
@@ -437,7 +437,7 @@ LIMIT 10;
 
 **Solution:**
 ```bash
-g2 feat-compute --exchange NASDAQ --local --refresh-existing
+gefion feat-compute --exchange NASDAQ --local --refresh-existing
 ```
 
 ### "Dataset not found"
@@ -447,10 +447,10 @@ g2 feat-compute --exchange NASDAQ --local --refresh-existing
 **Solution:**
 ```bash
 # List datasets
-g2 ml dataset-list
+gefion ml dataset-list
 
 # Rebuild if needed
-g2 ml dataset-build --name ... --export
+gefion ml dataset-build --name ... --export
 ```
 
 ### "Model artifact directory not found"
@@ -489,10 +489,10 @@ Validate the entire ML pipeline with a single command:
 
 ```bash
 # Quick smoke test (~1 minute)
-g2 ml e2e-test --exchange NASDAQ --limit 10
+gefion ml e2e-test --exchange NASDAQ --limit 10
 
 # Full test with cleanup
-g2 ml e2e-test --exchange NASDAQ --limit 50 --cleanup
+gefion ml e2e-test --exchange NASDAQ --limit 50 --cleanup
 ```
 
 This runs all steps automatically: data update → dataset build → train → ensemble → predict → quality check.
@@ -505,7 +505,7 @@ Train a [classifier](https://en.wikipedia.org/wiki/Statistical_classification) t
 
 ```bash
 # Train trend classifier
-g2 ml train-classifier \
+gefion ml train-classifier \
   --dataset-name nasdaq_500 \
   --dataset-version v1 \
   --model-name trend_classifier \
@@ -514,7 +514,7 @@ g2 ml train-classifier \
   --out-dir models
 
 # Generate trend predictions
-g2 ml predict-classifier \
+gefion ml predict-classifier \
   --model-path models/trend_classifier_YYYYMMDD_h7 \
   --symbols AAPL,MSFT,GOOGL
 ```
@@ -551,7 +551,7 @@ Dataset exports support both CSV (default) and Parquet formats. Use Parquet for:
 
 ```bash
 # Export as Parquet (recommended for large datasets)
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name tech --version v1 \
   --symbols AAPL,MSFT,GOOGL \
   --horizons 7,30 \
@@ -559,7 +559,7 @@ g2 ml dataset-build \
   --export
 
 # CSV is still the default (backward compatible)
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name tech --version v1 \
   --symbols AAPL,MSFT,GOOGL \
   --horizons 7,30 \
@@ -567,7 +567,7 @@ g2 ml dataset-build \
 ```
 
 **Requirements:**
-- Install with: `pip install g2[ml_extended]` (includes `pyarrow>=14.0`)
+- Install with: `pip install gefion[ml_extended]` (includes `pyarrow>=14.0`)
 
 **Output:**
 - Parquet: `prices.parquet`, `features.parquet`, `labels.parquet`

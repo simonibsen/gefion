@@ -17,9 +17,9 @@ def db_conn():
     if os.getenv("ENABLE_DB_TESTS", "0") != "1":
         pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
 
-    from g2.cli_helpers import db_connection, init_schema_tables
+    from gefion.cli_helpers import db_connection, init_schema_tables
 
-    from g2.db.schema import test_db_url
+    from gefion.db.schema import test_db_url
     url = test_db_url()
     with db_connection(url) as conn:
         # Drop ml_datasets to ensure fresh schema (backup may have old JSONB schema)
@@ -37,7 +37,7 @@ def test_export_with_exchange_limit_uses_valid_schema(db_conn, tmp_path):
     This test catches issues like referencing non-existent columns
     (e.g., stocks.exchange) that mock tests miss.
     """
-    from g2.ml.dataset import export_dataset_artifacts
+    from gefion.ml.dataset import export_dataset_artifacts
 
     # Test with exchange+limit - this should not raise SQL errors
     manifest = {
@@ -56,7 +56,7 @@ def test_export_with_exchange_limit_uses_valid_schema(db_conn, tmp_path):
 
 def test_export_with_symbols_uses_valid_schema(db_conn, tmp_path):
     """Test that explicit symbol list uses valid schema."""
-    from g2.ml.dataset import export_dataset_artifacts
+    from gefion.ml.dataset import export_dataset_artifacts
 
     # First, get a real symbol from the database
     with db_conn.cursor() as cur:
@@ -183,7 +183,7 @@ def test_upsert_ml_dataset_array_columns(db_conn):
     Regression test: horizons_days (INTEGER[]) and feature_names (TEXT[])
     are PostgreSQL array columns - pass Python lists directly.
     """
-    from g2.ml.store import upsert_ml_dataset
+    from gefion.ml.store import upsert_ml_dataset
 
     payload = {
         "name": "test_jsonb",

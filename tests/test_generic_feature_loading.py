@@ -9,8 +9,8 @@ import os
 from pathlib import Path
 import pytest
 import psycopg
-from g2.db import schema
-from g2.db.ingest import load_feature_definitions_from_json, ensure_feature_definitions
+from gefion.db import schema
+from gefion.db.ingest import load_feature_definitions_from_json, ensure_feature_definitions
 
 
 def test_load_feature_definitions_from_json_single_file():

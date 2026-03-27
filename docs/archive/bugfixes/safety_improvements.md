@@ -2,12 +2,12 @@
 
 ## Overview
 
-Added comprehensive safety mechanisms to the `ResourceAwareAdaptiveLimiter` to prevent catastrophic system hangs like the one experienced during `g2 features-compute --all-features`.
+Added comprehensive safety mechanisms to the `ResourceAwareAdaptiveLimiter` to prevent catastrophic system hangs like the one experienced during `gefion features-compute --all-features`.
 
 ## The Problem
 
 User reported a complete system hang:
-- Command: `g2 features-compute --all-features`
+- Command: `gefion features-compute --all-features`
 - Symptoms: System lost network connection and console access (kernel-level hang)
 - Root cause: Likely resource exhaustion (memory/CPU/threads) causing OOM killer or kernel panic
 
@@ -177,7 +177,7 @@ pytest tests/test_resource_aware_adaptive_limiter.py -v
 
 1. **Deploy with conservative settings:**
    ```bash
-   g2 features-compute --all-features --max-workers 8
+   gefion features-compute --all-features --max-workers 8
    ```
    - Hard limit prevents over-scaling
    - Emergency brake will protect if memory gets low
@@ -197,7 +197,7 @@ pytest tests/test_resource_aware_adaptive_limiter.py -v
 Testing the safety mechanisms:
 ```bash
 # Test with limited resources
-g2 features-compute --symbols AAPL,MSFT,GOOG --max-workers 4
+gefion features-compute --symbols AAPL,MSFT,GOOG --max-workers 4
 
 # Test emergency brake (simulate low memory - requires manual testing)
 # Monitor output for emergency brake messages
@@ -208,8 +208,8 @@ g2 features-compute --symbols AAPL,MSFT,GOOG --max-workers 4
 
 ## Files Modified
 
-- [src/g2/utils/adaptive.py](../src/g2/utils/adaptive.py): Added safety mechanisms
-- [src/g2/cli.py](../src/g2/cli.py): Updated limiter instantiation with safety params
+- [src/gefion/utils/adaptive.py](../src/gefion/utils/adaptive.py): Added safety mechanisms
+- [src/gefion/cli.py](../src/gefion/cli.py): Updated limiter instantiation with safety params
 - [docs/safety_improvements.md](../docs/safety_improvements.md): This document
 
 ## Expected Behavior
@@ -274,7 +274,7 @@ If system starts to hang despite these improvements:
    - Verify max_total_threads setting
 
 3. **Recovery:**
-   - Reduce max_workers: `g2 features-compute --max-workers 4`
+   - Reduce max_workers: `gefion features-compute --max-workers 4`
    - Increase memory threshold: Edit cli.py, set `min_memory_threshold_gb=4.0`
    - Disable auto-scaling: Set `user_max_writer_workers=2` to prevent writer scaling
 

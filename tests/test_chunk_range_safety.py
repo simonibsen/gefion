@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import warnings
 import pytest
 
-from g2.utils.timescale import (
+from gefion.utils.timescale import (
     get_chunk_date_range,
     filter_rows_by_chunk_range,
     validate_and_filter_insert_data
@@ -192,8 +192,8 @@ def test_insert_computed_features_filters_outside_chunk_range(db_conn_for_tests)
 
     This test requires a real database connection with TimescaleDB.
     """
-    from g2.db.ingest import insert_computed_features
-    from g2.db import schema
+    from gefion.db.ingest import insert_computed_features
+    from gefion.db import schema
 
     # Skip if no database connection available
     if not db_conn_for_tests:
@@ -207,7 +207,7 @@ def test_insert_computed_features_filters_outside_chunk_range(db_conn_for_tests)
     schema.create_computed_features_table(conn)
 
     # Create test stock and feature
-    from g2.db.ingest import upsert_stock, ensure_feature_definitions
+    from gefion.db.ingest import upsert_stock, ensure_feature_definitions
 
     stock_id = upsert_stock(conn, "TEST_CHUNK")
     feature_map = ensure_feature_definitions(
@@ -228,7 +228,7 @@ def test_insert_computed_features_filters_outside_chunk_range(db_conn_for_tests)
     )
 
     # Get chunk range
-    from g2.utils.timescale import get_chunk_date_range
+    from gefion.utils.timescale import get_chunk_date_range
 
     min_date, max_date = get_chunk_date_range(conn, "computed_features")
 

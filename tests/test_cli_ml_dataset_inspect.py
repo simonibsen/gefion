@@ -3,7 +3,7 @@
 import json
 from typer.testing import CliRunner
 
-from g2 import cli
+from gefion import cli
 
 
 def test_ml_dataset_inspect_shows_dataset_info(tmp_path, monkeypatch):

@@ -1,10 +1,10 @@
 # Backtesting Guide
 
-This guide covers using g2's backtesting engine to test trading strategies on historical data.
+This guide covers using Gefion's backtesting engine to test trading strategies on historical data.
 
 ## Overview
 
-g2 provides a complete backtesting framework for testing trading strategies with:
+gefion provides a complete backtesting framework for testing trading strategies with:
 
 - **Point-in-time correctness**: No look-ahead bias - strategies only see past data
 - **Portfolio tracking**: Accurate position sizing, cash management, and rebalancing
@@ -19,7 +19,7 @@ g2 provides a complete backtesting framework for testing trading strategies with
 Run a momentum backtest on specific symbols:
 
 ```bash
-g2 backtest run \
+gefion backtest run \
   --symbols AAPL,MSFT,GOOGL \
   --start-date 2024-01-01 \
   --end-date 2024-12-31 \
@@ -32,7 +32,7 @@ g2 backtest run \
 Test on NASDAQ stocks with a limit:
 
 ```bash
-g2 backtest run \
+gefion backtest run \
   --exchange NASDAQ \
   --limit 20 \
   --start-date 2024-01-01 \
@@ -49,7 +49,7 @@ g2 backtest run \
 Get machine-readable results:
 
 ```bash
-g2 backtest run \
+gefion backtest run \
   --symbols AAPL,MSFT \
   --start-date 2024-01-01 \
   --end-date 2024-12-31 \
@@ -204,10 +204,10 @@ To get full historical data for backtesting:
 
 ```bash
 # Ingest specific stocks with full history
-g2 data-update --exchange NASDAQ --limit 50 --timeframe full --refresh
+gefion data-update --exchange NASDAQ --limit 50 --timeframe full --refresh
 
 # Or ingest from a universe file
-g2 universe-ingest --exchange NASDAQ --limit 50 --status Active
+gefion universe-ingest --exchange NASDAQ --limit 50 --status Active
 ```
 
 ## Programmatic Usage
@@ -216,10 +216,10 @@ You can also use the backtesting engine programmatically:
 
 ```python
 from datetime import date
-from g2.backtest.data_loader import load_price_data_for_backtest
-from g2.backtest.engine import BacktestEngine
-from g2.strategies.momentum import MomentumStrategy
-from g2.config import load_settings
+from gefion.backtest.data_loader import load_price_data_for_backtest
+from gefion.backtest.engine import BacktestEngine
+from gefion.strategies.momentum import MomentumStrategy
+from gefion.config import load_settings
 
 # Load settings
 settings = load_settings()
@@ -279,13 +279,13 @@ Run backtests over different market conditions:
 
 ```bash
 # Bull market period
-g2 backtest run --symbols AAPL,MSFT --start-date 2023-01-01 --end-date 2023-12-31
+gefion backtest run --symbols AAPL,MSFT --start-date 2023-01-01 --end-date 2023-12-31
 
 # Bear market period
-g2 backtest run --symbols AAPL,MSFT --start-date 2022-01-01 --end-date 2022-12-31
+gefion backtest run --symbols AAPL,MSFT --start-date 2022-01-01 --end-date 2022-12-31
 
 # Full cycle
-g2 backtest run --symbols AAPL,MSFT --start-date 2020-01-01 --end-date 2024-12-31
+gefion backtest run --symbols AAPL,MSFT --start-date 2020-01-01 --end-date 2024-12-31
 ```
 
 ### 3. Start Small
@@ -294,7 +294,7 @@ Use `--limit` to test with a small set of stocks first:
 
 ```bash
 # Quick test with 10 stocks
-g2 backtest run --exchange NASDAQ --limit 10 --start-date 2024-01-01 --end-date 2024-12-31
+gefion backtest run --exchange NASDAQ --limit 10 --start-date 2024-01-01 --end-date 2024-12-31
 ```
 
 ### 4. Compare to Benchmark
@@ -303,11 +303,11 @@ Always compare strategy performance to a buy-and-hold benchmark:
 
 ```bash
 # Run strategy backtest
-g2 backtest run --symbols SPY --start-date 2024-01-01 --end-date 2024-12-31 \
+gefion backtest run --symbols SPY --start-date 2024-01-01 --end-date 2024-12-31 \
   --strategy momentum --json > strategy_results.json
 
 # Compare to buy-and-hold (top_n=1, never rebalance)
-g2 backtest run --symbols SPY --start-date 2024-01-01 --end-date 2024-12-31 \
+gefion backtest run --symbols SPY --start-date 2024-01-01 --end-date 2024-12-31 \
   --top-n 1 --rebalance-days 365 --json > benchmark_results.json
 ```
 
@@ -336,10 +336,10 @@ The backtest engine ensures no look-ahead bias:
 psql $DATABASE_URL -c "SELECT DISTINCT symbol, exchange FROM stocks WHERE status = 'Active' LIMIT 20;"
 
 # Try without exchange filter
-g2 backtest run --symbols AAPL --start-date 2024-01-01 --end-date 2024-12-31
+gefion backtest run --symbols AAPL --start-date 2024-01-01 --end-date 2024-12-31
 
 # Ingest more data
-g2 data-update --exchange NASDAQ --limit 50 --timeframe full
+gefion data-update --exchange NASDAQ --limit 50 --timeframe full
 ```
 
 ### Zero Trades Executed
@@ -416,10 +416,10 @@ class MyStrategy:
 
 ### Step 1: Create the Strategy File
 
-Create a new file in `src/g2/strategies/`:
+Create a new file in `src/gefion/strategies/`:
 
 ```python
-# src/g2/strategies/my_strategy.py
+# src/gefion/strategies/my_strategy.py
 """
 My Custom Trading Strategy.
 
@@ -514,14 +514,14 @@ class MyCustomStrategy:
 
 ### Step 2: Register the Strategy
 
-Add your strategy to `BUILTIN_STRATEGIES` in `src/g2/strategies/dispatcher.py`:
+Add your strategy to `BUILTIN_STRATEGIES` in `src/gefion/strategies/dispatcher.py`:
 
 ```python
 BUILTIN_STRATEGIES: Dict[str, Dict[str, Any]] = {
     # ... existing strategies ...
 
     "my_strategy": {
-        "module_path": "g2.strategies.my_strategy",
+        "module_path": "gefion.strategies.my_strategy",
         "class_name": "MyCustomStrategy",
         "description": "My custom trading strategy",
         "default_params": {
@@ -539,7 +539,7 @@ BUILTIN_STRATEGIES: Dict[str, Dict[str, Any]] = {
 Run db-init to register the strategy in the database:
 
 ```bash
-g2 db-init
+gefion db-init
 ```
 
 This calls `seed_builtin_strategies()` which inserts your strategy into `strategy_registry`.
@@ -550,7 +550,7 @@ Run a backtest to verify it works:
 
 ```bash
 # Basic test
-g2 backtest run \
+gefion backtest run \
   --strategy my_strategy \
   --symbols AAPL,MSFT,GOOGL \
   --start-date 2024-01-01 \
@@ -558,7 +558,7 @@ g2 backtest run \
   --initial-cash 100000
 
 # With custom parameters
-g2 backtest run \
+gefion backtest run \
   --strategy my_strategy \
   --symbols AAPL,MSFT,GOOGL \
   --start-date 2024-01-01 \
@@ -573,19 +573,19 @@ Strategy configs are named, parameterized instances of strategies stored in the 
 
 ```bash
 # Create an aggressive version of your strategy
-g2 strategy-create-config \
+gefion strategy-create-config \
   --name my_strategy_aggressive \
   --strategy my_strategy \
   --params '{"threshold": 0.02, "max_positions": 10}'
 
 # Create a conservative version
-g2 strategy-create-config \
+gefion strategy-create-config \
   --name my_strategy_conservative \
   --strategy my_strategy \
   --params '{"threshold": 0.10, "max_positions": 3}'
 
 # List all configs
-g2 strategy-configs
+gefion strategy-configs
 ```
 
 Configs merge parameters: `default_params` (from registry) + `config_params` (overrides).
@@ -600,7 +600,7 @@ Configs merge parameters: `default_params` (from registry) + `config_params` (ov
 
 ### Example: Using ML Predictions
 
-You can build strategies that use g2's ML predictions:
+You can build strategies that use Gefion's ML predictions:
 
 ```python
 class MLPredictionStrategy:
@@ -628,9 +628,9 @@ class MLPredictionStrategy:
 
 | File | Purpose |
 |------|---------|
-| `src/g2/strategies/*.py` | Strategy implementations |
-| `src/g2/strategies/dispatcher.py` | Registry and loading logic |
-| `src/g2/strategies/__init__.py` | Package exports |
+| `src/gefion/strategies/*.py` | Strategy implementations |
+| `src/gefion/strategies/dispatcher.py` | Registry and loading logic |
+| `src/gefion/strategies/__init__.py` | Package exports |
 | `tests/test_strategy_*.py` | Strategy tests |
 
 ### Future: Live Trading
@@ -645,7 +645,7 @@ See [.specify/memory/backlog.md](../.specify/memory/backlog.md) for the planned 
 
 ## ML Signal Strategy
 
-The ML Signal Strategy bridges g2's machine learning pipeline with the backtesting system, allowing you to validate whether ML predictions translate into profitable trading decisions.
+The ML Signal Strategy bridges Gefion's machine learning pipeline with the backtesting system, allowing you to validate whether ML predictions translate into profitable trading decisions.
 
 ### Theory: Why ML for Trading Signals?
 
@@ -735,7 +735,7 @@ used for trading on day D+1, avoiding look-ahead bias.
 
 **Workflow:**
 1. Train model on historical data
-2. Generate predictions for backtest period using `g2 ml predict`
+2. Generate predictions for backtest period using `gefion ml predict`
 3. Run backtest - strategy automatically uses D-1 predictions
 
 ### Quick Start
@@ -746,7 +746,7 @@ First, ensure you have ML predictions in the database:
 
 ```bash
 # Train a quantile model (if not already done)
-g2 ml train \
+gefion ml train \
   --dataset-name my_dataset \
   --dataset-version v1 \
   --model-name quantile \
@@ -754,7 +754,7 @@ g2 ml train \
 
 # Generate predictions for historical dates
 for date in 2024-01-02 2024-01-03 2024-01-04 ... ; do
-  g2 ml predict \
+  gefion ml predict \
     --model-name quantile \
     --model-version 20260101 \
     --prediction-date $date \
@@ -766,7 +766,7 @@ done
 #### Step 2: Run ML Backtest
 
 ```bash
-g2 backtest run \
+gefion backtest run \
   --strategy ml_signal \
   --symbols AAPL,MSFT,GOOGL,AMZN,NVDA \
   --start-date 2024-01-01 \
@@ -782,7 +782,7 @@ g2 backtest run \
 
 ```bash
 # ML strategy
-g2 backtest run \
+gefion backtest run \
   --strategy ml_signal \
   --symbols AAPL,MSFT,GOOGL,AMZN,NVDA \
   --start-date 2024-01-01 \
@@ -792,7 +792,7 @@ g2 backtest run \
   --json > ml_results.json
 
 # Traditional momentum
-g2 backtest run \
+gefion backtest run \
   --strategy momentum \
   --symbols AAPL,MSFT,GOOGL,AMZN,NVDA \
   --start-date 2024-01-01 \
@@ -840,14 +840,14 @@ jq '.metrics.sharpe_ratio' ml_results.json momentum_results.json
 
 ```bash
 # 1. Build training dataset
-g2 ml dataset-build \
+gefion ml dataset-build \
   --name backtest_data \
   --version v1 \
   --exchange NASDAQ \
   --limit 100
 
 # 2. Train quantile model
-g2 ml train \
+gefion ml train \
   --dataset-name backtest_data \
   --dataset-version v1 \
   --model-name quantile_v1 \
@@ -856,7 +856,7 @@ g2 ml train \
 
 # 3. Generate predictions for backtest period
 # (In production, use a script to iterate over dates)
-g2 ml predict \
+gefion ml predict \
   --model-name quantile_v1 \
   --model-version 20260101 \
   --prediction-date 2024-06-01 \
@@ -864,7 +864,7 @@ g2 ml predict \
   --limit 100
 
 # 4. Run backtest using predictions
-g2 backtest run \
+gefion backtest run \
   --strategy ml_signal \
   --exchange NASDAQ \
   --limit 50 \
@@ -924,18 +924,18 @@ psql $DATABASE_URL -c "
 
 ```bash
 # 1. Build dataset with temporal split
-g2 ml dataset-build --name full --version v1 --exchange NASDAQ --limit 100
+gefion ml dataset-build --name full --version v1 --exchange NASDAQ --limit 100
 
 # 2. Train on first 80% of data (adjust dates manually)
 # Check dataset dates: look at datasets/full_v1_manifest.json
 
 # 3. Generate predictions for test period ONLY
-g2 ml predict --model-name my_model --model-version v1 \
+gefion ml predict --model-name my_model --model-version v1 \
   --start-date 2024-06-01 --end-date 2024-12-31 \
   --exchange NASDAQ --limit 100
 
 # 4. Backtest on test period only
-g2 backtest run --strategy ml_signal \
+gefion backtest run --strategy ml_signal \
   --start-date 2024-06-01 --end-date 2024-12-31 \
   --model-name my_model --model-version v1
 ```
@@ -944,10 +944,10 @@ g2 backtest run --strategy ml_signal \
 
 ```python
 from datetime import date
-from g2.backtest.engine import BacktestEngine
-from g2.backtest.data_loader import load_price_data_for_backtest
-from g2.strategies.ml_signal import MLSignalStrategy
-from g2.config import load_settings
+from gefion.backtest.engine import BacktestEngine
+from gefion.backtest.data_loader import load_price_data_for_backtest
+from gefion.strategies.ml_signal import MLSignalStrategy
+from gefion.config import load_settings
 
 settings = load_settings()
 
@@ -1074,15 +1074,15 @@ This approach is being implemented as `MLFilterStrategy` - see strategy registry
 
 ## Related Documentation
 
-- [USER_GUIDE.md](USER_GUIDE.md) - Complete g2 workflow guide
+- [USER_GUIDE.md](USER_GUIDE.md) - Complete Gefion workflow guide
 - [ML_QUICKSTART.md](ML_QUICKSTART.md) - Machine learning features
 - [.specify/memory/backlog.md](../.specify/memory/backlog.md) - Future enhancements and backlog
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System design
 
 ## References
 
-- Backtest engine implementation: `src/g2/backtest/engine.py`
-- Momentum strategy: `src/g2/strategies/momentum.py`
-- Data loader: `src/g2/backtest/data_loader.py`
-- Metrics calculation: `src/g2/backtest/metrics.py`
+- Backtest engine implementation: `src/gefion/backtest/engine.py`
+- Momentum strategy: `src/gefion/strategies/momentum.py`
+- Data loader: `src/gefion/backtest/data_loader.py`
+- Metrics calculation: `src/gefion/backtest/metrics.py`
 - Tests: `tests/test_backtest_engine.py`, `tests/test_backtest_cli.py`

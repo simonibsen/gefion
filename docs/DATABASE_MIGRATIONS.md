@@ -13,26 +13,26 @@ G2 uses an automated migration system to manage database schema changes across d
 
 ```bash
 # Check database health including pending migrations
-g2 db-health
+gefion db-health
 
 # Output:
 #   ⚠️  Pending migrations: 2
 #       - 005_add_user_preferences
 #       - 006_add_indexes
-#   Run 'g2 db-migrate' to apply pending migrations
+#   Run 'gefion db-migrate' to apply pending migrations
 ```
 
 ### Running Migrations
 
 ```bash
 # Apply all pending migrations
-g2 db-migrate
+gefion db-migrate
 
 # Preview pending migrations without applying
-g2 db-migrate --dry-run
+gefion db-migrate --dry-run
 
 # Apply migrations to a specific database
-g2 db-migrate --db-url postgresql://user:pass@host:5432/db
+gefion db-migrate --db-url postgresql://user:pass@host:5432/db
 ```
 
 ### Automatic Warnings
@@ -41,17 +41,17 @@ The system automatically warns about pending migrations:
 
 **Before data operations:**
 ```bash
-g2 data-update
+gefion data-update
 # Output:
 # ⚠️  Warning: 2 pending migration(s) detected. Database schema may be out of sync.
 #   - 005_add_user_preferences
 #   - 006_add_indexes
-#   Run 'g2 db-migrate' to apply migrations before proceeding.
+#   Run 'gefion db-migrate' to apply migrations before proceeding.
 ```
 
 **During health checks:**
 ```bash
-g2 db-health
+gefion db-health
 # Shows pending migrations in health report
 ```
 
@@ -78,7 +78,7 @@ g2 db-health
 
 3. Run the migration:
    ```bash
-   g2 db-migrate
+   gefion db-migrate
    ```
 
 ## Migration System Design
@@ -96,7 +96,7 @@ The migration system consists of three main components:
    - Applied in sequential order
    - Standard SQL syntax (psql meta-commands like `\echo` are filtered out)
 
-3. **Migration Runner** (`g2 db-migrate` command)
+3. **Migration Runner** (`gefion db-migrate` command)
    - Scans migration directory
    - Compares with applied migrations
    - Applies pending migrations in order
@@ -154,8 +154,8 @@ CREATE INDEX IF NOT EXISTS idx_stocks_exchange
 
 3. **Test Before Committing** - Run on local database first
    ```bash
-   g2 db-migrate --dry-run  # Preview
-   g2 db-migrate            # Apply
+   gefion db-migrate --dry-run  # Preview
+   gefion db-migrate            # Apply
    ```
 
 4. **One Change Per Migration** - Keep migrations focused
@@ -172,26 +172,26 @@ CREATE INDEX IF NOT EXISTS idx_stocks_exchange
 
 ```bash
 # 1. Initialize schema
-g2 db-init
+gefion db-init
 
 # 2. Run migrations (if any post-baseline migrations exist)
-g2 db-migrate
+gefion db-migrate
 
 # 3. Enable compression (optional but recommended)
-g2 db-tune --compress-after-days 30
+gefion db-tune --compress-after-days 30
 ```
 
 ### For Existing Databases
 
 ```bash
 # 1. Preview pending migrations
-g2 db-migrate --dry-run
+gefion db-migrate --dry-run
 
 # 2. Backup database (recommended)
 pg_dump -h host -U user -d database > backup.sql
 
 # 3. Apply migrations
-g2 db-migrate
+gefion db-migrate
 
 # 4. Verify application
 # Test your application to ensure everything works
@@ -205,7 +205,7 @@ deploy:
   steps:
     - name: Run database migrations
       run: |
-        g2 db-migrate --db-url ${{ secrets.DATABASE_URL }}
+        gefion db-migrate --db-url ${{ secrets.DATABASE_URL }}
 ```
 
 ## Troubleshooting
@@ -217,7 +217,7 @@ If a migration fails:
 1. **Check the error message** - Indicates what went wrong
 2. **Migration is NOT recorded** - Failed migrations won't be marked as applied
 3. **Fix the migration file** - Correct the SQL syntax or logic
-4. **Run again** - `g2 db-migrate` will retry the failed migration
+4. **Run again** - `gefion db-migrate` will retry the failed migration
 
 ### Migration Skipped Unexpectedly
 
@@ -225,7 +225,7 @@ If a migration was skipped but you expected it to run:
 
 ```bash
 # Check what's recorded
-psql -d g2 -c "SELECT * FROM schema_migrations ORDER BY version;"
+psql -d gefion -c "SELECT * FROM schema_migrations ORDER BY version;"
 
 # Check migration files
 ls -la sql/migrations/
@@ -240,7 +240,7 @@ ls -la sql/migrations/
 DROP TABLE schema_migrations;
 
 -- Then run migrations again
-g2 db-migrate
+gefion db-migrate
 ```
 
 ## Testing
@@ -276,13 +276,13 @@ Current migrations:
 ### Custom Migration Directory
 
 ```bash
-g2 db-migrate --migrations-dir /path/to/custom/migrations
+gefion db-migrate --migrations-dir /path/to/custom/migrations
 ```
 
 ### JSON Output
 
 ```bash
-g2 db-migrate --json
+gefion db-migrate --json
 ```
 
 Output:
@@ -327,7 +327,7 @@ sql/
     ├── 003_*.sql
     └── 004_*.sql
 
-src/g2/
+src/gefion/
 ├── db/
 │   └── migrate.py                # Migration logic
 └── cli.py                        # db-migrate command
@@ -357,4 +357,4 @@ A: No, migrations run sequentially to maintain order and dependencies.
 
 - [Performance Optimizations](PERFORMANCE_OPTIMIZATIONS.md)
 - [Database Schema](../sql/schema.sql)
-- [Migration Source Code](../src/g2/db/migrate.py)
+- [Migration Source Code](../src/gefion/db/migrate.py)

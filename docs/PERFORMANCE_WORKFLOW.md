@@ -4,7 +4,7 @@ This guide describes how to use Grafana Tempo traces as part of your performance
 
 ## Overview
 
-Tempo provides **real-time visibility** into your g2 pipeline's performance without guesswork. Instead of profiling with print statements or blind optimization, you can see exactly where time is spent.
+Tempo provides **real-time visibility** into your Gefion pipeline's performance without guesswork. Instead of profiling with print statements or blind optimization, you can see exactly where time is spent.
 
 ## The Workflow
 
@@ -17,10 +17,10 @@ Before making any changes, capture a baseline trace:
 export $(cat .env.example | xargs)
 
 # Run the operation you want to optimize
-g2 feat-compute --symbols AAPL,MSFT,GOOGL --function-names indicator --profile
+gefion feat-compute --symbols AAPL,MSFT,GOOGL --function-names indicator --profile
 
 # Check the trace
-g2 span-check
+gefion span-check
 ```
 
 **What to look for:**
@@ -46,7 +46,7 @@ Use Grafana UI for deeper analysis:
 
 1. **Open Grafana**: http://localhost:3000
 2. **Navigate to Explore** → Tempo
-3. **Search**: service.name = "g2"
+3. **Search**: service.name = "gefion"
 4. **Click on the slowest trace**
 
 #### Common Bottleneck Patterns
@@ -79,7 +79,7 @@ Based on trace analysis, make targeted changes. For example:
 **Change**:
 ```bash
 # Increase batch size from 2000 to 10000
-g2 feat-compute --symbols AAPL --function-names indicator --batch-size 10000
+gefion feat-compute --symbols AAPL --function-names indicator --batch-size 10000
 ```
 
 ### 4. Re-measure
@@ -87,9 +87,9 @@ g2 feat-compute --symbols AAPL --function-names indicator --batch-size 10000
 Run the same operation again with tracing enabled:
 
 ```bash
-g2 feat-compute --symbols AAPL,MSFT,GOOGL --function-names indicator --profile --batch-size 10000
+gefion feat-compute --symbols AAPL,MSFT,GOOGL --function-names indicator --profile --batch-size 10000
 
-g2 span-check
+gefion span-check
 ```
 
 **Compare the traces:**
@@ -131,7 +131,7 @@ Repeat the process:
 **Step 1: Baseline**
 ```bash
 export $(cat .env.example | xargs)
-time g2 feat-compute --symbols $(cat symbols.txt) --all-features
+time Gefion feat-compute --symbols $(cat symbols.txt) --all-features
 # Real: 45m 23s
 ```
 
@@ -147,7 +147,7 @@ In Grafana, I see:
 
 API check shows details:
 ```bash
-g2 span-check
+gefion span-check
 ```
 
 Output shows:
@@ -161,7 +161,7 @@ Database spans: 8,423
 
 **Step 4: Increase Batch Size**
 ```bash
-time g2 feat-compute --symbols $(cat symbols.txt) --all-features --batch-size 10000
+time Gefion feat-compute --symbols $(cat symbols.txt) --all-features --batch-size 10000
 # Real: 18m 12s  (60% faster!)
 ```
 
@@ -178,7 +178,7 @@ Now computation is the bottleneck:
 
 **Step 7: Enable Parallelization**
 ```bash
-time g2 feat-compute --symbols $(cat symbols.txt) --all-features --batch-size 10000 --parallel
+time Gefion feat-compute --symbols $(cat symbols.txt) --all-features --batch-size 10000 --parallel
 # Real: 6m 34s  (86% faster than original!)
 ```
 
@@ -190,8 +190,8 @@ Find why AAPL is slower than MSFT:
 
 ```bash
 # In Grafana Explore:
-# Query 1: {service.name="g2"} | {symbol="AAPL"}
-# Query 2: {service.name="g2"} | {symbol="MSFT"}
+# Query 1: {service.name="gefion"} | {symbol="AAPL"}
+# Query 2: {service.name="gefion"} | {symbol="MSFT"}
 ```
 
 Compare the trace waterfalls to see what's different.
@@ -201,7 +201,7 @@ Compare the trace waterfalls to see what's different.
 Use TraceQL to find slow feature computations:
 
 ```
-{service.name="g2" && name="process_function_group"} | duration > 1s
+{service.name="gefion" && name="process_function_group"} | duration > 1s
 ```
 
 This shows all feature processing that took >1 second.
@@ -231,12 +231,12 @@ Test two approaches:
 
 ```bash
 # Approach A: High batch size
-export OTEL_SERVICE_NAME=g2-approach-a
-g2 feat-compute --symbols AAPL --batch-size 10000
+export OTEL_SERVICE_NAME=gefion-approach-a
+gefion feat-compute --symbols AAPL --batch-size 10000
 
 # Approach B: Parallel processing
-export OTEL_SERVICE_NAME=g2-approach-b
-g2 feat-compute --symbols AAPL --parallel --batch-size 2000
+export OTEL_SERVICE_NAME=gefion-approach-b
+gefion feat-compute --symbols AAPL --parallel --batch-size 2000
 ```
 
 Then compare in Grafana by filtering on `service.name`.
@@ -256,14 +256,14 @@ export $(cat .env.example | xargs)
 ### Run Your Operation
 
 ```bash
-g2 feat-compute --symbols AAPL --function-names indicator --profile
+gefion feat-compute --symbols AAPL --function-names indicator --profile
 ```
 
 ### Check Results
 
 ```bash
 # Via CLI
-g2 span-check
+gefion span-check
 
 # Via UI
 open http://localhost:3000/explore
@@ -282,7 +282,7 @@ In Grafana:
 The `--profile` flag adds timing breakdowns as span attributes:
 
 ```bash
-g2 feat-compute --symbols AAPL --all-features --profile
+gefion feat-compute --symbols AAPL --all-features --profile
 ```
 
 This adds attributes like:
@@ -292,7 +292,7 @@ This adds attributes like:
 
 You can filter by these in Grafana:
 ```
-{service.name="g2"} | timing.write > 1000
+{service.name="gefion"} | timing.write > 1000
 ```
 
 ## Best Practices
@@ -323,7 +323,7 @@ env | grep OTEL
 ```bash
 # Tempo batches traces - wait 10-30 seconds then refresh
 sleep 30
-g2 span-check
+gefion span-check
 ```
 
 **Too many traces cluttering view?**
@@ -347,4 +347,4 @@ export OTEL_SAMPLING_RATE=0.1  # 10% of operations
 - [Tempo API Documentation](https://grafana.com/docs/tempo/latest/api_docs/)
 - [TraceQL Query Language](https://grafana.com/docs/tempo/latest/traceql/)
 - [OpenTelemetry Best Practices](https://opentelemetry.io/docs/concepts/signals/traces/)
-- [g2 Observability Guide](OBSERVABILITY.md)
+- [Gefion Observability Guide](OBSERVABILITY.md)

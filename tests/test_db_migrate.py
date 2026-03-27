@@ -10,7 +10,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from g2.db import schema
+from gefion.db import schema
 
 
 def create_connection():
@@ -40,7 +40,7 @@ def clean_migrations_table(conn):
 
 def test_schema_migrations_table_creation(conn):
     """Test that schema_migrations table can be created."""
-    from g2.db.migrate import ensure_migrations_table
+    from gefion.db.migrate import ensure_migrations_table
 
     ensure_migrations_table(conn)
 
@@ -60,7 +60,7 @@ def test_schema_migrations_table_creation(conn):
 
 def test_schema_migrations_table_structure(conn):
     """Test that schema_migrations table has correct columns."""
-    from g2.db.migrate import ensure_migrations_table
+    from gefion.db.migrate import ensure_migrations_table
 
     ensure_migrations_table(conn)
 
@@ -82,7 +82,7 @@ def test_schema_migrations_table_structure(conn):
 
 def test_get_applied_migrations_empty(conn, clean_migrations_table):
     """Test getting applied migrations when none exist."""
-    from g2.db.migrate import ensure_migrations_table, get_applied_migrations
+    from gefion.db.migrate import ensure_migrations_table, get_applied_migrations
 
     ensure_migrations_table(conn)
     applied = get_applied_migrations(conn)
@@ -93,7 +93,7 @@ def test_get_applied_migrations_empty(conn, clean_migrations_table):
 
 def test_record_migration(conn):
     """Test recording a migration as applied."""
-    from g2.db.migrate import ensure_migrations_table, record_migration, get_applied_migrations
+    from gefion.db.migrate import ensure_migrations_table, record_migration, get_applied_migrations
 
     ensure_migrations_table(conn)
     record_migration(conn, "002", "test_migration", "abc123")
@@ -104,7 +104,7 @@ def test_record_migration(conn):
 
 def test_record_migration_idempotent(conn):
     """Test that recording the same migration twice doesn't error."""
-    from g2.db.migrate import ensure_migrations_table, record_migration
+    from gefion.db.migrate import ensure_migrations_table, record_migration
 
     ensure_migrations_table(conn)
     record_migration(conn, "002", "test_migration", "abc123")
@@ -120,7 +120,7 @@ def test_record_migration_idempotent(conn):
 
 def test_scan_migration_files(tmp_path):
     """Test scanning migration directory for SQL files."""
-    from g2.db.migrate import scan_migration_files
+    from gefion.db.migrate import scan_migration_files
 
     # Create test migration files
     (tmp_path / "001_first.sql").write_text("-- First migration")
@@ -139,7 +139,7 @@ def test_scan_migration_files(tmp_path):
 
 def test_scan_migration_files_sorted(tmp_path):
     """Test that migrations are returned in sorted order."""
-    from g2.db.migrate import scan_migration_files
+    from gefion.db.migrate import scan_migration_files
 
     # Create files in non-sorted order
     (tmp_path / "003_third.sql").write_text("-- Third")
@@ -154,7 +154,7 @@ def test_scan_migration_files_sorted(tmp_path):
 
 def test_get_pending_migrations(conn, tmp_path, clean_migrations_table):
     """Test identifying which migrations haven't been applied yet."""
-    from g2.db.migrate import (
+    from gefion.db.migrate import (
         ensure_migrations_table,
         record_migration,
         scan_migration_files,
@@ -182,7 +182,7 @@ def test_get_pending_migrations(conn, tmp_path, clean_migrations_table):
 
 def test_apply_migration(conn, tmp_path):
     """Test applying a single migration."""
-    from g2.db.migrate import ensure_migrations_table, apply_migration, get_applied_migrations
+    from gefion.db.migrate import ensure_migrations_table, apply_migration, get_applied_migrations
 
     # Create a test migration that creates a table
     migration_sql = """
@@ -223,7 +223,7 @@ def test_apply_migration(conn, tmp_path):
 
 def test_apply_migration_with_error(conn, tmp_path):
     """Test that failed migrations don't get recorded."""
-    from g2.db.migrate import ensure_migrations_table, apply_migration, get_applied_migrations
+    from gefion.db.migrate import ensure_migrations_table, apply_migration, get_applied_migrations
 
     # Create a migration with invalid SQL
     migration_sql = "INVALID SQL THAT WILL FAIL;"
@@ -249,7 +249,7 @@ def test_apply_migration_with_error(conn, tmp_path):
 
 def test_run_migrations_all_pending(conn, tmp_path, clean_migrations_table):
     """Test running all pending migrations."""
-    from g2.db.migrate import ensure_migrations_table, run_migrations
+    from gefion.db.migrate import ensure_migrations_table, run_migrations
 
     # Create multiple test migrations
     (tmp_path / "001_first.sql").write_text("CREATE TABLE IF NOT EXISTS table1 (id SERIAL);")
@@ -279,7 +279,7 @@ def test_run_migrations_all_pending(conn, tmp_path, clean_migrations_table):
 
 def test_run_migrations_some_already_applied(conn, tmp_path, clean_migrations_table):
     """Test running migrations when some are already applied."""
-    from g2.db.migrate import ensure_migrations_table, record_migration, run_migrations
+    from gefion.db.migrate import ensure_migrations_table, record_migration, run_migrations
 
     (tmp_path / "001_first.sql").write_text("CREATE TABLE IF NOT EXISTS table1 (id SERIAL);")
     (tmp_path / "002_second.sql").write_text("CREATE TABLE IF NOT EXISTS table2 (id SERIAL);")
@@ -310,7 +310,7 @@ def test_run_migrations_some_already_applied(conn, tmp_path, clean_migrations_ta
 
 def test_run_migrations_idempotent(conn, tmp_path, clean_migrations_table):
     """Test that running migrations twice doesn't cause errors."""
-    from g2.db.migrate import ensure_migrations_table, run_migrations
+    from gefion.db.migrate import ensure_migrations_table, run_migrations
 
     (tmp_path / "001_first.sql").write_text("CREATE TABLE IF NOT EXISTS table1 (id SERIAL);")
     (tmp_path / "002_second.sql").write_text("CREATE TABLE IF NOT EXISTS table2 (id SERIAL);")
@@ -329,7 +329,7 @@ def test_run_migrations_idempotent(conn, tmp_path, clean_migrations_table):
 
 def test_run_migrations_stops_on_error(conn, tmp_path, clean_migrations_table):
     """Test that migration runner stops on first error."""
-    from g2.db.migrate import ensure_migrations_table, run_migrations, get_applied_migrations
+    from gefion.db.migrate import ensure_migrations_table, run_migrations, get_applied_migrations
 
     (tmp_path / "001_first.sql").write_text("CREATE TABLE IF NOT EXISTS table1 (id SERIAL);")
     (tmp_path / "002_bad.sql").write_text("INVALID SQL;")
@@ -358,7 +358,7 @@ class TestParseSchemaChanges:
 
     def test_parse_create_table(self):
         """Parse CREATE TABLE statements."""
-        from g2.db.migrate import parse_migration_schema_changes
+        from gefion.db.migrate import parse_migration_schema_changes
 
         sql = "CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT);"
         changes = parse_migration_schema_changes(sql)
@@ -367,7 +367,7 @@ class TestParseSchemaChanges:
 
     def test_parse_create_table_if_not_exists(self):
         """Parse CREATE TABLE IF NOT EXISTS."""
-        from g2.db.migrate import parse_migration_schema_changes
+        from gefion.db.migrate import parse_migration_schema_changes
 
         sql = "CREATE TABLE IF NOT EXISTS stocks (id SERIAL);"
         changes = parse_migration_schema_changes(sql)
@@ -376,7 +376,7 @@ class TestParseSchemaChanges:
 
     def test_parse_alter_table_add_column(self):
         """Parse ALTER TABLE ADD COLUMN."""
-        from g2.db.migrate import parse_migration_schema_changes
+        from gefion.db.migrate import parse_migration_schema_changes
 
         sql = "ALTER TABLE stocks ADD COLUMN sector TEXT;"
         changes = parse_migration_schema_changes(sql)
@@ -385,7 +385,7 @@ class TestParseSchemaChanges:
 
     def test_parse_alter_table_add_column_if_not_exists(self):
         """Parse ALTER TABLE ADD COLUMN IF NOT EXISTS."""
-        from g2.db.migrate import parse_migration_schema_changes
+        from gefion.db.migrate import parse_migration_schema_changes
 
         sql = "ALTER TABLE stocks ADD COLUMN IF NOT EXISTS industry TEXT;"
         changes = parse_migration_schema_changes(sql)
@@ -394,7 +394,7 @@ class TestParseSchemaChanges:
 
     def test_parse_create_index(self):
         """Parse CREATE INDEX."""
-        from g2.db.migrate import parse_migration_schema_changes
+        from gefion.db.migrate import parse_migration_schema_changes
 
         sql = "CREATE INDEX idx_stocks_symbol ON stocks(symbol);"
         changes = parse_migration_schema_changes(sql)
@@ -403,7 +403,7 @@ class TestParseSchemaChanges:
 
     def test_parse_create_unique_index(self):
         """Parse CREATE UNIQUE INDEX."""
-        from g2.db.migrate import parse_migration_schema_changes
+        from gefion.db.migrate import parse_migration_schema_changes
 
         sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique ON users(email);"
         changes = parse_migration_schema_changes(sql)
@@ -412,7 +412,7 @@ class TestParseSchemaChanges:
 
     def test_parse_multiple_statements(self):
         """Parse SQL with multiple statements."""
-        from g2.db.migrate import parse_migration_schema_changes
+        from gefion.db.migrate import parse_migration_schema_changes
 
         sql = """
         CREATE TABLE orders (id SERIAL);
@@ -432,7 +432,7 @@ class TestVerifySchemaObjects:
 
     def test_verify_existing_table(self, conn):
         """Verify a table that exists."""
-        from g2.db.migrate import verify_schema_objects
+        from gefion.db.migrate import verify_schema_objects
 
         # Create a test table
         with conn.cursor() as cur:
@@ -449,7 +449,7 @@ class TestVerifySchemaObjects:
 
     def test_verify_missing_table(self, conn):
         """Verify a table that doesn't exist."""
-        from g2.db.migrate import verify_schema_objects
+        from gefion.db.migrate import verify_schema_objects
 
         changes = [{"type": "table", "name": "nonexistent_table_xyz"}]
         missing = verify_schema_objects(conn, changes)
@@ -460,7 +460,7 @@ class TestVerifySchemaObjects:
 
     def test_verify_existing_column(self, conn):
         """Verify a column that exists."""
-        from g2.db.migrate import verify_schema_objects
+        from gefion.db.migrate import verify_schema_objects
 
         # Create table with column
         with conn.cursor() as cur:
@@ -477,7 +477,7 @@ class TestVerifySchemaObjects:
 
     def test_verify_missing_column(self, conn):
         """Verify a column that doesn't exist."""
-        from g2.db.migrate import verify_schema_objects
+        from gefion.db.migrate import verify_schema_objects
 
         # Create table without the column
         with conn.cursor() as cur:
@@ -496,7 +496,7 @@ class TestVerifySchemaObjects:
 
     def test_verify_existing_index(self, conn):
         """Verify an index that exists."""
-        from g2.db.migrate import verify_schema_objects
+        from gefion.db.migrate import verify_schema_objects
 
         # Create table with index
         with conn.cursor() as cur:
@@ -514,7 +514,7 @@ class TestVerifySchemaObjects:
 
     def test_verify_missing_index(self, conn):
         """Verify an index that doesn't exist."""
-        from g2.db.migrate import verify_schema_objects
+        from gefion.db.migrate import verify_schema_objects
 
         changes = [{"type": "index", "name": "idx_nonexistent_xyz"}]
         missing = verify_schema_objects(conn, changes)
@@ -528,7 +528,7 @@ class TestGetMigrationStatus:
 
     def test_get_status_with_applied_and_pending(self, conn, tmp_path, clean_migrations_table):
         """Get status with some applied and some pending."""
-        from g2.db.migrate import (
+        from gefion.db.migrate import (
             ensure_migrations_table,
             record_migration,
             get_migration_status,
@@ -559,7 +559,7 @@ class TestRepairMigration:
 
     def test_repair_removes_and_reapplies(self, conn, tmp_path, clean_migrations_table):
         """Repair should remove record and re-apply migration."""
-        from g2.db.migrate import (
+        from gefion.db.migrate import (
             ensure_migrations_table,
             record_migration,
             get_applied_migrations,
@@ -607,7 +607,7 @@ class TestRepairMigration:
 
     def test_repair_nonexistent_version(self, conn, tmp_path, clean_migrations_table):
         """Repair should fail for nonexistent version."""
-        from g2.db.migrate import ensure_migrations_table, repair_migration
+        from gefion.db.migrate import ensure_migrations_table, repair_migration
 
         ensure_migrations_table(conn)
 
@@ -618,7 +618,7 @@ class TestRepairMigration:
 
     def test_repair_not_in_tracking_table(self, conn, tmp_path, clean_migrations_table):
         """Repair a migration that exists as file but not in tracking table."""
-        from g2.db.migrate import (
+        from gefion.db.migrate import (
             ensure_migrations_table,
             get_applied_migrations,
             repair_migration,

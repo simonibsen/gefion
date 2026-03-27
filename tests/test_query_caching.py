@@ -7,14 +7,14 @@ from datetime import date, timedelta
 import psycopg
 import pytest
 
-from g2.db import schema
-from g2.db.cache import (
+from gefion.db import schema
+from gefion.db.cache import (
     prefetch_stock_ids,
     prefetch_latest_prices,
     prefetch_feature_ids,
     StockMetadataCache,
 )
-from g2.db.ingest import upsert_stock, insert_stock_ohlcv
+from gefion.db.ingest import upsert_stock, insert_stock_ohlcv
 
 
 def create_connection():

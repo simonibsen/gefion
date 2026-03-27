@@ -57,7 +57,7 @@ The generic feature dispatcher provides a unified, metadata-driven approach to c
 ### Computing Features
 
 ```python
-from g2.features.dispatcher import compute_features
+from gefion.features.dispatcher import compute_features
 
 with psycopg.connect(db_url) as conn:
     # Compute all indicators for a stock
@@ -86,7 +86,7 @@ with psycopg.connect(db_url) as conn:
 ### Registering Compute Functions
 
 ```python
-from g2.features.dispatcher import register_compute_function
+from gefion.features.dispatcher import register_compute_function
 
 def compute_my_features(source_rows, feature_specs):
     """
@@ -152,16 +152,16 @@ The new `features-compute` command uses the dispatcher:
 
 ```bash
 # Compute all indicators for AAPL
-g2 features-compute --symbols AAPL --function-names indicator
+gefion features-compute --symbols AAPL --function-names indicator
 
 # Compute specific features for multiple stocks
-g2 features-compute --symbols AAPL,MSFT --features indicator_rsi_14,derivative_rsi_14_slope_5
+gefion features-compute --symbols AAPL,MSFT --features indicator_rsi_14,derivative_rsi_14_slope_5
 
 # Full refresh of all features for all stocks
-g2 features-compute --all-features --full
+gefion features-compute --all-features --full
 
 # Incremental computation (only new dates)
-g2 features-compute --symbols AAPL --function-names indicator,derivative --incremental
+gefion features-compute --symbols AAPL --function-names indicator,derivative --incremental
 ```
 
 ## Incremental vs Full Refresh
@@ -263,13 +263,13 @@ def compute_fundamentals(source_rows, feature_specs):
 
 2. **Register it**:
 ```python
-from g2.features.dispatcher import register_compute_function
+from gefion.features.dispatcher import register_compute_function
 register_compute_function('fundamental', compute_fundamentals)
 ```
 
 3. **Define features**:
 ```python
-from g2.db.ingest import ensure_feature_definitions
+from gefion.db.ingest import ensure_feature_definitions
 
 defs = [{
     'name': 'fundamental_pe_ratio',
@@ -330,12 +330,12 @@ compute_features(
 
 ## Files
 
-- [src/g2/features/dispatcher.py](../src/g2/features/dispatcher.py) - Generic dispatcher
-- [src/g2/features/derivatives.py](../src/g2/features/derivatives.py) - Derivative compute function
-- [src/g2/indicators/local.py](../src/g2/indicators/local.py) - Indicator compute function
+- [src/gefion/features/dispatcher.py](../src/gefion/features/dispatcher.py) - Generic dispatcher
+- [src/gefion/features/derivatives.py](../src/gefion/features/derivatives.py) - Derivative compute function
+- [src/gefion/indicators/local.py](../src/gefion/indicators/local.py) - Indicator compute function
 - [tests/test_feature_dispatcher.py](../tests/test_feature_dispatcher.py) - Dispatcher tests
 - [tests/test_compute_derivatives.py](../tests/test_compute_derivatives.py) - Derivative tests
-- [src/g2/cli.py](../src/g2/cli.py) - CLI integration (features-compute command)
+- [src/gefion/cli.py](../src/gefion/cli.py) - CLI integration (features-compute command)
 
 ## See Also
 

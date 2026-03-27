@@ -19,7 +19,7 @@ def test_writer_thread_event_queue_drain_on_connection_failure():
     This is a focused unit test that directly tests the writer_loop behavior
     when db_pool.get_connection() fails.
     """
-    import g2.features.dispatcher as dispatcher_module
+    import gefion.features.dispatcher as dispatcher_module
 
     # Create a mock queue with some items
     write_queue = queue.Queue()
@@ -47,7 +47,7 @@ def test_writer_thread_event_queue_drain_on_connection_failure():
 
     # Simulate writer_loop with connection failure
     def writer_loop_test():
-        from g2.db import pool as db_pool
+        from gefion.db import pool as db_pool
         try:
             with failing_get_connection():
                 # Should never get here

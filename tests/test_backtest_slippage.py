@@ -12,7 +12,7 @@ class TestSlippageModel:
 
     def test_zero_slippage_returns_order_price(self):
         """Zero slippage model returns exact order price."""
-        from g2.backtest.slippage import SlippageModel
+        from gefion.backtest.slippage import SlippageModel
 
         slippage = SlippageModel()
         price = slippage.calculate_execution_price(100.0, 100, "buy")
@@ -20,7 +20,7 @@ class TestSlippageModel:
 
     def test_fixed_slippage_increases_buy_price(self):
         """Buy orders execute at higher price due to slippage."""
-        from g2.backtest.slippage import SlippageModel
+        from gefion.backtest.slippage import SlippageModel
 
         slippage = SlippageModel(fixed_slippage_pct=0.001)  # 10 bps
         price = slippage.calculate_execution_price(100.0, 100, "buy")
@@ -29,7 +29,7 @@ class TestSlippageModel:
 
     def test_fixed_slippage_decreases_sell_price(self):
         """Sell orders execute at lower price due to slippage."""
-        from g2.backtest.slippage import SlippageModel
+        from gefion.backtest.slippage import SlippageModel
 
         slippage = SlippageModel(fixed_slippage_pct=0.001)  # 10 bps
         price = slippage.calculate_execution_price(100.0, 100, "sell")
@@ -38,7 +38,7 @@ class TestSlippageModel:
 
     def test_volume_based_slippage_larger_orders(self):
         """Larger orders have more slippage."""
-        from g2.backtest.slippage import SlippageModel
+        from gefion.backtest.slippage import SlippageModel
 
         slippage = SlippageModel(volume_slippage_coefficient=0.01)
 
@@ -57,7 +57,7 @@ class TestSlippageModel:
 
     def test_volume_slippage_no_volume_provided(self):
         """Volume slippage is zero when volume not provided."""
-        from g2.backtest.slippage import SlippageModel
+        from gefion.backtest.slippage import SlippageModel
 
         slippage = SlippageModel(volume_slippage_coefficient=0.01)
         price = slippage.calculate_execution_price(100.0, 100, "buy")
@@ -66,7 +66,7 @@ class TestSlippageModel:
 
     def test_volatility_based_slippage(self):
         """Higher volatility causes more slippage."""
-        from g2.backtest.slippage import SlippageModel
+        from gefion.backtest.slippage import SlippageModel
 
         slippage = SlippageModel(volatility_slippage_coefficient=0.5)
 
@@ -83,7 +83,7 @@ class TestSlippageModel:
 
     def test_combined_slippage(self):
         """All slippage components combine."""
-        from g2.backtest.slippage import SlippageModel
+        from gefion.backtest.slippage import SlippageModel
 
         slippage = SlippageModel(
             fixed_slippage_pct=0.001,
@@ -109,7 +109,7 @@ class TestLimitOrders:
 
     def test_limit_order_fills_at_limit(self):
         """Limit order fills at limit price when conditions met."""
-        from g2.backtest.slippage import SlippageModel, OrderType
+        from gefion.backtest.slippage import SlippageModel, OrderType
 
         slippage = SlippageModel()
         price = slippage.calculate_execution_price(
@@ -122,7 +122,7 @@ class TestLimitOrders:
 
     def test_limit_buy_no_fill_above_limit(self):
         """Buy limit order doesn't fill when price above limit."""
-        from g2.backtest.slippage import SlippageModel, OrderType
+        from gefion.backtest.slippage import SlippageModel, OrderType
 
         slippage = SlippageModel()
         price = slippage.calculate_execution_price(
@@ -135,7 +135,7 @@ class TestLimitOrders:
 
     def test_limit_sell_no_fill_below_limit(self):
         """Sell limit order doesn't fill when price below limit."""
-        from g2.backtest.slippage import SlippageModel, OrderType
+        from gefion.backtest.slippage import SlippageModel, OrderType
 
         slippage = SlippageModel()
         price = slippage.calculate_execution_price(
@@ -152,14 +152,14 @@ class TestSlippagePresets:
 
     def test_zero_slippage_preset(self):
         """ZERO_SLIPPAGE preset has no slippage."""
-        from g2.backtest.slippage import ZERO_SLIPPAGE
+        from gefion.backtest.slippage import ZERO_SLIPPAGE
 
         price = ZERO_SLIPPAGE.calculate_execution_price(100.0, 1000, "buy")
         assert price == 100.0
 
     def test_realistic_slippage_preset(self):
         """REALISTIC_SLIPPAGE preset exists and applies slippage."""
-        from g2.backtest.slippage import REALISTIC_SLIPPAGE
+        from gefion.backtest.slippage import REALISTIC_SLIPPAGE
 
         price = REALISTIC_SLIPPAGE.calculate_execution_price(
             100.0, 1000, "buy",

@@ -28,4 +28,4 @@ db-down:
 	docker compose down
 
 db-health:
-	docker compose exec -T postgres pg_isready -U $${POSTGRES_USER:-g2} -d $${POSTGRES_DB:-g2}
+	docker compose exec -T postgres pg_isready -U $${POSTGRES_USER:-gefion} -d $${POSTGRES_DB:-gefion}

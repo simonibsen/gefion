@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from g2.ml.dataset import export_dataset_artifacts
+from gefion.ml.dataset import export_dataset_artifacts
 
 
 class _FakeCursor:

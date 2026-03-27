@@ -31,7 +31,7 @@ def test_safe_import_allows_whitelisted_modules():
     - collections
     - typing
     """
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     # Mock database connection
     mock_conn = MagicMock()
@@ -63,7 +63,7 @@ def compute(df):
 
 def test_safe_import_allows_pandas():
     """Test that pandas can be imported."""
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -90,7 +90,7 @@ def compute(df):
 
 def test_safe_import_allows_datetime():
     """Test that datetime can be imported."""
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -127,7 +127,7 @@ def test_safe_import_blocks_dangerous_modules():
     - importlib (import system manipulation)
     - pickle (arbitrary code execution)
     """
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -159,7 +159,7 @@ def compute(stock_data):
 
 def test_safe_import_blocks_submodules_of_dangerous_modules():
     """Test that submodules of dangerous modules are also blocked."""
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -188,7 +188,7 @@ def test_pre_imported_modules_available():
     - pandas
     - datetime
     """
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -215,7 +215,7 @@ def compute(stock_data):
 
 def test_feature_function_with_multiple_imports():
     """Test that feature functions can import multiple whitelisted modules."""
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -250,7 +250,7 @@ def compute(df):
 
 def test_import_error_contains_security_message():
     """Test that blocked imports result in failed function load."""
-    from g2.features.dispatcher import _load_db_function
+    from gefion.features.dispatcher import _load_db_function
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()

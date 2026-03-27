@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from g2.ml.models import (
+from gefion.ml.models import (
     train_quantile_model,
     save_model_artifact,
     load_model_artifact,
@@ -153,7 +153,7 @@ def test_model_pipeline_pickle_compatibility():
     """
     import joblib
     import io
-    from g2.ml.models import ModelPipeline
+    from gefion.ml.models import ModelPipeline
     from sklearn.impute import SimpleImputer
     from sklearn.linear_model import LinearRegression
 

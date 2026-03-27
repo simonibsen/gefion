@@ -87,8 +87,8 @@ For `feat-compute` command:
 
 ### Context Propagation Fix (Pre-requisite)
 Fixed orphaned `db.get_connection` spans in traces by adding OpenTelemetry context propagation:
-- `src/g2/features/dispatcher.py`: Writer threads and parallel function execution
-- `src/g2/cli.py`: feat-compute worker threads
+- `src/gefion/features/dispatcher.py`: Writer threads and parallel function execution
+- `src/gefion/cli.py`: feat-compute worker threads
 
 This ensures proper trace nesting and accurate performance monitoring.
 
@@ -99,14 +99,14 @@ Applied migration `005_add_called_by_column.sql` to fix 100% feature computation
 
 1. `/sql/migrations/006_optimize_ohlcv_query.sql` - Created
 2. `/sql/migrations/005_add_called_by_column.sql` - Created
-3. `/src/g2/features/dispatcher.py` - OpenTelemetry context propagation
-4. `/src/g2/cli.py` - OpenTelemetry context propagation
+3. `/src/gefion/features/dispatcher.py` - OpenTelemetry context propagation
+4. `/src/gefion/cli.py` - OpenTelemetry context propagation
 
 ## Verification
 
 Applied migration:
 ```bash
-.venv/bin/g2 db-migrate
+.venv/bin/gefion db-migrate
 # Output: Migration 006 applied successfully
 ```
 
@@ -135,7 +135,7 @@ Analysis of trace `53a663347af8c2a67b87edea9ac6c6c0` revealed connection pool in
 - Total connection hold time: 8 × 1,008ms = 8,064ms per stock
 
 ### Solution Implemented
-Modified `src/g2/features/dispatcher.py:584` to acquire connections per-write instead of per-thread-lifetime:
+Modified `src/gefion/features/dispatcher.py:584` to acquire connections per-write instead of per-thread-lifetime:
 
 ```python
 # Before: Connection held for entire thread lifetime
@@ -188,5 +188,5 @@ while True:
 **Files Modified**:
 - `sql/migrations/006_optimize_ohlcv_query.sql` (OHLCV index)
 - `sql/migrations/005_add_called_by_column.sql` (schema fix)
-- `src/g2/features/dispatcher.py` (connection pooling + OpenTelemetry context)
-- `src/g2/cli.py` (OpenTelemetry context propagation)
+- `src/gefion/features/dispatcher.py` (connection pooling + OpenTelemetry context)
+- `src/gefion/cli.py` (OpenTelemetry context propagation)

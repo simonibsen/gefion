@@ -21,7 +21,7 @@
 
 ### 1.1 Purpose
 
-Enable AI-driven experimentation across the g2 platform with appropriate guardrails, isolation, and promotion paths. The AI can autonomously propose and run experiments, while humans maintain oversight through monitoring, review, and promotion decisions.
+Enable AI-driven experimentation across the Gefion platform with appropriate guardrails, isolation, and promotion paths. The AI can autonomously propose and run experiments, while humans maintain oversight through monitoring, review, and promotion decisions.
 
 ### 1.2 Scope
 
@@ -241,7 +241,7 @@ strategy_config
 When attempting to delete an artifact:
 
 ```
-$ g2 feature-def delete indicator_rsi_21
+$ gefion feature-def delete indicator_rsi_21
 
 🔍 Checking dependencies...
 
@@ -476,21 +476,21 @@ Experiment Completes
 
 ```bash
 # View promotion candidates
-g2 experiment promotions --status pending
+gefion experiment promotions --status pending
 
 # Promote a single artifact
-g2 experiment promote 42 --artifact "indicator_rsi_21" --as "indicator_rsi_21"
+gefion experiment promote 42 --artifact "indicator_rsi_21" --as "indicator_rsi_21"
 
 # Promote all artifacts from an experiment
-g2 experiment promote 42 --all --suffix "_v2"
+gefion experiment promote 42 --all --suffix "_v2"
 
 # Promote with notes
-g2 experiment promote 42 --artifact "exp42_model" \
+gefion experiment promote 42 --artifact "exp42_model" \
   --as "prod_model_v2" \
   --note "Validated on Q4 2024 data, 8% improvement"
 
 # Rollback a promotion
-g2 experiment rollback \
+gefion experiment rollback \
   --artifact-type model \
   --artifact-name "prod_model_v2" \
   --reason "Performance degraded in live trading"
@@ -704,62 +704,62 @@ ALTER TABLE ml_dataset_manifests ADD COLUMN IF NOT EXISTS
 
 ```bash
 # Propose a composite experiment
-g2 experiment propose \
+gefion experiment propose \
   --name "full_pipeline_opt" \
   --type composite \
   --config-file experiment_config.yaml
 
 # List experiments
-g2 experiment list --status completed --limit 20
+gefion experiment list --status completed --limit 20
 
 # View experiment details
-g2 experiment show 42 --include-components --include-artifacts
+gefion experiment show 42 --include-components --include-artifacts
 
 # Approve for execution
-g2 experiment approve 42
+gefion experiment approve 42
 
 # Run experiment
-g2 experiment run 42
+gefion experiment run 42
 ```
 
 ### 10.2 Artifact Management
 
 ```bash
 # List artifacts with experimental status
-g2 feature-def list --show-experimental
-g2 ml model-list --show-experimental
+gefion feature-def list --show-experimental
+gefion ml model-list --show-experimental
 
 # Check dependencies before delete
-g2 artifact deps --type feature_definition --name indicator_rsi_21
+gefion artifact deps --type feature_definition --name indicator_rsi_21
 
 # Delete with cascade
-g2 feature-def delete indicator_rsi_21 --cascade-experimental
+gefion feature-def delete indicator_rsi_21 --cascade-experimental
 ```
 
 ### 10.3 Promotion
 
 ```bash
 # View pending promotions
-g2 experiment promotions --status pending
+gefion experiment promotions --status pending
 
 # Promote artifact
-g2 experiment promote 42 --artifact "exp42_model" --as "prod_model_v2"
+gefion experiment promote 42 --artifact "exp42_model" --as "prod_model_v2"
 
 # Rollback
-g2 experiment rollback --artifact-type model --name prod_model_v2
+gefion experiment rollback --artifact-type model --name prod_model_v2
 ```
 
 ### 10.4 Monitoring
 
 ```bash
 # View experiment digest
-g2 experiment digest --days 7
+gefion experiment digest --days 7
 
 # Check experiment health
-g2 experiment monitor --alert-level warning
+gefion experiment monitor --alert-level warning
 
 # Resource usage
-g2 experiment usage --period week
+gefion experiment usage --period week
 ```
 
 ---
@@ -906,7 +906,7 @@ git merge experiment/rsi-optimization  # = promotion
 -- Just log what happened, no formal tracking
 INSERT INTO experiment_log (name, description, commands_run, outcome)
 VALUES ('rsi_optimization', 'Test RSI(21) vs RSI(14)',
-        ARRAY['g2 ml train ...', 'g2 backtest run ...'], 'success');
+        ARRAY['gefion ml train ...', 'gefion backtest run ...'], 'success');
 ```
 
 ### 14.4 Minimum Viable Implementation

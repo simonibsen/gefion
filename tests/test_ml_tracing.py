@@ -13,11 +13,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import g2.ml.models as models_mod
-import g2.ml.dataset as dataset_mod
-import g2.ml.evaluation as eval_mod
-import g2.ml.classifier as classifier_mod
-import g2.ml.importance as importance_mod
+import gefion.ml.models as models_mod
+import gefion.ml.dataset as dataset_mod
+import gefion.ml.evaluation as eval_mod
+import gefion.ml.classifier as classifier_mod
+import gefion.ml.importance as importance_mod
 
 
 class SpanCollector:

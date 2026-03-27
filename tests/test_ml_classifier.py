@@ -13,7 +13,7 @@ import pytest
 
 def test_load_dataset_for_classifier():
     """Test loading dataset with trend labels for classification."""
-    from g2.ml.classifier import load_dataset_for_classifier
+    from gefion.ml.classifier import load_dataset_for_classifier
 
     # Create a temporary test dataset
     tmp_dir = Path("/tmp/test_classifier_dataset")
@@ -61,7 +61,7 @@ def test_train_classifier_basic():
     except ImportError:
         pytest.skip("pandas not installed")
 
-    from g2.ml.classifier import train_classifier
+    from gefion.ml.classifier import train_classifier
 
     # Create sample data
     X = pd.DataFrame({
@@ -98,7 +98,7 @@ def test_train_classifier_with_xgboost():
     except (ImportError, Exception) as e:
         pytest.skip(f"XGBoost not available: {e}")
 
-    from g2.ml.classifier import train_classifier
+    from gefion.ml.classifier import train_classifier
 
     # Create sample data
     X = pd.DataFrame({
@@ -126,7 +126,7 @@ def test_predict_classifier():
     except ImportError:
         pytest.skip("pandas not installed")
 
-    from g2.ml.classifier import train_classifier, predict_classifier
+    from gefion.ml.classifier import train_classifier, predict_classifier
 
     # Train model
     X_train = pd.DataFrame({
@@ -161,7 +161,7 @@ def test_evaluate_classifier():
     except ImportError:
         pytest.skip("pandas not installed")
 
-    from g2.ml.classifier import train_classifier, evaluate_classifier
+    from gefion.ml.classifier import train_classifier, evaluate_classifier
 
     # Train model
     X = pd.DataFrame({
@@ -195,7 +195,7 @@ def test_classifier_handles_missing_values():
     except ImportError:
         pytest.skip("pandas or numpy not installed")
 
-    from g2.ml.classifier import train_classifier
+    from gefion.ml.classifier import train_classifier
 
     # Create data with missing values
     X = pd.DataFrame({

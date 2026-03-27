@@ -6,8 +6,8 @@ import pytest
 import psycopg
 from datetime import date, timedelta
 
-from g2.db import schema
-from g2.config import load_settings
+from gefion.db import schema
+from gefion.config import load_settings
 
 
 def create_connection():
@@ -70,8 +70,8 @@ def setup_tables(conn):
 
 def test_backtest_data_loader_with_symbols(conn):
     """Test loading price data for specific symbols."""
-    from g2.backtest.data_loader import load_price_data_for_backtest
-    from g2.db.ingest import upsert_stock, insert_stock_ohlcv
+    from gefion.backtest.data_loader import load_price_data_for_backtest
+    from gefion.db.ingest import upsert_stock, insert_stock_ohlcv
 
     # Insert test data
     aapl_id = upsert_stock(conn, "AAPL", status="Active")
@@ -131,8 +131,8 @@ def test_backtest_data_loader_with_symbols(conn):
 
 def test_backtest_data_loader_with_date_range(conn):
     """Test loading price data with date filtering."""
-    from g2.backtest.data_loader import load_price_data_for_backtest
-    from g2.db.ingest import upsert_stock, insert_stock_ohlcv
+    from gefion.backtest.data_loader import load_price_data_for_backtest
+    from gefion.db.ingest import upsert_stock, insert_stock_ohlcv
 
     # Insert test data
     aapl_id = upsert_stock(conn, "AAPL", status="Active")
@@ -176,10 +176,10 @@ def test_backtest_data_loader_with_date_range(conn):
 
 def test_backtest_run_end_to_end(conn):
     """Test full backtest workflow with real data."""
-    from g2.backtest.data_loader import load_price_data_for_backtest
-    from g2.backtest.engine import BacktestEngine
-    from g2.strategies.momentum import MomentumStrategy
-    from g2.db.ingest import upsert_stock, insert_stock_ohlcv
+    from gefion.backtest.data_loader import load_price_data_for_backtest
+    from gefion.backtest.engine import BacktestEngine
+    from gefion.strategies.momentum import MomentumStrategy
+    from gefion.db.ingest import upsert_stock, insert_stock_ohlcv
 
     # Insert test data for multiple symbols
     symbols = ["AAPL", "MSFT", "GOOGL"]
@@ -285,7 +285,7 @@ def test_backtest_run_end_to_end(conn):
 
 def test_backtest_empty_data(conn):
     """Test backtest with no price data."""
-    from g2.backtest.data_loader import load_price_data_for_backtest
+    from gefion.backtest.data_loader import load_price_data_for_backtest
 
     db_url = conn.test_db_url
     price_data = load_price_data_for_backtest(
@@ -299,8 +299,8 @@ def test_backtest_empty_data(conn):
 
 def test_get_available_symbols(conn):
     """Test getting list of available symbols."""
-    from g2.backtest.data_loader import get_available_symbols
-    from g2.db.ingest import upsert_stock, insert_stock_ohlcv
+    from gefion.backtest.data_loader import get_available_symbols
+    from gefion.db.ingest import upsert_stock, insert_stock_ohlcv
 
     # Insert test stocks with sufficient data
     symbols = ["AAPL", "MSFT", "GOOGL", "NVDA"]
@@ -335,8 +335,8 @@ def test_get_available_symbols(conn):
 
 def test_backtest_with_limit(conn):
     """Test backtest with symbol limit."""
-    from g2.backtest.data_loader import load_price_data_for_backtest
-    from g2.db.ingest import upsert_stock, insert_stock_ohlcv
+    from gefion.backtest.data_loader import load_price_data_for_backtest
+    from gefion.db.ingest import upsert_stock, insert_stock_ohlcv
 
     # Insert data for 5 symbols
     symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA"]

@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
-import g2.cli as cli
+import gefion.cli as cli
 
 
 runner = CliRunner()
@@ -125,7 +125,7 @@ class TestFeatureImportanceComputation:
 
     def test_compute_shap_importance_returns_ranked_features(self, mock_xgboost_model):
         """SHAP importance should return features ranked by importance."""
-        from g2.ml.importance import compute_shap_importance
+        from gefion.ml.importance import compute_shap_importance
 
         artifact_dir, X = mock_xgboost_model
 
@@ -147,7 +147,7 @@ class TestFeatureImportanceComputation:
 
     def test_shap_importance_feature_a_most_important(self, mock_xgboost_model):
         """feature_a should be most important (strongest signal in training data)."""
-        from g2.ml.importance import compute_shap_importance
+        from gefion.ml.importance import compute_shap_importance
 
         artifact_dir, X = mock_xgboost_model
 
@@ -164,7 +164,7 @@ class TestFeatureImportanceComputation:
 
     def test_get_feature_importance_from_model(self, mock_xgboost_model):
         """get_feature_importance should load model and compute importance."""
-        from g2.ml.importance import get_feature_importance
+        from gefion.ml.importance import get_feature_importance
 
         artifact_dir, X = mock_xgboost_model
 
@@ -180,7 +180,7 @@ class TestFeatureImportanceComputation:
 
     def test_feature_importance_top_k_limits_results(self, mock_xgboost_model):
         """top_k parameter should limit number of features returned."""
-        from g2.ml.importance import get_feature_importance
+        from gefion.ml.importance import get_feature_importance
 
         artifact_dir, _ = mock_xgboost_model
 
@@ -248,7 +248,7 @@ class TestFeatureImportanceWithLightGBM:
 
     def test_lightgbm_shap_importance(self, mock_lightgbm_model):
         """SHAP should work with LightGBM models."""
-        from g2.ml.importance import compute_shap_importance
+        from gefion.ml.importance import compute_shap_importance
 
         artifact_dir, X = mock_lightgbm_model
 
@@ -303,7 +303,7 @@ class TestFeatureImportanceEdgeCases:
         }
         (artifact_dir / "metadata.json").write_text(json.dumps(metadata))
 
-        from g2.ml.importance import get_feature_importance
+        from gefion.ml.importance import get_feature_importance
 
         # Should work (may use permutation importance as fallback)
         result = get_feature_importance(

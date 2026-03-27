@@ -4,8 +4,8 @@ from datetime import date
 import psycopg
 import pytest
 
-from g2.db import schema
-from g2.db.ingest import trim_stock_ohlcv, upsert_stock
+from gefion.db import schema
+from gefion.db.ingest import trim_stock_ohlcv, upsert_stock
 
 
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"

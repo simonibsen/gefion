@@ -7,7 +7,7 @@ import os
 import pytest
 import psycopg
 from datetime import date
-from g2.cli_helpers import (
+from gefion.cli_helpers import (
     parse_comma_separated,
     upsert_feature_function,
     setup_progress_reporter,
@@ -15,8 +15,8 @@ from g2.cli_helpers import (
     db_connection,
     init_schema_tables,
 )
-from g2.config import load_settings
-from g2.db import schema
+from gefion.config import load_settings
+from gefion.db import schema
 
 
 def get_db_url():
@@ -438,7 +438,7 @@ class TestInitSchemaTables:
 
     def test_init_ml_tables_calls_creators(self, monkeypatch):
         """Test that ML table names are supported by init_schema_tables()."""
-        from g2.db import schema as schema_mod
+        from gefion.db import schema as schema_mod
 
         called: list[str] = []
 

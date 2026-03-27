@@ -5,7 +5,7 @@ TDD: These tests are written FIRST, before implementation.
 import pytest
 from typer.testing import CliRunner
 
-from g2.cli import app
+from gefion.cli import app
 
 runner = CliRunner()
 
@@ -35,7 +35,7 @@ class TestVolatilityModule:
 
     def test_compute_adaptive_thresholds_for_multiple_horizons(self):
         """Test computing thresholds for multiple horizons."""
-        from g2.ml.volatility import compute_adaptive_thresholds
+        from gefion.ml.volatility import compute_adaptive_thresholds
 
         vol = 0.25
         horizons = [7, 30, 90]

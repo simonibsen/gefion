@@ -9,10 +9,10 @@ import psycopg
 import pytest
 from pathlib import Path
 from typer.testing import CliRunner
-from g2 import cli
-from g2.config import load_settings
-from g2.db import schema
-from g2.db.ingest import ensure_feature_definitions, ensure_store_targets
+from gefion import cli
+from gefion.config import load_settings
+from gefion.db import schema
+from gefion.db.ingest import ensure_feature_definitions, ensure_store_targets
 
 
 # Skip all tests in this module if ENABLE_DB_TESTS is not set

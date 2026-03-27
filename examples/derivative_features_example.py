@@ -8,7 +8,7 @@ features to capture trend, momentum, and acceleration patterns.
 import pandas as pd
 from datetime import date
 import psycopg
-from g2.features.derivatives import add_derivative_features
+from gefion.features.derivatives import add_derivative_features
 
 
 def fetch_features_with_derivatives(
@@ -67,7 +67,7 @@ def fetch_features_with_derivatives(
 
 def example_usage():
     """Example: Load features and analyze derivatives."""
-    db_url = "postgresql://g2:g2pass@localhost:5432/g2"
+    db_url = "postgresql://gefion:gefionpass@localhost:5432/gefion"
 
     # Fetch features with derivatives
     df = fetch_features_with_derivatives(
@@ -148,7 +148,7 @@ def example_usage():
 
 def example_pattern_detection():
     """Example: Detect specific patterns using derivatives."""
-    db_url = "postgresql://g2:g2pass@localhost:5432/g2"
+    db_url = "postgresql://gefion:gefionpass@localhost:5432/gefion"
 
     df = fetch_features_with_derivatives(
         db_url,

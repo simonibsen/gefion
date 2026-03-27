@@ -1,6 +1,6 @@
 import pytest
 
-from g2.ml.labels import TrendClass, classify_return_5class
+from gefion.ml.labels import TrendClass, classify_return_5class
 
 
 @pytest.mark.parametrize(

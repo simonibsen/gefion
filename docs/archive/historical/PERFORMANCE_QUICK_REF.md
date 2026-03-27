@@ -51,7 +51,7 @@ ENABLE_DB_TESTS=1 pytest tests/test_connection_pool.py -v
 
 ### Connection Pooling
 ```python
-from g2.db import pool
+from gefion.db import pool
 pool.init_pool(db_url, min_size=2, max_size=10)
 with pool.get_connection() as conn:
     # Use connection...

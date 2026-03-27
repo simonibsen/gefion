@@ -19,7 +19,7 @@ class TestExperimentConfig:
 
     def test_config_has_required_fields(self):
         """Test that ExperimentConfig has all required fields."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test_experiment",
@@ -33,7 +33,7 @@ class TestExperimentConfig:
 
     def test_config_has_default_values(self):
         """Test that ExperimentConfig has sensible defaults."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test",
@@ -50,7 +50,7 @@ class TestExperimentConfig:
 
     def test_config_with_goal(self):
         """Test ExperimentConfig with goal settings."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="targeted_experiment",
@@ -67,7 +67,7 @@ class TestExperimentConfig:
 
     def test_config_with_improvement_goal(self):
         """Test ExperimentConfig with improvement goal."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="improvement_experiment",
@@ -89,7 +89,7 @@ class TestExperimentRunner:
     @pytest.fixture
     def db_url(self):
         """Get database URL."""
-        from g2.db.schema import test_db_url
+        from gefion.db.schema import test_db_url
         return test_db_url()
 
     @pytest.fixture
@@ -117,13 +117,13 @@ class TestExperimentRunner:
     @pytest.fixture
     def runner(self, db_url, ensure_tables):
         """Create ExperimentRunner instance."""
-        from g2.experiments.core import ExperimentRunner
+        from gefion.experiments.core import ExperimentRunner
         return ExperimentRunner(db_url)
 
     @pytest.fixture
     def sample_config(self):
         """Create a sample experiment config."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
         return ExperimentConfig(
             name="test_momentum_optimization",
             experiment_type="strategy_params",
@@ -189,7 +189,7 @@ class TestExperimentRunner:
         # Create some experiments
         id1 = runner.propose(sample_config)
 
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
         config2 = ExperimentConfig(
             name="another_experiment",
             experiment_type="strategy_params",
@@ -225,7 +225,7 @@ class TestGridSearch:
 
     def test_grid_search_builds_grid(self):
         """Test that GridSearch builds all parameter combinations."""
-        from g2.experiments.search import GridSearch
+        from gefion.experiments.search import GridSearch
 
         search_space = {
             "a": {"type": "categorical", "choices": [1, 2]},
@@ -238,7 +238,7 @@ class TestGridSearch:
 
     def test_grid_search_suggests_all_combinations(self):
         """Test that GridSearch suggests all combinations."""
-        from g2.experiments.search import GridSearch
+        from gefion.experiments.search import GridSearch
 
         search_space = {
             "a": {"type": "categorical", "choices": [1, 2]}
@@ -255,7 +255,7 @@ class TestGridSearch:
 
     def test_grid_search_handles_int_type(self):
         """Test GridSearch with integer parameters."""
-        from g2.experiments.search import GridSearch
+        from gefion.experiments.search import GridSearch
 
         search_space = {
             "n": {"type": "int", "low": 1, "high": 3}
@@ -270,7 +270,7 @@ class TestGridSearch:
 
     def test_grid_search_handles_float_type(self):
         """Test GridSearch with float parameters."""
-        from g2.experiments.search import GridSearch
+        from gefion.experiments.search import GridSearch
 
         search_space = {
             "x": {"type": "float", "low": 0.0, "high": 1.0, "steps": 3}
@@ -287,7 +287,7 @@ class TestGridSearch:
 
     def test_grid_search_report_does_nothing(self):
         """Test that GridSearch.report() is a no-op."""
-        from g2.experiments.search import GridSearch
+        from gefion.experiments.search import GridSearch
 
         search = GridSearch({"a": {"type": "categorical", "choices": [1]}})
         params = search.suggest()
@@ -301,7 +301,7 @@ class TestRandomSearch:
 
     def test_random_search_respects_max_trials(self):
         """Test that RandomSearch respects max_trials."""
-        from g2.experiments.search import RandomSearch
+        from gefion.experiments.search import RandomSearch
 
         search_space = {
             "a": {"type": "int", "low": 1, "high": 100}
@@ -320,7 +320,7 @@ class TestRandomSearch:
 
     def test_random_search_samples_from_range(self):
         """Test that RandomSearch samples within specified range."""
-        from g2.experiments.search import RandomSearch
+        from gefion.experiments.search import RandomSearch
 
         search_space = {
             "n": {"type": "int", "low": 10, "high": 20}
@@ -335,7 +335,7 @@ class TestRandomSearch:
 
     def test_random_search_handles_categorical(self):
         """Test RandomSearch with categorical parameters."""
-        from g2.experiments.search import RandomSearch
+        from gefion.experiments.search import RandomSearch
 
         search_space = {
             "color": {"type": "categorical", "choices": ["red", "green", "blue"]}
@@ -353,7 +353,7 @@ class TestRandomSearch:
 
     def test_random_search_handles_float(self):
         """Test RandomSearch with float parameters."""
-        from g2.experiments.search import RandomSearch
+        from gefion.experiments.search import RandomSearch
 
         search_space = {
             "x": {"type": "float", "low": 0.0, "high": 1.0}
@@ -372,12 +372,12 @@ class TestBayesianSearch:
 
     def test_bayesian_search_import(self):
         """Test that BayesianSearch can be imported."""
-        from g2.experiments.search import BayesianSearch
+        from gefion.experiments.search import BayesianSearch
         assert BayesianSearch is not None
 
     def test_bayesian_search_respects_max_trials(self):
         """Test that BayesianSearch respects max_trials."""
-        from g2.experiments.search import BayesianSearch
+        from gefion.experiments.search import BayesianSearch
 
         search_space = {
             "a": {"type": "int", "low": 1, "high": 100}
@@ -399,7 +399,7 @@ class TestBayesianSearch:
 
     def test_bayesian_search_samples_from_range(self):
         """Test that BayesianSearch samples within specified range."""
-        from g2.experiments.search import BayesianSearch
+        from gefion.experiments.search import BayesianSearch
 
         search_space = {
             "n": {"type": "int", "low": 10, "high": 20}
@@ -415,7 +415,7 @@ class TestBayesianSearch:
 
     def test_bayesian_search_handles_categorical(self):
         """Test BayesianSearch with categorical parameters."""
-        from g2.experiments.search import BayesianSearch
+        from gefion.experiments.search import BayesianSearch
 
         search_space = {
             "color": {"type": "categorical", "choices": ["red", "green", "blue"]}
@@ -434,7 +434,7 @@ class TestBayesianSearch:
 
     def test_bayesian_search_handles_float(self):
         """Test BayesianSearch with float parameters."""
-        from g2.experiments.search import BayesianSearch
+        from gefion.experiments.search import BayesianSearch
 
         search_space = {
             "x": {"type": "float", "low": 0.0, "high": 1.0}
@@ -450,7 +450,7 @@ class TestBayesianSearch:
 
     def test_bayesian_search_handles_log_scale(self):
         """Test BayesianSearch with log-scale float parameters."""
-        from g2.experiments.search import BayesianSearch
+        from gefion.experiments.search import BayesianSearch
 
         search_space = {
             "learning_rate": {"type": "float", "low": 0.0001, "high": 0.1, "log": True}
@@ -466,7 +466,7 @@ class TestBayesianSearch:
 
     def test_bayesian_search_adapts_based_on_results(self):
         """Test that BayesianSearch learns from reported results."""
-        from g2.experiments.search import BayesianSearch
+        from gefion.experiments.search import BayesianSearch
 
         # Create a simple optimization problem: find x close to 50
         search_space = {
@@ -499,7 +499,7 @@ class TestBayesianSearch:
 
     def test_bayesian_search_minimize_direction(self):
         """Test BayesianSearch with minimize direction."""
-        from g2.experiments.search import BayesianSearch
+        from gefion.experiments.search import BayesianSearch
 
         search_space = {
             "x": {"type": "float", "low": 0.0, "high": 10.0}
@@ -526,7 +526,7 @@ class TestBayesianSearch:
 
     def test_bayesian_search_mixed_parameter_types(self):
         """Test BayesianSearch with mixed parameter types."""
-        from g2.experiments.search import BayesianSearch
+        from gefion.experiments.search import BayesianSearch
 
         search_space = {
             "n_layers": {"type": "int", "low": 1, "high": 5},
@@ -556,7 +556,7 @@ class TestExperimentDatabaseSchema:
         import psycopg
         from pathlib import Path
 
-        from g2.db.schema import test_db_url
+        from gefion.db.schema import test_db_url
         url = test_db_url()
         with psycopg.connect(url) as conn:
             # Check if experiments table exists
@@ -657,7 +657,7 @@ class TestStrategyParamExperiment:
 
     def test_strategy_param_experiment_init(self):
         """Test creating a strategy param experiment."""
-        from g2.experiments.types.strategy_params import StrategyParamExperiment
+        from gefion.experiments.types.strategy_params import StrategyParamExperiment
 
         exp = StrategyParamExperiment(
             strategy_name="momentum",
@@ -676,7 +676,7 @@ class TestStrategyParamExperiment:
 
     def test_evaluate_returns_metrics(self):
         """Test that evaluate() returns backtest metrics."""
-        from g2.experiments.types.strategy_params import StrategyParamExperiment
+        from gefion.experiments.types.strategy_params import StrategyParamExperiment
 
         exp = StrategyParamExperiment(
             strategy_name="momentum",
@@ -696,7 +696,7 @@ class TestStrategyParamExperiment:
 
     def test_evaluate_uses_params(self):
         """Test that different params produce different results."""
-        from g2.experiments.types.strategy_params import StrategyParamExperiment
+        from gefion.experiments.types.strategy_params import StrategyParamExperiment
 
         exp = StrategyParamExperiment(
             strategy_name="momentum",
@@ -721,7 +721,7 @@ class TestExperimentExecution:
     @pytest.fixture
     def db_url(self):
         """Get database URL."""
-        from g2.db.schema import test_db_url
+        from gefion.db.schema import test_db_url
         return test_db_url()
 
     @pytest.fixture
@@ -749,12 +749,12 @@ class TestExperimentExecution:
     @pytest.fixture
     def runner(self, db_url, ensure_tables):
         """Create ExperimentRunner instance."""
-        from g2.experiments.core import ExperimentRunner
+        from gefion.experiments.core import ExperimentRunner
         return ExperimentRunner(db_url)
 
     def test_run_executes_trials(self, runner):
         """Test that run() executes trials and stores results."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test_execution",
@@ -784,7 +784,7 @@ class TestExperimentExecution:
     def test_run_stores_trial_results(self, runner, db_url):
         """Test that individual trials are stored in experiment_trials table."""
         import psycopg
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test_trial_storage",
@@ -816,7 +816,7 @@ class TestExperimentExecution:
 
     def test_run_updates_best_score(self, runner):
         """Test that run() updates best_score on experiment."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test_best_score",
@@ -846,7 +846,7 @@ class TestGoalAchievement:
 
     @pytest.fixture
     def db_url(self):
-        from g2.db.schema import test_db_url
+        from gefion.db.schema import test_db_url
         return test_db_url()
 
     @pytest.fixture
@@ -872,12 +872,12 @@ class TestGoalAchievement:
 
     @pytest.fixture
     def runner(self, db_url, ensure_tables):
-        from g2.experiments.core import ExperimentRunner
+        from gefion.experiments.core import ExperimentRunner
         return ExperimentRunner(db_url)
 
     def test_goal_achieved_detected(self, runner):
         """Test that achieving goal is detected and recorded."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         # Set a very low goal that should be achieved
         config = ExperimentConfig(
@@ -904,7 +904,7 @@ class TestGoalAchievement:
 
     def test_goal_not_achieved_detected(self, runner):
         """Test that not achieving goal is detected and recorded."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         # Set impossibly high goal
         config = ExperimentConfig(
@@ -931,7 +931,7 @@ class TestGoalAchievement:
 
     def test_early_stop_on_goal(self, runner):
         """Test that early stopping works when goal is achieved."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test_early_stop",
@@ -958,7 +958,7 @@ class TestGoalAchievement:
 
     def test_improvement_goal_with_baseline(self, runner):
         """Test improvement goal that compares to baseline."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test_improvement",
@@ -990,7 +990,7 @@ class TestBayesianSearchIntegration:
 
     @pytest.fixture
     def db_url(self):
-        from g2.db.schema import test_db_url
+        from gefion.db.schema import test_db_url
         return test_db_url()
 
     @pytest.fixture
@@ -1016,12 +1016,12 @@ class TestBayesianSearchIntegration:
 
     @pytest.fixture
     def runner(self, db_url, ensure_tables):
-        from g2.experiments.core import ExperimentRunner
+        from gefion.experiments.core import ExperimentRunner
         return ExperimentRunner(db_url)
 
     def test_run_with_bayesian_search(self, runner):
         """Test running experiment with Bayesian search method."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test_bayesian_run",
@@ -1046,7 +1046,7 @@ class TestBayesianSearchIntegration:
 
     def test_config_has_search_method_field(self):
         """Test that ExperimentConfig has search_method field."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test",
@@ -1059,7 +1059,7 @@ class TestBayesianSearchIntegration:
 
     def test_config_search_method_defaults_to_grid(self):
         """Test that search_method defaults to grid."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="test",
@@ -1075,7 +1075,7 @@ class TestExperimentChaining:
 
     @pytest.fixture
     def db_url(self):
-        from g2.db.schema import test_db_url
+        from gefion.db.schema import test_db_url
         return test_db_url()
 
     @pytest.fixture
@@ -1101,12 +1101,12 @@ class TestExperimentChaining:
 
     @pytest.fixture
     def runner(self, db_url, ensure_tables):
-        from g2.experiments.core import ExperimentRunner
+        from gefion.experiments.core import ExperimentRunner
         return ExperimentRunner(db_url)
 
     def test_chain_creates_child_experiment(self, runner):
         """Test that chain() creates a child experiment with parent reference."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         # Create and complete parent experiment
         parent_config = ExperimentConfig(
@@ -1144,7 +1144,7 @@ class TestExperimentChaining:
 
     def test_chain_requires_completed_parent(self, runner):
         """Test that chain() requires parent to be completed."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         # Create parent but don't complete it
         parent_config = ExperimentConfig(
@@ -1168,7 +1168,7 @@ class TestExperimentChaining:
 
     def test_get_parent_results(self, runner):
         """Test that child can access parent's results."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         # Create and complete parent
         parent_config = ExperimentConfig(
@@ -1202,7 +1202,7 @@ class TestExperimentChaining:
 
     def test_get_parent_results_returns_none_for_orphan(self, runner):
         """Test that get_parent_results returns None for experiments without parent."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         config = ExperimentConfig(
             name="orphan_experiment",
@@ -1217,7 +1217,7 @@ class TestExperimentChaining:
 
     def test_list_children(self, runner):
         """Test listing child experiments of a parent."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         # Create and complete parent
         parent_config = ExperimentConfig(
@@ -1260,7 +1260,7 @@ class TestExperimentChaining:
 
     def test_child_inherits_parent_params(self, runner):
         """Test that child experiment can inherit parameters from parent's best_params."""
-        from g2.experiments.core import ExperimentConfig
+        from gefion.experiments.core import ExperimentConfig
 
         # Create and complete parent with specific best params
         parent_config = ExperimentConfig(

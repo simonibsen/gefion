@@ -9,8 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 import psycopg
 import pytest
 
-from g2.db import schema, pool
-from g2.db.ingest import upsert_stock
+from gefion.db import schema, pool
+from gefion.db.ingest import upsert_stock
 
 
 def create_connection():
@@ -48,7 +48,7 @@ def setup_pool():
 @pytest.fixture(autouse=True)
 def setup_tables(conn):
     """Setup minimal tables for testing."""
-    from g2.db.schema import create_stocks_table
+    from gefion.db.schema import create_stocks_table
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
         cur.execute("DROP TABLE IF EXISTS stocks CASCADE;")
