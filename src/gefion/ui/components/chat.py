@@ -289,67 +289,66 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
     suggestions = (page_context or {}).get("suggestions", [])
     messages = st.session_state[msg_key]
 
-    # --- Input FIRST (always at top) ---
-    placeholder = "Ask about this page..."
-    if suggestions and not messages:
-        placeholder = suggestions[0]
+    # --- Everything in an expander ---
+    label = "Ask AI" if not messages else f"Ask AI ({len(messages) // 2} conversation(s))"
+    with st.expander(label, expanded=False):
 
-    with st.form(f"chat_form_{page_name}", clear_on_submit=True, border=False):
-        col1, col2 = st.columns([9, 1])
-        with col1:
-            chat_input = st.text_input(
-                "Ask",
-                placeholder=placeholder,
-                key=f"_chat_input_{page_name}",
-                label_visibility="collapsed",
-            )
-        with col2:
-            submitted = st.form_submit_button(">")
+        # Input
+        placeholder = "Ask about this page..."
+        if suggestions and not messages:
+            placeholder = suggestions[0]
 
-    # --- Conversation history BELOW input (newest first, paired Q&A) ---
-    if messages:
-        # Show most recent exchange prominently, older ones collapsed
-        pairs = []
-        i = 0
-        while i < len(messages):
-            if messages[i]["role"] == "user":
-                q = messages[i]
-                a = messages[i + 1] if i + 1 < len(messages) and messages[i + 1]["role"] == "assistant" else None
-                pairs.append((q, a))
-                i += 2 if a else 1
-            else:
-                # Orphaned assistant message
-                pairs.append((None, messages[i]))
-                i += 1
+        with st.form(f"chat_form_{page_name}", clear_on_submit=True, border=False):
+            col1, col2 = st.columns([9, 1])
+            with col1:
+                chat_input = st.text_input(
+                    "Ask",
+                    placeholder=placeholder,
+                    key=f"_chat_input_{page_name}",
+                    label_visibility="collapsed",
+                )
+            with col2:
+                submitted = st.form_submit_button(">")
 
-        # Most recent pair shown expanded
-        if pairs:
-            q, a = pairs[-1]
-            if q:
-                st.caption(f"You ({q.get('timestamp', '')[-8:]})")
-                st.markdown(f"> {q['content']}")
-            if a:
-                st.markdown(a["content"])
+        # Conversation history
+        if messages:
+            pairs = []
+            i = 0
+            while i < len(messages):
+                if messages[i]["role"] == "user":
+                    q = messages[i]
+                    a = messages[i + 1] if i + 1 < len(messages) and messages[i + 1]["role"] == "assistant" else None
+                    pairs.append((q, a))
+                    i += 2 if a else 1
+                else:
+                    pairs.append((None, messages[i]))
+                    i += 1
 
-        # Older pairs in a collapsible section
-        if len(pairs) > 1:
-            with st.expander(f"{len(pairs) - 1} earlier message(s)"):
-                for q, a in reversed(pairs[:-1]):
-                    if q:
-                        st.markdown(f"**You**: {q['content']}")
-                    if a:
-                        content = a["content"]
-                        if len(content) > 200:
-                            st.markdown(content[:200] + "...")
-                        else:
-                            st.markdown(content)
-                    st.markdown("---")
+            # Most recent pair
+            if pairs:
+                q, a = pairs[-1]
+                if q:
+                    st.markdown(f"> {q['content']}")
+                if a:
+                    st.markdown(a["content"])
 
-        if st.button("Clear", key=f"_chat_clear_{page_name}"):
-            st.session_state[msg_key] = []
-            st.rerun()
+            # Older pairs
+            if len(pairs) > 1:
+                with st.expander(f"{len(pairs) - 1} earlier"):
+                    for q, a in reversed(pairs[:-1]):
+                        if q:
+                            st.markdown(f"**You**: {q['content']}")
+                        if a:
+                            content = a["content"]
+                            if len(content) > 200:
+                                st.markdown(content[:200] + "...")
+                            else:
+                                st.markdown(content)
+                        st.markdown("---")
 
-    st.markdown("---")
+            if st.button("Clear", key=f"_chat_clear_{page_name}"):
+                st.session_state[msg_key] = []
+                st.rerun()
 
     # --- Handle submission ---
     if submitted and chat_input:

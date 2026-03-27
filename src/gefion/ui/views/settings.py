@@ -2,11 +2,13 @@
 
 import streamlit as st
 import os
+from gefion.ui.components.chat import render_chat_widget
 
 
 def render_settings():
     """Render the settings page."""
     st.markdown("# :material/settings: Settings")
+    render_chat_widget({"page_name": "Settings"})
     st.markdown("Configure Gefion settings and preferences.")
 
     tab1, tab2 = st.tabs([":material/database: Database", ":material/info: About"])

@@ -2,6 +2,7 @@
 
 import streamlit as st
 from datetime import datetime, timedelta
+from gefion.ui.components.chat import render_chat_widget
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -200,6 +201,7 @@ def get_gefion_insights() -> Optional[GefionInsights]:
 def render_dashboard():
     """Render the main dashboard."""
     st.markdown("# :material/grid_view: Dashboard")
+    render_chat_widget(get_page_context())
     st.markdown("Welcome to Gefion — your AI-powered trading analysis platform.")
 
     # System status section

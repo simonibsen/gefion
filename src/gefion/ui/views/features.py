@@ -3,6 +3,7 @@
 import streamlit as st
 import subprocess
 import sys
+from gefion.ui.components.chat import render_chat_widget
 import os
 import json
 import time
@@ -44,6 +45,7 @@ def get_project_root() -> Path:
 def render_features():
     """Render the features management page."""
     st.markdown("# :material/tune: Features")
+    render_chat_widget(get_page_context())
     st.markdown("Manage feature definitions, functions, and view computed data coverage.")
 
     tab1, tab2, tab3, tab4 = st.tabs([":material/list_alt: Definitions", ":material/code: Functions", ":material/donut_large: Coverage", ":material/memory: Compute"])

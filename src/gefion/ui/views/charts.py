@@ -3,6 +3,7 @@
 import streamlit as st
 from datetime import datetime, timedelta, date
 from typing import Optional
+from gefion.ui.components.chat import render_chat_widget
 
 
 def get_page_context():
@@ -13,6 +14,7 @@ def get_page_context():
 def render_charts():
     """Render the charts page."""
     st.markdown("# :material/bar_chart: Charts")
+    render_chat_widget(get_page_context())
 
     # Chart type selection
     chart_type = st.selectbox(

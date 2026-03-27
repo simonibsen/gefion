@@ -3,6 +3,7 @@
 import streamlit as st
 import subprocess
 import sys
+from gefion.ui.components.chat import render_chat_widget
 import json
 import os
 import threading
@@ -249,6 +250,7 @@ def start_background_process(key: str, cmd: list, env: dict):
 def render_data():
     """Render the data management page."""
     st.markdown("# :material/storage: Data Management")
+    render_chat_widget(get_page_context())
     st.markdown("Manage market data, features, and database operations.")
 
     tab1, tab2, tab3 = st.tabs([":material/cloud_download: Update Data", ":material/monitoring: Data Status", ":material/build: Maintenance"])

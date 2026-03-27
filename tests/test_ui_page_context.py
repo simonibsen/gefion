@@ -60,14 +60,17 @@ class TestPageContextFunctions:
 
 
 class TestAppContextIntegration:
-    """app.py must wire up page context to the chat widget."""
+    """Each view must render the chat widget itself (not app.py)."""
 
-    def test_app_has_get_page_context_dispatcher(self):
-        content = (UI_DIR / "app.py").read_text()
-        assert "_get_page_context" in content
-        assert "render_chat_widget" in content
+    def test_views_call_render_chat_widget(self):
+        """Data views must call render_chat_widget inside their render function."""
+        for view in DATA_VIEWS:
+            content = (UI_DIR / "views" / f"{view}.py").read_text()
+            assert "render_chat_widget" in content, (
+                f"{view}.py must call render_chat_widget"
+            )
 
-    def test_app_skips_chat_on_ai_actions(self):
-        """Chat widget should not render on AI Actions page (it has its own)."""
-        content = (UI_DIR / "app.py").read_text()
-        assert "AI Actions" in content
+    def test_assistant_does_not_have_chat_widget(self):
+        """AI Actions page has its own full assistant, no chat widget."""
+        content = (UI_DIR / "views" / "assistant.py").read_text()
+        assert "render_chat_widget" not in content

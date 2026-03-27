@@ -370,6 +370,62 @@ class TestGetPageContext:
                 )
 
 
+class TestChatWidgetIntegration:
+    """Test that all view pages call render_chat_widget after their title."""
+
+    # Views that should have a chat widget call (all except assistant.py)
+    VIEWS_WITH_CHAT_WIDGET = [
+        "dashboard.py",
+        "ml.py",
+        "data.py",
+        "features.py",
+        "charts.py",
+        "backtest.py",
+        "experiments.py",
+        "settings.py",
+        "documentation.py",
+    ]
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views source directory."""
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_CHAT_WIDGET)
+    def test_view_imports_render_chat_widget(self, views_dir, view_file):
+        """Each view must import render_chat_widget from the chat component."""
+        content = (views_dir / view_file).read_text()
+        assert "from gefion.ui.components.chat import render_chat_widget" in content, (
+            f"{view_file} must import render_chat_widget"
+        )
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_CHAT_WIDGET)
+    def test_view_calls_render_chat_widget(self, views_dir, view_file):
+        """Each view must call render_chat_widget exactly once."""
+        content = (views_dir / view_file).read_text()
+        count = content.count("render_chat_widget(")
+        assert count == 1, (
+            f"{view_file} must call render_chat_widget exactly once, found {count}"
+        )
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_CHAT_WIDGET)
+    def test_chat_widget_after_title(self, views_dir, view_file):
+        """render_chat_widget call must appear after the first st.markdown title."""
+        content = (views_dir / view_file).read_text()
+        title_pos = content.find('st.markdown("# ')
+        chat_pos = content.find("render_chat_widget(")
+        assert title_pos != -1, f"{view_file} must have a title"
+        assert chat_pos != -1, f"{view_file} must call render_chat_widget"
+        assert chat_pos > title_pos, (
+            f"{view_file}: render_chat_widget must appear after the title"
+        )
+
+    def test_assistant_does_not_have_chat_widget(self, views_dir):
+        """assistant.py should NOT have the chat widget (it has its own full assistant)."""
+        content = (views_dir / "assistant.py").read_text()
+        assert "render_chat_widget(" not in content
+
+
 class TestUILaunchCommand:
     """Test CLI UI launch command."""
 

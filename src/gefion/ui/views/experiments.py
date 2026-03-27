@@ -3,6 +3,7 @@
 import streamlit as st
 import subprocess
 import sys
+from gefion.ui.components.chat import render_chat_widget
 import json
 import os
 
@@ -25,6 +26,7 @@ def get_page_context():
 def render_experiments():
     """Render the experiments page."""
     st.markdown("# :material/science: Experiments")
+    render_chat_widget(get_page_context())
     st.markdown("AI-driven parameter optimization with human approval.")
 
     tab1, tab2, tab3, tab4 = st.tabs([

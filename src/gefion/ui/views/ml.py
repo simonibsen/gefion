@@ -3,6 +3,7 @@
 import streamlit as st
 import subprocess
 import sys
+from gefion.ui.components.chat import render_chat_widget
 import json
 import os
 import re
@@ -402,6 +403,7 @@ def _render_model_inspection(model: dict):
 def render_ml():
     """Render the ML pipeline page."""
     st.markdown("# :material/model_training: ML Pipeline")
+    render_chat_widget(get_page_context())
     st.markdown("Train models, generate predictions, and evaluate performance.")
 
     tab1, tab2, tab3, tab4 = st.tabs([

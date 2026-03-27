@@ -3,6 +3,7 @@
 import streamlit as st
 import subprocess
 import sys
+from gefion.ui.components.chat import render_chat_widget
 import json
 import os
 from datetime import date, timedelta
@@ -470,6 +471,7 @@ def _render_backtest_results(data: dict) -> None:
 def render_backtest():
     """Render the backtesting page."""
     st.markdown("# :material/history: Backtesting")
+    render_chat_widget(get_page_context())
     st.markdown("Test trading strategies on historical data.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
