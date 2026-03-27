@@ -352,11 +352,19 @@ def _check_mcp_status() -> Dict[str, Any]:
 def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
     """Render the chat widget as an expander below the page title.
 
-    Args:
-        page_context: Optional dict from the page's get_page_context() function.
-            Keys: page_name, summary, filters, data_stats, empty_states, errors, suggestions
+    Delegates to a @st.fragment so polling for AI responses doesn't
+    trigger a full page re-render.
     """
-    page_name = (page_context or {}).get("page_name", "page")
+    # Store context in session state so the fragment can access it
+    st.session_state["_chat_page_context"] = page_context or {}
+    _render_chat_fragment()
+
+
+@st.fragment
+def _render_chat_fragment() -> None:
+    """Inner fragment — re-renders independently from the rest of the page."""
+    page_context = st.session_state.get("_chat_page_context", {})
+    page_name = page_context.get("page_name", "page")
     msg_key = f"_chat_{page_name}_messages"
 
     if msg_key not in st.session_state:
