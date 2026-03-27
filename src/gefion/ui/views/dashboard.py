@@ -12,19 +12,55 @@ def get_page_context():
     context = {"page_name": "Dashboard", "summary": "Market overview with movers, system stats, and prediction insights."}
     try:
         from gefion.ui.components.database import get_connection
+        from datetime import date as date_type
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM stocks")
                 stock_count = cur.fetchone()[0]
                 cur.execute("SELECT MAX(date) FROM stock_ohlcv")
                 latest = cur.fetchone()[0]
-        context["data_stats"] = {"stocks": stock_count, "latest_data": str(latest) if latest else "none"}
-        if latest:
-            from datetime import date, timedelta
-            age = (date.today() - latest).days
-            if age > 3:
-                context["empty_states"] = [f"price data is {age} days old"]
-                context["suggestions"] = [f"Update prices: gefion data-update"]
+
+                # Top movers summary
+                if latest:
+                    cur.execute("""
+                        SELECT s.symbol,
+                               ROUND(((o2.close - o1.close) / NULLIF(o1.close, 0) * 100)::numeric, 2) as pct
+                        FROM stock_ohlcv o2
+                        JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = o2.date - 1
+                        JOIN stocks s ON s.id = o2.data_id
+                        WHERE o2.date = %s
+                        ORDER BY pct DESC LIMIT 3
+                    """, (latest,))
+                    top_gainers = [f"{r[0]} ({r[1]:+.1f}%)" for r in cur.fetchall()]
+
+                    cur.execute("""
+                        SELECT s.symbol,
+                               ROUND(((o2.close - o1.close) / NULLIF(o1.close, 0) * 100)::numeric, 2) as pct
+                        FROM stock_ohlcv o2
+                        JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = o2.date - 1
+                        JOIN stocks s ON s.id = o2.data_id
+                        WHERE o2.date = %s
+                        ORDER BY pct ASC LIMIT 3
+                    """, (latest,))
+                    top_losers = [f"{r[0]} ({r[1]:+.1f}%)" for r in cur.fetchall()]
+                else:
+                    top_gainers, top_losers = [], []
+
+        data_age = (date_type.today() - latest).days if latest else None
+        context["data_stats"] = {
+            "stocks": stock_count,
+            "latest_data": str(latest) if latest else "none",
+            "data_age_days": data_age,
+            "top_gainers": top_gainers,
+            "top_losers": top_losers,
+        }
+        empty = []
+        suggestions = []
+        if data_age and data_age > 3:
+            empty.append(f"price data is {data_age} days old")
+            suggestions.append("Update prices: gefion data-update")
+        context["empty_states"] = empty
+        context["suggestions"] = suggestions
     except Exception:
         pass
     return context

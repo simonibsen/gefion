@@ -205,8 +205,43 @@ def parse_command_input(
     return cmd, display, "cli"
 
 
+def _get_system_context() -> str:
+    """Shared system context available on every page."""
+    parts = []
+    try:
+        import streamlit as _st
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM stocks")
+                parts.append(f"{cur.fetchone()[0]} stocks tracked")
+
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                latest = cur.fetchone()[0]
+                if latest:
+                    parts.append(f"latest price data: {latest}")
+
+                cur.execute("SELECT name, version, algorithm FROM ml_models WHERE active = true ORDER BY name")
+                models = cur.fetchall()
+                if models:
+                    model_strs = [f"{n} {v} ({a})" if a else f"{n} {v}" for n, v, a in models]
+                    parts.append(f"active models: {', '.join(model_strs)}")
+
+                cur.execute("SELECT prediction_type, COUNT(*) FROM predictions GROUP BY prediction_type")
+                preds = {r[0]: r[1] for r in cur.fetchall()}
+                if preds:
+                    pred_str = ", ".join(f"{k}: {v}" for k, v in preds.items())
+                    parts.append(f"predictions: {pred_str}")
+
+                cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
+                parts.append(f"{cur.fetchone()[0]} active features")
+    except Exception:
+        pass
+    return "System state: " + "; ".join(parts) if parts else ""
+
+
 def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
-    """Build a context prompt string from page context dict."""
+    """Build a context prompt string from page context dict + system context."""
     if not page_context:
         return None
 
@@ -235,6 +270,11 @@ def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
     errors = page_context.get("errors")
     if errors:
         parts.append(f"Errors shown: {'; '.join(errors)}")
+
+    # Add shared system context so AI knows cross-page state
+    sys_ctx = _get_system_context()
+    if sys_ctx:
+        parts.append(sys_ctx)
 
     return " ".join(parts)
 

@@ -18,25 +18,59 @@ def get_page_context():
         from gefion.ui.components.database import get_connection
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM ml_models WHERE active = true")
-                model_count = cur.fetchone()[0]
+                # Model details
+                cur.execute(
+                    "SELECT name, version, algorithm, "
+                    "(SELECT COUNT(*) FROM predictions p WHERE p.model_id = m.id) as pred_count, "
+                    "(SELECT DISTINCT prediction_type FROM predictions p WHERE p.model_id = m.id LIMIT 1) as pred_type "
+                    "FROM ml_models m WHERE active = true ORDER BY name"
+                )
+                models = []
+                for name, ver, algo, pcount, ptype in cur.fetchall():
+                    models.append(f"{name} {ver} ({algo or 'unknown'}, {pcount} {ptype or 'no'} predictions)")
+
                 cur.execute("SELECT prediction_type, COUNT(*) FROM predictions GROUP BY prediction_type")
                 pred_counts = {r[0]: r[1] for r in cur.fetchall()}
-                cur.execute("SELECT COUNT(*) FROM ml_datasets")
-                dataset_count = cur.fetchone()[0]
-        context["data_stats"] = {"active_models": model_count, "datasets": dataset_count, "predictions": pred_counts}
+
+                cur.execute("SELECT name, version FROM ml_datasets ORDER BY created_at DESC LIMIT 3")
+                datasets = [f"{n} {v}" for n, v in cur.fetchall()]
+
+        context["data_stats"] = {
+            "models": models or ["none"],
+            "datasets": datasets or ["none"],
+            "prediction_totals": pred_counts,
+        }
+
+        # Capture active filter selections from session state
+        filters = {}
+        filter_type = st.session_state.get("pred_filter_type")
+        if filter_type and filter_type != "All":
+            filters["prediction_type"] = filter_type
+        filter_model = st.session_state.get("pred_filter_model")
+        if filter_model and filter_model != "All":
+            filters["selected_model"] = filter_model
+        filter_date = st.session_state.get("pred_filter_date")
+        if filter_date and filter_date != "All":
+            filters["selected_date"] = filter_date
+        filter_symbol = st.session_state.get("pred_filter_symbol")
+        if filter_symbol:
+            filters["symbol_filter"] = filter_symbol
+        if filters:
+            context["filters"] = filters
+
         empty = []
-        if model_count == 0:
+        if not models:
             empty.append("no trained models")
         if not pred_counts.get("quantile"):
-            empty.append("no quantile predictions — train a quantile regression model")
+            empty.append("no quantile predictions")
         if not pred_counts.get("trend_class"):
             empty.append("no trend class predictions")
         context["empty_states"] = empty
+
         suggestions = []
         if not pred_counts.get("quantile"):
             suggestions.append("Train a quantile model: gefion ml train")
-        if model_count == 0:
+        if not models:
             suggestions.append("Build a dataset first: gefion ml dataset-build")
         context["suggestions"] = suggestions
     except Exception:

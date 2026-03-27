@@ -19,13 +19,32 @@ def get_page_context():
     context = {"page_name": "Data Management", "summary": "Stock data ingestion and coverage monitoring."}
     try:
         from gefion.ui.components.database import get_connection
+        from datetime import date as date_type
         with get_connection() as conn:
             with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM stocks")
+                total_stocks = cur.fetchone()[0]
                 cur.execute("SELECT COUNT(DISTINCT data_id) FROM stock_ohlcv")
                 symbols_with_data = cur.fetchone()[0]
-                cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
-                min_date, max_date = cur.fetchone()
-        context["data_stats"] = {"symbols_with_data": symbols_with_data, "date_range": f"{min_date} to {max_date}" if min_date else "empty"}
+                cur.execute("SELECT MIN(date), MAX(date), COUNT(*) FROM stock_ohlcv")
+                min_date, max_date, total_rows = cur.fetchone()
+
+                # Sectors breakdown
+                cur.execute("SELECT sector, COUNT(*) FROM stocks WHERE sector IS NOT NULL GROUP BY sector ORDER BY COUNT(*) DESC LIMIT 5")
+                top_sectors = [f"{r[0]} ({r[1]})" for r in cur.fetchall()]
+
+        data_age = (date_type.today() - max_date).days if max_date else None
+        context["data_stats"] = {
+            "total_stocks": total_stocks,
+            "symbols_with_data": symbols_with_data,
+            "total_ohlcv_rows": total_rows,
+            "date_range": f"{min_date} to {max_date}" if min_date else "empty",
+            "data_age_days": data_age,
+            "top_sectors": top_sectors,
+        }
+        if data_age and data_age > 3:
+            context["empty_states"] = [f"data is {data_age} days old"]
+            context["suggestions"] = ["Update data: gefion data-update --exchange NASDAQ"]
     except Exception:
         pass
     return context
