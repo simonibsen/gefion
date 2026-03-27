@@ -319,7 +319,7 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
             )
             submitted = st.form_submit_button("Ask")
 
-        # Conversation history inside the same expander
+        # Conversation history — each Q&A as its own expander
         if messages:
             pairs = []
             i = 0
@@ -333,33 +333,27 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                     pairs.append((None, messages[i]))
                     i += 1
 
-            # Most recent pair
-            if pairs:
-                q, a = pairs[-1]
-                if q:
-                    st.markdown(f"> {q['content']}")
-                if a:
-                    st.markdown(a["content"])
+            # Each pair gets its own expander, newest first, most recent expanded
+            for idx, (q, a) in enumerate(reversed(pairs)):
+                question = q["content"] if q else "..."
+                has_answer = a is not None
+                prefix = "+" if has_answer else "..."
+                is_latest = idx == 0
 
-            # Older pairs
-            if len(pairs) > 1:
-                st.markdown("---")
-                for q, a in reversed(pairs[:-1]):
+                with st.expander(
+                    f"{prefix} {question}",
+                    expanded=is_latest,
+                ):
                     if q:
-                        st.markdown(f"**You**: {q['content']}")
+                        st.markdown(f"**Prompt:** {q['content']}")
                     if a:
-                        content = a["content"]
-                        if len(content) > 200:
-                            st.markdown(content[:200] + "...")
-                        else:
-                            st.markdown(content)
-                    st.markdown("---")
+                        st.markdown(a["content"])
+                    elif q:
+                        st.info("Waiting for response...")
 
-            col1, col2 = st.columns([8, 2])
-            with col2:
-                if st.button("Clear", key=f"_chat_clear_{page_name}"):
-                    st.session_state[msg_key] = []
-                    st.rerun()
+            if st.button("Clear History", key=f"_chat_clear_{page_name}"):
+                st.session_state[msg_key] = []
+                st.rerun()
 
     # --- Handle submission ---
     if submitted and chat_input:
