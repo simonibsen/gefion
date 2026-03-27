@@ -252,7 +252,11 @@ div.chat-ask-form [data-testid="stForm"] {
     margin: 0 !important;
 }
 div.chat-ask-form [data-testid="stFormSubmitButton"] {
-    display: none !important;
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+    clip: rect(0,0,0,0) !important;
 }
 /* Sticky bar at top of main content area */
 div.chat-ask-form {
