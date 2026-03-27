@@ -245,33 +245,29 @@ def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
 
 _CHAT_BAR_CSS = """
 <style>
-.chat-floating-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 999;
-    background: #ffffff;
-    border-top: 1px solid #e0e0e0;
-    padding: 8px 16px;
-    box-shadow: 0 -2px 8px rgba(0,0,0,0.08);
+/* Pin the last stForm (the chat form) to viewport bottom */
+.main [data-testid="stForm"]:last-of-type {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: var(--sidebar-width, 245px) !important;
+    right: 0 !important;
+    z-index: 999 !important;
+    background: #ffffff !important;
+    border-top: 1px solid #e0e0e0 !important;
+    padding: 10px 24px !important;
+    margin: 0 !important;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.08) !important;
 }
-.chat-floating-bar input {
-    width: 100%;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    padding: 8px 12px;
-    font-size: 14px;
+/* Slim down the form internals */
+.main [data-testid="stForm"]:last-of-type [data-testid="stFormSubmitButton"] {
+    display: none !important;
+}
+.main [data-testid="stForm"]:last-of-type [data-baseweb="input"] {
     background: #f8f9fa;
 }
-.chat-floating-bar input:focus {
-    border-color: #4a7cf7;
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(74,124,247,0.2);
-}
-/* Add bottom padding to main content so it doesn't hide behind the bar */
+/* Prevent page content from hiding behind the fixed bar */
 .main .block-container {
-    padding-bottom: 80px !important;
+    padding-bottom: 70px !important;
 }
 </style>
 """
