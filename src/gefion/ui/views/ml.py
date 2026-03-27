@@ -2267,18 +2267,18 @@ def render_predict_section():
 
                         st.dataframe(df, use_container_width=True, hide_index=True)
 
-                    # Quick inspect
-                    unique_symbols = df["Symbol"].unique().tolist()
-                    if unique_symbols:
-                        inspect_symbol = st.selectbox(
-                            "Inspect symbol",
-                            ["Select..."] + unique_symbols,
-                            key="pred_inspect_symbol",
-                        )
-                        if inspect_symbol != "Select...":
-                            st.code(f"gefion ml predict-inspect --symbol {inspect_symbol}", language="bash")
-                else:
-                    st.info("No predictions found matching filters.")
+                        # Quick inspect
+                        unique_symbols = df["Symbol"].unique().tolist()
+                        if unique_symbols:
+                            inspect_symbol = st.selectbox(
+                                "Inspect symbol",
+                                ["Select..."] + unique_symbols,
+                                key="pred_inspect_symbol",
+                            )
+                            if inspect_symbol != "Select...":
+                                st.code(f"gefion ml predict-inspect --symbol {inspect_symbol}", language="bash")
+                    else:
+                        st.info("No predictions found matching filters.")
 
     except Exception as e:
         st.error(f"Error loading predictions: {e}")
