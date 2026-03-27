@@ -388,7 +388,7 @@ def _render_chat_fragment() -> None:
     else:
         label = f"Ask AI ({n_convos} conversations){status_dot}"
 
-    from gefion.ui.views.data import start_background_process, get_process_state, clear_process_state
+    from gefion.ui.views.data import start_background_process, get_process_state, clear_process_state, stop_process
 
     process_key = f"chat_{page_name}"
     chat_state = get_process_state(process_key)
@@ -433,17 +433,37 @@ def _render_chat_fragment() -> None:
             prompt_text = st.session_state.get(f"_chat_{page_name}_prompt", "")
             mode = st.session_state.get(f"_chat_{page_name}_mode", "ai")
 
-            with st.status("Thinking..." if mode == "ai" else "Running...", expanded=True, state="running"):
+            # Show live tool calls and text from stderr
+            all_events = getattr(chat_state, 'work_events', []) or getattr(chat_state, 'output_lines', [])
+            tool_calls = []
+            text_parts = []
+            for evt_line in all_events:
+                evt = parse_stream_event(evt_line)
+                if not evt:
+                    continue
+                if evt["type"] in ("tool_use", "tool_result"):
+                    tool_calls.append(evt)
+                elif evt["type"] == "text":
+                    text_parts.append(evt.get("text", ""))
+
+            # Build status label with details
+            if tool_calls:
+                last_tool = tool_calls[-1]
+                if last_tool["type"] == "tool_use":
+                    tool_name = last_tool.get("tool", "")
+                    if tool_name.startswith("mcp__gefion__"):
+                        tool_name = tool_name[len("mcp__gefion__"):]
+                    status_label = f"Using {tool_name}..."
+                else:
+                    status_label = f"Processing ({len(tool_calls)} tool calls)..."
+            elif text_parts:
+                status_label = "Writing response..."
+            else:
+                status_label = "Thinking..." if mode == "ai" else "Running..."
+
+            with st.status(status_label, expanded=True, state="running"):
                 if prompt_text:
                     st.caption(f"**{prompt_text}**")
-
-                # Show live tool calls from stderr
-                all_events = getattr(chat_state, 'work_events', []) or getattr(chat_state, 'output_lines', [])
-                tool_calls = []
-                for evt_line in all_events:
-                    evt = parse_stream_event(evt_line)
-                    if evt and evt["type"] in ("tool_use", "tool_result"):
-                        tool_calls.append(evt)
 
                 if tool_calls:
                     for tc in tool_calls:
@@ -454,8 +474,28 @@ def _render_chat_fragment() -> None:
                             st.markdown(f":material/build: **{tool}**")
                             if tc.get("input") and tc["input"] != "{}":
                                 st.code(tc["input"], language="json")
+                elif text_parts:
+                    # Show partial response as it streams
+                    partial = "".join(text_parts)
+                    if len(partial) > 200:
+                        st.markdown(partial[:200] + "...")
+                    else:
+                        st.markdown(partial)
                 else:
-                    st.markdown("*Waiting for response...*")
+                    st.markdown("*Connecting to AI...*")
+
+            # Stop button
+            if st.button("Stop", key=f"_chat_stop_{page_name}"):
+                stop_process(process_key)
+                st.session_state[msg_key].append({
+                    "role": "assistant",
+                    "content": "Stopped by user.",
+                    "work": tool_calls,
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+                st.session_state[f"_chat_{page_name}_saved"] = True
+                clear_process_state(process_key)
+                st.rerun()
 
             # Auto-refresh to poll for updates
             time.sleep(1.5)
