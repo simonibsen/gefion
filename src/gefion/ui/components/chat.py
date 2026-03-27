@@ -243,31 +243,36 @@ def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
 # Chat widget CSS + rendering
 # ---------------------------------------------------------------------------
 
-_CHAT_BAR_CSS = """
-<style>
-/* Compact the chat form */
-div.chat-ask-form [data-testid="stForm"] {
-    border: none !important;
-    padding: 0 !important;
-    margin: 0 !important;
-}
-div.chat-ask-form [data-testid="stFormSubmitButton"] {
-    position: absolute !important;
-    width: 1px !important;
-    height: 1px !important;
-    overflow: hidden !important;
-    clip: rect(0,0,0,0) !important;
-}
-/* Sticky bar at top of main content area */
-div.chat-ask-form {
-    position: sticky !important;
-    top: 0 !important;
-    z-index: 999 !important;
-    background: white !important;
-    padding: 8px 0 4px 0 !important;
-    border-bottom: 1px solid #e0e0e0 !important;
-}
-</style>
+_CHAT_BAR_HIDE_BUTTON_JS = """
+<script>
+// Hide the Ask button in the chat form by finding the input with our placeholder
+(function() {
+    function hideAskButton() {
+        const inputs = document.querySelectorAll('input[aria-label="Ask"]');
+        inputs.forEach(input => {
+            const form = input.closest('[data-testid="stForm"]');
+            if (form) {
+                form.style.border = 'none';
+                form.style.padding = '0';
+                const btn = form.querySelector('[data-testid="stFormSubmitButton"]');
+                if (btn) {
+                    btn.style.position = 'absolute';
+                    btn.style.width = '1px';
+                    btn.style.height = '1px';
+                    btn.style.overflow = 'hidden';
+                    btn.style.clip = 'rect(0,0,0,0)';
+                }
+            }
+        });
+    }
+    // Run after Streamlit renders
+    setTimeout(hideAskButton, 100);
+    setTimeout(hideAskButton, 500);
+    setTimeout(hideAskButton, 1500);
+    // Also observe DOM changes
+    new MutationObserver(hideAskButton).observe(document.body, {childList: true, subtree: true});
+})();
+</script>
 """
 
 
@@ -278,8 +283,8 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
         page_context: Optional dict from the page's get_page_context() function.
             Keys: page_name, summary, filters, data_stats, empty_states, errors, suggestions
     """
-    # Inject fixed-position CSS
-    st.markdown(_CHAT_BAR_CSS, unsafe_allow_html=True)
+    # Inject JS to hide Ask button and clean up form styling
+    st.markdown(_CHAT_BAR_HIDE_BUTTON_JS, unsafe_allow_html=True)
 
     page_name = (page_context or {}).get("page_name", "page")
     msg_key = f"_chat_{page_name}_messages"
@@ -319,7 +324,6 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
     if suggestions and not messages:
         placeholder = suggestions[0]
 
-    st.markdown('<div class="chat-ask-form">', unsafe_allow_html=True)
     with st.form(f"chat_form_{page_name}", clear_on_submit=True, border=False):
         chat_input = st.text_input(
             "Ask",
@@ -328,7 +332,6 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
             label_visibility="collapsed",
         )
         submitted = st.form_submit_button("Ask")
-    st.markdown('</div>', unsafe_allow_html=True)
 
     if submitted and chat_input:
         # Add user message
