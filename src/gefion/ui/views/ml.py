@@ -2105,6 +2105,7 @@ def render_predict_section():
                     SELECT DISTINCT m.name, m.version
                     FROM predictions p
                     JOIN ml_models m ON p.model_id = m.id
+                    WHERE p.prediction_type = 'quantile'
                     ORDER BY m.name, m.version DESC
                 """)
                 model_opts = [f"{r[0]} {r[1]}" for r in cur.fetchall()]
@@ -2112,6 +2113,7 @@ def render_predict_section():
                 cur.execute("""
                     SELECT DISTINCT prediction_date
                     FROM predictions
+                    WHERE prediction_type = 'quantile'
                     ORDER BY prediction_date DESC
                     LIMIT 30
                 """)
@@ -2141,7 +2143,7 @@ def render_predict_section():
         # Build query with filters
         with get_connection() as conn:
             with conn.cursor() as cur:
-                conditions = []
+                conditions = ["p.prediction_type = 'quantile'"]
                 params = []
 
                 if filter_model != "All":
