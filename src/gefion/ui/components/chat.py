@@ -290,41 +290,43 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
     messages = st.session_state[msg_key]
     n_convos = len(messages) // 2
 
-    # --- Input always visible, history in expander beside it ---
-    with st.form(f"chat_form_{page_name}", clear_on_submit=True, border=False):
+    # --- Label ---
+    if n_convos == 0:
+        label = "Ask AI"
+    elif n_convos == 1:
+        label = "Ask AI (1 conversation)"
+    else:
+        label = f"Ask AI ({n_convos} conversations)"
+
+    with st.expander(label, expanded=False):
+        # Input
         placeholder = "Ask about this page..."
         if suggestions and not messages:
             placeholder = suggestions[0]
 
-        label = f"Ask AI ({n_convos})" if n_convos else "Ask AI"
-        col_label, col_input, col_btn = st.columns([2, 8, 1])
-        with col_label:
-            st.markdown(f"**{label}**")
-        with col_input:
+        with st.form(f"chat_form_{page_name}", clear_on_submit=True, border=False):
             chat_input = st.text_input(
                 "Ask",
                 placeholder=placeholder,
                 key=f"_chat_input_{page_name}",
                 label_visibility="collapsed",
             )
-        with col_btn:
-            submitted = st.form_submit_button(">")
+            submitted = st.form_submit_button("Ask")
 
-    # Conversation history in expander (only if there are messages)
-    if messages:
-        pairs = []
-        i = 0
-        while i < len(messages):
-            if messages[i]["role"] == "user":
-                q = messages[i]
-                a = messages[i + 1] if i + 1 < len(messages) and messages[i + 1]["role"] == "assistant" else None
-                pairs.append((q, a))
-                i += 2 if a else 1
-            else:
-                pairs.append((None, messages[i]))
-                i += 1
+        # Conversation history inside the same expander
+        if messages:
+            pairs = []
+            i = 0
+            while i < len(messages):
+                if messages[i]["role"] == "user":
+                    q = messages[i]
+                    a = messages[i + 1] if i + 1 < len(messages) and messages[i + 1]["role"] == "assistant" else None
+                    pairs.append((q, a))
+                    i += 2 if a else 1
+                else:
+                    pairs.append((None, messages[i]))
+                    i += 1
 
-        with st.expander(f"Conversation ({n_convos})", expanded=n_convos == 1):
             # Most recent pair
             if pairs:
                 q, a = pairs[-1]
@@ -347,9 +349,11 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                             st.markdown(content)
                     st.markdown("---")
 
-            if st.button("Clear", key=f"_chat_clear_{page_name}"):
-                st.session_state[msg_key] = []
-                st.rerun()
+            col1, col2 = st.columns([8, 2])
+            with col2:
+                if st.button("Clear", key=f"_chat_clear_{page_name}"):
+                    st.session_state[msg_key] = []
+                    st.rerun()
 
     # --- Handle submission ---
     if submitted and chat_input:
