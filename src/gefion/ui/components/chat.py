@@ -245,12 +245,13 @@ def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
 
 _CHAT_BAR_CSS = """
 <style>
-/* Compact the chat form — remove extra padding/margins */
-div[data-testid="stForm"]:has(> div input[aria-label="Ask"]) {
+/* Compact the chat form — tighten spacing */
+div.chat-ask-form [data-testid="stForm"] {
     border: none !important;
     padding: 0 !important;
+    margin-top: -1rem !important;
 }
-div[data-testid="stForm"]:has(> div input[aria-label="Ask"]) [data-testid="stFormSubmitButton"] {
+div.chat-ask-form [data-testid="stFormSubmitButton"] {
     display: none !important;
 }
 </style>
@@ -306,6 +307,7 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
     if suggestions and not messages:
         placeholder = suggestions[0]
 
+    st.markdown('<div class="chat-ask-form">', unsafe_allow_html=True)
     with st.form(f"chat_form_{page_name}", clear_on_submit=True, border=False):
         chat_input = st.text_input(
             "Ask",
@@ -313,102 +315,79 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
             key=f"_chat_input_{page_name}",
             label_visibility="collapsed",
         )
-        submitted = st.form_submit_button("Ask", use_container_width=True)
+        submitted = st.form_submit_button("Ask")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        if submitted and chat_input:
-            # Add user message
-            st.session_state[msg_key].append({
-                "role": "user",
-                "content": chat_input,
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            })
+    if submitted and chat_input:
+        # Add user message
+        st.session_state[msg_key].append({
+            "role": "user",
+            "content": chat_input,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        })
 
-            # Build context prompt and route command
-            context_prompt = _build_context_prompt(page_context)
-            cmd_args, display_cmd, mode = parse_command_input(
-                chat_input,
-                context_prompt=context_prompt,
-                session_key=f"_chat_{page_name}_ai_active",
-            )
+        # Build context prompt and route command
+        context_prompt = _build_context_prompt(page_context)
+        cmd_args, display_cmd, mode = parse_command_input(
+            chat_input,
+            context_prompt=context_prompt,
+            session_key=f"_chat_{page_name}_ai_active",
+        )
 
-            if mode == "ai":
-                # Execute AI command and capture response
-                import subprocess
-                try:
-                    result = subprocess.run(
-                        cmd_args,
-                        capture_output=True,
-                        text=True,
-                        timeout=60,
-                        env={
-                            **__import__("os").environ,
-                            "OTEL_ENABLED": "false",
-                        },
-                    )
-                    # Parse stream-json output for the final response
-                    response_text = ""
-                    for line in (result.stderr or "").splitlines():
-                        event = parse_stream_event(line)
-                        if event and event["type"] == "result":
-                            response_text = event.get("result", "")
-                            break
-                        elif event and event["type"] == "text":
-                            response_text += event.get("text", "")
+        if mode == "ai":
+            import subprocess
+            try:
+                result = subprocess.run(
+                    cmd_args, capture_output=True, text=True, timeout=60,
+                    env={**__import__("os").environ, "OTEL_ENABLED": "false"},
+                )
+                response_text = ""
+                for line in (result.stderr or "").splitlines():
+                    event = parse_stream_event(line)
+                    if event and event["type"] == "result":
+                        response_text = event.get("result", "")
+                        break
+                    elif event and event["type"] == "text":
+                        response_text += event.get("text", "")
+                if not response_text:
+                    response_text = result.stdout.strip() or "No response received."
+                st.session_state[msg_key].append({
+                    "role": "assistant", "content": response_text,
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+            except subprocess.TimeoutExpired:
+                st.session_state[msg_key].append({
+                    "role": "assistant", "content": "Request timed out after 60 seconds.",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+            except Exception as e:
+                st.session_state[msg_key].append({
+                    "role": "assistant", "content": f"Error: {e}",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+        elif mode in ("cli", "mcp"):
+            import subprocess
+            try:
+                result = subprocess.run(
+                    cmd_args, capture_output=True, text=True, timeout=120,
+                    env={**__import__("os").environ, "OTEL_ENABLED": "false"},
+                )
+                output = result.stdout.strip() or result.stderr.strip() or "Command completed."
+                if len(output) > 2000:
+                    output = output[:2000] + "\n... (truncated)"
+                st.session_state[msg_key].append({
+                    "role": "assistant", "content": f"```\n{output}\n```",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+            except subprocess.TimeoutExpired:
+                st.session_state[msg_key].append({
+                    "role": "assistant", "content": "Command timed out.",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+            except Exception as e:
+                st.session_state[msg_key].append({
+                    "role": "assistant", "content": f"Error running command: {e}",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
 
-                    if not response_text:
-                        response_text = result.stdout.strip() or "No response received."
-
-                    st.session_state[msg_key].append({
-                        "role": "assistant",
-                        "content": response_text,
-                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    })
-                except subprocess.TimeoutExpired:
-                    st.session_state[msg_key].append({
-                        "role": "assistant",
-                        "content": "Request timed out after 60 seconds.",
-                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    })
-                except Exception as e:
-                    st.session_state[msg_key].append({
-                        "role": "assistant",
-                        "content": f"Error: {e}",
-                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    })
-            elif mode in ("cli", "mcp"):
-                # Execute CLI command
-                import subprocess
-                try:
-                    result = subprocess.run(
-                        cmd_args,
-                        capture_output=True,
-                        text=True,
-                        timeout=120,
-                        env={
-                            **__import__("os").environ,
-                            "OTEL_ENABLED": "false",
-                        },
-                    )
-                    output = result.stdout.strip() or result.stderr.strip() or "Command completed."
-                    # Truncate long output
-                    if len(output) > 2000:
-                        output = output[:2000] + "\n... (truncated)"
-                    st.session_state[msg_key].append({
-                        "role": "assistant",
-                        "content": f"```\n{output}\n```",
-                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    })
-                except subprocess.TimeoutExpired:
-                    st.session_state[msg_key].append({
-                        "role": "assistant",
-                        "content": "Command timed out.",
-                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    })
-                except Exception as e:
-                    st.session_state[msg_key].append({
-                        "role": "assistant",
-                        "content": f"Error running command: {e}",
-                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    })
-
-            st.rerun()
+        st.rerun()
