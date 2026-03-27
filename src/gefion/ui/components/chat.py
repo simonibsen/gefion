@@ -306,26 +306,48 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
         with col2:
             submitted = st.form_submit_button(">")
 
-    # --- Conversation history BELOW input ---
+    # --- Conversation history BELOW input (newest first, paired Q&A) ---
     if messages:
-        for msg in reversed(messages[-8:]):
-            ts = msg.get("timestamp", "")[-8:]
-            if msg["role"] == "user":
-                st.caption(f"You ({ts})")
-                st.markdown(f"> {msg['content']}")
+        # Show most recent exchange prominently, older ones collapsed
+        pairs = []
+        i = 0
+        while i < len(messages):
+            if messages[i]["role"] == "user":
+                q = messages[i]
+                a = messages[i + 1] if i + 1 < len(messages) and messages[i + 1]["role"] == "assistant" else None
+                pairs.append((q, a))
+                i += 2 if a else 1
             else:
-                st.caption(f"AI ({ts})")
-                content = msg["content"]
-                if len(content) > 500:
-                    st.markdown(content[:500] + "...")
-                    with st.expander("Show full response"):
-                        st.markdown(content)
-                else:
-                    st.markdown(content)
-        if len(messages) > 1:
-            if st.button("Clear chat", key=f"_chat_clear_{page_name}"):
-                st.session_state[msg_key] = []
-                st.rerun()
+                # Orphaned assistant message
+                pairs.append((None, messages[i]))
+                i += 1
+
+        # Most recent pair shown expanded
+        if pairs:
+            q, a = pairs[-1]
+            if q:
+                st.caption(f"You ({q.get('timestamp', '')[-8:]})")
+                st.markdown(f"> {q['content']}")
+            if a:
+                st.markdown(a["content"])
+
+        # Older pairs in a collapsible section
+        if len(pairs) > 1:
+            with st.expander(f"{len(pairs) - 1} earlier message(s)"):
+                for q, a in reversed(pairs[:-1]):
+                    if q:
+                        st.markdown(f"**You**: {q['content']}")
+                    if a:
+                        content = a["content"]
+                        if len(content) > 200:
+                            st.markdown(content[:200] + "...")
+                        else:
+                            st.markdown(content)
+                    st.markdown("---")
+
+        if st.button("Clear", key=f"_chat_clear_{page_name}"):
+            st.session_state[msg_key] = []
+            st.rerun()
 
     st.markdown("---")
 
