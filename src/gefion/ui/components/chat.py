@@ -245,14 +245,23 @@ def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
 
 _CHAT_BAR_CSS = """
 <style>
-/* Compact the chat form — tighten spacing */
+/* Compact the chat form */
 div.chat-ask-form [data-testid="stForm"] {
     border: none !important;
     padding: 0 !important;
-    margin-top: -1rem !important;
+    margin: 0 !important;
 }
 div.chat-ask-form [data-testid="stFormSubmitButton"] {
     display: none !important;
+}
+/* Sticky bar at top of main content area */
+div.chat-ask-form {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 999 !important;
+    background: white !important;
+    padding: 8px 0 4px 0 !important;
+    border-bottom: 1px solid #e0e0e0 !important;
 }
 </style>
 """
@@ -301,8 +310,7 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                     st.session_state[msg_key] = []
                     st.rerun()
 
-    # Chat input — compact bar at bottom of page
-    st.markdown("---")
+    # Chat input
     placeholder = "Ask about this page..."
     if suggestions and not messages:
         placeholder = suggestions[0]

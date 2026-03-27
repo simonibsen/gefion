@@ -88,6 +88,15 @@ def main():
     # Main content area based on selected page
     current_page = st.session_state.current_page
 
+    # Contextual chat at top of every page (except AI Actions which has its own)
+    if current_page != "AI Actions":
+        try:
+            from gefion.ui.components.chat import render_chat_widget
+            page_context = _get_page_context(current_page)
+            render_chat_widget(page_context)
+        except Exception:
+            pass
+
     try:
         if current_page == "Dashboard":
             from gefion.ui.views.dashboard import render_dashboard
@@ -132,14 +141,6 @@ def main():
         with st.expander("Details"):
             st.code(tb)
 
-    # Contextual chat widget on all pages except AI Actions (which has its own)
-    if current_page != "AI Actions":
-        try:
-            from gefion.ui.components.chat import render_chat_widget
-            page_context = _get_page_context(current_page)
-            render_chat_widget(page_context)
-        except Exception:
-            pass  # Chat widget is non-critical; don't break page rendering
 
 
 def _get_page_context(page_name: str) -> dict:
