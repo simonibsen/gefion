@@ -380,8 +380,18 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
     else:
         label = f"Ask AI ({n_convos} conversations){status_dot}"
 
-    with st.expander(label, expanded=False):
-        # Show MCP warning if not connected
+    from gefion.ui.views.data import start_background_process, get_process_state, clear_process_state
+
+    process_key = f"chat_{page_name}"
+    chat_state = get_process_state(process_key)
+    is_busy = chat_state.is_running
+    just_completed = chat_state.completed and not st.session_state.get(f"_chat_{page_name}_saved")
+
+    # Keep expander open while busy or just completed
+    should_expand = is_busy or just_completed or n_convos == 0
+
+    with st.expander(label, expanded=should_expand):
+        # MCP warning
         if not mcp["available"]:
             st.warning(
                 f"MCP server **{mcp.get('name') or 'gefion'}** is {mcp['status']}. "
@@ -389,6 +399,7 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                 "Run `gefion mcp-setup --force` to fix, then restart Claude Code.",
                 icon="\u26a0\ufe0f",
             )
+
         # Input
         placeholder = "Ask about this page..."
         if suggestions and not messages:
@@ -400,8 +411,8 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                 placeholder=placeholder,
                 key=f"_chat_input_{page_name}",
                 label_visibility="collapsed",
+                disabled=is_busy,
             )
-            # Hidden submit button — Enter key still submits the form
             st.markdown(
                 '<style>div[data-testid="stExpander"] [data-testid="stFormSubmitButton"] '
                 "{display:none !important;}</style>",
@@ -409,7 +420,80 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
             )
             submitted = st.form_submit_button("Ask")
 
-        # Conversation history — each Q&A as its own expander
+        # --- Live status while running ---
+        if is_busy:
+            prompt_text = st.session_state.get(f"_chat_{page_name}_prompt", "")
+            mode = st.session_state.get(f"_chat_{page_name}_mode", "ai")
+
+            with st.status("Thinking..." if mode == "ai" else "Running...", expanded=True, state="running"):
+                if prompt_text:
+                    st.caption(f"**{prompt_text}**")
+
+                # Show live tool calls from stderr
+                all_events = getattr(chat_state, 'work_events', []) or getattr(chat_state, 'output_lines', [])
+                tool_calls = []
+                for evt_line in all_events:
+                    evt = parse_stream_event(evt_line)
+                    if evt and evt["type"] in ("tool_use", "tool_result"):
+                        tool_calls.append(evt)
+
+                if tool_calls:
+                    for tc in tool_calls:
+                        if tc["type"] == "tool_use":
+                            tool = tc.get("tool", "")
+                            if tool.startswith("mcp__gefion__"):
+                                tool = tool[len("mcp__gefion__"):]
+                            st.markdown(f":material/build: **{tool}**")
+                            if tc.get("input") and tc["input"] != "{}":
+                                st.code(tc["input"], language="json")
+                else:
+                    st.markdown("*Waiting for response...*")
+
+            # Auto-refresh to poll for updates
+            time.sleep(1.5)
+            st.rerun()
+
+        # --- Process completed response ---
+        if just_completed:
+            mode = st.session_state.get(f"_chat_{page_name}_mode", "ai")
+            all_events = getattr(chat_state, 'work_events', []) or getattr(chat_state, 'output_lines', [])
+
+            if mode == "ai":
+                response_text = ""
+                work_events = []
+                duration_ms = 0
+                for evt_line in all_events:
+                    evt = parse_stream_event(evt_line)
+                    if not evt:
+                        continue
+                    if evt["type"] == "result":
+                        response_text = evt.get("result", "")
+                        duration_ms = evt.get("duration_ms", 0)
+                    elif evt["type"] == "text" and not response_text:
+                        response_text += evt.get("text", "")
+                    elif evt["type"] in ("tool_use", "tool_result"):
+                        work_events.append(evt)
+                if not response_text:
+                    output_lines = getattr(chat_state, 'output_lines', [])
+                    response_text = "\n".join(output_lines) if output_lines else "No response received."
+            else:
+                output_lines = getattr(chat_state, 'output_lines', [])
+                response_text = "\n".join(output_lines) if output_lines else "Command completed."
+                work_events = []
+                duration_ms = 0
+
+            st.session_state[msg_key].append({
+                "role": "assistant",
+                "content": response_text,
+                "work": work_events,
+                "duration_ms": duration_ms,
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            })
+            st.session_state[f"_chat_{page_name}_saved"] = True
+            clear_process_state(process_key)
+            st.rerun()
+
+        # --- Conversation history ---
         if messages:
             pairs = []
             i = 0
@@ -423,136 +507,60 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                     pairs.append((None, messages[i]))
                     i += 1
 
-            # Each pair gets its own expander, newest first, most recent expanded
             for idx, (q, a) in enumerate(reversed(pairs)):
                 question = q["content"] if q else "..."
                 has_answer = a is not None
                 prefix = "+" if has_answer else "..."
                 is_latest = idx == 0
 
-                with st.expander(
-                    f"{prefix} {question}",
-                    expanded=is_latest,
-                ):
+                with st.expander(f"{prefix} {question}", expanded=is_latest):
                     if q:
                         st.markdown(f"**Prompt:** {q['content']}")
                     if a:
-                        # Show work done (tool calls) if present
                         work = a.get("work", [])
                         if work:
-                            with st.expander(f"Work ({len(work)} tool calls)", expanded=False):
+                            tool_use_count = sum(1 for w in work if w.get("type") == "tool_use")
+                            with st.expander(f"Work ({tool_use_count} tool calls)", expanded=False):
                                 for event in work:
                                     if event["type"] == "tool_use":
                                         tool = event.get("tool", "unknown")
+                                        if tool.startswith("mcp__gefion__"):
+                                            tool = tool[len("mcp__gefion__"):]
                                         inp = event.get("input", "")
-                                        st.markdown(f"**{tool}**")
-                                        if inp:
+                                        st.markdown(f":material/build: **{tool}**")
+                                        if inp and inp != "{}":
                                             st.code(inp, language="json")
-                                    elif event["type"] == "tool_result":
-                                        content = event.get("content", "")
-                                        if content:
-                                            st.caption(content[:200])
 
                         st.markdown(a["content"])
 
-                        # Show duration/cost if available
-                        meta_parts = []
                         if a.get("duration_ms"):
-                            meta_parts.append(f"{a['duration_ms'] / 1000:.1f}s")
-                        if a.get("cost_usd"):
-                            meta_parts.append(f"${a['cost_usd']:.4f}")
-                        if meta_parts:
-                            st.caption(" | ".join(meta_parts))
-                    elif q:
-                        st.info("Waiting for response...")
+                            st.caption(f"{a['duration_ms'] / 1000:.1f}s")
 
             if st.button("Clear History", key=f"_chat_clear_{page_name}"):
                 st.session_state[msg_key] = []
                 st.rerun()
 
-    # --- Handle submission ---
-    if submitted and chat_input:
+    # --- Handle submission (outside expander) ---
+    if submitted and chat_input and not is_busy:
         st.session_state[msg_key].append({
             "role": "user", "content": chat_input,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         })
+        st.session_state[f"_chat_{page_name}_prompt"] = chat_input
+        st.session_state[f"_chat_{page_name}_saved"] = False
 
         context_prompt = _build_context_prompt(page_context)
         cmd_args, display_cmd, mode = parse_command_input(
             chat_input, context_prompt=context_prompt,
             session_key=f"_chat_{page_name}_ai_active",
         )
+        st.session_state[f"_chat_{page_name}_mode"] = mode
 
-        result = _execute_chat_command(cmd_args, mode)
-        st.session_state[msg_key].append({
-            "role": "assistant",
-            "content": result["content"],
-            "work": result.get("work", []),
-            "duration_ms": result.get("duration_ms"),
-            "cost_usd": result.get("cost_usd"),
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        })
+        import os
+        env = os.environ.copy()
+        env["OTEL_ENABLED"] = "false"
+        env.pop("CLAUDECODE", None)
+        start_background_process(process_key, cmd_args, env)
         st.rerun()
 
 
-def _execute_chat_command(cmd_args: List[str], mode: str) -> Dict[str, Any]:
-    """Execute a command and return response with work events.
-
-    Returns dict with: content (str), work (list of tool events), duration_ms, cost_usd.
-    """
-    import subprocess
-    import os
-
-    env = {**os.environ, "OTEL_ENABLED": "false"}
-    env.pop("CLAUDECODE", None)
-
-    try:
-        result = subprocess.run(
-            cmd_args, capture_output=True, text=True,
-            timeout=120, env=env,
-        )
-    except subprocess.TimeoutExpired:
-        return {"content": "Request timed out."}
-    except Exception as e:
-        return {"content": f"Error: {e}"}
-
-    if mode == "ai":
-        all_output = (result.stdout or "") + "\n" + (result.stderr or "")
-        text_parts = []
-        final_result = ""
-        work_events = []
-        duration_ms = 0
-        cost_usd = 0.0
-
-        for line in all_output.splitlines():
-            line = line.strip()
-            if not line or not line.startswith("{"):
-                continue
-            event = parse_stream_event(line)
-            if not event:
-                continue
-            if event["type"] == "result":
-                final_result = event.get("result", "")
-                duration_ms = event.get("duration_ms", 0)
-                cost_usd = event.get("cost_usd", 0.0)
-            elif event["type"] == "text":
-                text_parts.append(event.get("text", ""))
-            elif event["type"] == "tool_use":
-                work_events.append(event)
-            elif event["type"] == "tool_result":
-                work_events.append(event)
-
-        content = final_result or "".join(text_parts) or "No response received."
-        return {
-            "content": content,
-            "work": work_events,
-            "duration_ms": duration_ms,
-            "cost_usd": cost_usd,
-        }
-    else:
-        output = result.stdout.strip()
-        if not output:
-            output = result.stderr.strip() or "Command completed."
-        if len(output) > 2000:
-            output = output[:2000] + "\n... (truncated)"
-        return {"content": f"```\n{output}\n```"}
