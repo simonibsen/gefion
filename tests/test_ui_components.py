@@ -60,6 +60,26 @@ class TestUIStructure:
         for view in expected_views:
             assert (views_dir / view).exists(), f"View {view} not found"
 
+    def test_all_ui_views_compile(self, ui_dir):
+        """Every UI view module must be valid Python (no syntax errors)."""
+        import py_compile
+        views_dir = ui_dir / "views"
+        for py_file in sorted(views_dir.glob("*.py")):
+            try:
+                py_compile.compile(str(py_file), doraise=True)
+            except py_compile.PyCompileError as e:
+                pytest.fail(f"Syntax error in {py_file.name}: {e}")
+
+    def test_all_ui_components_compile(self, ui_dir):
+        """Every UI component module must be valid Python (no syntax errors)."""
+        import py_compile
+        components_dir = ui_dir / "components"
+        for py_file in sorted(components_dir.glob("*.py")):
+            try:
+                py_compile.compile(str(py_file), doraise=True)
+            except py_compile.PyCompileError as e:
+                pytest.fail(f"Syntax error in {py_file.name}: {e}")
+
     def test_dashboard_has_render_function(self, ui_dir):
         """Dashboard view should have render_dashboard function."""
         content = (ui_dir / "views" / "dashboard.py").read_text()
