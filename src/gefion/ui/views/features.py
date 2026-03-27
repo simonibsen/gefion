@@ -645,7 +645,7 @@ gefion feat-compute --symbols AAPL,MSFT --all-features
 gefion feat-trim --before 2020-01-01
 
 # Query feature data
-gefion query-database --sql "SELECT * FROM computed_features LIMIT 10"""", language="bash")
+gefion query-database --sql 'SELECT * FROM computed_features LIMIT 10'""", language="bash")
 
     col1, col2 = st.columns([3, 1])
     with col1:
