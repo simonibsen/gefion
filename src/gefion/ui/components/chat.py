@@ -313,8 +313,37 @@ _CHAT_BAR_HIDE_BUTTON_JS = """
 """
 
 
+@st.cache_data(ttl=300)
+def _check_mcp_status() -> Dict[str, Any]:
+    """Check if the gefion MCP server is available to Claude CLI. Cached for 5 min."""
+    import subprocess
+    import os
+    try:
+        result = subprocess.run(
+            ["claude", "-p", "ping", "--output-format", "stream-json", "--max-turns", "1"],
+            capture_output=True, text=True, timeout=15,
+            env={**os.environ, "OTEL_ENABLED": "false"},
+        )
+        output = (result.stdout or "") + "\n" + (result.stderr or "")
+        for line in output.splitlines():
+            if '"mcp_servers"' in line:
+                import json
+                try:
+                    data = json.loads(line.strip())
+                    servers = data.get("mcp_servers", [])
+                    for s in servers:
+                        if s.get("name") in ("gefion", "g2"):
+                            return {"available": s.get("status") == "connected", "name": s.get("name"), "status": s.get("status")}
+                    return {"available": False, "name": None, "status": "not configured"}
+                except json.JSONDecodeError:
+                    pass
+        return {"available": False, "name": None, "status": "no init event"}
+    except Exception as e:
+        return {"available": False, "name": None, "status": str(e)}
+
+
 def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
-    """Render the floating chat bar at the bottom of the page.
+    """Render the chat widget as an expander below the page title.
 
     Args:
         page_context: Optional dict from the page's get_page_context() function.
@@ -330,15 +359,29 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
     messages = st.session_state[msg_key]
     n_convos = len(messages) // 2
 
-    # --- Label ---
-    if n_convos == 0:
-        label = "Ask AI"
-    elif n_convos == 1:
-        label = "Ask AI (1 conversation)"
+    # --- Label with MCP status indicator ---
+    mcp = _check_mcp_status()
+    if mcp["available"]:
+        status_dot = ""
     else:
-        label = f"Ask AI ({n_convos} conversations)"
+        status_dot = " (offline)"
+
+    if n_convos == 0:
+        label = f"Ask AI{status_dot}"
+    elif n_convos == 1:
+        label = f"Ask AI (1 conversation){status_dot}"
+    else:
+        label = f"Ask AI ({n_convos} conversations){status_dot}"
 
     with st.expander(label, expanded=False):
+        # Show MCP warning if not connected
+        if not mcp["available"]:
+            st.warning(
+                f"MCP server **{mcp.get('name') or 'gefion'}** is {mcp['status']}. "
+                "AI questions may time out or fail. "
+                "Run `gefion mcp-setup --force` to fix, then restart Claude Code.",
+                icon="!",
+            )
         # Input
         placeholder = "Ask about this page..."
         if suggestions and not messages:
