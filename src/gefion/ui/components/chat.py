@@ -320,24 +320,31 @@ def _check_mcp_status() -> Dict[str, Any]:
     import os
     try:
         result = subprocess.run(
-            ["claude", "-p", "ping", "--output-format", "stream-json", "--max-turns", "1"],
-            capture_output=True, text=True, timeout=15,
+            ["claude", "-p", "hi", "--output-format", "stream-json", "--verbose", "--max-turns", "1"],
+            capture_output=True, text=True, timeout=20,
             env={**os.environ, "OTEL_ENABLED": "false"},
         )
-        output = (result.stdout or "") + "\n" + (result.stderr or "")
-        for line in output.splitlines():
+        # Init event with mcp_servers goes to stdout
+        all_output = (result.stdout or "") + "\n" + (result.stderr or "")
+        for line in all_output.splitlines():
             if '"mcp_servers"' in line:
                 import json
                 try:
                     data = json.loads(line.strip())
                     servers = data.get("mcp_servers", [])
-                    for s in servers:
-                        if s.get("name") in ("gefion", "g2"):
-                            return {"available": s.get("status") == "connected", "name": s.get("name"), "status": s.get("status")}
+                    # Check gefion first, then g2 (legacy name)
+                    for name in ("gefion", "g2"):
+                        for s in servers:
+                            if s.get("name") == name:
+                                return {"available": s.get("status") == "connected", "name": name, "status": s.get("status")}
                     return {"available": False, "name": None, "status": "not configured"}
                 except json.JSONDecodeError:
                     pass
-        return {"available": False, "name": None, "status": "no init event"}
+        return {"available": False, "name": None, "status": "claude CLI not responding"}
+    except FileNotFoundError:
+        return {"available": False, "name": None, "status": "claude CLI not found"}
+    except subprocess.TimeoutExpired:
+        return {"available": False, "name": None, "status": "claude CLI timed out"}
     except Exception as e:
         return {"available": False, "name": None, "status": str(e)}
 
