@@ -2222,10 +2222,7 @@ def render_predict_section():
 
                         st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    # Quantile or All (default to quantile columns)
-                    if show_type is None:
-                        # "All" — add type column
-                        conditions_with_type = conditions
+                    # Quantile-only or All view
                     cur.execute(f"""
                         SELECT
                             s.symbol,
@@ -2255,15 +2252,20 @@ def render_predict_section():
                         )
                         df["Horizon"] = df["Horizon"].apply(lambda x: f"{x}d")
                         df["Type"] = df["Type"].apply(lambda x: {"quantile": "Q", "trend_class": "TC"}.get(x, x))
-                        df["Q10"] = df["Q10"].apply(lambda x: f"{float(x):.1%}" if x is not None else "-")
-                        df["Q50"] = df["Q50"].apply(lambda x: f"{float(x):.1%}" if x is not None else "-")
-                        df["Q90"] = df["Q90"].apply(lambda x: f"{float(x):.1%}" if x is not None else "-")
-                        df["Margin"] = df["Margin"].apply(lambda x: f"{float(x):.2%}" if x is not None else "-")
-                        df["Class"] = df["Class"].apply(lambda x: x if x else "-")
+                        df["Q10"] = df["Q10"].apply(lambda x: f"{float(x):.1%}" if x is not None else None)
+                        df["Q50"] = df["Q50"].apply(lambda x: f"{float(x):.1%}" if x is not None else None)
+                        df["Q90"] = df["Q90"].apply(lambda x: f"{float(x):.1%}" if x is not None else None)
+                        df["Margin"] = df["Margin"].apply(lambda x: f"{float(x):.4f}" if x is not None else None)
+                        df["Class"] = df["Class"].apply(lambda x: x if x else None)
 
-                        # Drop empty columns for cleaner display
-                        if show_type == "quantile":
-                            df = df.drop(columns=["Class", "Margin", "Type"])
+                        # Drop columns that are entirely empty
+                        for col in ["Q10", "Q50", "Q90", "Class", "Margin"]:
+                            if df[col].isna().all() or (df[col] == None).all():
+                                df = df.drop(columns=[col])
+
+                        # Drop Type column when only one type is present
+                        if df["Type"].nunique() <= 1:
+                            df = df.drop(columns=["Type"])
 
                         st.dataframe(df, use_container_width=True, hide_index=True)
 
