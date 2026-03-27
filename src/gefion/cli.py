@@ -2219,7 +2219,24 @@ def ml_eval(
             predictions_data = cur.fetchall()
 
         if not predictions_data:
-            emit_error(f"No predictions found for evaluation period", json_output=json_output)
+            # Check if model has trend_class predictions instead
+            with db_connection(db_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COUNT(*), prediction_type FROM predictions "
+                        "WHERE model_id = %s GROUP BY prediction_type",
+                        (model_id,),
+                    )
+                    type_counts = {row[1]: row[0] for row in cur.fetchall()}
+            if type_counts.get("trend_class", 0) > 0:
+                emit_error(
+                    f"Model has {type_counts['trend_class']} trend_class predictions but no quantile predictions. "
+                    f"Quantile eval requires quantile predictions (q10/q50/q90). "
+                    f"Run 'gefion ml predict' with a quantile regression model first.",
+                    json_output=json_output,
+                )
+            else:
+                emit_error("No predictions found for evaluation period", json_output=json_output)
             return
 
         emit(f"Found {len(predictions_data)} predictions to evaluate", json_output=json_output)
