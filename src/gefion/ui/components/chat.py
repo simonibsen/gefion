@@ -380,7 +380,7 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                 f"MCP server **{mcp.get('name') or 'gefion'}** is {mcp['status']}. "
                 "AI questions may time out or fail. "
                 "Run `gefion mcp-setup --force` to fix, then restart Claude Code.",
-                icon="!",
+                icon="\u26a0\ufe0f",
             )
         # Input
         placeholder = "Ask about this page..."
