@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-HISTORY_FILE = Path.home() / ".g2" / "ai_history.jsonl"
+HISTORY_FILE = Path.home() / ".gefion" / "ai_history.jsonl"
 MAX_EXCHANGES = 100
 
 

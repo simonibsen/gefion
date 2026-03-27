@@ -926,8 +926,8 @@ def render_run_section():
         else:
             cmd.extend(["--exchange", exchange, "--limit", str(bt_limit)])
 
-        # Show equivalent CLI command (skip "python -m g2.cli" prefix)
-        cli_args = cmd[3:]  # Skip [python, -m, g2.cli]
+        # Show equivalent CLI command (skip "python -m gefion.cli" prefix)
+        cli_args = cmd[3:]  # Skip [python, -m, gefion.cli]
         st.code(f"gefion {' '.join(cli_args)}", language="bash")
 
         with st.status("Running backtest...", expanded=True) as status:
@@ -1096,8 +1096,8 @@ def render_compare_section():
                 "--horizon-days", str(cmp_ml_horizon),
             ])
 
-        # Show equivalent CLI command (skip "python -m g2.cli" prefix)
-        cli_args = cmd[3:]  # Skip [python, -m, g2.cli]
+        # Show equivalent CLI command (skip "python -m gefion.cli" prefix)
+        cli_args = cmd[3:]  # Skip [python, -m, gefion.cli]
         st.code(f"gefion {' '.join(cli_args)}", language="bash")
 
         with st.status("Comparing strategies...", expanded=True) as status:
@@ -1306,7 +1306,7 @@ def render_strategy_configs():
         st.markdown("""
         ### Strategies vs Configs
 
-        **Strategies** are Python classes defined in code (`src/g2/strategies/`).
+        **Strategies** are Python classes defined in code (`src/gefion/strategies/`).
         They contain the trading logic and cannot be modified from the UI.
         To add a new strategy, you must write Python code.
 
@@ -1420,7 +1420,7 @@ def render_strategy_configs():
     st.markdown("---")
     st.markdown("### 💻 CLI Equivalent")
     st.code(
-        'g2 strategy create-config --name my_config --strategy momentum --params \'{"lookback_days": 10}\'',
+        'gefion strategy create-config --name my_config --strategy momentum --params \'{"lookback_days": 10}\'',
         language="bash"
     )
 

@@ -1,8 +1,8 @@
 """
-g2 Streamlit UI package.
+Gefion Streamlit UI package.
 
 Launch with: gefion ui
-Or directly: streamlit run src/g2/ui/app.py
+Or directly: streamlit run src/gefion/ui/app.py
 """
 
 from pathlib import Path

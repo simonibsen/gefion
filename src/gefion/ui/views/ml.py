@@ -1766,9 +1766,9 @@ def _render_tune_section(datasets: list):
         if model_type == "quantile":
             cmd.extend(["--quantile", str(quantile)])
 
-        # Show CLI command (skip python -u -m g2.cli prefix)
+        # Show CLI command (skip python -u -m gefion.cli prefix)
         cli_cmd = " ".join(cmd[4:]).replace("gefion.cli", "gefion")
-        cli_cmd = "g2 " + cli_cmd
+        cli_cmd = "gefion " + cli_cmd
         st.code(cli_cmd, language="bash")
 
         with st.status("Tuning hyperparameters...", expanded=True) as status:

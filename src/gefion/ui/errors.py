@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def _error_file() -> Path:
-    path = Path.home() / ".g2" / "ui_errors.jsonl"
+    path = Path.home() / ".gefion" / "ui_errors.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
