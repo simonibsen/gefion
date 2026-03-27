@@ -77,6 +77,19 @@ g2 trade flatten --confirm
 
 ---
 
+## Technical Debt (High Priority)
+
+### Unified Predictions Table
+**Priority**: High
+
+Replace `quantile_predictions` and `trend_class_predictions` with a single `predictions` table using JSONB for flexible prediction values. Current two-table approach causes UI to only show quantile predictions — classifier predictions are invisible.
+
+**Proposed schema**: `predictions(model_id, data_id, prediction_date, horizon_days, prediction_type, values JSONB, metadata JSONB, run_id, created_at)`
+
+**Migration**: Create new table, migrate data from both existing tables, update CLI commands and UI views, drop old tables. Requires schema governance approval.
+
+---
+
 ## Bugs
 
 ### Backup Disk Space Check Falsely Reports Insufficient Space
