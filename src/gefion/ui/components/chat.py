@@ -311,6 +311,12 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                 key=f"_chat_input_{page_name}",
                 label_visibility="collapsed",
             )
+            # Hidden submit button — Enter key still submits the form
+            st.markdown(
+                '<style>div[data-testid="stExpander"] [data-testid="stFormSubmitButton"] '
+                "{display:none !important;}</style>",
+                unsafe_allow_html=True,
+            )
             submitted = st.form_submit_button("Ask")
 
         # Conversation history inside the same expander
