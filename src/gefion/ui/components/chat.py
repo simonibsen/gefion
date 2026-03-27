@@ -347,7 +347,32 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
                     if q:
                         st.markdown(f"**Prompt:** {q['content']}")
                     if a:
+                        # Show work done (tool calls) if present
+                        work = a.get("work", [])
+                        if work:
+                            with st.expander(f"Work ({len(work)} tool calls)", expanded=False):
+                                for event in work:
+                                    if event["type"] == "tool_use":
+                                        tool = event.get("tool", "unknown")
+                                        inp = event.get("input", "")
+                                        st.markdown(f"**{tool}**")
+                                        if inp:
+                                            st.code(inp, language="json")
+                                    elif event["type"] == "tool_result":
+                                        content = event.get("content", "")
+                                        if content:
+                                            st.caption(content[:200])
+
                         st.markdown(a["content"])
+
+                        # Show duration/cost if available
+                        meta_parts = []
+                        if a.get("duration_ms"):
+                            meta_parts.append(f"{a['duration_ms'] / 1000:.1f}s")
+                        if a.get("cost_usd"):
+                            meta_parts.append(f"${a['cost_usd']:.4f}")
+                        if meta_parts:
+                            st.caption(" | ".join(meta_parts))
                     elif q:
                         st.info("Waiting for response...")
 
@@ -368,41 +393,47 @@ def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
             session_key=f"_chat_{page_name}_ai_active",
         )
 
-        response = _execute_chat_command(cmd_args, mode)
+        result = _execute_chat_command(cmd_args, mode)
         st.session_state[msg_key].append({
-            "role": "assistant", "content": response,
+            "role": "assistant",
+            "content": result["content"],
+            "work": result.get("work", []),
+            "duration_ms": result.get("duration_ms"),
+            "cost_usd": result.get("cost_usd"),
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         })
         st.rerun()
 
 
-def _execute_chat_command(cmd_args: List[str], mode: str) -> str:
-    """Execute a command and return the response text."""
+def _execute_chat_command(cmd_args: List[str], mode: str) -> Dict[str, Any]:
+    """Execute a command and return response with work events.
+
+    Returns dict with: content (str), work (list of tool events), duration_ms, cost_usd.
+    """
     import subprocess
     import os
 
     env = {**os.environ, "OTEL_ENABLED": "false"}
-    # Strip CLAUDECODE to avoid nested session errors
     env.pop("CLAUDECODE", None)
-
-    timeout = 120 if mode == "ai" else 120
 
     try:
         result = subprocess.run(
             cmd_args, capture_output=True, text=True,
-            timeout=timeout, env=env,
+            timeout=120, env=env,
         )
     except subprocess.TimeoutExpired:
-        return "Request timed out."
+        return {"content": "Request timed out."}
     except Exception as e:
-        return f"Error: {e}"
+        return {"content": f"Error: {e}"}
 
     if mode == "ai":
-        # Parse stream-json from both stdout and stderr
-        # claude -p --output-format stream-json may write to either
         all_output = (result.stdout or "") + "\n" + (result.stderr or "")
         text_parts = []
         final_result = ""
+        work_events = []
+        duration_ms = 0
+        cost_usd = 0.0
+
         for line in all_output.splitlines():
             line = line.strip()
             if not line or not line.startswith("{"):
@@ -412,19 +443,26 @@ def _execute_chat_command(cmd_args: List[str], mode: str) -> str:
                 continue
             if event["type"] == "result":
                 final_result = event.get("result", "")
+                duration_ms = event.get("duration_ms", 0)
+                cost_usd = event.get("cost_usd", 0.0)
             elif event["type"] == "text":
                 text_parts.append(event.get("text", ""))
+            elif event["type"] == "tool_use":
+                work_events.append(event)
+            elif event["type"] == "tool_result":
+                work_events.append(event)
 
-        if final_result:
-            return final_result
-        if text_parts:
-            return "".join(text_parts)
-        return "No response received."
+        content = final_result or "".join(text_parts) or "No response received."
+        return {
+            "content": content,
+            "work": work_events,
+            "duration_ms": duration_ms,
+            "cost_usd": cost_usd,
+        }
     else:
-        # CLI/MCP: return stdout
         output = result.stdout.strip()
         if not output:
             output = result.stderr.strip() or "Command completed."
         if len(output) > 2000:
             output = output[:2000] + "\n... (truncated)"
-        return f"```\n{output}\n```"
+        return {"content": f"```\n{output}\n```"}
