@@ -13,6 +13,23 @@ from typing import Optional, List
 from queue import Queue, Empty
 
 
+def get_page_context():
+    """Return compact context dict for the Data Management page."""
+    context = {"page_name": "Data Management", "summary": "Stock data ingestion and coverage monitoring."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(DISTINCT data_id) FROM stock_ohlcv")
+                symbols_with_data = cur.fetchone()[0]
+                cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
+                min_date, max_date = cur.fetchone()
+        context["data_stats"] = {"symbols_with_data": symbols_with_data, "date_range": f"{min_date} to {max_date}" if min_date else "empty"}
+    except Exception:
+        pass
+    return context
+
+
 @dataclass
 class ProcessState:
     """Track state of a background process."""

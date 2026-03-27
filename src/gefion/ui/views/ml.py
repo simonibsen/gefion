@@ -10,6 +10,39 @@ from datetime import datetime, date, timedelta
 from typing import Dict, Any
 
 
+def get_page_context():
+    """Return compact context dict for the ML Pipeline page."""
+    context = {"page_name": "ML Pipeline", "summary": "ML model training, predictions, and evaluation."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM ml_models WHERE active = true")
+                model_count = cur.fetchone()[0]
+                cur.execute("SELECT prediction_type, COUNT(*) FROM predictions GROUP BY prediction_type")
+                pred_counts = {r[0]: r[1] for r in cur.fetchall()}
+                cur.execute("SELECT COUNT(*) FROM ml_datasets")
+                dataset_count = cur.fetchone()[0]
+        context["data_stats"] = {"active_models": model_count, "datasets": dataset_count, "predictions": pred_counts}
+        empty = []
+        if model_count == 0:
+            empty.append("no trained models")
+        if not pred_counts.get("quantile"):
+            empty.append("no quantile predictions — train a quantile regression model")
+        if not pred_counts.get("trend_class"):
+            empty.append("no trend class predictions")
+        context["empty_states"] = empty
+        suggestions = []
+        if not pred_counts.get("quantile"):
+            suggestions.append("Train a quantile model: gefion ml train")
+        if model_count == 0:
+            suggestions.append("Build a dataset first: gefion ml dataset-build")
+        context["suggestions"] = suggestions
+    except Exception:
+        pass
+    return context
+
+
 @st.cache_resource
 def _detect_device() -> Dict[str, Any]:
     """Detect available compute device for ML training."""

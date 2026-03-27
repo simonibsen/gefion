@@ -15,6 +15,26 @@ from gefion.ui.views.data import (
 )
 
 
+def get_page_context():
+    """Return compact context dict for the Features page."""
+    context = {"page_name": "Features", "summary": "Technical indicator and cross-sectional feature management."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
+                active = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM feature_definitions")
+                total = cur.fetchone()[0]
+        context["data_stats"] = {"active_features": active, "total_features": total}
+        if active == 0:
+            context["empty_states"] = ["no active feature definitions"]
+            context["suggestions"] = ["Import features: gefion feat-def-import --directory feature-definitions"]
+    except Exception:
+        pass
+    return context
+
+
 def get_project_root() -> Path:
     """Get the project root directory (where feature-definitions/ lives)."""
     # Navigate up from src/g2/ui/views to project root

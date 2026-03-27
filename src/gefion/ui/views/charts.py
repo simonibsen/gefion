@@ -5,6 +5,11 @@ from datetime import datetime, timedelta, date
 from typing import Optional
 
 
+def get_page_context():
+    """Return compact context dict for the Charts page."""
+    return {"page_name": "Charts", "summary": "Price charts, predictions, and technical analysis visualizations."}
+
+
 def render_charts():
     """Render the charts page."""
     st.markdown("# :material/bar_chart: Charts")

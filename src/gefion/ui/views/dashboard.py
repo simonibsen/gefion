@@ -6,6 +6,29 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+def get_page_context():
+    """Return compact context dict for the Dashboard page."""
+    context = {"page_name": "Dashboard", "summary": "Market overview with movers, system stats, and prediction insights."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM stocks")
+                stock_count = cur.fetchone()[0]
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                latest = cur.fetchone()[0]
+        context["data_stats"] = {"stocks": stock_count, "latest_data": str(latest) if latest else "none"}
+        if latest:
+            from datetime import date, timedelta
+            age = (date.today() - latest).days
+            if age > 3:
+                context["empty_states"] = [f"price data is {age} days old"]
+                context["suggestions"] = [f"Update prices: gefion data-update"]
+    except Exception:
+        pass
+    return context
+
+
 @dataclass
 class MarketMovers:
     """Cached market movers data."""

@@ -262,6 +262,114 @@ class TestUIStructure:
         assert "def render_experiments(" in content
 
 
+class TestGetPageContext:
+    """Test that all view files with get_page_context() define the function correctly."""
+
+    VIEWS_WITH_PAGE_CONTEXT = [
+        "ml.py",
+        "dashboard.py",
+        "data.py",
+        "features.py",
+        "charts.py",
+        "backtest.py",
+        "experiments.py",
+    ]
+
+    EXPECTED_PAGE_NAMES = {
+        "ml.py": "ML Pipeline",
+        "dashboard.py": "Dashboard",
+        "data.py": "Data Management",
+        "features.py": "Features",
+        "charts.py": "Charts",
+        "backtest.py": "Backtesting",
+        "experiments.py": "Experiments",
+    }
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views source directory."""
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_PAGE_CONTEXT)
+    def test_view_has_get_page_context_function(self, views_dir, view_file):
+        """Each target view should define get_page_context()."""
+        content = (views_dir / view_file).read_text()
+        assert "def get_page_context():" in content, (
+            f"{view_file} must define get_page_context()"
+        )
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_PAGE_CONTEXT)
+    def test_get_page_context_returns_dict_with_required_keys(self, views_dir, view_file):
+        """get_page_context() must return a dict with page_name and summary."""
+        content = (views_dir / view_file).read_text()
+        assert '"page_name"' in content or "'page_name'" in content, (
+            f"{view_file} get_page_context must set page_name"
+        )
+        assert '"summary"' in content or "'summary'" in content, (
+            f"{view_file} get_page_context must set summary"
+        )
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_PAGE_CONTEXT)
+    def test_get_page_context_has_correct_page_name(self, views_dir, view_file):
+        """get_page_context() must return the expected page_name."""
+        content = (views_dir / view_file).read_text()
+        expected = self.EXPECTED_PAGE_NAMES[view_file]
+        assert expected in content, (
+            f"{view_file} get_page_context must include page_name '{expected}'"
+        )
+
+    @pytest.mark.parametrize("view_file", [
+        v for v in VIEWS_WITH_PAGE_CONTEXT if v != "charts.py"
+    ])
+    def test_get_page_context_has_try_except(self, views_dir, view_file):
+        """Views with DB queries must wrap them in try/except."""
+        content = (views_dir / view_file).read_text()
+        # Extract the get_page_context function body
+        idx = content.index("def get_page_context():")
+        # Find the next top-level def after get_page_context
+        rest = content[idx + len("def get_page_context():"):]
+        next_def = rest.find("\ndef ")
+        if next_def == -1:
+            func_body = rest
+        else:
+            func_body = rest[:next_def]
+        assert "try:" in func_body, (
+            f"{view_file} get_page_context must have try/except around DB queries"
+        )
+        assert "except Exception:" in func_body or "except Exception as" in func_body, (
+            f"{view_file} get_page_context must catch Exception"
+        )
+
+    @pytest.mark.parametrize("view_file", [
+        v for v in VIEWS_WITH_PAGE_CONTEXT if v != "charts.py"
+    ])
+    def test_get_page_context_uses_get_connection(self, views_dir, view_file):
+        """Views with DB queries must use get_connection from the database component."""
+        content = (views_dir / view_file).read_text()
+        idx = content.index("def get_page_context():")
+        rest = content[idx:]
+        next_def = rest.find("\ndef ")
+        if next_def == -1:
+            func_body = rest
+        else:
+            func_body = rest[:next_def]
+        assert "get_connection" in func_body, (
+            f"{view_file} get_page_context must use get_connection for DB access"
+        )
+
+    def test_get_page_context_defined_before_render_function(self, views_dir):
+        """get_page_context() should be defined before the main render function."""
+        for view_file in self.VIEWS_WITH_PAGE_CONTEXT:
+            content = (views_dir / view_file).read_text()
+            ctx_pos = content.index("def get_page_context():")
+            # Find the first render_ function
+            render_pos = content.find("def render_")
+            if render_pos != -1:
+                assert ctx_pos < render_pos, (
+                    f"{view_file}: get_page_context must be before render functions"
+                )
+
+
 class TestUILaunchCommand:
     """Test CLI UI launch command."""
 
@@ -962,29 +1070,30 @@ class TestActionDashboard:
         assert "freeform" in content
 
     def test_assistant_has_mcp_tool_mapping(self, ui_dir):
-        """Assistant should map MCP tool names to CLI commands."""
+        """Assistant should have access to MCP tool map (via import from chat component)."""
         content = (ui_dir / "views" / "assistant.py").read_text()
         assert "MCP_TOOL_MAP" in content
-        # Should include key MCP tools
-        assert "data_update" in content
-        assert "ml_train" in content
-        assert "system_status" in content
+        # Shared module should include key MCP tools
+        chat_content = (ui_dir / "components" / "chat.py").read_text()
+        assert "data_update" in chat_content
+        assert "ml_train" in chat_content
+        assert "system_status" in chat_content
 
     def test_assistant_has_parse_input_function(self, ui_dir):
-        """Assistant should parse both MCP tool names and CLI commands."""
+        """Assistant should have parse_command_input (via import from chat component)."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "def parse_command_input(" in content
+        assert "parse_command_input" in content
 
     def test_assistant_has_ai_prompt_mode(self, ui_dir):
-        """Assistant should support sending natural language to Claude via claude -p."""
-        content = (ui_dir / "views" / "assistant.py").read_text()
+        """Chat component should support sending natural language to Claude via claude -p."""
+        content = (ui_dir / "components" / "chat.py").read_text()
         # Should use claude CLI for AI prompts
         assert "claude" in content
-        assert "--print" in content or '"-p"' in content
+        assert '"-p"' in content
         # Should have operator context so LLM doesn't do dev operations
         assert "append-system-prompt" in content
         # Should restrict to MCP tools only
-        assert "allowed-tools" in content or "allowedTools" in content
+        assert "allowedTools" in content
 
     def test_assistant_uses_background_process(self, ui_dir):
         """Assistant should import and use background process infrastructure."""
@@ -1099,11 +1208,7 @@ class TestActionDashboard:
         assert "time.sleep(" in content
 
     def test_mcp_tool_map_references_valid_cli_commands(self, ui_dir):
-        """Every CLI command in MCP_TOOL_MAP must be a real gefion CLI command.
-
-        system-status and health-check do not exist — the real commands
-        are 'health' and 'db-health'.
-        """
+        """Every CLI command in MCP_TOOL_MAP (in chat component) must be a real gefion CLI command."""
         import subprocess
         result = subprocess.run(
             [sys.executable, "-m", "gefion.cli", "--help"],
@@ -1111,7 +1216,7 @@ class TestActionDashboard:
         )
         help_text = result.stdout
 
-        content = (ui_dir / "views" / "assistant.py").read_text()
+        content = (ui_dir / "components" / "chat.py").read_text()
         # Extract just the MCP_TOOL_MAP block
         import re
         map_match = re.search(r'MCP_TOOL_MAP\s*=\s*\{(.+?)\}', content, re.DOTALL)
@@ -1177,7 +1282,7 @@ class TestActionDashboard:
 
     def test_ai_prompt_uses_stream_json(self, ui_dir):
         """AI prompts must use --output-format stream-json --verbose for transparency."""
-        content = (ui_dir / "views" / "assistant.py").read_text()
+        content = (ui_dir / "components" / "chat.py").read_text()
         assert "stream-json" in content, "AI command must use --output-format stream-json"
         assert "--verbose" in content, "AI command must use --verbose for stream-json"
 
@@ -1190,13 +1295,13 @@ class TestActionDashboard:
 
     def test_ai_prompt_supports_continue(self, ui_dir):
         """AI prompts must support --continue for multi-turn conversation context."""
-        content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "ai_session_active" in content, "Must track AI session state"
+        content = (ui_dir / "components" / "chat.py").read_text()
+        assert "ai_session_active" in content or "session_key" in content, "Must track AI session state"
         assert '"--continue"' in content, "Must add --continue flag for subsequent prompts"
 
     def test_parse_stream_json_event_exists(self, ui_dir):
         """A function to parse stream-json events must exist."""
-        content = (ui_dir / "views" / "assistant.py").read_text()
+        content = (ui_dir / "components" / "chat.py").read_text()
         assert "parse_stream_event" in content, "Must have parse_stream_event function"
 
     def test_sidebar_ai_actions_position(self, ui_dir):

@@ -9,6 +9,23 @@ from datetime import date, timedelta
 import pandas as pd
 
 
+def get_page_context():
+    """Return compact context dict for the Backtesting page."""
+    context = {"page_name": "Backtesting", "summary": "Strategy backtesting and comparison."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM strategy_registry")
+                count = cur.fetchone()[0]
+        context["data_stats"] = {"strategies": count}
+        if count == 0:
+            context["suggestions"] = ["Create a strategy: gefion strategy create-config"]
+    except Exception:
+        pass
+    return context
+
+
 def _parse_last_json(output: str) -> dict:
     """Parse the last JSON object from CLI output.
 
