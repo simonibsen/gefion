@@ -2100,40 +2100,57 @@ def render_predict_section():
 
         with get_connection() as conn:
             with conn.cursor() as cur:
-                # Get filter options
-                cur.execute("""
+                # Get available prediction types
+                cur.execute("SELECT DISTINCT prediction_type FROM predictions ORDER BY prediction_type")
+                type_opts = [r[0] for r in cur.fetchall()]
+
+        # Type toggle + filters
+        filter_cols = st.columns(4)
+        with filter_cols[0]:
+            filter_type = st.selectbox(
+                "Type",
+                ["All"] + type_opts,
+                format_func=lambda x: {"quantile": "Quantile", "trend_class": "Trend Class"}.get(x, x.title()),
+                key="pred_filter_type",
+            )
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # Get filter options scoped to selected type
+                type_cond = "WHERE p.prediction_type = %s" if filter_type != "All" else ""
+                type_params = [filter_type] if filter_type != "All" else []
+
+                cur.execute(f"""
                     SELECT DISTINCT m.name, m.version
                     FROM predictions p
                     JOIN ml_models m ON p.model_id = m.id
-                    WHERE p.prediction_type = 'quantile'
+                    {type_cond}
                     ORDER BY m.name, m.version DESC
-                """)
+                """, type_params)
                 model_opts = [f"{r[0]} {r[1]}" for r in cur.fetchall()]
 
-                cur.execute("""
+                cur.execute(f"""
                     SELECT DISTINCT prediction_date
                     FROM predictions
-                    WHERE prediction_type = 'quantile'
+                    {"WHERE prediction_type = %s" if filter_type != "All" else ""}
                     ORDER BY prediction_date DESC
                     LIMIT 30
-                """)
+                """, type_params)
                 date_opts = [str(r[0]) for r in cur.fetchall()]
 
-        # Filters
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        with filter_cols[1]:
             filter_model = st.selectbox(
                 "Model",
                 ["All"] + model_opts,
                 key="pred_filter_model",
             )
-        with col2:
+        with filter_cols[2]:
             filter_date = st.selectbox(
                 "Date",
                 ["All"] + date_opts,
                 key="pred_filter_date",
             )
-        with col3:
+        with filter_cols[3]:
             filter_symbol = st.text_input(
                 "Symbol",
                 placeholder="e.g., AAPL",
@@ -2143,8 +2160,12 @@ def render_predict_section():
         # Build query with filters
         with get_connection() as conn:
             with conn.cursor() as cur:
-                conditions = ["p.prediction_type = 'quantile'"]
+                conditions = []
                 params = []
+
+                if filter_type != "All":
+                    conditions.append("p.prediction_type = %s")
+                    params.append(filter_type)
 
                 if filter_model != "All":
                     parts = filter_model.rsplit(" ", 1)
@@ -2162,37 +2183,89 @@ def render_predict_section():
 
                 where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
-                cur.execute(f"""
-                    SELECT
-                        s.symbol,
-                        p.prediction_date,
-                        p.horizon_days,
-                        (p.prediction_values->>'q10')::NUMERIC,
-                        (p.prediction_values->>'q50')::NUMERIC,
-                        (p.prediction_values->>'q90')::NUMERIC,
-                        m.name || ' ' || m.version as model
-                    FROM predictions p
-                    JOIN stocks s ON p.data_id = s.id
-                    JOIN ml_models m ON p.model_id = m.id
-                    {where_clause}
-                    ORDER BY p.prediction_date DESC, s.symbol, p.horizon_days
-                    LIMIT 200
-                """, params)
-                predictions = cur.fetchall()
+                # Use type-specific columns
+                show_type = filter_type if filter_type != "All" else None
 
-                if predictions:
-                    df = pd.DataFrame(
-                        predictions,
-                        columns=["Symbol", "Date", "Horizon", "Q10", "Q50", "Q90", "Model"]
-                    )
+                if show_type == "trend_class":
+                    cur.execute(f"""
+                        SELECT
+                            s.symbol,
+                            p.prediction_date,
+                            p.horizon_days,
+                            p.prediction_values->>'predicted_class',
+                            (p.prediction_values->>'p_strong_up')::NUMERIC,
+                            (p.prediction_values->>'p_weak_up')::NUMERIC,
+                            (p.prediction_values->>'p_neutral')::NUMERIC,
+                            (p.prediction_values->>'p_weak_down')::NUMERIC,
+                            (p.prediction_values->>'p_strong_down')::NUMERIC,
+                            (p.prediction_values->>'margin')::NUMERIC,
+                            m.name || ' ' || m.version as model
+                        FROM predictions p
+                        JOIN stocks s ON p.data_id = s.id
+                        JOIN ml_models m ON p.model_id = m.id
+                        {where_clause}
+                        ORDER BY p.prediction_date DESC, s.symbol, p.horizon_days
+                        LIMIT 200
+                    """, params)
+                    predictions = cur.fetchall()
 
-                    # Format percentages
-                    df["Q10"] = df["Q10"].apply(lambda x: f"{float(x):.1%}" if x else "-")
-                    df["Q50"] = df["Q50"].apply(lambda x: f"{float(x):.1%}" if x else "-")
-                    df["Q90"] = df["Q90"].apply(lambda x: f"{float(x):.1%}" if x else "-")
-                    df["Horizon"] = df["Horizon"].apply(lambda x: f"{x}d")
+                    if predictions:
+                        df = pd.DataFrame(
+                            predictions,
+                            columns=["Symbol", "Date", "Horizon", "Class",
+                                     "P(Strong Up)", "P(Weak Up)", "P(Neutral)",
+                                     "P(Weak Down)", "P(Strong Down)", "Margin", "Model"]
+                        )
+                        df["Horizon"] = df["Horizon"].apply(lambda x: f"{x}d")
+                        for col in ["P(Strong Up)", "P(Weak Up)", "P(Neutral)", "P(Weak Down)", "P(Strong Down)", "Margin"]:
+                            df[col] = df[col].apply(lambda x: f"{float(x):.2%}" if x is not None else "-")
 
-                    st.dataframe(df, use_container_width=True, hide_index=True)
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    # Quantile or All (default to quantile columns)
+                    if show_type is None:
+                        # "All" — add type column
+                        conditions_with_type = conditions
+                    cur.execute(f"""
+                        SELECT
+                            s.symbol,
+                            p.prediction_date,
+                            p.horizon_days,
+                            p.prediction_type,
+                            (p.prediction_values->>'q10')::NUMERIC,
+                            (p.prediction_values->>'q50')::NUMERIC,
+                            (p.prediction_values->>'q90')::NUMERIC,
+                            p.prediction_values->>'predicted_class',
+                            (p.prediction_values->>'margin')::NUMERIC,
+                            m.name || ' ' || m.version as model
+                        FROM predictions p
+                        JOIN stocks s ON p.data_id = s.id
+                        JOIN ml_models m ON p.model_id = m.id
+                        {where_clause}
+                        ORDER BY p.prediction_date DESC, s.symbol, p.horizon_days
+                        LIMIT 200
+                    """, params)
+                    predictions = cur.fetchall()
+
+                    if predictions:
+                        df = pd.DataFrame(
+                            predictions,
+                            columns=["Symbol", "Date", "Horizon", "Type",
+                                     "Q10", "Q50", "Q90", "Class", "Margin", "Model"]
+                        )
+                        df["Horizon"] = df["Horizon"].apply(lambda x: f"{x}d")
+                        df["Type"] = df["Type"].apply(lambda x: {"quantile": "Q", "trend_class": "TC"}.get(x, x))
+                        df["Q10"] = df["Q10"].apply(lambda x: f"{float(x):.1%}" if x is not None else "-")
+                        df["Q50"] = df["Q50"].apply(lambda x: f"{float(x):.1%}" if x is not None else "-")
+                        df["Q90"] = df["Q90"].apply(lambda x: f"{float(x):.1%}" if x is not None else "-")
+                        df["Margin"] = df["Margin"].apply(lambda x: f"{float(x):.2%}" if x is not None else "-")
+                        df["Class"] = df["Class"].apply(lambda x: x if x else "-")
+
+                        # Drop empty columns for cleaner display
+                        if show_type == "quantile":
+                            df = df.drop(columns=["Class", "Margin", "Type"])
+
+                        st.dataframe(df, use_container_width=True, hide_index=True)
 
                     # Quick inspect
                     unique_symbols = df["Symbol"].unique().tolist()

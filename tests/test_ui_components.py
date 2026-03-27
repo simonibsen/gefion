@@ -93,12 +93,14 @@ class TestUIStructure:
         assert "# Predictions - table may not exist yet" in content or "predictions WHERE prediction_type" in content
         assert "# Model performance - table may not exist yet" in content
 
-    def test_ml_view_predictions_filter_by_type(self, ui_dir):
-        """ML view prediction queries must filter by prediction_type to avoid
-        showing trend_class rows with null Q10/Q50/Q90."""
+    def test_ml_view_predictions_supports_both_types(self, ui_dir):
+        """ML view predictions page must support both quantile and trend_class types."""
         content = (ui_dir / "views" / "ml.py").read_text()
-        # All prediction queries extracting q10/q50/q90 must include type filter
-        assert "prediction_type = 'quantile'" in content
+        # Must have a type filter/toggle
+        assert "pred_filter_type" in content
+        # Must query both prediction types
+        assert "prediction_type = 'quantile'" in content or "prediction_values->>'q10'" in content
+        assert "predicted_class" in content
 
     def test_charts_has_render_function(self, ui_dir):
         """Charts view should have render_charts function."""
