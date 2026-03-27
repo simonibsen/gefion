@@ -372,10 +372,15 @@ def _execute_chat_command(cmd_args: List[str], mode: str) -> str:
         return f"Error: {e}"
 
     if mode == "ai":
-        # Parse stream-json: collect text events, prefer final result
+        # Parse stream-json from both stdout and stderr
+        # claude -p --output-format stream-json may write to either
+        all_output = (result.stdout or "") + "\n" + (result.stderr or "")
         text_parts = []
         final_result = ""
-        for line in (result.stderr or "").splitlines():
+        for line in all_output.splitlines():
+            line = line.strip()
+            if not line or not line.startswith("{"):
+                continue
             event = parse_stream_event(line)
             if not event:
                 continue
@@ -384,13 +389,11 @@ def _execute_chat_command(cmd_args: List[str], mode: str) -> str:
             elif event["type"] == "text":
                 text_parts.append(event.get("text", ""))
 
-        # Prefer the final result field, fall back to concatenated text
         if final_result:
             return final_result
         if text_parts:
             return "".join(text_parts)
-        # Last resort: stdout (but not raw stderr)
-        return result.stdout.strip() or "No response received."
+        return "No response received."
     else:
         # CLI/MCP: return stdout
         output = result.stdout.strip()
