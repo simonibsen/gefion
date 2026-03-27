@@ -4590,6 +4590,15 @@ def _db_init_impl(db_url, json_output):
             json_output=json_output
         )
 
+        # Run pending migrations (idempotent — skips already-applied ones)
+        migrations_dir = package_dir / "sql" / "migrations"
+        if migrations_dir.exists():
+            with db_connection(url) as conn:
+                result = migrate.run_migrations(conn, str(migrations_dir))
+                applied = result.get("applied", 0) if isinstance(result, dict) else 0
+                if applied and not json_output:
+                    emit(f"Applied {applied} pending migration(s)")
+
         # Seed feature functions and definitions from JSON files
         fx_dir = package_dir / "feature-functions"
         def_dir = package_dir / "feature-definitions"
