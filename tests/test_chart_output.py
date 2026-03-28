@@ -47,7 +47,7 @@ class TestGetChartOutputDir:
                 assert str(result) == tmpdir
 
     def test_defaults_to_home_directory(self):
-        """get_chart_output_dir should default to ~/.g2/charts/."""
+        """get_chart_output_dir should default to ~/.gefion/charts/."""
         from gefion.charts.output import get_chart_output_dir
 
         # Clear env var if set
@@ -55,7 +55,7 @@ class TestGetChartOutputDir:
         env.pop("G2_CHART_DIR", None)
         with patch.dict(os.environ, env, clear=True):
             result = get_chart_output_dir()
-            expected = Path.home() / ".g2" / "charts"
+            expected = Path.home() / ".gefion" / "charts"
             assert result == expected
 
 
