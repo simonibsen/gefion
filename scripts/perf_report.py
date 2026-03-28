@@ -27,6 +27,9 @@ THRESHOLDS = {
     "charts.": 2000,
     "cli.": 5000,
 }
+
+# Spans to ignore (long-running parent spans, not actionable)
+IGNORE_SPANS = {"cli.ui"}
 DEFAULT_THRESHOLD = 1000
 
 
@@ -83,6 +86,8 @@ def print_report(traces: list, show_detail: bool = False):
     ok = []
     for t in ranked:
         name = t.get("rootTraceName", "?")
+        if name in IGNORE_SPANS:
+            continue
         dur = t.get("durationMs", 0)
         tid = t.get("traceID", "")
         thresh = get_threshold(name)
