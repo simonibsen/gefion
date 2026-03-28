@@ -60,6 +60,26 @@ class TestUIStructure:
         for view in expected_views:
             assert (views_dir / view).exists(), f"View {view} not found"
 
+    def test_all_ui_views_compile(self, ui_dir):
+        """Every UI view module must be valid Python (no syntax errors)."""
+        import py_compile
+        views_dir = ui_dir / "views"
+        for py_file in sorted(views_dir.glob("*.py")):
+            try:
+                py_compile.compile(str(py_file), doraise=True)
+            except py_compile.PyCompileError as e:
+                pytest.fail(f"Syntax error in {py_file.name}: {e}")
+
+    def test_all_ui_components_compile(self, ui_dir):
+        """Every UI component module must be valid Python (no syntax errors)."""
+        import py_compile
+        components_dir = ui_dir / "components"
+        for py_file in sorted(components_dir.glob("*.py")):
+            try:
+                py_compile.compile(str(py_file), doraise=True)
+            except py_compile.PyCompileError as e:
+                pytest.fail(f"Syntax error in {py_file.name}: {e}")
+
     def test_dashboard_has_render_function(self, ui_dir):
         """Dashboard view should have render_dashboard function."""
         content = (ui_dir / "views" / "dashboard.py").read_text()
@@ -90,8 +110,17 @@ class TestUIStructure:
         """
         content = (ui_dir / "views" / "dashboard.py").read_text()
         # Should have try/except around ML table queries
-        assert "# Predictions - table may not exist yet" in content
+        assert "# Predictions - table may not exist yet" in content or "predictions WHERE prediction_type" in content
         assert "# Model performance - table may not exist yet" in content
+
+    def test_ml_view_predictions_supports_both_types(self, ui_dir):
+        """ML view predictions page must support both quantile and trend_class types."""
+        content = (ui_dir / "views" / "ml.py").read_text()
+        # Must have a type filter/toggle
+        assert "pred_filter_type" in content
+        # Must query both prediction types
+        assert "prediction_type = 'quantile'" in content or "prediction_values->>'q10'" in content
+        assert "predicted_class" in content
 
     def test_charts_has_render_function(self, ui_dir):
         """Charts view should have render_charts function."""
@@ -231,6 +260,170 @@ class TestUIStructure:
         """Experiments view should have render_experiments function."""
         content = (ui_dir / "views" / "experiments.py").read_text()
         assert "def render_experiments(" in content
+
+
+class TestGetPageContext:
+    """Test that all view files with get_page_context() define the function correctly."""
+
+    VIEWS_WITH_PAGE_CONTEXT = [
+        "ml.py",
+        "dashboard.py",
+        "data.py",
+        "features.py",
+        "charts.py",
+        "backtest.py",
+        "experiments.py",
+    ]
+
+    EXPECTED_PAGE_NAMES = {
+        "ml.py": "ML Pipeline",
+        "dashboard.py": "Dashboard",
+        "data.py": "Data Management",
+        "features.py": "Features",
+        "charts.py": "Charts",
+        "backtest.py": "Backtesting",
+        "experiments.py": "Experiments",
+    }
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views source directory."""
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_PAGE_CONTEXT)
+    def test_view_has_get_page_context_function(self, views_dir, view_file):
+        """Each target view should define get_page_context()."""
+        content = (views_dir / view_file).read_text()
+        assert "def get_page_context():" in content, (
+            f"{view_file} must define get_page_context()"
+        )
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_PAGE_CONTEXT)
+    def test_get_page_context_returns_dict_with_required_keys(self, views_dir, view_file):
+        """get_page_context() must return a dict with page_name and summary."""
+        content = (views_dir / view_file).read_text()
+        assert '"page_name"' in content or "'page_name'" in content, (
+            f"{view_file} get_page_context must set page_name"
+        )
+        assert '"summary"' in content or "'summary'" in content, (
+            f"{view_file} get_page_context must set summary"
+        )
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_PAGE_CONTEXT)
+    def test_get_page_context_has_correct_page_name(self, views_dir, view_file):
+        """get_page_context() must return the expected page_name."""
+        content = (views_dir / view_file).read_text()
+        expected = self.EXPECTED_PAGE_NAMES[view_file]
+        assert expected in content, (
+            f"{view_file} get_page_context must include page_name '{expected}'"
+        )
+
+    @pytest.mark.parametrize("view_file", [
+        v for v in VIEWS_WITH_PAGE_CONTEXT if v != "charts.py"
+    ])
+    def test_get_page_context_has_try_except(self, views_dir, view_file):
+        """Views with DB queries must wrap them in try/except."""
+        content = (views_dir / view_file).read_text()
+        # Extract the get_page_context function body
+        idx = content.index("def get_page_context():")
+        # Find the next top-level def after get_page_context
+        rest = content[idx + len("def get_page_context():"):]
+        next_def = rest.find("\ndef ")
+        if next_def == -1:
+            func_body = rest
+        else:
+            func_body = rest[:next_def]
+        assert "try:" in func_body, (
+            f"{view_file} get_page_context must have try/except around DB queries"
+        )
+        assert "except Exception:" in func_body or "except Exception as" in func_body, (
+            f"{view_file} get_page_context must catch Exception"
+        )
+
+    @pytest.mark.parametrize("view_file", [
+        v for v in VIEWS_WITH_PAGE_CONTEXT if v != "charts.py"
+    ])
+    def test_get_page_context_uses_get_connection(self, views_dir, view_file):
+        """Views with DB queries must use get_connection from the database component."""
+        content = (views_dir / view_file).read_text()
+        idx = content.index("def get_page_context():")
+        rest = content[idx:]
+        next_def = rest.find("\ndef ")
+        if next_def == -1:
+            func_body = rest
+        else:
+            func_body = rest[:next_def]
+        assert "get_connection" in func_body, (
+            f"{view_file} get_page_context must use get_connection for DB access"
+        )
+
+    def test_get_page_context_defined_before_render_function(self, views_dir):
+        """get_page_context() should be defined before the main render function."""
+        for view_file in self.VIEWS_WITH_PAGE_CONTEXT:
+            content = (views_dir / view_file).read_text()
+            ctx_pos = content.index("def get_page_context():")
+            # Find the first render_ function
+            render_pos = content.find("def render_")
+            if render_pos != -1:
+                assert ctx_pos < render_pos, (
+                    f"{view_file}: get_page_context must be before render functions"
+                )
+
+
+class TestChatWidgetIntegration:
+    """Test that all view pages call render_chat_widget after their title."""
+
+    # Views that should have a chat widget call (all except assistant.py)
+    VIEWS_WITH_CHAT_WIDGET = [
+        "dashboard.py",
+        "ml.py",
+        "data.py",
+        "features.py",
+        "charts.py",
+        "backtest.py",
+        "experiments.py",
+        "settings.py",
+        "documentation.py",
+    ]
+
+    @pytest.fixture
+    def views_dir(self):
+        """Get the views source directory."""
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_CHAT_WIDGET)
+    def test_view_imports_render_chat_widget(self, views_dir, view_file):
+        """Each view must import render_chat_widget from the chat component."""
+        content = (views_dir / view_file).read_text()
+        assert "from gefion.ui.components.chat import render_chat_widget" in content, (
+            f"{view_file} must import render_chat_widget"
+        )
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_CHAT_WIDGET)
+    def test_view_calls_render_chat_widget(self, views_dir, view_file):
+        """Each view must call render_chat_widget exactly once."""
+        content = (views_dir / view_file).read_text()
+        count = content.count("render_chat_widget(")
+        assert count == 1, (
+            f"{view_file} must call render_chat_widget exactly once, found {count}"
+        )
+
+    @pytest.mark.parametrize("view_file", VIEWS_WITH_CHAT_WIDGET)
+    def test_chat_widget_after_title(self, views_dir, view_file):
+        """render_chat_widget call must appear after the first st.markdown title."""
+        content = (views_dir / view_file).read_text()
+        title_pos = content.find('st.markdown("# ')
+        chat_pos = content.find("render_chat_widget(")
+        assert title_pos != -1, f"{view_file} must have a title"
+        assert chat_pos != -1, f"{view_file} must call render_chat_widget"
+        assert chat_pos > title_pos, (
+            f"{view_file}: render_chat_widget must appear after the title"
+        )
+
+    def test_assistant_has_chat_widget(self, views_dir):
+        """System Operations page uses Ask Gefion like all other pages."""
+        content = (views_dir / "assistant.py").read_text()
+        assert "render_chat_widget(" in content
 
 
 class TestUILaunchCommand:
@@ -428,14 +621,14 @@ class TestStatusComponentStructure:
     def test_ml_table_queries_handle_missing_tables(self, status_module_path):
         """ML table queries should handle missing tables gracefully.
 
-        ml_models and quantile_predictions may not exist yet, so queries
+        ml_models and predictions may not exist yet, so queries
         should fail gracefully and default to 0 instead of crashing.
         """
         content = status_module_path.read_text()
         # Should have individual try/except blocks for ML tables
         assert "# ML tables may not exist yet" in content
         assert content.count("SELECT COUNT(*) FROM ml_models") == 1
-        assert content.count("SELECT COUNT(*) FROM quantile_predictions") == 1
+        assert content.count("SELECT COUNT(*) FROM predictions") == 1
         # Both queries should be in their own try/except blocks
         assert "model_count = 0" in content
         assert "prediction_count = 0" in content
@@ -926,36 +1119,36 @@ class TestActionDashboard:
         content = (ui_dir / "views" / "assistant.py").read_text()
         assert "def check_conditions(" in content
 
-    def test_assistant_has_free_form_command_entry(self, ui_dir):
-        """Assistant should have text input for natural language and CLI commands."""
+    def test_assistant_has_chat_widget_entry(self, ui_dir):
+        """System Operations should use Ask Gefion for chat input."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "st.text_area(" in content or "st.text_input(" in content
-        assert "freeform" in content
+        assert "render_chat_widget" in content
 
     def test_assistant_has_mcp_tool_mapping(self, ui_dir):
-        """Assistant should map MCP tool names to CLI commands."""
+        """Assistant should have access to MCP tool map (via import from chat component)."""
         content = (ui_dir / "views" / "assistant.py").read_text()
         assert "MCP_TOOL_MAP" in content
-        # Should include key MCP tools
-        assert "data_update" in content
-        assert "ml_train" in content
-        assert "system_status" in content
+        # Shared module should include key MCP tools
+        chat_content = (ui_dir / "components" / "chat.py").read_text()
+        assert "data_update" in chat_content
+        assert "ml_train" in chat_content
+        assert "system_status" in chat_content
 
     def test_assistant_has_parse_input_function(self, ui_dir):
-        """Assistant should parse both MCP tool names and CLI commands."""
+        """Assistant should have parse_command_input (via import from chat component)."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "def parse_command_input(" in content
+        assert "parse_command_input" in content
 
     def test_assistant_has_ai_prompt_mode(self, ui_dir):
-        """Assistant should support sending natural language to Claude via claude -p."""
-        content = (ui_dir / "views" / "assistant.py").read_text()
+        """Chat component should support sending natural language to Claude via claude -p."""
+        content = (ui_dir / "components" / "chat.py").read_text()
         # Should use claude CLI for AI prompts
         assert "claude" in content
-        assert "--print" in content or '"-p"' in content
+        assert '"-p"' in content
         # Should have operator context so LLM doesn't do dev operations
         assert "append-system-prompt" in content
         # Should restrict to MCP tools only
-        assert "allowed-tools" in content or "allowedTools" in content
+        assert "allowedTools" in content
 
     def test_assistant_uses_background_process(self, ui_dir):
         """Assistant should import and use background process infrastructure."""
@@ -1005,55 +1198,17 @@ class TestActionDashboard:
         # render_action_card should accept a reason parameter
         assert "reason" in content
 
-    def test_assistant_has_freeform_output_renderer(self, ui_dir):
-        """Assistant should have render_freeform_output for plain-text display.
-
-        The freeform section (Ask AI / Run Command) should NOT use
-        render_process_status — that shows data-update metrics (progress,
-        inserted, errors, ETA) which don't apply to AI prompts or general
-        CLI output. Instead, render_freeform_output shows plain text.
-        """
+    def test_assistant_has_suggested_actions(self, ui_dir):
+        """System Operations page should have suggested actions section."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        # Must have the dedicated renderer
-        assert "def render_freeform_output(" in content
-        # Freeform section must call it (not render_process_status)
-        # The function should use st.markdown for plain text output
-        assert "st.markdown(" in content
-        # Should store mode in session state for renderer to use
-        assert "freeform_mode" in content
+        assert "Suggested Actions" in content
+        assert "check_conditions" in content
+        assert "render_action_card" in content
 
-    def test_assistant_freeform_run_not_blocked_by_completed(self, ui_dir):
-        """Run button must be available even after a previous command completes.
-
-        If the freeform state is completed, the user should be able to type
-        a new command and click Run without having to Clear first. The Run
-        button must NOT be guarded by `elif` after checking completed state.
-        """
+    def test_assistant_uses_ask_gefion(self, ui_dir):
+        """System Operations page must use the Ask Gefion chat widget."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        # The run button logic must check "not is_running" rather than
-        # being in an elif that's unreachable when completed=True
-        assert "not freeform_state.is_running" in content
-
-    def test_assistant_freeform_strips_claudecode_env(self, ui_dir):
-        """Freeform command must strip CLAUDECODE env var.
-
-        When g2 ui is launched from Claude Code, the CLAUDECODE env var is set.
-        claude -p refuses to run inside another Claude Code session. The env
-        passed to start_background_process must remove this variable.
-        """
-        content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "CLAUDECODE" in content, "Must handle CLAUDECODE env var for nested sessions"
-
-    def test_assistant_freeform_uses_form(self, ui_dir):
-        """Freeform input and Run button must be wrapped in a st.form.
-
-        Without a form, st.text_input doesn't send its value until the user
-        presses Enter. Wrapping in a form lets the submit button commit
-        the input value in one action.
-        """
-        content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "st.form(" in content, "Freeform section must use st.form"
-        assert "st.form_submit_button(" in content, "Must use form_submit_button inside form"
+        assert "render_chat_widget" in content, "Must use Ask Gefion chat widget"
 
     def test_assistant_freeform_has_auto_refresh(self, ui_dir):
         """Freeform output must auto-refresh while the process is running.
@@ -1070,11 +1225,7 @@ class TestActionDashboard:
         assert "time.sleep(" in content
 
     def test_mcp_tool_map_references_valid_cli_commands(self, ui_dir):
-        """Every CLI command in MCP_TOOL_MAP must be a real gefion CLI command.
-
-        system-status and health-check do not exist — the real commands
-        are 'health' and 'db-health'.
-        """
+        """Every CLI command in MCP_TOOL_MAP (in chat component) must be a real gefion CLI command."""
         import subprocess
         result = subprocess.run(
             [sys.executable, "-m", "gefion.cli", "--help"],
@@ -1082,7 +1233,7 @@ class TestActionDashboard:
         )
         help_text = result.stdout
 
-        content = (ui_dir / "views" / "assistant.py").read_text()
+        content = (ui_dir / "components" / "chat.py").read_text()
         # Extract just the MCP_TOOL_MAP block
         import re
         map_match = re.search(r'MCP_TOOL_MAP\s*=\s*\{(.+?)\}', content, re.DOTALL)
@@ -1148,7 +1299,7 @@ class TestActionDashboard:
 
     def test_ai_prompt_uses_stream_json(self, ui_dir):
         """AI prompts must use --output-format stream-json --verbose for transparency."""
-        content = (ui_dir / "views" / "assistant.py").read_text()
+        content = (ui_dir / "components" / "chat.py").read_text()
         assert "stream-json" in content, "AI command must use --output-format stream-json"
         assert "--verbose" in content, "AI command must use --verbose for stream-json"
 
@@ -1161,50 +1312,41 @@ class TestActionDashboard:
 
     def test_ai_prompt_supports_continue(self, ui_dir):
         """AI prompts must support --continue for multi-turn conversation context."""
-        content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "ai_session_active" in content, "Must track AI session state"
+        content = (ui_dir / "components" / "chat.py").read_text()
+        assert "ai_session_active" in content or "session_key" in content, "Must track AI session state"
         assert '"--continue"' in content, "Must add --continue flag for subsequent prompts"
 
     def test_parse_stream_json_event_exists(self, ui_dir):
         """A function to parse stream-json events must exist."""
-        content = (ui_dir / "views" / "assistant.py").read_text()
+        content = (ui_dir / "components" / "chat.py").read_text()
         assert "parse_stream_event" in content, "Must have parse_stream_event function"
 
-    def test_sidebar_ai_actions_position(self, ui_dir):
-        """AI Actions must be the second item in the sidebar PAGES list."""
+    def test_sidebar_system_operations_position(self, ui_dir):
+        """System Operations must be the second item in the sidebar PAGES list."""
         content = (ui_dir / "app.py").read_text()
-        # Find the PAGES list and extract page labels (first element of each tuple)
         import re
-        # Match tuples like ("Label", ":material/icon:")
         tuples = re.findall(r'\("([^"]+)",\s*":[^"]+:"\)', content)
-        if not tuples:
-            # Fallback: old format with plain strings
-            pages_match = re.search(r'PAGES\s*=\s*\[(.*?)\]', content, re.DOTALL)
-            assert pages_match, "PAGES list not found in app.py"
-            tuples = re.findall(r'"([^"]+)"', pages_match.group(1))
         assert len(tuples) >= 2, "PAGES must have at least 2 entries"
-        assert "AI Actions" in tuples[1], (
-            f"AI Actions must be second in PAGES, got '{tuples[1]}'"
+        assert "System Operations" in tuples[1], (
+            f"System Operations must be second in PAGES, got '{tuples[1]}'"
         )
 
-    def test_assistant_renamed_to_ai_actions(self, ui_dir):
-        """The page routing must use 'AI Actions' not 'AI Prompts'."""
+    def test_assistant_renamed_to_system_operations(self, ui_dir):
+        """The page routing must use 'System Operations'."""
         content = (ui_dir / "app.py").read_text()
-        assert "AI Actions" in content, "app.py must reference 'AI Actions'"
+        assert "System Operations" in content
 
-    def test_assistant_input_before_proactive_actions(self, ui_dir):
-        """Chat input must appear before proactive action cards in assistant.py."""
+    def test_assistant_chat_before_proactive_actions(self, ui_dir):
+        """Ask Gefion must appear before proactive action cards in assistant.py."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        # Look within render_assistant function body only
         render_start = content.find("def render_assistant")
         assert render_start > 0, "render_assistant must exist"
         body = content[render_start:]
-        form_pos = body.find("freeform_form")
-        # Find the call to check_conditions(), not the function definition
+        chat_pos = body.find("render_chat_widget")
         conditions_pos = body.find("check_conditions()")
-        assert form_pos > 0 and conditions_pos > 0, "Both form and conditions call must exist"
-        assert form_pos < conditions_pos, (
-            "Chat input (freeform_form) must appear before proactive actions (check_conditions)"
+        assert chat_pos > 0 and conditions_pos > 0, "Both chat widget and conditions call must exist"
+        assert chat_pos < conditions_pos, (
+            "Ask Gefion must appear before proactive actions (check_conditions)"
         )
 
 

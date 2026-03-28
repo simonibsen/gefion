@@ -1,6 +1,6 @@
-# g2 Backlog
+# Gefion Backlog
 
-**Last Updated**: 2026-03-15
+**Last Updated**: 2026-03-27
 
 Open work items extracted from NEXT_STEPS.md, ML_ROADMAP.md, PROGRESS.md, and NOTES.md.
 
@@ -77,6 +77,22 @@ g2 trade flatten --confirm
 
 ---
 
+## Technical Debt (High Priority)
+
+### Unified Predictions Table 🔄 IN PROGRESS
+**Priority**: High
+**Branch**: `predictions`
+
+Replace `quantile_predictions` and `trend_class_predictions` with a single `predictions` table using JSONB for flexible prediction values. Current two-table approach causes UI to only show quantile predictions — classifier predictions are invisible.
+
+**Schema**: `predictions(model_id, data_id, prediction_date, horizon_days, prediction_type TEXT, prediction_values JSONB, metadata JSONB, run_id, created_at)`
+
+**Migration**: `sql/migrations/20260327_000001_unified_predictions_table.sql`
+**Helper module**: `src/gefion/db/predictions.py`
+**Status**: Migration SQL written, helper module implemented and tested, updating CLI + downstream consumers.
+
+---
+
 ## Bugs
 
 ### Backup Disk Space Check Falsely Reports Insufficient Space
@@ -89,10 +105,10 @@ g2 trade flatten --confirm
 
 ## Technical Debt
 
-### Cascading Cleanup on Data Cull
+### Cascading Cleanup on Data Cull 🔄 IN PROGRESS
 **Discovered**: 2026-03-25
 **Priority**: Medium
-**Branch**: `002-data-cull`
+**Branch**: `predictions` (combined with unified predictions work)
 
 When `stock_ohlcv` rows are deleted (e.g., culling to a 1-year window), downstream artifacts are orphaned with no warning. No foreign key constraints exist between `stock_ohlcv` and derived tables.
 

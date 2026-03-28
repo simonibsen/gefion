@@ -194,3 +194,21 @@ class TestFeatureSeeding:
             count = import_functions_from_directory(conn, Path("/nonexistent/path"), None)
 
         assert count == 0
+
+
+class TestDbInitRunsMigrations:
+    """db-init should run pending migrations after schema creation."""
+
+    def test_db_init_applies_migrations(self):
+        """db-init runs migrations as part of initialization."""
+        result = runner.invoke(cli.app, ["db-init"])
+        assert result.exit_code == 0
+        # Should succeed without errors — migrations are idempotent
+        assert "Database initialized successfully" in result.output
+
+    def test_db_init_idempotent(self):
+        """Running db-init twice produces the same result (no errors)."""
+        first = runner.invoke(cli.app, ["db-init"])
+        second = runner.invoke(cli.app, ["db-init"])
+        assert first.exit_code == 0
+        assert second.exit_code == 0

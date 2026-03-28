@@ -3,13 +3,30 @@
 import streamlit as st
 import subprocess
 import sys
+from gefion.ui.components.chat import render_chat_widget
 import json
 import os
+
+
+def get_page_context():
+    """Return compact context dict for the Experiments page."""
+    context = {"page_name": "Experiments", "summary": "AI experimentation framework for strategy optimization."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT status, COUNT(*) FROM experiments GROUP BY status")
+                by_status = {r[0]: r[1] for r in cur.fetchall()}
+        context["data_stats"] = {"experiments_by_status": by_status}
+    except Exception:
+        pass
+    return context
 
 
 def render_experiments():
     """Render the experiments page."""
     st.markdown("# :material/science: Experiments")
+    render_chat_widget(get_page_context())
     st.markdown("AI-driven parameter optimization with human approval.")
 
     tab1, tab2, tab3, tab4 = st.tabs([

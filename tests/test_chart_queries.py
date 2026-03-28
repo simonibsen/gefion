@@ -16,6 +16,35 @@ from gefion.db import schema
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
 
 
+class TestFetchPredictionsUsesUnifiedTable:
+    """Test that fetch_predictions_for_chart uses the unified predictions table."""
+
+    def test_query_references_predictions_table(self):
+        """SQL should reference 'predictions' table, not 'quantile_predictions'."""
+        import inspect
+        from gefion.charts.queries import fetch_predictions_for_chart
+
+        source = inspect.getsource(fetch_predictions_for_chart)
+        assert "FROM predictions " in source or "FROM predictions\n" in source
+        assert "quantile_predictions" not in source
+
+    def test_query_extracts_jsonb_fields(self):
+        """SQL should extract q10/q50/q90 from prediction_values JSONB."""
+        import inspect
+        from gefion.charts.queries import fetch_predictions_for_chart
+
+        source = inspect.getsource(fetch_predictions_for_chart)
+        assert "prediction_values" in source
+
+    def test_query_filters_by_prediction_type(self):
+        """SQL should filter by prediction_type = 'quantile'."""
+        import inspect
+        from gefion.charts.queries import fetch_predictions_for_chart
+
+        source = inspect.getsource(fetch_predictions_for_chart)
+        assert "prediction_type" in source
+
+
 def require_db():
     """Get DB connection or skip test."""
     if not DB_TESTS_ENABLED:
@@ -201,7 +230,7 @@ class TestFetchPredictionsForChart:
         schema.create_ml_datasets_table(conn)
         schema.create_ml_runs_table(conn)
         schema.create_ml_models_table(conn)
-        schema.create_quantile_predictions_table(conn)
+        schema.create_predictions_table(conn)
 
         with conn.cursor() as cur:
             # Get stock id
@@ -220,30 +249,33 @@ class TestFetchPredictionsForChart:
             )
             model_id = cur.fetchone()[0]
 
-            # Insert test predictions
+            # Insert test predictions using unified predictions table
             cur.execute(
-                "DELETE FROM quantile_predictions WHERE model_id = %s AND data_id = %s",
+                "DELETE FROM predictions WHERE model_id = %s AND data_id = %s",
                 (model_id, data_id),
             )
             base_date = date.today() - timedelta(days=10)
             for i in range(10):
                 d = base_date + timedelta(days=i)
+                from psycopg.types.json import Json
                 cur.execute(
                     """
-                    INSERT INTO quantile_predictions
-                        (model_id, data_id, prediction_date, horizon_days, q10, q50, q90)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (model_id, data_id, prediction_date, horizon_days)
-                    DO UPDATE SET q10 = EXCLUDED.q10, q50 = EXCLUDED.q50, q90 = EXCLUDED.q90
+                    INSERT INTO predictions
+                        (model_id, data_id, prediction_date, horizon_days,
+                         prediction_type, prediction_values)
+                    VALUES (%s, %s, %s, %s, 'quantile', %s)
+                    ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
+                    DO UPDATE SET prediction_values = EXCLUDED.prediction_values
                     """,
-                    (model_id, data_id, d, 7, 95.0 + i, 100.0 + i, 105.0 + i),
+                    (model_id, data_id, d, 7,
+                     Json({"q10": 95.0 + i, "q50": 100.0 + i, "q90": 105.0 + i})),
                 )
 
         yield model_name
 
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM quantile_predictions WHERE model_id = %s AND data_id = %s",
+                "DELETE FROM predictions WHERE model_id = %s AND data_id = %s",
                 (model_id, data_id),
             )
             cur.execute("DELETE FROM ml_models WHERE name = %s", (model_name,))

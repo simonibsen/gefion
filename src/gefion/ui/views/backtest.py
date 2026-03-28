@@ -3,10 +3,28 @@
 import streamlit as st
 import subprocess
 import sys
+from gefion.ui.components.chat import render_chat_widget
 import json
 import os
 from datetime import date, timedelta
 import pandas as pd
+
+
+def get_page_context():
+    """Return compact context dict for the Backtesting page."""
+    context = {"page_name": "Backtesting", "summary": "Strategy backtesting and comparison."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM strategy_registry")
+                count = cur.fetchone()[0]
+        context["data_stats"] = {"strategies": count}
+        if count == 0:
+            context["suggestions"] = ["Create a strategy: gefion strategy create-config"]
+    except Exception:
+        pass
+    return context
 
 
 def _parse_last_json(output: str) -> dict:
@@ -453,6 +471,7 @@ def _render_backtest_results(data: dict) -> None:
 def render_backtest():
     """Render the backtesting page."""
     st.markdown("# :material/history: Backtesting")
+    render_chat_widget(get_page_context())
     st.markdown("Test trading strategies on historical data.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -907,8 +926,8 @@ def render_run_section():
         else:
             cmd.extend(["--exchange", exchange, "--limit", str(bt_limit)])
 
-        # Show equivalent CLI command (skip "python -m g2.cli" prefix)
-        cli_args = cmd[3:]  # Skip [python, -m, g2.cli]
+        # Show equivalent CLI command (skip "python -m gefion.cli" prefix)
+        cli_args = cmd[3:]  # Skip [python, -m, gefion.cli]
         st.code(f"gefion {' '.join(cli_args)}", language="bash")
 
         with st.status("Running backtest...", expanded=True) as status:
@@ -1077,8 +1096,8 @@ def render_compare_section():
                 "--horizon-days", str(cmp_ml_horizon),
             ])
 
-        # Show equivalent CLI command (skip "python -m g2.cli" prefix)
-        cli_args = cmd[3:]  # Skip [python, -m, g2.cli]
+        # Show equivalent CLI command (skip "python -m gefion.cli" prefix)
+        cli_args = cmd[3:]  # Skip [python, -m, gefion.cli]
         st.code(f"gefion {' '.join(cli_args)}", language="bash")
 
         with st.status("Comparing strategies...", expanded=True) as status:
@@ -1287,7 +1306,7 @@ def render_strategy_configs():
         st.markdown("""
         ### Strategies vs Configs
 
-        **Strategies** are Python classes defined in code (`src/g2/strategies/`).
+        **Strategies** are Python classes defined in code (`src/gefion/strategies/`).
         They contain the trading logic and cannot be modified from the UI.
         To add a new strategy, you must write Python code.
 
@@ -1401,7 +1420,7 @@ def render_strategy_configs():
     st.markdown("---")
     st.markdown("### 💻 CLI Equivalent")
     st.code(
-        'g2 strategy create-config --name my_config --strategy momentum --params \'{"lookback_days": 10}\'',
+        'gefion strategy create-config --name my_config --strategy momentum --params \'{"lookback_days": 10}\'',
         language="bash"
     )
 

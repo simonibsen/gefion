@@ -499,11 +499,14 @@ def _run_quality_check(
                 """
                 SELECT
                     COUNT(*) as cnt,
-                    AVG(q90 - q10) as avg_iqr,
-                    SUM(CASE WHEN q10 <= q50 AND q50 <= q90 THEN 1 ELSE 0 END) as valid_ordering
-                FROM quantile_predictions qp
-                JOIN ml_models m ON qp.model_id = m.id
-                WHERE m.name = %s;
+                    AVG((prediction_values->>'q90')::NUMERIC - (prediction_values->>'q10')::NUMERIC) as avg_iqr,
+                    SUM(CASE WHEN (prediction_values->>'q10')::NUMERIC <= (prediction_values->>'q50')::NUMERIC
+                              AND (prediction_values->>'q50')::NUMERIC <= (prediction_values->>'q90')::NUMERIC
+                         THEN 1 ELSE 0 END) as valid_ordering
+                FROM predictions p
+                JOIN ml_models m ON p.model_id = m.id
+                WHERE p.prediction_type = 'quantile'
+                  AND m.name = %s;
                 """,
                 (model_name,),
             )
@@ -517,11 +520,14 @@ def _run_quality_check(
                 """
                 SELECT
                     COUNT(*) as cnt,
-                    AVG(q90 - q10) as avg_iqr,
-                    SUM(CASE WHEN q10 <= q50 AND q50 <= q90 THEN 1 ELSE 0 END) as valid_ordering
-                FROM quantile_predictions qp
-                JOIN ml_models m ON qp.model_id = m.id
-                WHERE m.name = %s;
+                    AVG((prediction_values->>'q90')::NUMERIC - (prediction_values->>'q10')::NUMERIC) as avg_iqr,
+                    SUM(CASE WHEN (prediction_values->>'q10')::NUMERIC <= (prediction_values->>'q50')::NUMERIC
+                              AND (prediction_values->>'q50')::NUMERIC <= (prediction_values->>'q90')::NUMERIC
+                         THEN 1 ELSE 0 END) as valid_ordering
+                FROM predictions p
+                JOIN ml_models m ON p.model_id = m.id
+                WHERE p.prediction_type = 'quantile'
+                  AND m.name = %s;
                 """,
                 (ensemble_name,),
             )
@@ -547,7 +553,7 @@ def _run_cleanup(artifacts: Dict[str, Any], conn) -> None:
         if "model_name" in artifacts:
             cur.execute(
                 """
-                DELETE FROM quantile_predictions
+                DELETE FROM predictions
                 WHERE model_id IN (
                     SELECT id FROM ml_models WHERE name = %s
                 );
@@ -558,7 +564,7 @@ def _run_cleanup(artifacts: Dict[str, Any], conn) -> None:
         if "ensemble_name" in artifacts:
             cur.execute(
                 """
-                DELETE FROM quantile_predictions
+                DELETE FROM predictions
                 WHERE model_id IN (
                     SELECT id FROM ml_models WHERE name = %s
                 );

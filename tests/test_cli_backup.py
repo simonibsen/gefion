@@ -126,6 +126,52 @@ class TestRestoreCommand:
         assert "--dry-run" in result.output
 
 
+class TestBackupUnifiedPredictionsTable:
+    """Test that backup module uses unified predictions table."""
+
+    def test_bytes_per_row_uses_predictions_table(self):
+        """BYTES_PER_ROW should reference 'predictions' not old table names."""
+        from gefion.backup import BYTES_PER_ROW
+
+        assert "predictions" in BYTES_PER_ROW
+        assert "quantile_predictions" not in BYTES_PER_ROW
+        assert "trend_class_predictions" not in BYTES_PER_ROW
+
+    def test_data_type_tables_uses_predictions_table(self):
+        """DATA_TYPE_TABLES should reference 'predictions' not old table names."""
+        from gefion.backup import DATA_TYPE_TABLES
+
+        pred_tables = DATA_TYPE_TABLES["predictions"]
+        assert "predictions" in pred_tables
+        assert "quantile_predictions" not in pred_tables
+        assert "trend_class_predictions" not in pred_tables
+
+        all_tables = DATA_TYPE_TABLES["all"]
+        assert "predictions" in all_tables
+        assert "quantile_predictions" not in all_tables
+        assert "trend_class_predictions" not in all_tables
+
+    def test_restore_order_uses_predictions_table(self):
+        """Restore order should reference 'predictions' not old table names."""
+        import inspect
+        from gefion.backup import restore_backup
+
+        source = inspect.getsource(restore_backup)
+        assert '"predictions"' in source
+        assert '"quantile_predictions"' not in source
+        assert '"trend_class_predictions"' not in source
+
+    def test_conflict_map_uses_predictions_table(self):
+        """Conflict map should reference 'predictions' not old table names."""
+        import inspect
+        from gefion.backup import _restore_table
+
+        source = inspect.getsource(_restore_table)
+        assert '"predictions"' in source
+        assert '"quantile_predictions"' not in source
+        assert '"trend_class_predictions"' not in source
+
+
 class TestBackupModule:
     """Test the backup module functions."""
 

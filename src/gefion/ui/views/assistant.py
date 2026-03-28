@@ -1,4 +1,4 @@
-"""AI Actions — context-aware operations center with conversation history."""
+"""System Operations — system health, suggested actions, and operations history."""
 
 import json
 import logging
@@ -13,6 +13,14 @@ from datetime import date
 
 logger = logging.getLogger(__name__)
 
+from gefion.ui.components.chat import (
+    MCP_TOOL_MAP,
+    UI_OPERATOR_PROMPT,
+    parse_command_input,
+    parse_stream_event,
+    _is_command,
+    _param_to_flag,
+)
 from gefion.ui.history import append_exchange, read_exchanges, clear_history
 from gefion.ui.errors import read_session_errors
 from gefion.ui.views.data import (
@@ -23,207 +31,6 @@ from gefion.ui.views.data import (
     clear_process_state,
 )
 
-
-# MCP tool name -> (CLI command prefix, description)
-MCP_TOOL_MAP = {
-    "data_update": ("data-update", "Update prices and features"),
-    "system_status": ("health", "System health check"),
-    "health_check": ("health", "Infrastructure health check"),
-    "ml_dataset_build": ("ml dataset-build", "Build ML dataset"),
-    "ml_dataset_inspect": ("ml dataset-inspect", "Inspect dataset"),
-    "ml_train": ("ml train", "Train quantile model"),
-    "ml_predict": ("ml predict", "Generate predictions"),
-    "ml_eval": ("ml eval", "Evaluate model"),
-    "ml_tune": ("ml tune", "Tune hyperparameters"),
-    "ml_train_classifier": ("ml train-classifier", "Train classifier"),
-    "ml_predict_classifier": ("ml predict-classifier", "Predict with classifier"),
-    "ml_train_ensemble": ("ml train-ensemble", "Train ensemble"),
-    "ml_predict_ensemble": ("ml predict-ensemble", "Predict with ensemble"),
-    "ml_feature_importance": ("ml feature-importance", "Feature importance"),
-    "ml_e2e_test": ("ml e2e-test", "End-to-end ML test"),
-    "ml_calibrate": ("ml calibrate", "Calibrate model"),
-    "feature_compute": ("feat-compute", "Compute features"),
-    "features_list": ("feat-def-list", "List features"),
-    "feature_show": ("feat-def-show", "Show feature details"),
-    "feature_functions_list": ("feat-fx-list", "List feature functions"),
-    "feature_definitions_export": ("feat-def-export", "Export definitions"),
-    "feature_definitions_import": ("feat-def-import", "Import definitions"),
-    "feature_functions_export": ("feat-fx-export", "Export functions"),
-    "feature_functions_import": ("feat-fx-import", "Import functions"),
-    "cross_sectional_compute": ("cross-sectional-compute", "Compute rankings"),
-    "backtest_run": ("backtest run", "Run backtest"),
-    "backtest_compare": ("backtest compare", "Compare strategies"),
-    "volatility_compute": ("volatility compute", "Compute volatility"),
-    "strategy_list": ("strategy list", "List strategies"),
-    "strategy_configs": ("strategy configs", "List strategy configs"),
-    "strategy_create_config": ("strategy create-config", "Create strategy config"),
-    "experiment_propose": ("experiment propose", "Propose experiment"),
-    "experiment_list": ("experiment list", "List experiments"),
-    "experiment_approve": ("experiment approve", "Approve experiment"),
-    "experiment_run": ("experiment run", "Run experiment"),
-    "experiment_results": ("experiment results", "Experiment results"),
-    "chart_price": ("chart price", "Price chart"),
-    "chart_predictions": ("chart predictions", "Prediction chart"),
-    "chart_features": ("chart features", "Feature chart"),
-    "backup": ("backup", "Backup data"),
-    "restore": ("restore", "Restore data"),
-}
-
-# MCP param name -> CLI flag (snake_case to kebab-case)
-def _param_to_flag(param: str) -> str:
-    """Convert MCP parameter name to CLI flag."""
-    return f"--{param.replace('_', '-')}"
-
-
-UI_OPERATOR_PROMPT = (
-    "You are responding to a request from the Gefion web UI. "
-    "You are an OPERATOR — use Gefion MCP tools to answer questions and "
-    "execute operations. Do NOT modify source code, create files, or "
-    "perform developer operations. Focus on data analysis, ML workflows, "
-    "and system operations using the available MCP tools. "
-    "Keep responses concise and actionable."
-)
-
-
-def parse_stream_event(line: str) -> Optional[dict]:
-    """Parse a stream-json event line from claude -p stderr.
-
-    Returns a dict with 'type' and relevant fields, or None if not parseable.
-    Event types: 'tool_use', 'text', 'result', 'init', 'other'.
-    """
-    try:
-        data = json.loads(line.strip())
-    except (json.JSONDecodeError, ValueError):
-        return None
-
-    if not isinstance(data, dict):
-        return None
-
-    event_type = data.get("type", "")
-
-    if event_type == "assistant":
-        message = data.get("message", {})
-        for content in message.get("content", []):
-            ct = content.get("type", "")
-            if ct == "tool_use":
-                tool_name = content.get("name", "unknown")
-                tool_input = content.get("input", {})
-                # Summarize input (first 150 chars of JSON)
-                input_summary = json.dumps(tool_input)
-                if len(input_summary) > 150:
-                    input_summary = input_summary[:150] + "..."
-                return {
-                    "type": "tool_use",
-                    "tool": tool_name,
-                    "input": input_summary,
-                }
-            elif ct == "text":
-                return {"type": "text", "text": content.get("text", "")}
-        return None
-
-    if event_type == "tool_result":
-        return {
-            "type": "tool_result",
-            "content": json.dumps(data.get("content", ""))[:200],
-        }
-
-    if event_type == "result":
-        return {
-            "type": "result",
-            "result": data.get("result", ""),
-            "duration_ms": data.get("duration_ms", 0),
-            "cost_usd": data.get("total_cost_usd", 0),
-        }
-
-    if event_type == "system":
-        return {"type": "init"}
-
-    return None
-
-
-def _is_command(text: str) -> bool:
-    """Check if text looks like a CLI/MCP command vs natural language."""
-    parts = text.strip().split()
-    if not parts:
-        return False
-    first = parts[0]
-    # Starts with gefion CLI prefix
-    if first in ("g2", "gefion"):
-        return True
-    # Is a known MCP tool name
-    if first in MCP_TOOL_MAP:
-        return True
-    # Starts with -- (flag)
-    if first.startswith("--"):
-        return True
-    # Contains CLI-style subcommands (kebab-case like data-update, ml)
-    if "-" in first and not first.startswith("-"):
-        return True
-    return False
-
-
-def parse_command_input(text: str) -> Tuple[List[str], str, str]:
-    """Parse input as natural language, MCP tool call, or CLI command.
-
-    Returns (cmd_args, display_cmd, mode) where:
-      - cmd_args: subprocess args list
-      - display_cmd: human-readable display string
-      - mode: "ai", "cli", or "mcp"
-    """
-    text = text.strip()
-    if not text:
-        return [], "", ""
-
-    # Natural language -> route to claude -p with stream-json for transparency
-    if not _is_command(text):
-        cmd = [
-            "claude",
-            "-p", text,
-            "--append-system-prompt", UI_OPERATOR_PROMPT,
-            "--allowedTools", "mcp__gefion__*",
-            "--output-format", "stream-json",
-            "--verbose",
-        ]
-        # Continue previous AI session for multi-turn context
-        if st.session_state.get("ai_session_active"):
-            cmd.append("--continue")
-        return cmd, text, "ai"
-
-    # Try to parse as MCP tool name or CLI command
-    parts = shlex.split(text)
-    first = parts[0]
-
-    # Strip "g2" prefix if present
-    if first in ("g2", "gefion") and len(parts) > 1:
-        first = parts[1]
-        rest = parts[2:]
-    else:
-        rest = parts[1:]
-
-    if first in MCP_TOOL_MAP:
-        cli_prefix = MCP_TOOL_MAP[first][0]
-        # Convert key=value params to --key value flags
-        cli_args = []
-        for arg in rest:
-            if "=" in arg and not arg.startswith("--"):
-                key, val = arg.split("=", 1)
-                cli_args.append(_param_to_flag(key))
-                cli_args.append(val)
-            else:
-                cli_args.append(arg)
-        cli_parts = cli_prefix.split() + cli_args
-        display = f"g2 {' '.join(cli_parts)}"
-        cmd = [sys.executable, "-m", "gefion.cli"] + cli_parts + ["--json"]
-        return cmd, display, "mcp"
-
-    # Raw CLI command
-    if parts[0] in ("g2", "gefion"):
-        cli_parts = parts[1:]
-    else:
-        cli_parts = parts
-    display = f"g2 {' '.join(cli_parts)}"
-    cmd = [sys.executable, "-m", "gefion.cli"] + cli_parts + ["--json"]
-    return cmd, display, "cli"
 
 
 @dataclass
@@ -312,8 +119,9 @@ def check_conditions() -> Optional[SystemConditions]:
                 try:
                     cur.execute("""
                         SELECT COUNT(*), MAX(prediction_date)
-                        FROM quantile_predictions
-                        WHERE prediction_date > CURRENT_DATE - INTERVAL '7 days'
+                        FROM predictions
+                        WHERE prediction_type = 'quantile'
+                          AND prediction_date > CURRENT_DATE - INTERVAL '7 days'
                     """)
                     row = cur.fetchone()
                     cond.prediction_count = row[0]
@@ -324,7 +132,7 @@ def check_conditions() -> Optional[SystemConditions]:
                         pred_age = (date.today() - row[1]).days
                         cond.predictions_aging = pred_age > 2
                 except Exception as e:
-                    logger.debug("Could not query quantile_predictions: %s", e)
+                    logger.debug("Could not query predictions: %s", e)
 
                 # 5. Calibration quality (from latest model_performance)
                 try:
@@ -699,10 +507,46 @@ def render_freeform_output(key: str, mode: str):
         st.rerun()
 
 
+def get_page_context():
+    """Return context for the System Operations page."""
+    context = {"page_name": "System Operations", "summary": "System health, suggested actions, and operations history."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM ml_models WHERE active = true")
+                model_count = cur.fetchone()[0]
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                latest = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM predictions")
+                pred_count = cur.fetchone()[0]
+        from datetime import date as date_type
+        data_age = (date_type.today() - latest).days if latest else None
+        context["data_stats"] = {
+            "active_models": model_count,
+            "predictions": pred_count,
+            "latest_data": str(latest) if latest else "none",
+            "data_age_days": data_age,
+        }
+        suggestions = []
+        if data_age and data_age > 3:
+            suggestions.append(f"Data is {data_age} days old — run gefion data-update")
+        if model_count == 0:
+            suggestions.append("No models — run gefion ml train")
+        context["suggestions"] = suggestions
+    except Exception:
+        pass
+    return context
+
+
 def render_assistant():
-    """Render the AI Actions page."""
-    st.title("AI Actions")
-    st.markdown("Run commands, ask questions, and explore your data.")
+    """Render the System Operations page."""
+    st.title("System Operations")
+    st.markdown("Monitor system health, run suggested actions, and review history.")
+
+    # Ask Gefion chat widget
+    from gefion.ui.components.chat import render_chat_widget
+    render_chat_widget(get_page_context())
 
     # --- Session errors indicator ---
     session_errors = read_session_errors()
@@ -718,125 +562,7 @@ def render_assistant():
                 msg = err.get("message", "")
                 st.error(f"**[{ts}] {source}**: {msg[:300]}")
 
-    # --- Section 1: Prompt entry + conversation history ---
-    st.subheader("Ask AI / Run Command")
-    st.caption(
-        "Type a natural language request (routed to Claude with Gefion MCP tools) "
-        "or a direct command (e.g. `gefion data-update --exchange NASDAQ`)."
-    )
-
-    history = read_exchanges()
-
-    with st.form("freeform_form", clear_on_submit=True):
-        cmd_input = st.text_input(
-            "Prompt or command",
-            placeholder="Which stocks had the biggest moves this week?" if not history else "",
-            key="freeform_cmd",
-        )
-        # Hide submit button, reduce form padding, sharpen input border
-        st.markdown(
-            "<style>"
-            "[data-testid='stFormSubmitButton'] {display: none;}"
-            "[data-testid='stForm'] {border: none; padding: 0;}"
-            "[data-testid='stTextInput'] input {"
-            "  border: 1px solid #ccc; border-radius: 4px;"
-            "  background-color: #f0f2f6;"
-            "}"
-            "[data-testid='stTextInput'] input:focus {"
-            "  border-color: #4a7cf7; box-shadow: 0 0 0 1px #4a7cf7;"
-            "}"
-            "</style>",
-            unsafe_allow_html=True,
-        )
-        submitted = st.form_submit_button("Run")
-
-    cmd_args: List[str] = []
-    display_cmd = ""
-    mode = ""
-    if cmd_input:
-        try:
-            cmd_args, display_cmd, mode = parse_command_input(cmd_input)
-        except ValueError as e:
-            st.error(f"Could not parse input: {e}")
-            cmd_args, display_cmd, mode = [], "", ""
-
-        if mode == "ai":
-            st.caption("Will send to Claude with Gefion MCP tools (operator mode)")
-        elif display_cmd:
-            st.code(display_cmd, language="bash")
-
-    freeform_state = get_process_state("freeform_cmd")
-    if freeform_state.is_running or freeform_state.completed:
-        freeform_mode = st.session_state.get("freeform_mode", "cli")
-        render_freeform_output("freeform_cmd", freeform_mode)
-
-    # Save completed exchange to history (once per completion)
-    if freeform_state.completed and not st.session_state.get("freeform_saved"):
-        prompt_text = st.session_state.get("freeform_prompt", "")
-        freeform_mode = st.session_state.get("freeform_mode", "cli")
-        # For AI mode, extract response from stream-json events
-        if freeform_mode == "ai":
-            all_events = (
-                getattr(freeform_state, "work_events", [])
-                or getattr(freeform_state, "output_lines", [])
-            )
-            response_text = ""
-            for evt_line in all_events:
-                evt = parse_stream_event(evt_line)
-                if evt and evt["type"] == "result":
-                    response_text = evt.get("result", "")
-        else:
-            output_lines = getattr(freeform_state, "output_lines", [])
-            response_text = "\n".join(output_lines) if output_lines else ""
-        append_exchange(
-            prompt=prompt_text,
-            mode=freeform_mode,
-            response=response_text,
-            success=freeform_state.success,
-            duration_sec=0.0,
-        )
-        st.session_state["freeform_saved"] = True
-        # Mark AI session as active so subsequent prompts use --continue
-        if freeform_mode == "ai" and freeform_state.success:
-            st.session_state["ai_session_active"] = True
-
-    if submitted and cmd_args and not freeform_state.is_running:
-        clear_process_state("freeform_cmd")
-        st.session_state["freeform_mode"] = mode
-        st.session_state["freeform_prompt"] = cmd_input
-        st.session_state["freeform_saved"] = False
-        env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
-        # Remove CLAUDECODE so claude -p can run (it refuses nested sessions)
-        env.pop("CLAUDECODE", None)
-        start_background_process("freeform_cmd", cmd_args, env)
-        st.rerun()
-
-    # Render conversation history (nested: History expander > individual exchanges)
-    if history:
-        with st.expander(f"History ({len(history)} exchanges)", expanded=False):
-            if st.button("Clear History", key="clear_history_btn"):
-                clear_history()
-                st.session_state["ai_session_active"] = False
-                st.rerun()
-            for i, ex in enumerate(reversed(history)):
-                status = "✓" if ex.get("success", True) else "✗"
-                prompt_preview = ex["prompt"][:80]
-                with st.expander(f"{status} {prompt_preview}", expanded=(i == 0)):
-                    st.markdown(f"**Prompt:** {ex['prompt']}")
-                    if ex.get("success", True):
-                        st.markdown(ex.get("response", ""))
-                    else:
-                        st.error(ex.get("response", "Command failed"))
-
-    # MCP tool reference
-    with st.expander("Available MCP Tools"):
-        for tool_name, (_, desc) in sorted(MCP_TOOL_MAP.items()):
-            st.markdown(f"- `{tool_name}` — {desc}")
-
-    st.markdown("---")
-
-    # --- Section 2: System conditions -> Action cards ---
+    # --- Suggested Actions ---
     st.subheader("Suggested Actions")
     conditions = check_conditions()
 
@@ -864,3 +590,28 @@ def render_assistant():
         c2.metric("Prices", f"{stats.ohlcv_rows:,}")
         c3.metric("Models", stats.model_count)
         c4.metric("Predictions", f"{stats.prediction_count:,}")
+
+    st.markdown("---")
+
+    # --- Global conversation history (persisted to disk) ---
+    history = read_exchanges()
+    if history:
+        with st.expander(f"History ({len(history)} exchanges)", expanded=False):
+            if st.button("Clear History", key="clear_history_btn"):
+                clear_history()
+                st.session_state["ai_session_active"] = False
+                st.rerun()
+            for i, ex in enumerate(reversed(history)):
+                status = "+" if ex.get("success", True) else "x"
+                prompt_preview = ex["prompt"][:80]
+                with st.expander(f"{status} {prompt_preview}", expanded=(i == 0)):
+                    st.markdown(f"**Prompt:** {ex['prompt']}")
+                    if ex.get("success", True):
+                        st.markdown(ex.get("response", ""))
+                    else:
+                        st.error(ex.get("response", "Command failed"))
+
+    # MCP tool reference
+    with st.expander("Available MCP Tools"):
+        for tool_name, (_, desc) in sorted(MCP_TOOL_MAP.items()):
+            st.markdown(f"- `{tool_name}` — {desc}")

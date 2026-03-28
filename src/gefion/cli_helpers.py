@@ -400,6 +400,7 @@ def init_schema_tables(conn: psycopg.Connection, tables: List[str]) -> None:
         "ml_datasets": schema.create_ml_datasets_table,
         "ml_runs": schema.create_ml_runs_table,
         "ml_models": schema.create_ml_models_table,
+        "predictions": schema.create_predictions_table,
         "quantile_predictions": schema.create_quantile_predictions_table,
         "prediction_outcomes": schema.create_prediction_outcomes_table,
         "model_performance": schema.create_model_performance_table,

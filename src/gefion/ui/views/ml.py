@@ -3,11 +3,79 @@
 import streamlit as st
 import subprocess
 import sys
+from gefion.ui.components.chat import render_chat_widget
 import json
 import os
 import re
 from datetime import datetime, date, timedelta
 from typing import Dict, Any
+
+
+def get_page_context():
+    """Return compact context dict for the ML Pipeline page."""
+    context = {"page_name": "ML Pipeline", "summary": "ML model training, predictions, and evaluation."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # Model details
+                cur.execute(
+                    "SELECT name, version, algorithm, "
+                    "(SELECT COUNT(*) FROM predictions p WHERE p.model_id = m.id) as pred_count, "
+                    "(SELECT DISTINCT prediction_type FROM predictions p WHERE p.model_id = m.id LIMIT 1) as pred_type "
+                    "FROM ml_models m WHERE active = true ORDER BY name"
+                )
+                models = []
+                for name, ver, algo, pcount, ptype in cur.fetchall():
+                    models.append(f"{name} {ver} ({algo or 'unknown'}, {pcount} {ptype or 'no'} predictions)")
+
+                cur.execute("SELECT prediction_type, COUNT(*) FROM predictions GROUP BY prediction_type")
+                pred_counts = {r[0]: r[1] for r in cur.fetchall()}
+
+                cur.execute("SELECT name, version FROM ml_datasets ORDER BY created_at DESC LIMIT 3")
+                datasets = [f"{n} {v}" for n, v in cur.fetchall()]
+
+        context["data_stats"] = {
+            "models": models or ["none"],
+            "datasets": datasets or ["none"],
+            "prediction_totals": pred_counts,
+        }
+
+        # Capture active filter selections from session state
+        filters = {}
+        filter_type = st.session_state.get("pred_filter_type")
+        if filter_type and filter_type != "All":
+            filters["prediction_type"] = filter_type
+        filter_model = st.session_state.get("pred_filter_model")
+        if filter_model and filter_model != "All":
+            filters["selected_model"] = filter_model
+        filter_date = st.session_state.get("pred_filter_date")
+        if filter_date and filter_date != "All":
+            filters["selected_date"] = filter_date
+        filter_symbol = st.session_state.get("pred_filter_symbol")
+        if filter_symbol:
+            filters["symbol_filter"] = filter_symbol
+        if filters:
+            context["filters"] = filters
+
+        empty = []
+        if not models:
+            empty.append("no trained models")
+        if not pred_counts.get("quantile"):
+            empty.append("no quantile predictions")
+        if not pred_counts.get("trend_class"):
+            empty.append("no trend class predictions")
+        context["empty_states"] = empty
+
+        suggestions = []
+        if not pred_counts.get("quantile"):
+            suggestions.append("Train a quantile model: gefion ml train")
+        if not models:
+            suggestions.append("Build a dataset first: gefion ml dataset-build")
+        context["suggestions"] = suggestions
+    except Exception:
+        pass
+    return context
 
 
 @st.cache_resource
@@ -369,6 +437,7 @@ def _render_model_inspection(model: dict):
 def render_ml():
     """Render the ML pipeline page."""
     st.markdown("# :material/model_training: ML Pipeline")
+    render_chat_widget(get_page_context())
     st.markdown("Train models, generate predictions, and evaluate performance.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -1731,9 +1800,9 @@ def _render_tune_section(datasets: list):
         if model_type == "quantile":
             cmd.extend(["--quantile", str(quantile)])
 
-        # Show CLI command (skip python -u -m g2.cli prefix)
+        # Show CLI command (skip python -u -m gefion.cli prefix)
         cli_cmd = " ".join(cmd[4:]).replace("gefion.cli", "gefion")
-        cli_cmd = "g2 " + cli_cmd
+        cli_cmd = "gefion " + cli_cmd
         st.code(cli_cmd, language="bash")
 
         with st.status("Tuning hyperparameters...", expanded=True) as status:
@@ -2100,38 +2169,57 @@ def render_predict_section():
 
         with get_connection() as conn:
             with conn.cursor() as cur:
-                # Get filter options
-                cur.execute("""
+                # Get available prediction types
+                cur.execute("SELECT DISTINCT prediction_type FROM predictions ORDER BY prediction_type")
+                type_opts = [r[0] for r in cur.fetchall()]
+
+        # Type toggle + filters
+        filter_cols = st.columns(4)
+        with filter_cols[0]:
+            filter_type = st.selectbox(
+                "Type",
+                ["All"] + type_opts,
+                format_func=lambda x: {"quantile": "Quantile", "trend_class": "Trend Class"}.get(x, x.title()),
+                key="pred_filter_type",
+            )
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # Get filter options scoped to selected type
+                type_cond = "WHERE p.prediction_type = %s" if filter_type != "All" else ""
+                type_params = [filter_type] if filter_type != "All" else []
+
+                cur.execute(f"""
                     SELECT DISTINCT m.name, m.version
-                    FROM quantile_predictions qp
-                    JOIN ml_models m ON qp.model_id = m.id
+                    FROM predictions p
+                    JOIN ml_models m ON p.model_id = m.id
+                    {type_cond}
                     ORDER BY m.name, m.version DESC
-                """)
+                """, type_params)
                 model_opts = [f"{r[0]} {r[1]}" for r in cur.fetchall()]
 
-                cur.execute("""
+                cur.execute(f"""
                     SELECT DISTINCT prediction_date
-                    FROM quantile_predictions
+                    FROM predictions
+                    {"WHERE prediction_type = %s" if filter_type != "All" else ""}
                     ORDER BY prediction_date DESC
                     LIMIT 30
-                """)
+                """, type_params)
                 date_opts = [str(r[0]) for r in cur.fetchall()]
 
-        # Filters
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        with filter_cols[1]:
             filter_model = st.selectbox(
                 "Model",
                 ["All"] + model_opts,
                 key="pred_filter_model",
             )
-        with col2:
+        with filter_cols[2]:
             filter_date = st.selectbox(
                 "Date",
                 ["All"] + date_opts,
                 key="pred_filter_date",
             )
-        with col3:
+        with filter_cols[3]:
             filter_symbol = st.text_input(
                 "Symbol",
                 placeholder="e.g., AAPL",
@@ -2144,6 +2232,10 @@ def render_predict_section():
                 conditions = []
                 params = []
 
+                if filter_type != "All":
+                    conditions.append("p.prediction_type = %s")
+                    params.append(filter_type)
+
                 if filter_model != "All":
                     parts = filter_model.rsplit(" ", 1)
                     if len(parts) == 2:
@@ -2151,7 +2243,7 @@ def render_predict_section():
                         params.extend(parts)
 
                 if filter_date != "All":
-                    conditions.append("qp.prediction_date = %s")
+                    conditions.append("p.prediction_date = %s")
                     params.append(filter_date)
 
                 if filter_symbol:
@@ -2160,50 +2252,104 @@ def render_predict_section():
 
                 where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
-                cur.execute(f"""
-                    SELECT
-                        s.symbol,
-                        qp.prediction_date,
-                        qp.horizon_days,
-                        qp.q10,
-                        qp.q50,
-                        qp.q90,
-                        m.name || ' ' || m.version as model
-                    FROM quantile_predictions qp
-                    JOIN stocks s ON qp.data_id = s.id
-                    JOIN ml_models m ON qp.model_id = m.id
-                    {where_clause}
-                    ORDER BY qp.prediction_date DESC, s.symbol, qp.horizon_days
-                    LIMIT 200
-                """, params)
-                predictions = cur.fetchall()
+                # Use type-specific columns
+                show_type = filter_type if filter_type != "All" else None
 
-                if predictions:
-                    df = pd.DataFrame(
-                        predictions,
-                        columns=["Symbol", "Date", "Horizon", "Q10", "Q50", "Q90", "Model"]
-                    )
+                if show_type == "trend_class":
+                    cur.execute(f"""
+                        SELECT
+                            s.symbol,
+                            p.prediction_date,
+                            p.horizon_days,
+                            p.prediction_values->>'predicted_class',
+                            (p.prediction_values->>'p_strong_up')::NUMERIC,
+                            (p.prediction_values->>'p_weak_up')::NUMERIC,
+                            (p.prediction_values->>'p_neutral')::NUMERIC,
+                            (p.prediction_values->>'p_weak_down')::NUMERIC,
+                            (p.prediction_values->>'p_strong_down')::NUMERIC,
+                            (p.prediction_values->>'margin')::NUMERIC,
+                            m.name || ' ' || m.version as model
+                        FROM predictions p
+                        JOIN stocks s ON p.data_id = s.id
+                        JOIN ml_models m ON p.model_id = m.id
+                        {where_clause}
+                        ORDER BY p.prediction_date DESC, s.symbol, p.horizon_days
+                        LIMIT 200
+                    """, params)
+                    predictions = cur.fetchall()
 
-                    # Format percentages
-                    df["Q10"] = df["Q10"].apply(lambda x: f"{float(x):.1%}" if x else "-")
-                    df["Q50"] = df["Q50"].apply(lambda x: f"{float(x):.1%}" if x else "-")
-                    df["Q90"] = df["Q90"].apply(lambda x: f"{float(x):.1%}" if x else "-")
-                    df["Horizon"] = df["Horizon"].apply(lambda x: f"{x}d")
-
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-
-                    # Quick inspect
-                    unique_symbols = df["Symbol"].unique().tolist()
-                    if unique_symbols:
-                        inspect_symbol = st.selectbox(
-                            "Inspect symbol",
-                            ["Select..."] + unique_symbols,
-                            key="pred_inspect_symbol",
+                    if predictions:
+                        df = pd.DataFrame(
+                            predictions,
+                            columns=["Symbol", "Date", "Horizon", "Class",
+                                     "P(Strong Up)", "P(Weak Up)", "P(Neutral)",
+                                     "P(Weak Down)", "P(Strong Down)", "Margin", "Model"]
                         )
-                        if inspect_symbol != "Select...":
-                            st.code(f"gefion ml predict-inspect --symbol {inspect_symbol}", language="bash")
+                        df["Horizon"] = df["Horizon"].apply(lambda x: f"{x}d")
+                        for col in ["P(Strong Up)", "P(Weak Up)", "P(Neutral)", "P(Weak Down)", "P(Strong Down)", "Margin"]:
+                            df[col] = df[col].apply(lambda x: f"{float(x):.2%}" if x is not None else "-")
+
+                        st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.info("No predictions found matching filters.")
+                    # Quantile-only or All view
+                    cur.execute(f"""
+                        SELECT
+                            s.symbol,
+                            p.prediction_date,
+                            p.horizon_days,
+                            p.prediction_type,
+                            (p.prediction_values->>'q10')::NUMERIC,
+                            (p.prediction_values->>'q50')::NUMERIC,
+                            (p.prediction_values->>'q90')::NUMERIC,
+                            p.prediction_values->>'predicted_class',
+                            (p.prediction_values->>'margin')::NUMERIC,
+                            m.name || ' ' || m.version as model
+                        FROM predictions p
+                        JOIN stocks s ON p.data_id = s.id
+                        JOIN ml_models m ON p.model_id = m.id
+                        {where_clause}
+                        ORDER BY p.prediction_date DESC, s.symbol, p.horizon_days
+                        LIMIT 200
+                    """, params)
+                    predictions = cur.fetchall()
+
+                    if predictions:
+                        df = pd.DataFrame(
+                            predictions,
+                            columns=["Symbol", "Date", "Horizon", "Type",
+                                     "Q10", "Q50", "Q90", "Class", "Margin", "Model"]
+                        )
+                        df["Horizon"] = df["Horizon"].apply(lambda x: f"{x}d")
+                        df["Type"] = df["Type"].apply(lambda x: {"quantile": "Q", "trend_class": "TC"}.get(x, x))
+                        df["Q10"] = df["Q10"].apply(lambda x: f"{float(x):.1%}" if x is not None else None)
+                        df["Q50"] = df["Q50"].apply(lambda x: f"{float(x):.1%}" if x is not None else None)
+                        df["Q90"] = df["Q90"].apply(lambda x: f"{float(x):.1%}" if x is not None else None)
+                        df["Margin"] = df["Margin"].apply(lambda x: f"{float(x):.4f}" if x is not None else None)
+                        df["Class"] = df["Class"].apply(lambda x: x if x else None)
+
+                        # Drop columns that are entirely empty
+                        for col in ["Q10", "Q50", "Q90", "Class", "Margin"]:
+                            if df[col].isna().all() or (df[col] == None).all():
+                                df = df.drop(columns=[col])
+
+                        # Drop Type column when only one type is present
+                        if df["Type"].nunique() <= 1:
+                            df = df.drop(columns=["Type"])
+
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+
+                        # Quick inspect
+                        unique_symbols = df["Symbol"].unique().tolist()
+                        if unique_symbols:
+                            inspect_symbol = st.selectbox(
+                                "Inspect symbol",
+                                ["Select..."] + unique_symbols,
+                                key="pred_inspect_symbol",
+                            )
+                            if inspect_symbol != "Select...":
+                                st.code(f"gefion ml predict-inspect --symbol {inspect_symbol}", language="bash")
+                    else:
+                        st.info("No predictions found matching filters.")
 
     except Exception as e:
         st.error(f"Error loading predictions: {e}")

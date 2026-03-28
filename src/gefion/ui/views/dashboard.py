@@ -2,8 +2,68 @@
 
 import streamlit as st
 from datetime import datetime, timedelta
+from gefion.ui.components.chat import render_chat_widget
 from dataclasses import dataclass, field
 from typing import Optional
+
+
+def get_page_context():
+    """Return compact context dict for the Dashboard page."""
+    context = {"page_name": "Dashboard", "summary": "Market overview with movers, system stats, and prediction insights."}
+    try:
+        from gefion.ui.components.database import get_connection
+        from datetime import date as date_type
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM stocks")
+                stock_count = cur.fetchone()[0]
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                latest = cur.fetchone()[0]
+
+                # Top movers summary
+                if latest:
+                    cur.execute("""
+                        SELECT s.symbol,
+                               ROUND(((o2.close - o1.close) / NULLIF(o1.close, 0) * 100)::numeric, 2) as pct
+                        FROM stock_ohlcv o2
+                        JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = o2.date - 1
+                        JOIN stocks s ON s.id = o2.data_id
+                        WHERE o2.date = %s
+                        ORDER BY pct DESC LIMIT 3
+                    """, (latest,))
+                    top_gainers = [f"{r[0]} ({r[1]:+.1f}%)" for r in cur.fetchall()]
+
+                    cur.execute("""
+                        SELECT s.symbol,
+                               ROUND(((o2.close - o1.close) / NULLIF(o1.close, 0) * 100)::numeric, 2) as pct
+                        FROM stock_ohlcv o2
+                        JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = o2.date - 1
+                        JOIN stocks s ON s.id = o2.data_id
+                        WHERE o2.date = %s
+                        ORDER BY pct ASC LIMIT 3
+                    """, (latest,))
+                    top_losers = [f"{r[0]} ({r[1]:+.1f}%)" for r in cur.fetchall()]
+                else:
+                    top_gainers, top_losers = [], []
+
+        data_age = (date_type.today() - latest).days if latest else None
+        context["data_stats"] = {
+            "stocks": stock_count,
+            "latest_data": str(latest) if latest else "none",
+            "data_age_days": data_age,
+            "top_gainers": top_gainers,
+            "top_losers": top_losers,
+        }
+        empty = []
+        suggestions = []
+        if data_age and data_age > 3:
+            empty.append(f"price data is {data_age} days old")
+            suggestions.append("Update prices: gefion data-update")
+        context["empty_states"] = empty
+        context["suggestions"] = suggestions
+    except Exception:
+        pass
+    return context
 
 
 @dataclass
@@ -109,11 +169,13 @@ def get_gefion_insights() -> Optional[GefionInsights]:
         with get_connection() as conn:
             with conn.cursor() as cur:
                 # Predictions - table may not exist yet
+                # Predictions - table may not exist yet
                 try:
                     cur.execute("""
                         SELECT COUNT(*), MAX(prediction_date)
-                        FROM quantile_predictions
-                        WHERE prediction_date >= CURRENT_DATE - INTERVAL '7 days'
+                        FROM predictions
+                        WHERE prediction_type = 'quantile'
+                          AND prediction_date >= CURRENT_DATE - INTERVAL '7 days'
                     """)
                     pred_count, pred_date = cur.fetchone()
                     insights.pred_count = pred_count or 0
@@ -121,12 +183,19 @@ def get_gefion_insights() -> Optional[GefionInsights]:
 
                     if insights.pred_count > 0:
                         cur.execute("""
-                            SELECT s.symbol, qp.q50, qp.q90, qp.horizon_days
-                            FROM quantile_predictions qp
-                            JOIN stocks s ON qp.data_id = s.id
-                            WHERE qp.prediction_date = (SELECT MAX(prediction_date) FROM quantile_predictions)
-                              AND qp.horizon_days = 7
-                            ORDER BY qp.q50 DESC
+                            SELECT s.symbol,
+                                   (p.prediction_values->>'q50')::NUMERIC,
+                                   (p.prediction_values->>'q90')::NUMERIC,
+                                   p.horizon_days
+                            FROM predictions p
+                            JOIN stocks s ON p.data_id = s.id
+                            WHERE p.prediction_type = 'quantile'
+                              AND p.prediction_date = (
+                                  SELECT MAX(prediction_date) FROM predictions
+                                  WHERE prediction_type = 'quantile'
+                              )
+                              AND p.horizon_days = 7
+                            ORDER BY (p.prediction_values->>'q50')::NUMERIC DESC
                             LIMIT 3
                         """)
                         insights.bullish = list(cur.fetchall())
@@ -168,6 +237,7 @@ def get_gefion_insights() -> Optional[GefionInsights]:
 def render_dashboard():
     """Render the main dashboard."""
     st.markdown("# :material/grid_view: Dashboard")
+    render_chat_widget(get_page_context())
     st.markdown("Welcome to Gefion — your AI-powered trading analysis platform.")
 
     # System status section
@@ -191,10 +261,10 @@ def render_dashboard():
             st.rerun()
 
     with col2:
-        st.markdown("### :material/bolt: AI Actions")
-        st.markdown("Ask questions and run commands with AI.")
-        if st.button("AI Actions", key="quick_ai", width="stretch"):
-            st.session_state.current_page = "AI Actions"
+        st.markdown("### :material/bolt: System Operations")
+        st.markdown("System health, actions, and history.")
+        if st.button("System Operations", key="quick_ai", width="stretch"):
+            st.session_state.current_page = "System Operations"
             st.rerun()
 
     with col3:
@@ -316,7 +386,7 @@ def render_dashboard():
 
         **Gefion** is a comprehensive trading analysis platform that combines:
         - :material/bar_chart: **Charts** - Candlesticks, comparisons, volatility analysis
-        - :material/bolt: **AI Actions** - Example queries for Claude Code
+        - :material/bolt: **System Operations** - Health monitoring and suggested actions
         - :material/model_training: **ML Predictions** - Quantile regression and trend classification
         - :material/history: **Backtesting** - Test strategies with realistic execution modeling
 

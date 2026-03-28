@@ -3,6 +3,7 @@
 import streamlit as st
 from pathlib import Path
 import re
+from gefion.ui.components.chat import render_chat_widget
 from typing import List, Tuple
 
 
@@ -148,6 +149,7 @@ def search_docs(query: str) -> List[Tuple[str, str, str, str, str, int]]:
 def render_docs():
     """Render the documentation page."""
     st.markdown("# :material/menu_book: Documentation")
+    render_chat_widget({"page_name": "Documentation"})
     st.markdown("Guides and theory for Gefion quantitative trading platform.")
 
     # Search box

@@ -2,11 +2,13 @@
 
 import streamlit as st
 import os
+from gefion.ui.components.chat import render_chat_widget
 
 
 def render_settings():
     """Render the settings page."""
     st.markdown("# :material/settings: Settings")
+    render_chat_widget({"page_name": "Settings"})
     st.markdown("Configure Gefion settings and preferences.")
 
     tab1, tab2 = st.tabs([":material/database: Database", ":material/info: About"])
@@ -104,7 +106,7 @@ def render_about():
     **Gefion** is a comprehensive trading analysis platform that combines:
 
     - :material/bar_chart: **Charts** - Professional Plotly visualizations
-    - :material/bolt: **AI Actions** - Example queries for Claude Code
+    - :material/bolt: **System Operations** - Health monitoring and suggested actions
     - :material/model_training: **ML Pipeline** - Quantile regression & classification models
     - :material/history: **Backtesting** - Strategy testing with realistic execution
 

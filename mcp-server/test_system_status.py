@@ -33,7 +33,7 @@ class TestSystemStatusComprehensive:
     def test_system_status_suggests_data_update_when_stale(self):
         """Test suggestions for stale data."""
         # Expected: If latest data is old, suggest:
-        # "g2 data-update --exchange NASDAQ --limit 10"
+        # "gefion data-update --exchange NASDAQ --limit 10"
         pass
 
     def test_system_status_prioritizes_suggestions(self):
@@ -80,7 +80,7 @@ class TestSystemStatusComprehensive:
         """Test that suggestions include executable commands."""
         # Expected: Each suggestion has:
         # - description: What's wrong
-        # - command: Exact g2 command to fix it
+        # - command: Exact gefion command to fix it
         # - priority: high/medium/low
         pass
 
@@ -124,7 +124,7 @@ class TestSystemStatusSuggestionEngine:
     def test_suggestions_are_actionable(self):
         """Test that every suggestion has a clear action."""
         # Expected: Each suggestion has executable command
-        # Not just "data is stale" but "run: g2 data-update ..."
+        # Not just "data is stale" but "run: gefion data-update ..."
         pass
 
     def test_next_steps_workflow_is_logical(self):
@@ -140,13 +140,13 @@ class TestFeatureRegistrationDetection:
     def test_detects_unregistered_feature_definitions(self):
         """Test detection of feature definitions on disk not in DB."""
         # Expected: Compares feature-definitions/*.json count vs feature_definitions table
-        # If mismatch, suggests: g2 feat-def-import
+        # If mismatch, suggests: gefion feat-def-import
         pass
 
     def test_detects_unregistered_feature_functions(self):
         """Test detection of feature functions on disk not in DB."""
         # Expected: Compares feature-functions/*.json count vs feature_functions table
-        # If mismatch, suggests: g2 feat-fx-import
+        # If mismatch, suggests: gefion feat-fx-import
         pass
 
     def test_feature_definition_mismatch_priority(self):
@@ -158,8 +158,8 @@ class TestFeatureRegistrationDetection:
     def test_suggests_correct_import_commands(self):
         """Test that suggestions include correct import commands."""
         # Expected:
-        # - Feature definitions: "g2 feat-def-import --directory feature-definitions"
-        # - Feature functions: "g2 feat-fx-import --directory feature-functions"
+        # - Feature definitions: "gefion feat-def-import --directory feature-definitions"
+        # - Feature functions: "gefion feat-fx-import --directory feature-functions"
         pass
 
     def test_handles_missing_directories(self):
@@ -181,13 +181,13 @@ class TestFundamentalsStalenessDetection:
     def test_detects_stale_fundamentals(self):
         """Test detection of fundamentals data older than threshold."""
         # Expected: Checks MAX(updated_at) from stocks table
-        # If older than 30 days, suggests: g2 fundamentals-update
+        # If older than 30 days, suggests: gefion fundamentals-update
         pass
 
     def test_detects_missing_fundamentals(self):
         """Test detection when stocks have no fundamentals data."""
         # Expected: Checks for stocks with NULL sector/industry
-        # Suggests: g2 fundamentals-update
+        # Suggests: gefion fundamentals-update
         pass
 
     def test_fundamentals_staleness_priority_is_low(self):
@@ -204,7 +204,7 @@ class TestFundamentalsStalenessDetection:
 
     def test_suggests_correct_fundamentals_command(self):
         """Test that suggestion includes correct command."""
-        # Expected: "g2 fundamentals-update"
+        # Expected: "gefion fundamentals-update"
         pass
 
     def test_no_issue_when_fundamentals_fresh(self):

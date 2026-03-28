@@ -1,12 +1,13 @@
 <!--
   Sync Impact Report
-  Version change: 1.7.0 → 1.7.1 (skill maintenance requirement)
-  Added: /g2 operator skill must be updated when MCP tools change (Section III)
+  Version change: 1.7.1 → 1.8.0 (db-init + migration governance)
+  Added: db-init as single idempotent entry point (Section I), two-file rule for migrations (Schema Governance)
+  Renamed: g2 → gefion throughout
   Templates requiring updates: none
   Follow-up TODOs: none
 -->
 
-# g2 Constitution
+# Gefion Constitution
 
 ## Core Principles
 
@@ -16,8 +17,9 @@ The database is the single source of truth. Feature definitions, compute functio
 
 - All feature logic MUST be stored in `feature_functions` and `feature_definitions` tables
 - Git exports (`feature-functions/`, `feature-definitions/`) are backups, not primary sources
-- Schema changes MUST go through `sql/schema.sql`; no ad-hoc DDL (see Schema Governance below)
-- TimescaleDB hypertables MUST be used for time-series data (`stock_ohlcv`, `computed_features`)
+- Schema changes MUST go through `sql/schema.sql` (canonical DDL) and `sql/migrations/` (incremental changes); no ad-hoc DDL (see Schema Governance below)
+- `gefion db-init` is the single idempotent entry point for database setup: it creates tables from `schema.sql`, runs pending migrations, and seeds reference data — a fresh database or an existing one must both reach the correct state from this one command
+- TimescaleDB hypertables MUST be used for time-series data (`stock_ohlcv`, `computed_features`, `predictions`)
 - Compute functions MUST be pure: no side effects, no file I/O; the dispatcher handles all DB interaction
 
 ### II. Test-Driven Development (NON-NEGOTIABLE)
@@ -49,14 +51,14 @@ All functionality MUST be accessible through the `gefion` CLI before any other i
 - The MCP server wraps CLI commands for natural language access; it does not bypass them
 - New capabilities MUST be usable from the command line without requiring a UI or API
 - Major CLI commands MUST have corresponding MCP tool definitions to ensure natural language accessibility
-- Claude Code skills (`.claude/commands/`) MUST be prefixed with `g2-` (e.g., `g2-services.md`) to namespace them from third-party skills
-- When new MCP tools are added, the `/g2` operator skill MUST be reviewed and updated to include the new capabilities in its workflow guidance and tool routing
+- Claude Code skills (`.claude/commands/`) MUST be prefixed with `gefion-` (e.g., `gefion-services.md`) to namespace them from third-party skills
+- When new MCP tools are added, the `/gefion` operator skill MUST be reviewed and updated to include the new capabilities in its workflow guidance and tool routing
 
 ### IV. Observability
 
 Every significant operation MUST be traceable and debuggable.
 
-- New modules MUST import from `g2.observability`
+- New modules MUST import from `gefion.observability`
 - Significant operations MUST use the `@traced` decorator for OpenTelemetry spans
 - All modules MUST use structured logging via `logger = logging.getLogger(__name__)`
 - Traces MUST be queryable through Grafana Tempo for performance investigation
@@ -133,11 +135,14 @@ Major features MUST include documentation updates as part of the implementation.
 
 ## Schema Governance
 
-The database schema is the backbone of g2. Because it controls data flow, feature computation, and ML pipelines, all schema changes require explicit owner approval.
+The database schema is the backbone of gefion. Because it controls data flow, feature computation, and ML pipelines, all schema changes require explicit owner approval.
 
 - **No autonomous schema changes**: Claude Code MUST NOT create, alter, or drop tables, columns, indexes, hypertables, or constraints without owner approval
 - **Propose, don't execute**: When a feature requires schema changes, present the proposed DDL for review. Do not write it to `sql/schema.sql` or run it against the database until approved
 - **Scope of approval**: Each approval covers the specific change discussed. Approval of one migration does not authorize future schema changes
+- **Two-file rule**: Every schema change MUST update both `sql/schema.sql` (canonical DDL for fresh databases) and add a migration in `sql/migrations/` (incremental change for existing databases). The two MUST be kept in sync — `schema.sql` represents the final state, the migration gets there from the previous state
+- **Migration naming**: `YYYYMMDD_NNNNNN_descriptive_name.sql` — tracked in the `schema_migrations` table
+- **db-init handles both**: `gefion db-init` runs `schema.sql` (CREATE IF NOT EXISTS — safe on existing DBs) then applies pending migrations. This ensures any database reaches the current schema regardless of its starting state
 - **What counts as a schema change**:
   - Adding, renaming, or removing tables or columns
   - Changing column types, defaults, or constraints
@@ -169,4 +174,4 @@ This constitution supersedes all ad-hoc practices. Amendments require:
 
 All code changes MUST comply with these principles. Complexity that violates a principle MUST be explicitly justified and documented.
 
-**Version**: 1.7.1 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-02-28
+**Version**: 1.8.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-03-27

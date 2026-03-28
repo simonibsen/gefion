@@ -3,6 +3,7 @@
 import streamlit as st
 import subprocess
 import sys
+from gefion.ui.components.chat import render_chat_widget
 import os
 import json
 import time
@@ -15,15 +16,67 @@ from gefion.ui.views.data import (
 )
 
 
+def get_page_context():
+    """Return compact context dict for the Features page."""
+    context = {"page_name": "Features", "summary": "Technical indicator and cross-sectional feature management."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # Feature definitions with details
+                cur.execute(
+                    "SELECT name, function_name, active FROM feature_definitions "
+                    "ORDER BY active DESC, name LIMIT 30"
+                )
+                definitions = [
+                    f"{r[0]} (fn: {r[1]}, {'active' if r[2] else 'inactive'})"
+                    for r in cur.fetchall()
+                ]
+
+                # Feature functions
+                cur.execute(
+                    "SELECT name, version, enabled FROM feature_functions "
+                    "ORDER BY enabled DESC, name"
+                )
+                functions = [
+                    f"{r[0]} v{r[1]} ({'enabled' if r[2] else 'disabled'})"
+                    for r in cur.fetchall()
+                ]
+
+                cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
+                active = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM feature_definitions")
+                total = cur.fetchone()[0]
+
+                # Coverage stats
+                cur.execute("SELECT COUNT(DISTINCT data_id) FROM computed_features")
+                symbols_with_features = cur.fetchone()[0]
+
+        context["data_stats"] = {
+            "active_definitions": active,
+            "total_definitions": total,
+            "symbols_with_computed_features": symbols_with_features,
+            "definitions": definitions,
+            "functions": functions,
+        }
+        if active == 0:
+            context["empty_states"] = ["no active feature definitions"]
+            context["suggestions"] = ["Import features: gefion feat-def-import --directory feature-definitions"]
+    except Exception:
+        pass
+    return context
+
+
 def get_project_root() -> Path:
     """Get the project root directory (where feature-definitions/ lives)."""
-    # Navigate up from src/g2/ui/views to project root
+    # Navigate up from src/gefion/ui/views to project root
     return Path(__file__).parent.parent.parent.parent.parent
 
 
 def render_features():
     """Render the features management page."""
     st.markdown("# :material/tune: Features")
+    render_chat_widget(get_page_context())
     st.markdown("Manage feature definitions, functions, and view computed data coverage.")
 
     tab1, tab2, tab3, tab4 = st.tabs([":material/list_alt: Definitions", ":material/code: Functions", ":material/donut_large: Coverage", ":material/memory: Compute"])
@@ -52,10 +105,10 @@ def render_definitions_tab():
 gefion feat-def-list
 
 # Show details for a specific feature
-g2 feat-def-show indicator_rsi_14
+gefion feat-def-show indicator_rsi_14
 
 # Export definitions to JSON files
-g2 feat-def-export --dir feature-definitions/
+gefion feat-def-export --dir feature-definitions/
 
 # Import definitions from JSON files
 gefion feat-def-import --dir feature-definitions/""", language="bash")
@@ -312,10 +365,10 @@ def render_functions_tab():
     # Show CLI command reference
     with st.expander("CLI Commands"):
         st.code("""# List all registered functions
-g2 feat-fx-list
+gefion feat-fx-list
 
 # Export functions to JSON files
-g2 feat-fx-export --dir feature-functions/
+gefion feat-fx-export --dir feature-functions/
 
 # Import functions from JSON files
 gefion feat-fx-import --dir feature-functions/""", language="bash")
@@ -620,10 +673,10 @@ def render_coverage_tab():
 gefion feat-compute --symbols AAPL,MSFT --all-features
 
 # Trim feature data by date
-g2 feat-trim --before 2020-01-01
+gefion feat-trim --before 2020-01-01
 
 # Query feature data
-g2 query-database --sql "SELECT * FROM computed_features LIMIT 10" """, language="bash")
+gefion query-database --sql 'SELECT * FROM computed_features LIMIT 10'""", language="bash")
 
     col1, col2 = st.columns([3, 1])
     with col1:
