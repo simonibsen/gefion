@@ -382,11 +382,11 @@ def _render_chat_fragment() -> None:
         status_dot = " (offline)"
 
     if n_convos == 0:
-        label = f"Ask AI{status_dot}"
+        label = f"Ask Gefion{status_dot}"
     elif n_convos == 1:
-        label = f"Ask AI (1 conversation){status_dot}"
+        label = f"Ask Gefion (1 conversation){status_dot}"
     else:
-        label = f"Ask AI ({n_convos} conversations){status_dot}"
+        label = f"Ask Gefion ({n_convos} conversations){status_dot}"
 
     from gefion.ui.views.data import start_background_process, get_process_state, clear_process_state, stop_process
 
@@ -424,8 +424,12 @@ def _render_chat_fragment() -> None:
                 disabled=is_busy,
             )
             st.markdown(
-                '<style>div[data-testid="stExpander"] [data-testid="stFormSubmitButton"] '
-                "{display:none !important;}</style>",
+                "<style>"
+                'div[data-testid="stExpander"] [data-testid="stFormSubmitButton"] '
+                "{display:none !important;} "
+                'div[data-testid="stExpander"] [data-testid="stForm"] '
+                "{padding-bottom:0 !important; margin-bottom:-1rem !important;}"
+                "</style>",
                 unsafe_allow_html=True,
             )
             submitted = st.form_submit_button("Ask")
