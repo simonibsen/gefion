@@ -3641,7 +3641,7 @@ async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get("early_stop"):
             cmd.append("--early-stop")
 
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _propose)
@@ -3659,7 +3659,7 @@ async def _experiment_list(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get("limit"):
             cmd.extend(["--limit", str(args["limit"])])
 
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _list)
@@ -3669,7 +3669,7 @@ async def _experiment_approve(args: Dict[str, Any]) -> Dict[str, Any]:
     """Approve an experiment for execution."""
     async def _approve():
         cmd = ["gefion", "experiment", "approve", "--id", str(args["experiment_id"])]
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _approve)
@@ -3679,7 +3679,7 @@ async def _experiment_run(args: Dict[str, Any]) -> Dict[str, Any]:
     """Run an approved experiment."""
     async def _run():
         cmd = ["gefion", "experiment", "run", "--id", str(args["experiment_id"])]
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _run)
@@ -3693,7 +3693,7 @@ async def _experiment_results(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get("show_trials"):
             cmd.append("--show-trials")
 
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _results)
@@ -3724,7 +3724,7 @@ async def _experiment_chain(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get("search_method"):
             cmd.extend(["--search-method", args["search_method"]])
 
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _chain)
@@ -3734,7 +3734,7 @@ async def _experiment_children(args: Dict[str, Any]) -> Dict[str, Any]:
     """List child experiments of a parent."""
     async def _children():
         cmd = ["gefion", "experiment", "children", "--parent-id", str(args["parent_id"])]
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _children)
@@ -3744,7 +3744,7 @@ async def _experiment_status(args: Dict[str, Any]) -> Dict[str, Any]:
     """Get detailed status of an experiment."""
     async def _status():
         cmd = ["gefion", "experiment", "status", "--id", str(args["experiment_id"])]
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _status)
@@ -3764,7 +3764,7 @@ async def _chart_price(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--end-date", args["end_date"]])
         if args.get("indicators"):
             cmd.extend(["--indicators", args["indicators"]])
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _generate)
@@ -3777,7 +3777,7 @@ async def _chart_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
                "--model", args["model"], "--json", "--no-open"]
         if args.get("horizon"):
             cmd.extend(["--horizon", str(args["horizon"])])
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _generate)
@@ -3792,7 +3792,7 @@ async def _chart_features(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--start-date", args["start_date"]])
         if args.get("end_date"):
             cmd.extend(["--end-date", args["end_date"]])
-        executor = CLIExecutor()
+        executor = GefionExecutor()
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _generate)
