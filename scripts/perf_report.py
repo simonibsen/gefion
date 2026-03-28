@@ -29,7 +29,7 @@ THRESHOLDS = {
 }
 
 # Spans to ignore (long-running parent spans, not actionable)
-IGNORE_SPANS = {"cli.ui"}
+IGNORE_SPANS = {"cli.ui", "SELECT"}  # cli.ui = session span, SELECT = auto-instrumented connection span
 DEFAULT_THRESHOLD = 1000
 
 
