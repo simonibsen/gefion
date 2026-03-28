@@ -127,6 +127,30 @@ class TestUIStructure:
         content = (ui_dir / "views" / "charts.py").read_text()
         assert "def render_charts(" in content
 
+    def test_charts_uses_d3_renderers(self, ui_dir):
+        """Charts view should import from gefion.charts.d3.renderers, not gefion.charts.renderers."""
+        content = (ui_dir / "views" / "charts.py").read_text()
+        assert "from gefion.charts.d3.renderers import" in content, (
+            "charts.py must import from gefion.charts.d3.renderers"
+        )
+        # Should NOT import chart creators from the old Plotly renderers
+        assert "from gefion.charts.renderers import create_" not in content, (
+            "charts.py must not import create_* from gefion.charts.renderers (Plotly)"
+        )
+
+    def test_charts_uses_components_html_not_plotly(self, ui_dir):
+        """Charts view should use components.html() instead of st.plotly_chart()."""
+        content = (ui_dir / "views" / "charts.py").read_text()
+        assert "st.plotly_chart(" not in content, (
+            "charts.py must not use st.plotly_chart (use components.html for D3)"
+        )
+        assert "components.html(" in content, (
+            "charts.py must use components.html() to render D3 HTML charts"
+        )
+        assert "import streamlit.components.v1 as components" in content, (
+            "charts.py must import streamlit.components.v1 as components"
+        )
+
     def test_assistant_has_render_function(self, ui_dir):
         """Assistant view should have render_assistant function."""
         content = (ui_dir / "views" / "assistant.py").read_text()

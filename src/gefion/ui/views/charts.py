@@ -1,6 +1,7 @@
 """Charts page - Interactive visualizations."""
 
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta, date
 from typing import Optional
 from gefion.ui.components.chat import render_chat_widget
@@ -103,7 +104,7 @@ def render_price_chart():
             try:
                 from gefion.ui.components.database import get_connection
                 from gefion.charts.queries import fetch_ohlcv_for_chart
-                from gefion.charts.renderers import create_candlestick_chart
+                from gefion.charts.d3.renderers import create_candlestick_chart
                 from gefion.charts.analysis import compute_price_insights
 
                 start, end = get_period_dates(period)
@@ -119,10 +120,10 @@ def render_price_chart():
                 insights = compute_price_insights(ohlcv, {})
 
                 # Create chart
-                fig = create_candlestick_chart(ohlcv, symbol, insights=insights)
+                html = create_candlestick_chart(ohlcv, symbol, insights=insights)
 
                 # Display chart
-                st.plotly_chart(fig, use_container_width=True)
+                components.html(html, height=650, scrolling=False)
 
                 # Display insights
                 with st.expander("Analysis", expanded=True):
@@ -188,7 +189,7 @@ def render_comparison_chart():
             try:
                 from gefion.ui.components.database import get_connection
                 from gefion.charts.queries import fetch_ohlcv_for_chart
-                from gefion.charts.renderers import create_comparison_chart
+                from gefion.charts.d3.renderers import create_comparison_chart
 
                 start, end = get_period_dates(period)
                 symbol_data = {}
@@ -203,8 +204,8 @@ def render_comparison_chart():
                     st.error("Need at least 2 symbols with data")
                     return
 
-                fig = create_comparison_chart(symbol_data)
-                st.plotly_chart(fig, use_container_width=True)
+                html = create_comparison_chart(symbol_data)
+                components.html(html, height=500, scrolling=False)
 
                 # Performance summary
                 st.subheader("Performance Summary")
@@ -254,7 +255,7 @@ def render_correlation_chart():
             try:
                 from gefion.ui.components.database import get_connection
                 from gefion.charts.queries import fetch_ohlcv_for_chart
-                from gefion.charts.renderers import create_correlation_matrix
+                from gefion.charts.d3.renderers import create_correlation_matrix
 
                 start, end = get_period_dates(period)
                 symbol_data = {}
@@ -265,8 +266,8 @@ def render_correlation_chart():
                         if ohlcv:
                             symbol_data[symbol] = ohlcv
 
-                fig = create_correlation_matrix(symbol_data)
-                st.plotly_chart(fig, use_container_width=True)
+                html = create_correlation_matrix(symbol_data)
+                components.html(html, height=600, scrolling=False)
 
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -311,7 +312,7 @@ def render_volatility_chart():
             try:
                 from gefion.ui.components.database import get_connection
                 from gefion.charts.queries import fetch_ohlcv_for_chart
-                from gefion.charts.renderers import create_volatility_chart
+                from gefion.charts.d3.renderers import create_volatility_chart
 
                 start, end = get_period_dates(period)
 
@@ -322,8 +323,8 @@ def render_volatility_chart():
                     st.error(f"No data for {symbol}")
                     return
 
-                fig = create_volatility_chart(ohlcv, symbol, window=window)
-                st.plotly_chart(fig, use_container_width=True)
+                html = create_volatility_chart(ohlcv, symbol, window=window)
+                components.html(html, height=650, scrolling=False)
 
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -359,7 +360,7 @@ def render_drawdown_chart():
             try:
                 from gefion.ui.components.database import get_connection
                 from gefion.charts.queries import fetch_ohlcv_for_chart
-                from gefion.charts.renderers import create_drawdown_chart
+                from gefion.charts.d3.renderers import create_drawdown_chart
 
                 start, end = get_period_dates(period)
 
@@ -370,8 +371,8 @@ def render_drawdown_chart():
                     st.error(f"No data for {symbol}")
                     return
 
-                fig = create_drawdown_chart(ohlcv, symbol)
-                st.plotly_chart(fig, use_container_width=True)
+                html = create_drawdown_chart(ohlcv, symbol)
+                components.html(html, height=500, scrolling=False)
 
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -420,7 +421,7 @@ def render_rolling_chart():
             try:
                 from gefion.ui.components.database import get_connection
                 from gefion.charts.queries import fetch_ohlcv_for_chart
-                from gefion.charts.renderers import create_rolling_returns_chart
+                from gefion.charts.d3.renderers import create_rolling_returns_chart
 
                 start, end = get_period_dates(period)
                 symbol_data = {}
@@ -431,8 +432,8 @@ def render_rolling_chart():
                         if ohlcv:
                             symbol_data[symbol] = ohlcv
 
-                fig = create_rolling_returns_chart(symbol_data, windows=windows)
-                st.plotly_chart(fig, use_container_width=True)
+                html = create_rolling_returns_chart(symbol_data, windows=windows)
+                components.html(html, height=500, scrolling=False)
 
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -464,7 +465,7 @@ def render_sector_chart():
             try:
                 from gefion.ui.components.database import get_connection
                 from gefion.charts.queries import fetch_ohlcv_for_chart
-                from gefion.charts.renderers import create_sector_heatmap
+                from gefion.charts.d3.renderers import create_sector_heatmap
 
                 start, end = get_period_dates(period)
                 sector_data = {}
@@ -503,8 +504,8 @@ def render_sector_chart():
                     st.warning("No sector data available. Make sure stocks have sector information.")
                     return
 
-                fig = create_sector_heatmap(sector_data)
-                st.plotly_chart(fig, use_container_width=True)
+                html = create_sector_heatmap(sector_data)
+                components.html(html, height=500, scrolling=False)
 
             except Exception as e:
                 st.error(f"Error: {e}")
