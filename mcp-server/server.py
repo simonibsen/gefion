@@ -3611,7 +3611,7 @@ async def _backtest_compare(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
     """Propose a new experiment for approval."""
     async def _propose():
-        cmd = ["gefion", "experiment", "propose"]
+        cmd = ["experiment", "propose"]
 
         # Required arguments
         cmd.extend(["--name", args["name"]])
@@ -3650,7 +3650,7 @@ async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_list(args: Dict[str, Any]) -> Dict[str, Any]:
     """List experiments with optional filters."""
     async def _list():
-        cmd = ["gefion", "experiment", "list"]
+        cmd = ["experiment", "list"]
 
         if args.get("status"):
             cmd.extend(["--status", args["status"]])
@@ -3668,7 +3668,7 @@ async def _experiment_list(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_approve(args: Dict[str, Any]) -> Dict[str, Any]:
     """Approve an experiment for execution."""
     async def _approve():
-        cmd = ["gefion", "experiment", "approve", "--id", str(args["experiment_id"])]
+        cmd = ["experiment", "approve", "--id", str(args["experiment_id"])]
         executor = GefionExecutor()
         return await executor.run(*cmd)
 
@@ -3678,7 +3678,7 @@ async def _experiment_approve(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_run(args: Dict[str, Any]) -> Dict[str, Any]:
     """Run an approved experiment."""
     async def _run():
-        cmd = ["gefion", "experiment", "run", "--id", str(args["experiment_id"])]
+        cmd = ["experiment", "run", "--id", str(args["experiment_id"])]
         executor = GefionExecutor()
         return await executor.run(*cmd)
 
@@ -3688,7 +3688,7 @@ async def _experiment_run(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_results(args: Dict[str, Any]) -> Dict[str, Any]:
     """Get results for a completed experiment."""
     async def _results():
-        cmd = ["gefion", "experiment", "results", "--id", str(args["experiment_id"])]
+        cmd = ["experiment", "results", "--id", str(args["experiment_id"])]
 
         if args.get("show_trials"):
             cmd.append("--show-trials")
@@ -3733,7 +3733,7 @@ async def _experiment_chain(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_children(args: Dict[str, Any]) -> Dict[str, Any]:
     """List child experiments of a parent."""
     async def _children():
-        cmd = ["gefion", "experiment", "children", "--parent-id", str(args["parent_id"])]
+        cmd = ["experiment", "children", "--parent-id", str(args["parent_id"])]
         executor = GefionExecutor()
         return await executor.run(*cmd)
 
@@ -3743,7 +3743,7 @@ async def _experiment_children(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _experiment_status(args: Dict[str, Any]) -> Dict[str, Any]:
     """Get detailed status of an experiment."""
     async def _status():
-        cmd = ["gefion", "experiment", "status", "--id", str(args["experiment_id"])]
+        cmd = ["experiment", "status", "--id", str(args["experiment_id"])]
         executor = GefionExecutor()
         return await executor.run(*cmd)
 
@@ -3757,7 +3757,7 @@ async def _experiment_status(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _chart_price(args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate candlestick price chart with rich context."""
     async def _generate():
-        cmd = ["gefion", "chart", "price", args["symbol"], "--json", "--no-open"]
+        cmd = ["chart", "price", args["symbol"], "--no-open"]
         if args.get("start_date"):
             cmd.extend(["--start-date", args["start_date"]])
         if args.get("end_date"):
@@ -3773,8 +3773,8 @@ async def _chart_price(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _chart_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate prediction chart with rich context."""
     async def _generate():
-        cmd = ["gefion", "chart", "predictions", args["symbol"],
-               "--model", args["model"], "--json", "--no-open"]
+        cmd = ["chart", "predictions", args["symbol"],
+               "--model", args["model"], "--no-open"]
         if args.get("horizon"):
             cmd.extend(["--horizon", str(args["horizon"])])
         executor = GefionExecutor()
@@ -3786,8 +3786,8 @@ async def _chart_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _chart_features(args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate feature overlay chart with rich context."""
     async def _generate():
-        cmd = ["gefion", "chart", "features", args["symbol"],
-               "--features", args["features"], "--json", "--no-open"]
+        cmd = ["chart", "features", args["symbol"],
+               "--features", args["features"], "--no-open"]
         if args.get("start_date"):
             cmd.extend(["--start-date", args["start_date"]])
         if args.get("end_date"):
