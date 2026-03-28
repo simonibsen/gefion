@@ -31,11 +31,12 @@ def get_page_context() -> Dict[str, Any]:
 
                 # Top movers (biggest absolute % change on latest date)
                 cur.execute("""
-                    SELECT symbol,
-                           ROUND(((close - open) / NULLIF(open, 0)) * 100, 2) AS pct_change
-                    FROM stock_ohlcv
-                    WHERE date = (SELECT MAX(date) FROM stock_ohlcv)
-                    ORDER BY ABS((close - open) / NULLIF(open, 0)) DESC
+                    SELECT s.symbol,
+                           ROUND(((o.close - o.open) / NULLIF(o.open, 0)) * 100, 2) AS pct_change
+                    FROM stock_ohlcv o
+                    JOIN stocks s ON o.data_id = s.id
+                    WHERE o.date = (SELECT MAX(date) FROM stock_ohlcv)
+                    ORDER BY ABS((o.close - o.open) / NULLIF(o.open, 0)) DESC
                     LIMIT 5
                 """)
                 movers = cur.fetchall()
@@ -127,7 +128,7 @@ def _render_suggested_charts() -> None:
     # Render the selected suggestion inline
     active = st.session_state.get("_charts_active_suggestion")
     if active == "suggested_pipeline_health":
-        render_pipeline_health_chart()
+        _render_quick_pipeline()
     elif active == "suggested_top_movers":
         _render_top_movers_chart(ctx.get("top_movers", []))
     elif active == "suggested_calibration":
@@ -240,9 +241,9 @@ def _render_quick_charts() -> None:
     """Render one-click quick chart buttons."""
     quick_charts = [
         ("Sector Heatmap", "quick_sector", ":material/grid_view:"),
-        ("Pipeline Health", "quick_pipeline", ":material/monitor_heart:"),
         ("Top Movers", "quick_movers", ":material/trending_up:"),
         ("Volatility Leaders", "quick_volatility", ":material/show_chart:"),
+        ("Pipeline Health", "quick_pipeline", ":material/monitor_heart:"),
     ]
 
     cols = st.columns(len(quick_charts))
@@ -256,11 +257,27 @@ def _render_quick_charts() -> None:
     if active == "quick_sector":
         _render_quick_sector()
     elif active == "quick_pipeline":
-        render_pipeline_health_chart()
+        _render_quick_pipeline()
     elif active == "quick_movers":
         _render_quick_top_movers()
     elif active == "quick_volatility":
         _render_quick_volatility()
+
+
+def _render_quick_pipeline() -> None:
+    """Render pipeline health chart directly (no Generate button)."""
+    with st.spinner("Checking pipeline..."):
+        try:
+            from gefion.ui.components.database import get_connection
+            from gefion.charts.queries import fetch_pipeline_health
+            from gefion.charts.d3.renderers import create_pipeline_health_chart
+
+            with get_connection() as conn:
+                data = fetch_pipeline_health(conn)
+            html = create_pipeline_health_chart(data)
+            components.html(html, height=500, scrolling=False)
+        except Exception as e:
+            st.error(f"Error: {e}")
 
 
 def _render_quick_top_movers() -> None:
@@ -274,10 +291,11 @@ def _render_quick_top_movers() -> None:
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        SELECT symbol
-                        FROM stock_ohlcv
-                        WHERE date = (SELECT MAX(date) FROM stock_ohlcv)
-                        ORDER BY ABS((close - open) / NULLIF(open, 0)) DESC
+                        SELECT s.symbol
+                        FROM stock_ohlcv o
+                        JOIN stocks s ON o.data_id = s.id
+                        WHERE o.date = (SELECT MAX(date) FROM stock_ohlcv)
+                        ORDER BY ABS((o.close - o.open) / NULLIF(o.open, 0)) DESC
                         LIMIT 5
                     """)
                     symbols = [row[0] for row in cur.fetchall()]
@@ -314,11 +332,12 @@ def _render_quick_volatility() -> None:
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        SELECT symbol,
-                               STDDEV((close - open) / NULLIF(open, 0)) AS vol
-                        FROM stock_ohlcv
-                        WHERE date >= CURRENT_DATE - INTERVAL '30 days'
-                        GROUP BY symbol
+                        SELECT s.symbol,
+                               STDDEV((o.close - o.open) / NULLIF(o.open, 0)) AS vol
+                        FROM stock_ohlcv o
+                        JOIN stocks s ON o.data_id = s.id
+                        WHERE o.date >= CURRENT_DATE - INTERVAL '30 days'
+                        GROUP BY s.symbol
                         HAVING COUNT(*) >= 5
                         ORDER BY vol DESC
                         LIMIT 1
