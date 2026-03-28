@@ -26,12 +26,20 @@ def get_page_context():
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM stocks")
                 total_stocks = cur.fetchone()[0]
-                cur.execute("SELECT COUNT(DISTINCT data_id) FROM stock_ohlcv")
-                symbols_with_data = cur.fetchone()[0]
-                cur.execute("SELECT MIN(date), MAX(date), COUNT(*) FROM stock_ohlcv")
-                min_date, max_date, total_rows = cur.fetchone()
 
-                # Sectors breakdown
+                # Fast: use pg_stat for approximate row counts (instant vs 10s+ scans)
+                cur.execute("SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables WHERE relname = 'stock_ohlcv'")
+                row = cur.fetchone()
+                total_rows = row[0] if row else 0
+
+                # Fast: MIN/MAX on indexed columns
+                cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
+                min_date, max_date = cur.fetchone()
+
+                # Approximate symbols with data from stocks count (if rows exist, most stocks have data)
+                symbols_with_data = total_stocks if total_rows > 0 else 0
+
+                # Sectors breakdown (fast — stocks table is small)
                 cur.execute("SELECT sector, COUNT(*) FROM stocks WHERE sector IS NOT NULL GROUP BY sector ORDER BY COUNT(*) DESC LIMIT 5")
                 top_sectors = [f"{r[0]} ({r[1]})" for r in cur.fetchall()]
 
@@ -79,7 +87,7 @@ class ProcessState:
     last_ok_inserted: int = 0
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def _get_symbol_coverage() -> list:
     """Get symbol coverage stats with 60-second cache."""
     try:
@@ -88,6 +96,8 @@ def _get_symbol_coverage() -> list:
         with create_span("ui.data._get_symbol_coverage"):
           with get_connection() as conn:
             with conn.cursor() as cur:
+                # Fast: only check recent data (last 30 days) for coverage
+                # instead of scanning entire hypertable with LEFT JOIN
                 cur.execute("""
                     SELECT
                         s.symbol,
@@ -97,6 +107,7 @@ def _get_symbol_coverage() -> list:
                         MAX(o.date) as last_date
                     FROM stocks s
                     LEFT JOIN stock_ohlcv o ON s.id = o.data_id
+                        AND o.date >= CURRENT_DATE - INTERVAL '30 days'
                     WHERE s.status = 'Active'
                     GROUP BY s.id, s.symbol, s.sector
                     ORDER BY days DESC
