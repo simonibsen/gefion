@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 import psycopg
 
+from gefion.observability import create_span, set_attributes
+
 
 def fetch_ohlcv_for_chart(
     conn: psycopg.Connection,
@@ -28,61 +30,64 @@ def fetch_ohlcv_for_chart(
     Returns:
         List of dicts with keys: date, open, high, low, close, volume
     """
-    # When adjusted=True, use adjusted_close and compute adjusted OHLC
-    # The adjustment ratio is: adjusted_close / close
-    # We apply this ratio to open, high, low as well
-    if adjusted:
-        query = """
-            SELECT
-                o.date,
-                CASE WHEN o.adjusted_close IS NOT NULL AND o.close > 0
-                     THEN o.open * (o.adjusted_close / o.close)
-                     ELSE o.open END as adj_open,
-                CASE WHEN o.adjusted_close IS NOT NULL AND o.close > 0
-                     THEN o.high * (o.adjusted_close / o.close)
-                     ELSE o.high END as adj_high,
-                CASE WHEN o.adjusted_close IS NOT NULL AND o.close > 0
-                     THEN o.low * (o.adjusted_close / o.close)
-                     ELSE o.low END as adj_low,
-                COALESCE(o.adjusted_close, o.close) as adj_close,
-                o.volume
-            FROM stock_ohlcv o
-            JOIN stocks s ON o.data_id = s.id
-            WHERE s.symbol = %s
-        """
-    else:
-        query = """
-            SELECT o.date, o.open, o.high, o.low, o.close, o.volume
-            FROM stock_ohlcv o
-            JOIN stocks s ON o.data_id = s.id
-            WHERE s.symbol = %s
-        """
-    params: List[Any] = [symbol]
+    with create_span("charts.queries.fetch_ohlcv_for_chart", symbol=symbol) as span:
+        # When adjusted=True, use adjusted_close and compute adjusted OHLC
+        # The adjustment ratio is: adjusted_close / close
+        # We apply this ratio to open, high, low as well
+        if adjusted:
+            query = """
+                SELECT
+                    o.date,
+                    CASE WHEN o.adjusted_close IS NOT NULL AND o.close > 0
+                         THEN o.open * (o.adjusted_close / o.close)
+                         ELSE o.open END as adj_open,
+                    CASE WHEN o.adjusted_close IS NOT NULL AND o.close > 0
+                         THEN o.high * (o.adjusted_close / o.close)
+                         ELSE o.high END as adj_high,
+                    CASE WHEN o.adjusted_close IS NOT NULL AND o.close > 0
+                         THEN o.low * (o.adjusted_close / o.close)
+                         ELSE o.low END as adj_low,
+                    COALESCE(o.adjusted_close, o.close) as adj_close,
+                    o.volume
+                FROM stock_ohlcv o
+                JOIN stocks s ON o.data_id = s.id
+                WHERE s.symbol = %s
+            """
+        else:
+            query = """
+                SELECT o.date, o.open, o.high, o.low, o.close, o.volume
+                FROM stock_ohlcv o
+                JOIN stocks s ON o.data_id = s.id
+                WHERE s.symbol = %s
+            """
+        params: List[Any] = [symbol]
 
-    if start_date:
-        query += " AND o.date >= %s"
-        params.append(start_date)
-    if end_date:
-        query += " AND o.date <= %s"
-        params.append(end_date)
+        if start_date:
+            query += " AND o.date >= %s"
+            params.append(start_date)
+        if end_date:
+            query += " AND o.date <= %s"
+            params.append(end_date)
 
-    query += " ORDER BY o.date ASC"
+        query += " ORDER BY o.date ASC"
 
-    with conn.cursor() as cur:
-        cur.execute(query, params)
-        rows = cur.fetchall()
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
 
-    return [
-        {
-            "date": row[0],
-            "open": float(row[1]) if row[1] is not None else None,
-            "high": float(row[2]) if row[2] is not None else None,
-            "low": float(row[3]) if row[3] is not None else None,
-            "close": float(row[4]) if row[4] is not None else None,
-            "volume": int(row[5]) if row[5] is not None else 0,
-        }
-        for row in rows
-    ]
+        result = [
+            {
+                "date": row[0],
+                "open": float(row[1]) if row[1] is not None else None,
+                "high": float(row[2]) if row[2] is not None else None,
+                "low": float(row[3]) if row[3] is not None else None,
+                "close": float(row[4]) if row[4] is not None else None,
+                "volume": int(row[5]) if row[5] is not None else 0,
+            }
+            for row in rows
+        ]
+        set_attributes(span, row_count=len(result), table="stock_ohlcv")
+        return result
 
 
 def fetch_predictions_for_chart(
@@ -103,34 +108,37 @@ def fetch_predictions_for_chart(
     Returns:
         List of dicts with keys: date, q10, q50, q90
     """
-    query = """
-        SELECT p.prediction_date,
-               (p.prediction_values->>'q10')::NUMERIC,
-               (p.prediction_values->>'q50')::NUMERIC,
-               (p.prediction_values->>'q90')::NUMERIC
-        FROM predictions p
-        JOIN stocks s ON p.data_id = s.id
-        JOIN ml_models m ON p.model_id = m.id
-        WHERE p.prediction_type = 'quantile'
-          AND s.symbol = %s
-          AND m.name = %s
-          AND p.horizon_days = %s
-        ORDER BY p.prediction_date ASC
-    """
+    with create_span("charts.queries.fetch_predictions_for_chart", symbol=symbol, model_name=model_name, horizon=horizon) as span:
+        query = """
+            SELECT p.prediction_date,
+                   (p.prediction_values->>'q10')::NUMERIC,
+                   (p.prediction_values->>'q50')::NUMERIC,
+                   (p.prediction_values->>'q90')::NUMERIC
+            FROM predictions p
+            JOIN stocks s ON p.data_id = s.id
+            JOIN ml_models m ON p.model_id = m.id
+            WHERE p.prediction_type = 'quantile'
+              AND s.symbol = %s
+              AND m.name = %s
+              AND p.horizon_days = %s
+            ORDER BY p.prediction_date ASC
+        """
 
-    with conn.cursor() as cur:
-        cur.execute(query, (symbol, model_name, horizon))
-        rows = cur.fetchall()
+        with conn.cursor() as cur:
+            cur.execute(query, (symbol, model_name, horizon))
+            rows = cur.fetchall()
 
-    return [
-        {
-            "date": row[0],
-            "q10": float(row[1]) if row[1] is not None else None,
-            "q50": float(row[2]) if row[2] is not None else None,
-            "q90": float(row[3]) if row[3] is not None else None,
-        }
-        for row in rows
-    ]
+        result = [
+            {
+                "date": row[0],
+                "q10": float(row[1]) if row[1] is not None else None,
+                "q50": float(row[2]) if row[2] is not None else None,
+                "q90": float(row[3]) if row[3] is not None else None,
+            }
+            for row in rows
+        ]
+        set_attributes(span, row_count=len(result), table="predictions")
+        return result
 
 
 def fetch_features_for_chart(
@@ -153,44 +161,46 @@ def fetch_features_for_chart(
     Returns:
         Dict mapping feature_name -> list of {date, value}
     """
-    # Initialize result dict with empty lists
-    result: Dict[str, List[Dict[str, Any]]] = {name: [] for name in feature_names}
+    with create_span("charts.queries.fetch_features_for_chart", symbol=symbol, feature_count=len(feature_names)) as span:
+        # Initialize result dict with empty lists
+        result: Dict[str, List[Dict[str, Any]]] = {name: [] for name in feature_names}
 
-    if not feature_names:
+        if not feature_names:
+            return result
+
+        query = """
+            SELECT cf.date, fd.name, cf.value
+            FROM computed_features cf
+            JOIN stocks s ON cf.data_id = s.id
+            JOIN feature_definitions fd ON cf.feature_id = fd.id
+            WHERE s.symbol = %s
+              AND fd.name = ANY(%s)
+        """
+        params: List[Any] = [symbol, feature_names]
+
+        if start_date:
+            query += " AND cf.date >= %s"
+            params.append(start_date)
+        if end_date:
+            query += " AND cf.date <= %s"
+            params.append(end_date)
+
+        query += " ORDER BY cf.date ASC, fd.name"
+
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
+
+        for row in rows:
+            feature_name = row[1]
+            if feature_name in result:
+                result[feature_name].append({
+                    "date": row[0],
+                    "value": float(row[2]) if row[2] is not None else None,
+                })
+
+        set_attributes(span, row_count=len(rows), table="computed_features")
         return result
-
-    query = """
-        SELECT cf.date, fd.name, cf.value
-        FROM computed_features cf
-        JOIN stocks s ON cf.data_id = s.id
-        JOIN feature_definitions fd ON cf.feature_id = fd.id
-        WHERE s.symbol = %s
-          AND fd.name = ANY(%s)
-    """
-    params: List[Any] = [symbol, feature_names]
-
-    if start_date:
-        query += " AND cf.date >= %s"
-        params.append(start_date)
-    if end_date:
-        query += " AND cf.date <= %s"
-        params.append(end_date)
-
-    query += " ORDER BY cf.date ASC, fd.name"
-
-    with conn.cursor() as cur:
-        cur.execute(query, params)
-        rows = cur.fetchall()
-
-    for row in rows:
-        feature_name = row[1]
-        if feature_name in result:
-            result[feature_name].append({
-                "date": row[0],
-                "value": float(row[2]) if row[2] is not None else None,
-            })
-
-    return result
 
 
 def fetch_backtest_equity_curve(
@@ -251,33 +261,36 @@ def fetch_model_calibration(
     model_name: str,
 ) -> List[Dict[str, Any]]:
     """Fetch calibration data: predicted quantile levels vs observed coverage."""
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT
-                (p.prediction_values->>'q10')::NUMERIC as q10,
-                (p.prediction_values->>'q50')::NUMERIC as q50,
-                (p.prediction_values->>'q90')::NUMERIC as q90,
-                po.actual_return
-            FROM predictions p
-            JOIN ml_models m ON p.model_id = m.id
-            JOIN prediction_outcomes po ON po.data_id = p.data_id
-                AND po.prediction_date = p.prediction_date
-                AND po.horizon_days = p.horizon_days
-            WHERE p.prediction_type = 'quantile'
-              AND m.name = %s
-        """, (model_name,))
-        rows = cur.fetchall()
+    with create_span("charts.queries.fetch_model_calibration", model_name=model_name) as span:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    (p.prediction_values->>'q10')::NUMERIC as q10,
+                    (p.prediction_values->>'q50')::NUMERIC as q50,
+                    (p.prediction_values->>'q90')::NUMERIC as q90,
+                    po.actual_return
+                FROM predictions p
+                JOIN ml_models m ON p.model_id = m.id
+                JOIN prediction_outcomes po ON po.data_id = p.data_id
+                    AND po.prediction_date = p.prediction_date
+                    AND po.horizon_days = p.horizon_days
+                WHERE p.prediction_type = 'quantile'
+                  AND m.name = %s
+            """, (model_name,))
+            rows = cur.fetchall()
 
-    if not rows:
-        return []
+        if not rows:
+            set_attributes(span, row_count=0)
+            return []
 
-    result = []
-    for level, label, idx in [(0.1, "q10", 0), (0.5, "q50", 1), (0.9, "q90", 2)]:
-        below = sum(1 for r in rows if r[3] is not None and r[idx] is not None and float(r[3]) <= float(r[idx]))
-        total = sum(1 for r in rows if r[3] is not None and r[idx] is not None)
-        observed = below / total if total > 0 else 0
-        result.append({"predicted": level, "observed": observed, "count": total, "label": label})
-    return result
+        result = []
+        for level, label, idx in [(0.1, "q10", 0), (0.5, "q50", 1), (0.9, "q90", 2)]:
+            below = sum(1 for r in rows if r[3] is not None and r[idx] is not None and float(r[3]) <= float(r[idx]))
+            total = sum(1 for r in rows if r[3] is not None and r[idx] is not None)
+            observed = below / total if total > 0 else 0
+            result.append({"predicted": level, "observed": observed, "count": total, "label": label})
+        set_attributes(span, row_count=len(rows))
+        return result
 
 
 def fetch_predictions_vs_actuals(
@@ -286,61 +299,66 @@ def fetch_predictions_vs_actuals(
     limit: int = 500,
 ) -> List[Dict[str, Any]]:
     """Fetch prediction-actual pairs for scatter plot."""
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT s.symbol, p.prediction_date,
-                   (p.prediction_values->>'q50')::NUMERIC, po.actual_return
-            FROM predictions p
-            JOIN ml_models m ON p.model_id = m.id
-            JOIN stocks s ON p.data_id = s.id
-            JOIN prediction_outcomes po ON po.data_id = p.data_id
-                AND po.prediction_date = p.prediction_date
-                AND po.horizon_days = p.horizon_days
-            WHERE p.prediction_type = 'quantile' AND m.name = %s
-                AND po.actual_return IS NOT NULL
-            ORDER BY p.prediction_date DESC LIMIT %s
-        """, (model_name, limit))
-        return [
-            {"symbol": r[0], "date": str(r[1]), "predicted": float(r[2]), "actual": float(r[3])}
-            for r in cur.fetchall()
-        ]
+    with create_span("charts.queries.fetch_predictions_vs_actuals", model_name=model_name, limit=limit) as span:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT s.symbol, p.prediction_date,
+                       (p.prediction_values->>'q50')::NUMERIC, po.actual_return
+                FROM predictions p
+                JOIN ml_models m ON p.model_id = m.id
+                JOIN stocks s ON p.data_id = s.id
+                JOIN prediction_outcomes po ON po.data_id = p.data_id
+                    AND po.prediction_date = p.prediction_date
+                    AND po.horizon_days = p.horizon_days
+                WHERE p.prediction_type = 'quantile' AND m.name = %s
+                    AND po.actual_return IS NOT NULL
+                ORDER BY p.prediction_date DESC LIMIT %s
+            """, (model_name, limit))
+            result = [
+                {"symbol": r[0], "date": str(r[1]), "predicted": float(r[2]), "actual": float(r[3])}
+                for r in cur.fetchall()
+            ]
+        set_attributes(span, row_count=len(result))
+        return result
 
 
 def fetch_pipeline_health(conn: psycopg.Connection) -> Dict[str, Any]:
     """Fetch data freshness, feature coverage, prediction distributions.
 
-    Uses fast queries — avoids full table scans on hypertables.
+    Uses fast queries -- avoids full table scans on hypertables.
     """
-    from datetime import date as d
-    result: Dict[str, Any] = {"freshness": [], "coverage": {}, "predictions": []}
-    with conn.cursor() as cur:
-        # Single query for all freshness data (fast — MAX on indexed columns)
-        cur.execute("""
-            SELECT 'OHLCV', MAX(date) FROM stock_ohlcv
-            UNION ALL
-            SELECT 'Features', MAX(date) FROM computed_features
-            UNION ALL
-            SELECT 'Predictions', MAX(prediction_date) FROM predictions
-        """)
-        for name, latest in cur.fetchall():
-            if latest:
-                result["freshness"].append({"name": name, "days_old": (d.today() - latest).days})
+    with create_span("charts.queries.fetch_pipeline_health") as span:
+        from datetime import date as d
+        result: Dict[str, Any] = {"freshness": [], "coverage": {}, "predictions": []}
+        with conn.cursor() as cur:
+            # Single query for all freshness data (fast -- MAX on indexed columns)
+            cur.execute("""
+                SELECT 'OHLCV', MAX(date) FROM stock_ohlcv
+                UNION ALL
+                SELECT 'Features', MAX(date) FROM computed_features
+                UNION ALL
+                SELECT 'Predictions', MAX(prediction_date) FROM predictions
+            """)
+            for name, latest in cur.fetchall():
+                if latest:
+                    result["freshness"].append({"name": name, "days_old": (d.today() - latest).days})
 
-        # Feature coverage — use stocks table count (fast) vs approximate feature coverage
-        # Instead of expensive COUNT(DISTINCT data_id) on hypertable, check recent features only
-        cur.execute("SELECT COUNT(*) FROM stocks")
-        total = cur.fetchone()[0]
-        cur.execute("""
-            SELECT COUNT(DISTINCT data_id) FROM computed_features
-            WHERE date >= CURRENT_DATE - INTERVAL '30 days'
-        """)
-        computed = cur.fetchone()[0]
-        result["coverage"] = {"computed": computed, "total": total}
+            # Feature coverage -- use stocks table count (fast) vs approximate feature coverage
+            # Instead of expensive COUNT(DISTINCT data_id) on hypertable, check recent features only
+            cur.execute("SELECT COUNT(*) FROM stocks")
+            total = cur.fetchone()[0]
+            cur.execute("""
+                SELECT COUNT(DISTINCT data_id) FROM computed_features
+                WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+            """)
+            computed = cur.fetchone()[0]
+            result["coverage"] = {"computed": computed, "total": total}
 
-        # Prediction counts by type (fast — small result set)
-        cur.execute("SELECT prediction_type, COUNT(*) FROM predictions GROUP BY prediction_type")
-        result["predictions"] = [{"type": r[0], "count": r[1]} for r in cur.fetchall()]
-    return result
+            # Prediction counts by type (fast -- small result set)
+            cur.execute("SELECT prediction_type, COUNT(*) FROM predictions GROUP BY prediction_type")
+            result["predictions"] = [{"type": r[0], "count": r[1]} for r in cur.fetchall()]
+        set_attributes(span, freshness_count=len(result["freshness"]), stock_count=total)
+        return result
 
 
 def fetch_confusion_matrix(
@@ -348,31 +366,33 @@ def fetch_confusion_matrix(
     model_name: str,
 ) -> Dict[str, Any]:
     """Fetch confusion matrix for trend classifier."""
-    labels = ["strong_down", "weak_down", "neutral", "weak_up", "strong_up"]
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT p.prediction_values->>'predicted_class', po.actual_return
-            FROM predictions p
-            JOIN ml_models m ON p.model_id = m.id
-            JOIN prediction_outcomes po ON po.data_id = p.data_id
-                AND po.prediction_date = p.prediction_date
-                AND po.horizon_days = p.horizon_days
-            WHERE p.prediction_type = 'trend_class' AND m.name = %s
-                AND po.actual_return IS NOT NULL
-        """, (model_name,))
-        rows = cur.fetchall()
+    with create_span("charts.queries.fetch_confusion_matrix", model_name=model_name) as span:
+        labels = ["strong_down", "weak_down", "neutral", "weak_up", "strong_up"]
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.prediction_values->>'predicted_class', po.actual_return
+                FROM predictions p
+                JOIN ml_models m ON p.model_id = m.id
+                JOIN prediction_outcomes po ON po.data_id = p.data_id
+                    AND po.prediction_date = p.prediction_date
+                    AND po.horizon_days = p.horizon_days
+                WHERE p.prediction_type = 'trend_class' AND m.name = %s
+                    AND po.actual_return IS NOT NULL
+            """, (model_name,))
+            rows = cur.fetchall()
 
-    def classify(ret):
-        r = float(ret) * 100
-        if r < -3: return "strong_down"
-        if r < -1: return "weak_down"
-        if r < 1: return "neutral"
-        if r < 3: return "weak_up"
-        return "strong_up"
+        def classify(ret):
+            r = float(ret) * 100
+            if r < -3: return "strong_down"
+            if r < -1: return "weak_down"
+            if r < 1: return "neutral"
+            if r < 3: return "weak_up"
+            return "strong_up"
 
-    matrix = [[0]*5 for _ in range(5)]
-    for predicted, actual_ret in rows:
-        actual_class = classify(actual_ret)
-        if predicted in labels and actual_class in labels:
-            matrix[labels.index(actual_class)][labels.index(predicted)] += 1
-    return {"labels": labels, "matrix": matrix}
+        matrix = [[0]*5 for _ in range(5)]
+        for predicted, actual_ret in rows:
+            actual_class = classify(actual_ret)
+            if predicted in labels and actual_class in labels:
+                matrix[labels.index(actual_class)][labels.index(predicted)] += 1
+        set_attributes(span, row_count=len(rows))
+        return {"labels": labels, "matrix": matrix}

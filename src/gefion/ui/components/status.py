@@ -4,6 +4,7 @@ import streamlit as st
 from dataclasses import dataclass
 from typing import Optional
 from datetime import date
+from gefion.observability import create_span, set_attributes
 
 
 @dataclass
@@ -25,11 +26,12 @@ def get_latest_data_date() -> Optional[date]:
     try:
         from gefion.ui.components.database import get_connection
 
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
-                result = cur.fetchone()
-                return result[0] if result else None
+        with create_span("ui.status.get_latest_data_date"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                    result = cur.fetchone()
+                    return result[0] if result else None
     except Exception:
         return None
 
@@ -54,37 +56,38 @@ def get_system_stats() -> Optional[SystemStats]:
     try:
         from gefion.ui.components.database import get_connection
 
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM stocks")
-                total_stocks = cur.fetchone()[0]
+        with create_span("ui.status.get_system_stats"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM stocks")
+                    total_stocks = cur.fetchone()[0]
 
-                cur.execute("SELECT COUNT(*) FROM stocks WHERE status = 'Active'")
-                active_stocks = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM stocks WHERE status = 'Active'")
+                    active_stocks = cur.fetchone()[0]
 
-                cur.execute("SELECT COUNT(*) FROM stock_ohlcv")
-                ohlcv_rows = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM stock_ohlcv")
+                    ohlcv_rows = cur.fetchone()[0]
 
-                cur.execute("SELECT COUNT(*) FROM computed_features")
-                feature_rows = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM computed_features")
+                    feature_rows = cur.fetchone()[0]
 
-                cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
-                date_range = cur.fetchone()
+                    cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
+                    date_range = cur.fetchone()
 
-                # ML tables may not exist yet - query gracefully
-                model_count = 0
-                prediction_count = 0
-                try:
-                    cur.execute("SELECT COUNT(*) FROM ml_models")
-                    model_count = cur.fetchone()[0]
-                except Exception:
-                    pass
+                    # ML tables may not exist yet - query gracefully
+                    model_count = 0
+                    prediction_count = 0
+                    try:
+                        cur.execute("SELECT COUNT(*) FROM ml_models")
+                        model_count = cur.fetchone()[0]
+                    except Exception:
+                        pass
 
-                try:
-                    cur.execute("SELECT COUNT(*) FROM predictions")
-                    prediction_count = cur.fetchone()[0]
-                except Exception:
-                    pass
+                    try:
+                        cur.execute("SELECT COUNT(*) FROM predictions")
+                        prediction_count = cur.fetchone()[0]
+                    except Exception:
+                        pass
 
         return SystemStats(
             total_stocks=total_stocks,

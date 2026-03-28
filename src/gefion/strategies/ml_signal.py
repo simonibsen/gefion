@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional
 
 import psycopg
 
+from gefion.observability import create_span, set_attributes
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,42 +44,44 @@ def get_predictions_for_date(
     Returns:
         Dict mapping symbol -> {q10, q50, q90}
     """
-    predictions = {}
+    with create_span("strategies.ml_signal.get_predictions_for_date", model_name=model_name, prediction_date=str(prediction_date), horizon_days=horizon_days) as span:
+        predictions = {}
 
-    try:
-        with psycopg.connect(db_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT s.symbol,
-                           (p.prediction_values->>'q10')::NUMERIC,
-                           (p.prediction_values->>'q50')::NUMERIC,
-                           (p.prediction_values->>'q90')::NUMERIC
-                    FROM predictions p
-                    JOIN stocks s ON p.data_id = s.id
-                    JOIN ml_models m ON p.model_id = m.id
-                    WHERE p.prediction_type = 'quantile'
-                      AND m.name = %s
-                      AND m.version = %s
-                      AND p.prediction_date = %s
-                      AND p.horizon_days = %s
-                      AND m.active = TRUE
-                    ORDER BY (p.prediction_values->>'q50')::NUMERIC DESC
-                    """,
-                    (model_name, model_version, prediction_date, horizon_days),
-                )
+        try:
+            with psycopg.connect(db_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT s.symbol,
+                               (p.prediction_values->>'q10')::NUMERIC,
+                               (p.prediction_values->>'q50')::NUMERIC,
+                               (p.prediction_values->>'q90')::NUMERIC
+                        FROM predictions p
+                        JOIN stocks s ON p.data_id = s.id
+                        JOIN ml_models m ON p.model_id = m.id
+                        WHERE p.prediction_type = 'quantile'
+                          AND m.name = %s
+                          AND m.version = %s
+                          AND p.prediction_date = %s
+                          AND p.horizon_days = %s
+                          AND m.active = TRUE
+                        ORDER BY (p.prediction_values->>'q50')::NUMERIC DESC
+                        """,
+                        (model_name, model_version, prediction_date, horizon_days),
+                    )
 
-                for symbol, q10, q50, q90 in cur.fetchall():
-                    predictions[symbol] = {
-                        "q10": float(q10) if q10 else 0.0,
-                        "q50": float(q50) if q50 else 0.0,
-                        "q90": float(q90) if q90 else 0.0,
-                    }
-    except Exception as e:
-        logger.debug(f"Error fetching predictions: {e}")
-        pass
+                    for symbol, q10, q50, q90 in cur.fetchall():
+                        predictions[symbol] = {
+                            "q10": float(q10) if q10 else 0.0,
+                            "q50": float(q50) if q50 else 0.0,
+                            "q90": float(q90) if q90 else 0.0,
+                        }
+        except Exception as e:
+            logger.debug(f"Error fetching predictions: {e}")
+            pass
 
-    return predictions
+        set_attributes(span, result_count=len(predictions))
+        return predictions
 
 
 def get_classifier_predictions_for_date(
@@ -100,51 +104,53 @@ def get_classifier_predictions_for_date(
     Returns:
         Dict mapping symbol -> {predicted_class, p_strong_up, ..., margin}
     """
-    predictions = {}
+    with create_span("strategies.ml_signal.get_classifier_predictions_for_date", model_name=model_name, prediction_date=str(prediction_date), horizon_days=horizon_days) as span:
+        predictions = {}
 
-    try:
-        with psycopg.connect(db_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT s.symbol,
-                           p.prediction_values->>'predicted_class',
-                           (p.prediction_values->>'p_strong_up')::NUMERIC,
-                           (p.prediction_values->>'p_weak_up')::NUMERIC,
-                           (p.prediction_values->>'p_neutral')::NUMERIC,
-                           (p.prediction_values->>'p_weak_down')::NUMERIC,
-                           (p.prediction_values->>'p_strong_down')::NUMERIC,
-                           (p.prediction_values->>'margin')::NUMERIC
-                    FROM predictions p
-                    JOIN stocks s ON p.data_id = s.id
-                    JOIN ml_models m ON p.model_id = m.id
-                    WHERE p.prediction_type = 'trend_class'
-                      AND m.name = %s
-                      AND m.version = %s
-                      AND p.prediction_date = %s
-                      AND p.horizon_days = %s
-                      AND m.active = TRUE
-                    ORDER BY (p.prediction_values->>'margin')::NUMERIC DESC
-                    """,
-                    (model_name, model_version, prediction_date, horizon_days),
-                )
+        try:
+            with psycopg.connect(db_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT s.symbol,
+                               p.prediction_values->>'predicted_class',
+                               (p.prediction_values->>'p_strong_up')::NUMERIC,
+                               (p.prediction_values->>'p_weak_up')::NUMERIC,
+                               (p.prediction_values->>'p_neutral')::NUMERIC,
+                               (p.prediction_values->>'p_weak_down')::NUMERIC,
+                               (p.prediction_values->>'p_strong_down')::NUMERIC,
+                               (p.prediction_values->>'margin')::NUMERIC
+                        FROM predictions p
+                        JOIN stocks s ON p.data_id = s.id
+                        JOIN ml_models m ON p.model_id = m.id
+                        WHERE p.prediction_type = 'trend_class'
+                          AND m.name = %s
+                          AND m.version = %s
+                          AND p.prediction_date = %s
+                          AND p.horizon_days = %s
+                          AND m.active = TRUE
+                        ORDER BY (p.prediction_values->>'margin')::NUMERIC DESC
+                        """,
+                        (model_name, model_version, prediction_date, horizon_days),
+                    )
 
-                for row in cur.fetchall():
-                    symbol = row[0]
-                    predictions[symbol] = {
-                        "predicted_class": row[1],
-                        "p_strong_up": float(row[2]) if row[2] else 0.0,
-                        "p_weak_up": float(row[3]) if row[3] else 0.0,
-                        "p_neutral": float(row[4]) if row[4] else 0.0,
-                        "p_weak_down": float(row[5]) if row[5] else 0.0,
-                        "p_strong_down": float(row[6]) if row[6] else 0.0,
-                        "margin": float(row[7]) if row[7] else 0.0,
-                    }
-    except Exception as e:
-        logger.debug(f"Error fetching classifier predictions: {e}")
-        pass
+                    for row in cur.fetchall():
+                        symbol = row[0]
+                        predictions[symbol] = {
+                            "predicted_class": row[1],
+                            "p_strong_up": float(row[2]) if row[2] else 0.0,
+                            "p_weak_up": float(row[3]) if row[3] else 0.0,
+                            "p_neutral": float(row[4]) if row[4] else 0.0,
+                            "p_weak_down": float(row[5]) if row[5] else 0.0,
+                            "p_strong_down": float(row[6]) if row[6] else 0.0,
+                            "margin": float(row[7]) if row[7] else 0.0,
+                        }
+        except Exception as e:
+            logger.debug(f"Error fetching classifier predictions: {e}")
+            pass
 
-    return predictions
+        set_attributes(span, result_count=len(predictions))
+        return predictions
 
 
 class MLSignalStrategy:

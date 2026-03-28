@@ -14,6 +14,8 @@ import psycopg
 from psycopg import Connection
 from psycopg import sql
 
+from gefion.observability import create_span, set_attributes
+
 _DEFAULT_TEST_URL = "postgresql://gefion:gefionpass@localhost:6432/gefion_test"
 
 
@@ -62,99 +64,103 @@ def _ensure_timescaledb(conn: Connection) -> None:
 
 def create_stocks_table(conn: Connection) -> None:
     """Create stocks dimension table."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS stocks (
-                id SERIAL PRIMARY KEY,
-                symbol TEXT NOT NULL UNIQUE,
-                status TEXT,
-                name TEXT,
-                sector TEXT,
-                industry TEXT,
-                updated_at TIMESTAMP
-            );
-            CREATE INDEX IF NOT EXISTS stocks_sector_idx ON stocks(sector);
-            CREATE INDEX IF NOT EXISTS stocks_industry_idx ON stocks(industry);
-            """
-        )
-    conn.commit()
+    with create_span("db.schema.create_stocks_table") as span:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stocks (
+                    id SERIAL PRIMARY KEY,
+                    symbol TEXT NOT NULL UNIQUE,
+                    status TEXT,
+                    name TEXT,
+                    sector TEXT,
+                    industry TEXT,
+                    updated_at TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS stocks_sector_idx ON stocks(sector);
+                CREATE INDEX IF NOT EXISTS stocks_industry_idx ON stocks(industry);
+                """
+            )
+        conn.commit()
+        set_attributes(span, table="stocks")
 
 
 def create_stock_ohlcv_table(conn: Connection) -> None:
     """Create stock_ohlcv hypertable with unique stock/date constraint."""
-    _ensure_timescaledb(conn)
+    with create_span("db.schema.create_stock_ohlcv_table") as span:
+        _ensure_timescaledb(conn)
 
-    # Check if table exists but is not a hypertable - if so, drop and recreate
-    # This fixes issues where the table was created before TimescaleDB was enabled
-    with conn.cursor() as cur:
-        try:
-            cur.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = 'stock_ohlcv'
-                );
-            """)
-            table_exists = cur.fetchone()[0]
-
-            if table_exists:
-                # Check if it's already a hypertable
+        # Check if table exists but is not a hypertable - if so, drop and recreate
+        # This fixes issues where the table was created before TimescaleDB was enabled
+        with conn.cursor() as cur:
+            try:
                 cur.execute("""
                     SELECT EXISTS (
-                        SELECT FROM timescaledb_information.hypertables
-                        WHERE hypertable_schema = 'public' AND hypertable_name = 'stock_ohlcv'
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = 'stock_ohlcv'
                     );
                 """)
-                is_hypertable = cur.fetchone()[0]
+                table_exists = cur.fetchone()[0]
 
-                if not is_hypertable:
-                    # Table exists but isn't a hypertable - drop and recreate
-                    print("Dropping existing stock_ohlcv table to recreate as hypertable...")
-                    cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
-                    conn.commit()
-        except Exception as e:
-            # If TimescaleDB queries fail, just try to continue
-            pass
+                if table_exists:
+                    # Check if it's already a hypertable
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM timescaledb_information.hypertables
+                            WHERE hypertable_schema = 'public' AND hypertable_name = 'stock_ohlcv'
+                        );
+                    """)
+                    is_hypertable = cur.fetchone()[0]
 
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS stock_ohlcv (
-                id BIGSERIAL,
-                data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
-                date DATE NOT NULL,
-                open NUMERIC(18,6),
-                high NUMERIC(18,6),
-                low NUMERIC(18,6),
-                close NUMERIC(18,6),
-                adjusted_close NUMERIC(18,6),
-                dividend_amount NUMERIC(18,6),
-                split_coefficient NUMERIC(18,6),
-                volume BIGINT,
-                source TEXT,
-                PRIMARY KEY (id, date),
-                UNIQUE (data_id, date)
-            );
-            """
-        )
-        cur.execute(
-            """
-            SELECT create_hypertable('stock_ohlcv', 'date', if_not_exists => TRUE);
-            """
-        )
-        # Performance helpers: chunk interval and BRIN on date for large scans
-        try:
-            cur.execute("SELECT set_chunk_time_interval('stock_ohlcv', INTERVAL '30 days');")
-        except Exception:
-            pass
-        cur.execute("CREATE INDEX IF NOT EXISTS stock_ohlcv_brin ON stock_ohlcv USING BRIN(date);")
-        # Composite B-tree index for efficient single-stock time-series queries
-        # Optimized for "SELECT ... WHERE data_id = X AND date BETWEEN Y AND Z ORDER BY date DESC"
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS stock_ohlcv_data_id_date_idx
-                ON stock_ohlcv(data_id, date DESC);
-        """)
-    conn.commit()
+                    if not is_hypertable:
+                        # Table exists but isn't a hypertable - drop and recreate
+                        print("Dropping existing stock_ohlcv table to recreate as hypertable...")
+                        cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
+                        conn.commit()
+            except Exception as e:
+                # If TimescaleDB queries fail, just try to continue
+                pass
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stock_ohlcv (
+                    id BIGSERIAL,
+                    data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
+                    date DATE NOT NULL,
+                    open NUMERIC(18,6),
+                    high NUMERIC(18,6),
+                    low NUMERIC(18,6),
+                    close NUMERIC(18,6),
+                    adjusted_close NUMERIC(18,6),
+                    dividend_amount NUMERIC(18,6),
+                    split_coefficient NUMERIC(18,6),
+                    volume BIGINT,
+                    source TEXT,
+                    PRIMARY KEY (id, date),
+                    UNIQUE (data_id, date)
+                );
+                """
+            )
+            cur.execute(
+                """
+                SELECT create_hypertable('stock_ohlcv', 'date', if_not_exists => TRUE);
+                """
+            )
+            # Performance helpers: chunk interval and BRIN on date for large scans
+            try:
+                cur.execute("SELECT set_chunk_time_interval('stock_ohlcv', INTERVAL '30 days');")
+            except Exception:
+                pass
+            cur.execute("CREATE INDEX IF NOT EXISTS stock_ohlcv_brin ON stock_ohlcv USING BRIN(date);")
+            # Composite B-tree index for efficient single-stock time-series queries
+            # Optimized for "SELECT ... WHERE data_id = X AND date BETWEEN Y AND Z ORDER BY date DESC"
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS stock_ohlcv_data_id_date_idx
+                    ON stock_ohlcv(data_id, date DESC);
+            """)
+        conn.commit()
+        set_attributes(span, table="stock_ohlcv")
 
 
 def create_feature_definitions_table(conn: Connection) -> None:
@@ -565,50 +571,52 @@ def create_trend_class_predictions_table(conn: Connection) -> None:
 
 def create_predictions_table(conn: Connection) -> None:
     """Unified predictions table storing both quantile and trend_class predictions as JSONB."""
-    _ensure_timescaledb(conn)
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS predictions (
-                model_id INTEGER NOT NULL REFERENCES ml_models(id),
-                data_id INTEGER NOT NULL REFERENCES stocks(id),
-                prediction_date DATE NOT NULL,
-                horizon_days INTEGER NOT NULL,
-                prediction_type TEXT NOT NULL,
-                prediction_values JSONB NOT NULL,
-                metadata JSONB DEFAULT '{}',
-                run_id INTEGER REFERENCES ml_runs(id),
-                created_at TIMESTAMP DEFAULT NOW(),
-                PRIMARY KEY (model_id, data_id, prediction_date, horizon_days, prediction_type),
-                CONSTRAINT check_horizon_positive CHECK (horizon_days > 0),
-                CONSTRAINT check_prediction_type CHECK (prediction_type IN ('quantile', 'trend_class'))
-            );
-            """
-        )
-        cur.execute("SELECT create_hypertable('predictions', 'prediction_date', if_not_exists => TRUE);")
-        try:
-            cur.execute("SELECT set_chunk_time_interval('predictions', INTERVAL '30 days');")
-        except Exception:
-            pass
-        cur.execute(
-            """
-            CREATE INDEX IF NOT EXISTS predictions_symbol_date_idx
-                ON predictions(data_id, prediction_date, horizon_days);
-            """
-        )
-        cur.execute(
-            """
-            CREATE INDEX IF NOT EXISTS predictions_type_idx
-                ON predictions(prediction_type, prediction_date DESC);
-            """
-        )
-        cur.execute(
-            """
-            CREATE INDEX IF NOT EXISTS predictions_run_id_idx
-                ON predictions(run_id);
-            """
-        )
-    conn.commit()
+    with create_span("db.schema.create_predictions_table") as span:
+        _ensure_timescaledb(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS predictions (
+                    model_id INTEGER NOT NULL REFERENCES ml_models(id),
+                    data_id INTEGER NOT NULL REFERENCES stocks(id),
+                    prediction_date DATE NOT NULL,
+                    horizon_days INTEGER NOT NULL,
+                    prediction_type TEXT NOT NULL,
+                    prediction_values JSONB NOT NULL,
+                    metadata JSONB DEFAULT '{}',
+                    run_id INTEGER REFERENCES ml_runs(id),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    PRIMARY KEY (model_id, data_id, prediction_date, horizon_days, prediction_type),
+                    CONSTRAINT check_horizon_positive CHECK (horizon_days > 0),
+                    CONSTRAINT check_prediction_type CHECK (prediction_type IN ('quantile', 'trend_class'))
+                );
+                """
+            )
+            cur.execute("SELECT create_hypertable('predictions', 'prediction_date', if_not_exists => TRUE);")
+            try:
+                cur.execute("SELECT set_chunk_time_interval('predictions', INTERVAL '30 days');")
+            except Exception:
+                pass
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS predictions_symbol_date_idx
+                    ON predictions(data_id, prediction_date, horizon_days);
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS predictions_type_idx
+                    ON predictions(prediction_type, prediction_date DESC);
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS predictions_run_id_idx
+                    ON predictions(run_id);
+                """
+            )
+        conn.commit()
+        set_attributes(span, table="predictions")
 
 
 def migrate_stock_tables_to_data_id(conn: Connection) -> None:

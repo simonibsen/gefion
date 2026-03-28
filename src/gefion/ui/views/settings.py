@@ -2,6 +2,7 @@
 
 import streamlit as st
 import os
+from gefion.observability import create_span, set_attributes
 from gefion.ui.components.chat import render_chat_widget
 
 
@@ -54,7 +55,8 @@ def render_database_settings():
     try:
         from gefion.ui.components.database import get_connection
 
-        with get_connection() as conn:
+        with create_span("ui.settings.render_database_settings"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 # Get table sizes
                 cur.execute("""

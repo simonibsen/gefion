@@ -12,6 +12,7 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional, List
 from queue import Queue, Empty
+from gefion.observability import create_span, set_attributes
 
 
 def get_page_context():
@@ -20,7 +21,8 @@ def get_page_context():
     try:
         from gefion.ui.components.database import get_connection
         from datetime import date as date_type
-        with get_connection() as conn:
+        with create_span("ui.data.get_page_context"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM stocks")
                 total_stocks = cur.fetchone()[0]
@@ -83,7 +85,8 @@ def _get_symbol_coverage() -> list:
     try:
         from gefion.ui.components.database import get_connection
 
-        with get_connection() as conn:
+        with create_span("ui.data._get_symbol_coverage"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT
@@ -146,7 +149,8 @@ def stop_process(key: str):
 
 def start_background_process(key: str, cmd: list, env: dict):
     """Start a background process with state tracking."""
-    state = get_process_state(key)
+    with create_span("ui.data.start_background_process", process_key=key):
+        state = get_process_state(key)
 
     # Don't start if already running
     if state.is_running:

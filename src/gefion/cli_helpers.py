@@ -11,6 +11,8 @@ import os
 import psycopg
 from psycopg.types.json import Json
 
+from gefion.observability import create_span, set_attributes
+
 
 def parse_comma_separated(
     value: Optional[str],
@@ -312,60 +314,62 @@ def db_connection(url: Optional[str], autocommit: bool = True):
     SETTINGS = load_settings()
     db_url = url or SETTINGS.database_url or os.getenv("DATABASE_URL") or schema.test_db_url()
 
-    try:
-        conn = psycopg.connect(db_url)
-    except psycopg.OperationalError as e:
-        # Provide helpful error message for common database connection issues
-        error_msg = str(e).lower()
+    with create_span("cli_helpers.db_connection", autocommit=autocommit) as span:
+        try:
+            conn = psycopg.connect(db_url)
+        except psycopg.OperationalError as e:
+            # Provide helpful error message for common database connection issues
+            error_msg = str(e).lower()
 
-        if "connection refused" in error_msg or "could not connect" in error_msg:
-            raise RuntimeError(
-                "✗ Could not connect to database.\n"
-                "\n"
-                "Possible causes:\n"
-                "  1. Database is not running\n"
-                "     → Start it with: docker compose up -d\n"
-                "  2. Wrong port or credentials\n"
-                f"     → Check DATABASE_URL in .env file\n"
-                f"     → Currently using: {db_url}\n"
-                "\n"
-                "See: docs/USER_GUIDE.md#database-setup"
-            ) from e
-        elif "authentication failed" in error_msg or "password" in error_msg:
-            raise RuntimeError(
-                "✗ Database authentication failed.\n"
-                "\n"
-                "Check your database credentials:\n"
-                f"  → DATABASE_URL in .env file\n"
-                f"  → Currently using: {db_url}\n"
-                "\n"
-                "See: docs/USER_GUIDE.md#database-setup"
-            ) from e
-        elif "does not exist" in error_msg:
-            raise RuntimeError(
-                "✗ Database does not exist.\n"
-                "\n"
-                "Create the database:\n"
-                "  → Run: docker compose up -d\n"
-                "  → Run: gefion db-init\n"
-                "\n"
-                "See: docs/USER_GUIDE.md#database-setup"
-            ) from e
-        else:
-            # Unknown error - re-raise with context
-            raise RuntimeError(
-                f"✗ Database connection error: {e}\n"
-                "\n"
-                "See: docs/USER_GUIDE.md#database-setup"
-            ) from e
+            if "connection refused" in error_msg or "could not connect" in error_msg:
+                raise RuntimeError(
+                    "✗ Could not connect to database.\n"
+                    "\n"
+                    "Possible causes:\n"
+                    "  1. Database is not running\n"
+                    "     → Start it with: docker compose up -d\n"
+                    "  2. Wrong port or credentials\n"
+                    f"     → Check DATABASE_URL in .env file\n"
+                    f"     → Currently using: {db_url}\n"
+                    "\n"
+                    "See: docs/USER_GUIDE.md#database-setup"
+                ) from e
+            elif "authentication failed" in error_msg or "password" in error_msg:
+                raise RuntimeError(
+                    "✗ Database authentication failed.\n"
+                    "\n"
+                    "Check your database credentials:\n"
+                    f"  → DATABASE_URL in .env file\n"
+                    f"  → Currently using: {db_url}\n"
+                    "\n"
+                    "See: docs/USER_GUIDE.md#database-setup"
+                ) from e
+            elif "does not exist" in error_msg:
+                raise RuntimeError(
+                    "✗ Database does not exist.\n"
+                    "\n"
+                    "Create the database:\n"
+                    "  → Run: docker compose up -d\n"
+                    "  → Run: gefion db-init\n"
+                    "\n"
+                    "See: docs/USER_GUIDE.md#database-setup"
+                ) from e
+            else:
+                # Unknown error - re-raise with context
+                raise RuntimeError(
+                    f"✗ Database connection error: {e}\n"
+                    "\n"
+                    "See: docs/USER_GUIDE.md#database-setup"
+                ) from e
 
-    if autocommit:
-        conn.autocommit = True
+        if autocommit:
+            conn.autocommit = True
 
-    try:
-        yield conn
-    finally:
-        conn.close()
+        set_attributes(span, connected=True)
+        try:
+            yield conn
+        finally:
+            conn.close()
 
 
 def init_schema_tables(conn: psycopg.Connection, tables: List[str]) -> None:
@@ -390,26 +394,28 @@ def init_schema_tables(conn: psycopg.Connection, tables: List[str]) -> None:
     """
     from gefion.db import schema
 
-    # Map table names to their creation functions
-    table_creators = {
-        "stocks": schema.create_stocks_table,
-        "stock_ohlcv": schema.create_stock_ohlcv_table,
-        "feature_functions": schema.create_feature_functions_table,
-        "feature_definitions": schema.create_feature_definitions_table,
-        "computed_features": schema.create_computed_features_table,
-        "ml_datasets": schema.create_ml_datasets_table,
-        "ml_runs": schema.create_ml_runs_table,
-        "ml_models": schema.create_ml_models_table,
-        "predictions": schema.create_predictions_table,
-        "quantile_predictions": schema.create_quantile_predictions_table,
-        "prediction_outcomes": schema.create_prediction_outcomes_table,
-        "model_performance": schema.create_model_performance_table,
-        "trend_class_predictions": schema.create_trend_class_predictions_table,
-        "strategy_registry": schema.create_strategy_registry_table,
-        "strategy_configs": schema.create_strategy_configs_table,
-    }
+    with create_span("cli_helpers.init_schema_tables", table_count=len(tables)) as span:
+        # Map table names to their creation functions
+        table_creators = {
+            "stocks": schema.create_stocks_table,
+            "stock_ohlcv": schema.create_stock_ohlcv_table,
+            "feature_functions": schema.create_feature_functions_table,
+            "feature_definitions": schema.create_feature_definitions_table,
+            "computed_features": schema.create_computed_features_table,
+            "ml_datasets": schema.create_ml_datasets_table,
+            "ml_runs": schema.create_ml_runs_table,
+            "ml_models": schema.create_ml_models_table,
+            "predictions": schema.create_predictions_table,
+            "quantile_predictions": schema.create_quantile_predictions_table,
+            "prediction_outcomes": schema.create_prediction_outcomes_table,
+            "model_performance": schema.create_model_performance_table,
+            "trend_class_predictions": schema.create_trend_class_predictions_table,
+            "strategy_registry": schema.create_strategy_registry_table,
+            "strategy_configs": schema.create_strategy_configs_table,
+        }
 
-    for table in tables:
-        if table not in table_creators:
-            raise ValueError(f"Unknown table: {table}. Valid tables: {list(table_creators.keys())}")
-        table_creators[table](conn)
+        for table in tables:
+            if table not in table_creators:
+                raise ValueError(f"Unknown table: {table}. Valid tables: {list(table_creators.keys())}")
+            table_creators[table](conn)
+        set_attributes(span, tables_created=len(tables))

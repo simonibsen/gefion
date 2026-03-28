@@ -7,6 +7,8 @@ are running and accessible, with helpful error messages and suggestions.
 import os
 from typing import Dict, Any
 
+from gefion.observability import create_span, set_attributes
+
 
 def check_postgres_health(url: str | None = None, timeout: int = 2) -> Dict[str, Any]:
     """
@@ -23,6 +25,14 @@ def check_postgres_health(url: str | None = None, timeout: int = 2) -> Dict[str,
             - suggestion: str - how to fix if not running (optional)
             - error_type: str - category of error (optional)
     """
+    with create_span("health.check_postgres_health") as span:
+        result = _check_postgres_health_impl(url, timeout)
+        set_attributes(span, running=result.get("running", False), error_type=result.get("error_type", ""))
+        return result
+
+
+def _check_postgres_health_impl(url: str | None = None, timeout: int = 2) -> Dict[str, Any]:
+    """Internal implementation of check_postgres_health."""
     try:
         import psycopg
 
@@ -112,6 +122,14 @@ def check_tempo_health(endpoint: str | None = None, timeout: int = 2) -> Dict[st
     Returns:
         Dict with health status and suggestions
     """
+    with create_span("health.check_tempo_health") as span:
+        result = _check_tempo_health_impl(endpoint, timeout)
+        set_attributes(span, running=result.get("running", False))
+        return result
+
+
+def _check_tempo_health_impl(endpoint: str | None = None, timeout: int = 2) -> Dict[str, Any]:
+    """Internal implementation of check_tempo_health."""
     import subprocess
 
     # First check if tempo container is running via Docker
@@ -333,12 +351,16 @@ def check_all_services() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dict mapping service name to health status
     """
-    return {
-        "docker": check_docker_services(),
-        "postgres": check_postgres_health(),
-        "tempo": check_tempo_health(),
-        "grafana": check_grafana_health(),
-    }
+    with create_span("health.check_all_services") as span:
+        result = {
+            "docker": check_docker_services(),
+            "postgres": check_postgres_health(),
+            "tempo": check_tempo_health(),
+            "grafana": check_grafana_health(),
+        }
+        healthy_count = sum(1 for s in result.values() if s.get("running"))
+        set_attributes(span, service_count=len(result), healthy_count=healthy_count)
+        return result
 
 
 def format_health_report(health_status: Dict[str, Dict[str, Any]]) -> str:

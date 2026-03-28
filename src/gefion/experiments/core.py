@@ -11,6 +11,8 @@ import json
 import psycopg
 from datetime import datetime
 
+from gefion.observability import create_span, set_attributes
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,51 +70,53 @@ class ExperimentRunner:
         Propose a new experiment. Returns experiment_id.
         Status will be 'proposed' until approved.
         """
-        with self._get_conn() as conn:
-            with conn.cursor() as cur:
-                # Build config dict for storage
-                full_config = {
-                    "symbols": config.symbols,
-                    "exchange": config.exchange,
-                    "start_date": config.start_date,
-                    "end_date": config.end_date,
-                    "max_trials": config.max_trials,
-                    "search_method": config.search_method,
-                    **config.extra_config
-                }
+        with create_span("experiments.core.propose", experiment_name=config.name, experiment_type=config.experiment_type) as span:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    # Build config dict for storage
+                    full_config = {
+                        "symbols": config.symbols,
+                        "exchange": config.exchange,
+                        "start_date": config.start_date,
+                        "end_date": config.end_date,
+                        "max_trials": config.max_trials,
+                        "search_method": config.search_method,
+                        **config.extra_config
+                    }
 
-                cur.execute("""
-                    INSERT INTO experiments (
-                        name, experiment_type, config, search_space,
-                        objective_metric, objective_direction,
-                        goal_target, goal_type, baseline_value, early_stop_on_goal,
-                        status, proposed_by, total_trials
-                    ) VALUES (
-                        %s, %s, %s, %s,
-                        %s, %s,
-                        %s, %s, %s, %s,
-                        'proposed', %s, %s
-                    )
-                    RETURNING id
-                """, (
-                    config.name,
-                    config.experiment_type,
-                    json.dumps(full_config),
-                    json.dumps(config.search_space),
-                    config.objective_metric,
-                    config.objective_direction,
-                    config.goal_target,
-                    config.goal_type,
-                    config.baseline_value,
-                    config.early_stop_on_goal,
-                    proposed_by,
-                    config.max_trials
-                ))
+                    cur.execute("""
+                        INSERT INTO experiments (
+                            name, experiment_type, config, search_space,
+                            objective_metric, objective_direction,
+                            goal_target, goal_type, baseline_value, early_stop_on_goal,
+                            status, proposed_by, total_trials
+                        ) VALUES (
+                            %s, %s, %s, %s,
+                            %s, %s,
+                            %s, %s, %s, %s,
+                            'proposed', %s, %s
+                        )
+                        RETURNING id
+                    """, (
+                        config.name,
+                        config.experiment_type,
+                        json.dumps(full_config),
+                        json.dumps(config.search_space),
+                        config.objective_metric,
+                        config.objective_direction,
+                        config.goal_target,
+                        config.goal_type,
+                        config.baseline_value,
+                        config.early_stop_on_goal,
+                        proposed_by,
+                        config.max_trials
+                    ))
 
-                experiment_id = cur.fetchone()[0]
-                conn.commit()
+                    experiment_id = cur.fetchone()[0]
+                    conn.commit()
 
-        return experiment_id
+            set_attributes(span, experiment_id=experiment_id)
+            return experiment_id
 
     def get(self, experiment_id: int) -> Dict[str, Any]:
         """Get experiment details by ID."""

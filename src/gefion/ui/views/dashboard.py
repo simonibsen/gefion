@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from gefion.ui.components.chat import render_chat_widget
 from dataclasses import dataclass, field
 from typing import Optional
+from gefion.observability import create_span, set_attributes
 
 
 def get_page_context():
@@ -13,7 +14,8 @@ def get_page_context():
     try:
         from gefion.ui.components.database import get_connection
         from datetime import date as date_type
-        with get_connection() as conn:
+        with create_span("ui.dashboard.get_page_context"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM stocks")
                 stock_count = cur.fetchone()[0]
@@ -92,7 +94,8 @@ def get_market_movers() -> Optional[MarketMovers]:
     try:
         from gefion.ui.components.database import get_connection
 
-        with get_connection() as conn:
+        with create_span("ui.dashboard.get_market_movers"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 # Fast query: only look at last 2 trading days
                 cur.execute("""
@@ -166,7 +169,8 @@ def get_gefion_insights() -> Optional[GefionInsights]:
 
         insights = GefionInsights()
 
-        with get_connection() as conn:
+        with create_span("ui.dashboard.get_gefion_insights"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 # Predictions - table may not exist yet
                 # Predictions - table may not exist yet

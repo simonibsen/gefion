@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 import psycopg
+from gefion.observability import create_span, set_attributes
 
 
 def get_available_connections(url: str) -> Optional[Tuple[int, int, int]]:
@@ -10,13 +11,14 @@ def get_available_connections(url: str) -> Optional[Tuple[int, int, int]]:
     Return (available, max_connections, used) or None on failure.
     """
     try:
-        with psycopg.connect(url) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SHOW max_connections;")
-                max_conn = int(cur.fetchone()[0])
-                cur.execute("SELECT count(*) FROM pg_stat_activity;")
-                used = int(cur.fetchone()[0])
-                return max_conn - used, max_conn, used
+        with create_span("utils.db_load.get_available_connections"):
+            with psycopg.connect(url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SHOW max_connections;")
+                    max_conn = int(cur.fetchone()[0])
+                    cur.execute("SELECT count(*) FROM pg_stat_activity;")
+                    used = int(cur.fetchone()[0])
+                    return max_conn - used, max_conn, used
     except Exception:
         return None
 

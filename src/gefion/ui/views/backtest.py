@@ -8,6 +8,7 @@ import json
 import os
 from datetime import date, timedelta
 import pandas as pd
+from gefion.observability import create_span, set_attributes
 
 
 def get_page_context():
@@ -15,10 +16,11 @@ def get_page_context():
     context = {"page_name": "Backtesting", "summary": "Strategy backtesting and comparison."}
     try:
         from gefion.ui.components.database import get_connection
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM strategy_registry")
-                count = cur.fetchone()[0]
+        with create_span("ui.backtest.get_page_context"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM strategy_registry")
+                    count = cur.fetchone()[0]
         context["data_stats"] = {"strategies": count}
         if count == 0:
             context["suggestions"] = ["Create a strategy: gefion strategy create-config"]
@@ -498,7 +500,8 @@ def get_strategies():
     """Get available strategies from database or dispatcher."""
     try:
         from gefion.ui.components.database import get_connection
-        with get_connection() as conn:
+        with create_span("ui.backtest.get_strategies"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT name, description

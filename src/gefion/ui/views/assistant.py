@@ -13,6 +13,7 @@ from datetime import date
 
 logger = logging.getLogger(__name__)
 
+from gefion.observability import create_span, set_attributes
 from gefion.ui.components.chat import (
     MCP_TOOL_MAP,
     UI_OPERATOR_PROMPT,
@@ -73,105 +74,106 @@ def check_conditions() -> Optional[SystemConditions]:
 
     cond = SystemConditions()
     try:
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                # Stock count
-                try:
-                    cur.execute(
-                        "SELECT COUNT(*) FROM stocks WHERE status = 'Active'"
-                    )
-                    cond.stock_count = cur.fetchone()[0]
-                except Exception as e:
-                    logger.debug("Could not query stock count: %s", e)
+        with create_span("ui.assistant.check_conditions"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Stock count
+                    try:
+                        cur.execute(
+                            "SELECT COUNT(*) FROM stocks WHERE status = 'Active'"
+                        )
+                        cond.stock_count = cur.fetchone()[0]
+                    except Exception as e:
+                        logger.debug("Could not query stock count: %s", e)
 
-                # 1. Data freshness
-                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
-                row = cur.fetchone()
-                if row and row[0]:
-                    cond.data_last_date = row[0]
-                    today = date.today()
-                    delta = (today - row[0]).days
-                    cond.data_days_old = delta
-                    # Stale if > 3 days old, or > 1 day on weekdays
-                    cond.data_stale = delta > 3 or (today.weekday() < 5 and delta > 1)
-                else:
-                    cond.data_stale = True
-
-                # 2. Model count
-                try:
-                    cur.execute("SELECT COUNT(*) FROM ml_models")
-                    cond.model_count = cur.fetchone()[0]
-                    cond.no_models = cond.model_count == 0
-                except Exception as e:
-                    logger.debug("Could not query ml_models: %s", e)
-                    cond.no_models = True
-
-                # 3. Dataset count
-                try:
-                    cur.execute("SELECT COUNT(*) FROM ml_datasets")
-                    ds_count = cur.fetchone()[0]
-                    cond.no_datasets = ds_count == 0
-                except Exception as e:
-                    logger.debug("Could not query ml_datasets: %s", e)
-                    cond.no_datasets = True
-
-                # 4. Recent predictions
-                try:
-                    cur.execute("""
-                        SELECT COUNT(*), MAX(prediction_date)
-                        FROM predictions
-                        WHERE prediction_type = 'quantile'
-                          AND prediction_date > CURRENT_DATE - INTERVAL '7 days'
-                    """)
-                    row = cur.fetchone()
-                    cond.prediction_count = row[0]
-                    cond.latest_prediction_date = row[1]
-                    cond.no_predictions = cond.model_count > 0 and cond.prediction_count == 0
-                    # Predictions aging if latest is > 2 days old
-                    if row[1]:
-                        pred_age = (date.today() - row[1]).days
-                        cond.predictions_aging = pred_age > 2
-                except Exception as e:
-                    logger.debug("Could not query predictions: %s", e)
-
-                # 5. Calibration quality (from latest model_performance)
-                try:
-                    cur.execute("""
-                        SELECT metrics FROM model_performance
-                        ORDER BY evaluated_at DESC LIMIT 1
-                    """)
+                    # 1. Data freshness
+                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
                     row = cur.fetchone()
                     if row and row[0]:
-                        metrics = row[0]
-                        q50_cal = metrics.get("q50_calibration", 50)
-                        if abs(q50_cal - 50) > 15:
-                            cond.needs_calibration = True
-                            cond.calibration_info = (
-                                f"Q50 coverage at {q50_cal:.0f}% (target: 50%)"
-                            )
+                        cond.data_last_date = row[0]
+                        today = date.today()
+                        delta = (today - row[0]).days
+                        cond.data_days_old = delta
+                        # Stale if > 3 days old, or > 1 day on weekdays
+                        cond.data_stale = delta > 3 or (today.weekday() < 5 and delta > 1)
                     else:
+                        cond.data_stale = True
+
+                    # 2. Model count
+                    try:
+                        cur.execute("SELECT COUNT(*) FROM ml_models")
+                        cond.model_count = cur.fetchone()[0]
+                        cond.no_models = cond.model_count == 0
+                    except Exception as e:
+                        logger.debug("Could not query ml_models: %s", e)
+                        cond.no_models = True
+
+                    # 3. Dataset count
+                    try:
+                        cur.execute("SELECT COUNT(*) FROM ml_datasets")
+                        ds_count = cur.fetchone()[0]
+                        cond.no_datasets = ds_count == 0
+                    except Exception as e:
+                        logger.debug("Could not query ml_datasets: %s", e)
+                        cond.no_datasets = True
+
+                    # 4. Recent predictions
+                    try:
+                        cur.execute("""
+                            SELECT COUNT(*), MAX(prediction_date)
+                            FROM predictions
+                            WHERE prediction_type = 'quantile'
+                              AND prediction_date > CURRENT_DATE - INTERVAL '7 days'
+                        """)
+                        row = cur.fetchone()
+                        cond.prediction_count = row[0]
+                        cond.latest_prediction_date = row[1]
+                        cond.no_predictions = cond.model_count > 0 and cond.prediction_count == 0
+                        # Predictions aging if latest is > 2 days old
+                        if row[1]:
+                            pred_age = (date.today() - row[1]).days
+                            cond.predictions_aging = pred_age > 2
+                    except Exception as e:
+                        logger.debug("Could not query predictions: %s", e)
+
+                    # 5. Calibration quality (from latest model_performance)
+                    try:
+                        cur.execute("""
+                            SELECT metrics FROM model_performance
+                            ORDER BY evaluated_at DESC LIMIT 1
+                        """)
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            metrics = row[0]
+                            q50_cal = metrics.get("q50_calibration", 50)
+                            if abs(q50_cal - 50) > 15:
+                                cond.needs_calibration = True
+                                cond.calibration_info = (
+                                    f"Q50 coverage at {q50_cal:.0f}% (target: 50%)"
+                                )
+                        else:
+                            cond.no_eval = True
+                    except Exception as e:
+                        logger.debug("Could not query model_performance: %s", e)
                         cond.no_eval = True
-                except Exception as e:
-                    logger.debug("Could not query model_performance: %s", e)
-                    cond.no_eval = True
 
-                # 6. Feature coverage gap
-                try:
-                    cur.execute(
-                        "SELECT COUNT(DISTINCT feature_name) FROM computed_features"
-                    )
-                    actual = cur.fetchone()[0]
-                    cur.execute(
-                        "SELECT COUNT(*) FROM feature_definitions WHERE active = true"
-                    )
-                    expected = cur.fetchone()[0]
-                    if expected > 0 and actual < expected:
-                        cond.features_stale = True
-                        cond.feature_gap = expected - actual
-                except Exception as e:
-                    logger.debug("Could not query feature coverage: %s", e)
+                    # 6. Feature coverage gap
+                    try:
+                        cur.execute(
+                            "SELECT COUNT(DISTINCT feature_name) FROM computed_features"
+                        )
+                        actual = cur.fetchone()[0]
+                        cur.execute(
+                            "SELECT COUNT(*) FROM feature_definitions WHERE active = true"
+                        )
+                        expected = cur.fetchone()[0]
+                        if expected > 0 and actual < expected:
+                            cond.features_stale = True
+                            cond.feature_gap = expected - actual
+                    except Exception as e:
+                        logger.debug("Could not query feature coverage: %s", e)
 
-        return cond
+            return cond
     except Exception as e:
         logger.warning("Failed to check system conditions: %s", e)
         return None
@@ -512,14 +514,15 @@ def get_page_context():
     context = {"page_name": "System Operations", "summary": "System health, suggested actions, and operations history."}
     try:
         from gefion.ui.components.database import get_connection
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM ml_models WHERE active = true")
-                model_count = cur.fetchone()[0]
-                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
-                latest = cur.fetchone()[0]
-                cur.execute("SELECT COUNT(*) FROM predictions")
-                pred_count = cur.fetchone()[0]
+        with create_span("ui.assistant.get_page_context"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM ml_models WHERE active = true")
+                    model_count = cur.fetchone()[0]
+                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                    latest = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM predictions")
+                    pred_count = cur.fetchone()[0]
         from datetime import date as date_type
         data_age = (date_type.today() - latest).days if latest else None
         context["data_stats"] = {

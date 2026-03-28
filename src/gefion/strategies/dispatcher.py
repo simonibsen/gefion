@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Type
 import psycopg
 from psycopg.types.json import Jsonb
 
+from gefion.observability import create_span, set_attributes
+
 
 # Built-in strategies with their module paths and class names
 BUILTIN_STRATEGIES: Dict[str, Dict[str, Any]] = {
@@ -110,22 +112,25 @@ def load_strategy_class(
     Returns:
         Strategy class or None if not found/disabled
     """
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT module_path, class_name
-            FROM strategy_registry
-            WHERE enabled = TRUE AND name = %s;
-            """,
-            (strategy_name,),
-        )
-        row = cur.fetchone()
+    with create_span("strategies.dispatcher.load_strategy_class", strategy_name=strategy_name) as span:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT module_path, class_name
+                FROM strategy_registry
+                WHERE enabled = TRUE AND name = %s;
+                """,
+                (strategy_name,),
+            )
+            row = cur.fetchone()
 
-    if not row:
-        return None
+        if not row:
+            set_attributes(span, found=False)
+            return None
 
-    module_path, class_name = row
-    return _load_from_module(module_path, class_name)
+        module_path, class_name = row
+        set_attributes(span, found=True, module_path=module_path)
+        return _load_from_module(module_path, class_name)
 
 
 def _load_from_module(module_path: str, class_name: str) -> Optional[Type]:
@@ -149,30 +154,33 @@ def get_strategy_registry(conn: psycopg.Connection) -> List[Dict[str, Any]]:
     Returns:
         List of strategy registry entries
     """
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT name, module_path, class_name, default_params,
-                   param_schema, description, tags
-            FROM strategy_registry
-            WHERE enabled = TRUE
-            ORDER BY name;
-            """
-        )
-        rows = cur.fetchall()
+    with create_span("strategies.dispatcher.get_strategy_registry") as span:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT name, module_path, class_name, default_params,
+                       param_schema, description, tags
+                FROM strategy_registry
+                WHERE enabled = TRUE
+                ORDER BY name;
+                """
+            )
+            rows = cur.fetchall()
 
-    return [
-        {
-            'name': row[0],
-            'module_path': row[1],
-            'class_name': row[2],
-            'default_params': row[3] or {},
-            'param_schema': row[4],
-            'description': row[5],
-            'tags': row[6] or [],
-        }
-        for row in rows
-    ]
+        result = [
+            {
+                'name': row[0],
+                'module_path': row[1],
+                'class_name': row[2],
+                'default_params': row[3] or {},
+                'param_schema': row[4],
+                'description': row[5],
+                'tags': row[6] or [],
+            }
+            for row in rows
+        ]
+        set_attributes(span, result_count=len(result))
+        return result
 
 
 def get_strategy_config(
@@ -281,26 +289,30 @@ def instantiate_strategy(
     Returns:
         Strategy instance or None if not found
     """
-    config = get_strategy_config(conn, config_name)
-    if not config:
-        return None
+    with create_span("strategies.dispatcher.instantiate_strategy", config_name=config_name) as span:
+        config = get_strategy_config(conn, config_name)
+        if not config:
+            set_attributes(span, found=False)
+            return None
 
-    # Load strategy class
-    strategy_class = _load_from_module(config['module_path'], config['class_name'])
-    if not strategy_class:
-        return None
+        # Load strategy class
+        strategy_class = _load_from_module(config['module_path'], config['class_name'])
+        if not strategy_class:
+            set_attributes(span, found=True, class_loaded=False)
+            return None
 
-    # Merge params (config params already include defaults)
-    params = {**config['params']}
-    if param_overrides:
-        params.update(param_overrides)
+        # Merge params (config params already include defaults)
+        params = {**config['params']}
+        if param_overrides:
+            params.update(param_overrides)
 
-    # Instantiate
-    try:
-        return strategy_class(**params)
-    except Exception as exc:
-        warnings.warn(f"Failed to instantiate strategy '{config_name}': {exc}")
-        return None
+        # Instantiate
+        try:
+            set_attributes(span, found=True, class_loaded=True, strategy_name=config['strategy_name'])
+            return strategy_class(**params)
+        except Exception as exc:
+            warnings.warn(f"Failed to instantiate strategy '{config_name}': {exc}")
+            return None
 
 
 def create_strategy_config(
@@ -366,47 +378,49 @@ def seed_builtin_strategies(conn: psycopg.Connection) -> int:
     Returns:
         Number of strategies seeded
     """
-    with conn.cursor() as cur:
-        # Seed strategy_registry
-        for name, info in BUILTIN_STRATEGIES.items():
-            cur.execute(
-                """
-                INSERT INTO strategy_registry
-                    (name, module_path, class_name, default_params, description, tags, enabled)
-                VALUES
-                    (%s, %s, %s, %s, %s, %s, true)
-                ON CONFLICT (name) DO UPDATE SET
-                    module_path = EXCLUDED.module_path,
-                    class_name = EXCLUDED.class_name,
-                    default_params = EXCLUDED.default_params,
-                    description = EXCLUDED.description,
-                    tags = EXCLUDED.tags;
-                """,
-                (
-                    name,
-                    info['module_path'],
-                    info['class_name'],
-                    Jsonb(info.get('default_params', {})),
-                    info['description'],
-                    info.get('tags', []),
-                ),
-            )
+    with create_span("strategies.dispatcher.seed_builtin_strategies") as span:
+        with conn.cursor() as cur:
+            # Seed strategy_registry
+            for name, info in BUILTIN_STRATEGIES.items():
+                cur.execute(
+                    """
+                    INSERT INTO strategy_registry
+                        (name, module_path, class_name, default_params, description, tags, enabled)
+                    VALUES
+                        (%s, %s, %s, %s, %s, %s, true)
+                    ON CONFLICT (name) DO UPDATE SET
+                        module_path = EXCLUDED.module_path,
+                        class_name = EXCLUDED.class_name,
+                        default_params = EXCLUDED.default_params,
+                        description = EXCLUDED.description,
+                        tags = EXCLUDED.tags;
+                    """,
+                    (
+                        name,
+                        info['module_path'],
+                        info['class_name'],
+                        Jsonb(info.get('default_params', {})),
+                        info['description'],
+                        info.get('tags', []),
+                    ),
+                )
 
-        # Seed default configs (one per strategy with default params)
-        for name, info in BUILTIN_STRATEGIES.items():
-            cur.execute(
-                """
-                INSERT INTO strategy_configs
-                    (name, strategy_name, params, description, active)
-                VALUES
-                    (%s, %s, '{}', %s, true)
-                ON CONFLICT (name) DO NOTHING;
-                """,
-                (name, name, f"Default {info['description']}"),
-            )
+            # Seed default configs (one per strategy with default params)
+            for name, info in BUILTIN_STRATEGIES.items():
+                cur.execute(
+                    """
+                    INSERT INTO strategy_configs
+                        (name, strategy_name, params, description, active)
+                    VALUES
+                        (%s, %s, '{}', %s, true)
+                    ON CONFLICT (name) DO NOTHING;
+                    """,
+                    (name, name, f"Default {info['description']}"),
+                )
 
-    conn.commit()
-    return len(BUILTIN_STRATEGIES)
+        conn.commit()
+        set_attributes(span, strategy_count=len(BUILTIN_STRATEGIES))
+        return len(BUILTIN_STRATEGIES)
 
 
 # Backwards compatibility - keep old function names as aliases

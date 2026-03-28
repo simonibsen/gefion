@@ -18,6 +18,8 @@ from typing import Optional, List, Dict, Any, Tuple
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from gefion.observability import create_span, set_attributes
+
 
 # Average bytes per row estimates for size calculation
 BYTES_PER_ROW = {
@@ -86,70 +88,72 @@ def estimate_backup_size(
     for dt in data_types:
         tables.update(DATA_TYPE_TABLES.get(dt, []))
 
-    result = {"tables": {}, "total_rows": 0, "total_bytes": 0}
+    with create_span("backup.estimate_backup_size", data_types=str(data_types)) as span:
+        result = {"tables": {}, "total_rows": 0, "total_bytes": 0}
 
-    with conn.cursor() as cur:
-        for table in tables:
-            # Check if table exists
-            cur.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = %s
-                )
-            """, (table,))
-            if not cur.fetchone()[0]:
-                # Table doesn't exist, skip it
-                continue
+        with conn.cursor() as cur:
+            for table in tables:
+                # Check if table exists
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_name = %s
+                    )
+                """, (table,))
+                if not cur.fetchone()[0]:
+                    # Table doesn't exist, skip it
+                    continue
 
-            # Build count query with filters
-            query = f"SELECT COUNT(*) FROM {table}"
-            params = []
-            conditions = []
+                # Build count query with filters
+                query = f"SELECT COUNT(*) FROM {table}"
+                params = []
+                conditions = []
 
-            if table in ("stock_ohlcv", "computed_features") and (start_date or end_date):
-                if start_date:
-                    conditions.append("date >= %s")
-                    params.append(start_date)
-                if end_date:
-                    conditions.append("date <= %s")
-                    params.append(end_date)
+                if table in ("stock_ohlcv", "computed_features") and (start_date or end_date):
+                    if start_date:
+                        conditions.append("date >= %s")
+                        params.append(start_date)
+                    if end_date:
+                        conditions.append("date <= %s")
+                        params.append(end_date)
 
-            if symbols and table in ("stocks",):
-                placeholders = ",".join(["%s"] * len(symbols))
-                conditions.append(f"symbol IN ({placeholders})")
-                params.extend(symbols)
-            elif symbols and table in ("stock_ohlcv", "computed_features"):
-                # Need to join with stocks to filter by symbol
-                if table == "stock_ohlcv":
-                    query = """
-                        SELECT COUNT(*) FROM stock_ohlcv o
-                        JOIN stocks s ON o.data_id = s.id
-                    """
-                else:
-                    query = """
-                        SELECT COUNT(*) FROM computed_features cf
-                        JOIN stocks s ON cf.data_id = s.id
-                    """
-                placeholders = ",".join(["%s"] * len(symbols))
-                conditions.append(f"s.symbol IN ({placeholders})")
-                params.extend(symbols)
+                if symbols and table in ("stocks",):
+                    placeholders = ",".join(["%s"] * len(symbols))
+                    conditions.append(f"symbol IN ({placeholders})")
+                    params.extend(symbols)
+                elif symbols and table in ("stock_ohlcv", "computed_features"):
+                    # Need to join with stocks to filter by symbol
+                    if table == "stock_ohlcv":
+                        query = """
+                            SELECT COUNT(*) FROM stock_ohlcv o
+                            JOIN stocks s ON o.data_id = s.id
+                        """
+                    else:
+                        query = """
+                            SELECT COUNT(*) FROM computed_features cf
+                            JOIN stocks s ON cf.data_id = s.id
+                        """
+                    placeholders = ",".join(["%s"] * len(symbols))
+                    conditions.append(f"s.symbol IN ({placeholders})")
+                    params.extend(symbols)
 
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
+                if conditions:
+                    query += " WHERE " + " AND ".join(conditions)
 
-            cur.execute(query, params)
-            row_count = cur.fetchone()[0]
+                cur.execute(query, params)
+                row_count = cur.fetchone()[0]
 
-            estimated_bytes = row_count * BYTES_PER_ROW.get(table, 100)
+                estimated_bytes = row_count * BYTES_PER_ROW.get(table, 100)
 
-            result["tables"][table] = {
-                "rows": row_count,
-                "estimated_bytes": estimated_bytes,
-            }
-            result["total_rows"] += row_count
-            result["total_bytes"] += estimated_bytes
+                result["tables"][table] = {
+                    "rows": row_count,
+                    "estimated_bytes": estimated_bytes,
+                }
+                result["total_rows"] += row_count
+                result["total_bytes"] += estimated_bytes
 
-    return result
+        set_attributes(span, total_rows=result["total_rows"], total_bytes=result["total_bytes"], table_count=len(result["tables"]))
+        return result
 
 
 def check_disk_space(path: str, required_bytes: int) -> bool:
@@ -283,73 +287,75 @@ def create_backup(
     Returns:
         Dict with backup results
     """
-    output_dir = Path(output_path)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    with create_span("backup.create_backup", output_path=output_path, data_types=str(data_types), incremental=incremental) as span:
+        output_dir = Path(output_path)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Resolve tables
-    tables = set()
-    for dt in data_types:
-        tables.update(DATA_TYPE_TABLES.get(dt, []))
+        # Resolve tables
+        tables = set()
+        for dt in data_types:
+            tables.update(DATA_TYPE_TABLES.get(dt, []))
 
-    results = {"tables": {}, "total_rows": 0, "total_bytes": 0}
+        results = {"tables": {}, "total_rows": 0, "total_bytes": 0}
 
-    # For incremental, adjust start_date
-    if incremental and last_backup_date:
-        inc_date = datetime.fromisoformat(last_backup_date.replace("Z", "")).date()
-        if start_date is None or inc_date > start_date:
-            start_date = inc_date
+        # For incremental, adjust start_date
+        if incremental and last_backup_date:
+            inc_date = datetime.fromisoformat(last_backup_date.replace("Z", "")).date()
+            if start_date is None or inc_date > start_date:
+                start_date = inc_date
 
-    with conn.cursor() as cur:
-        for table in sorted(tables):
-            # Check if table exists
-            cur.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = %s
+        with conn.cursor() as cur:
+            for table in sorted(tables):
+                # Check if table exists
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_name = %s
+                    )
+                """, (table,))
+                if not cur.fetchone()[0]:
+                    # Table doesn't exist, skip it
+                    continue
+
+                table_result = _backup_table(
+                    cur=cur,
+                    table=table,
+                    output_dir=output_dir,
+                    start_date=start_date,
+                    end_date=end_date,
+                    symbols=symbols,
+                    compress=compress,
+                    progress_callback=progress_callback,
                 )
-            """, (table,))
-            if not cur.fetchone()[0]:
-                # Table doesn't exist, skip it
-                continue
 
-            table_result = _backup_table(
-                cur=cur,
-                table=table,
-                output_dir=output_dir,
-                start_date=start_date,
-                end_date=end_date,
-                symbols=symbols,
-                compress=compress,
-                progress_callback=progress_callback,
+                results["tables"][table] = table_result
+                results["total_rows"] += table_result.get("rows", 0)
+                results["total_bytes"] += table_result.get("bytes", 0)
+
+        # Write manifest
+        date_range = None
+        if start_date or end_date:
+            date_range = (
+                str(start_date) if start_date else None,
+                str(end_date) if end_date else None,
             )
 
-            results["tables"][table] = table_result
-            results["total_rows"] += table_result.get("rows", 0)
-            results["total_bytes"] += table_result.get("bytes", 0)
-
-    # Write manifest
-    date_range = None
-    if start_date or end_date:
-        date_range = (
-            str(start_date) if start_date else None,
-            str(end_date) if end_date else None,
+        manifest = create_manifest(
+            tables=results["tables"],
+            date_range=date_range,
+            symbols=symbols,
+            incremental_from=last_backup_date if incremental else None,
         )
 
-    manifest = create_manifest(
-        tables=results["tables"],
-        date_range=date_range,
-        symbols=symbols,
-        incremental_from=last_backup_date if incremental else None,
-    )
+        manifest_path = output_dir / "manifest.json"
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
 
-    manifest_path = output_dir / "manifest.json"
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+        results["manifest_path"] = str(manifest_path)
+        results["success"] = True
 
-    results["manifest_path"] = str(manifest_path)
-    results["success"] = True
-
-    return results
+        set_attributes(span, total_rows=results["total_rows"], total_bytes=results["total_bytes"], table_count=len(results["tables"]))
+        return results
 
 
 def _backup_table(
@@ -502,71 +508,73 @@ def restore_backup(
     Returns:
         Dict with restore results
     """
-    input_dir = Path(input_path)
+    with create_span("backup.restore_backup", input_path=input_path, mode=mode) as span:
+        input_dir = Path(input_path)
 
-    # Read manifest
-    manifest_path = input_dir / "manifest.json"
-    if not manifest_path.exists():
-        return {"success": False, "error": "No manifest.json found"}
+        # Read manifest
+        manifest_path = input_dir / "manifest.json"
+        if not manifest_path.exists():
+            return {"success": False, "error": "No manifest.json found"}
 
-    with open(manifest_path) as f:
-        manifest = json.load(f)
+        with open(manifest_path) as f:
+            manifest = json.load(f)
 
-    results = {"tables": {}, "total_rows": 0, "mode": mode}
+        results = {"tables": {}, "total_rows": 0, "mode": mode}
 
-    # Determine tables to restore
-    tables_in_backup = list(manifest.get("tables", {}).keys())
+        # Determine tables to restore
+        tables_in_backup = list(manifest.get("tables", {}).keys())
 
-    if data_types:
-        # Filter to requested types
-        allowed_tables = set()
-        for dt in data_types:
-            allowed_tables.update(DATA_TYPE_TABLES.get(dt, []))
-        tables_to_restore = [t for t in tables_in_backup if t in allowed_tables]
-    else:
-        tables_to_restore = tables_in_backup
+        if data_types:
+            # Filter to requested types
+            allowed_tables = set()
+            for dt in data_types:
+                allowed_tables.update(DATA_TYPE_TABLES.get(dt, []))
+            tables_to_restore = [t for t in tables_in_backup if t in allowed_tables]
+        else:
+            tables_to_restore = tables_in_backup
 
-    # Restore order matters (parent tables before children with foreign keys)
-    restore_order = [
-        "schema_migrations",  # Meta first
-        "stocks",  # Base data
-        "feature_definitions", "feature_functions",
-        "stock_ohlcv", "computed_features",
-        "strategy_registry", "strategy_configs",
-        "ml_datasets", "ml_models", "ml_runs",
-        "predictions",
-        "prediction_outcomes", "model_performance",
-        "volatility_thresholds",
-        "experiments", "experiment_trials",
-    ]
-    tables_to_restore = sorted(tables_to_restore, key=lambda t: restore_order.index(t) if t in restore_order else 99)
+        # Restore order matters (parent tables before children with foreign keys)
+        restore_order = [
+            "schema_migrations",  # Meta first
+            "stocks",  # Base data
+            "feature_definitions", "feature_functions",
+            "stock_ohlcv", "computed_features",
+            "strategy_registry", "strategy_configs",
+            "ml_datasets", "ml_models", "ml_runs",
+            "predictions",
+            "prediction_outcomes", "model_performance",
+            "volatility_thresholds",
+            "experiments", "experiment_trials",
+        ]
+        tables_to_restore = sorted(tables_to_restore, key=lambda t: restore_order.index(t) if t in restore_order else 99)
 
-    with conn.cursor() as cur:
-        for table in tables_to_restore:
-            parquet_file = input_dir / f"{table}.parquet"
-            if not parquet_file.exists():
-                # Check if this was an empty table (no file expected)
-                table_info = manifest.get("tables", {}).get(table, {})
-                if table_info.get("rows", 0) == 0:
-                    results["tables"][table] = {"rows_restored": 0, "rows_skipped": 0}
+        with conn.cursor() as cur:
+            for table in tables_to_restore:
+                parquet_file = input_dir / f"{table}.parquet"
+                if not parquet_file.exists():
+                    # Check if this was an empty table (no file expected)
+                    table_info = manifest.get("tables", {}).get(table, {})
+                    if table_info.get("rows", 0) == 0:
+                        results["tables"][table] = {"rows_restored": 0, "rows_skipped": 0}
+                        continue
+                    results["tables"][table] = {"error": "File not found", "rows": 0}
                     continue
-                results["tables"][table] = {"error": "File not found", "rows": 0}
-                continue
 
-            table_result = _restore_table(
-                cur=cur,
-                conn=conn,
-                table=table,
-                parquet_file=parquet_file,
-                mode=mode,
-                progress_callback=progress_callback,
-            )
+                table_result = _restore_table(
+                    cur=cur,
+                    conn=conn,
+                    table=table,
+                    parquet_file=parquet_file,
+                    mode=mode,
+                    progress_callback=progress_callback,
+                )
 
-            results["tables"][table] = table_result
-            results["total_rows"] += table_result.get("rows_restored", 0)
+                results["tables"][table] = table_result
+                results["total_rows"] += table_result.get("rows_restored", 0)
 
-    results["success"] = True
-    return results
+        results["success"] = True
+        set_attributes(span, total_rows=results["total_rows"], table_count=len(results["tables"]))
+        return results
 
 
 def _restore_table(
@@ -700,58 +708,60 @@ def verify_backup(backup_path: str) -> Dict[str, Any]:
     Returns:
         Dict with verification results
     """
-    backup_dir = Path(backup_path)
+    with create_span("backup.verify_backup", backup_path=backup_path) as span:
+        backup_dir = Path(backup_path)
 
-    if not backup_dir.exists():
-        return {"valid": False, "error": "Backup path does not exist"}
+        if not backup_dir.exists():
+            return {"valid": False, "error": "Backup path does not exist"}
 
-    manifest_path = backup_dir / "manifest.json"
-    if not manifest_path.exists():
-        return {"valid": False, "error": "No manifest.json found"}
+        manifest_path = backup_dir / "manifest.json"
+        if not manifest_path.exists():
+            return {"valid": False, "error": "No manifest.json found"}
 
-    with open(manifest_path) as f:
-        manifest = json.load(f)
+        with open(manifest_path) as f:
+            manifest = json.load(f)
 
-    results = {"valid": True, "tables": {}}
+        results = {"valid": True, "tables": {}}
 
-    for table, info in manifest.get("tables", {}).items():
-        parquet_file = backup_dir / f"{table}.parquet"
+        for table, info in manifest.get("tables", {}).items():
+            parquet_file = backup_dir / f"{table}.parquet"
 
-        # Empty tables don't have files - that's valid
-        expected_rows = info.get("rows", 0)
-        if not parquet_file.exists():
-            if expected_rows == 0:
-                results["tables"][table] = {"valid": True, "rows": 0, "expected_rows": 0}
-                continue
-            results["tables"][table] = {"valid": False, "error": "File missing"}
-            results["valid"] = False
-            continue
-
-        # Verify checksum if present
-        expected_checksum = info.get("checksum")
-        if expected_checksum:
-            with open(parquet_file, "rb") as f:
-                actual_checksum = _compute_checksum(f.read())
-
-            if actual_checksum != expected_checksum:
-                results["tables"][table] = {
-                    "valid": False,
-                    "error": f"Checksum mismatch: expected {expected_checksum}, got {actual_checksum}",
-                }
+            # Empty tables don't have files - that's valid
+            expected_rows = info.get("rows", 0)
+            if not parquet_file.exists():
+                if expected_rows == 0:
+                    results["tables"][table] = {"valid": True, "rows": 0, "expected_rows": 0}
+                    continue
+                results["tables"][table] = {"valid": False, "error": "File missing"}
                 results["valid"] = False
                 continue
 
-        # Try to read the parquet file
-        try:
-            arrow_table = pq.read_table(parquet_file)
-            row_count = arrow_table.num_rows
-            results["tables"][table] = {
-                "valid": True,
-                "rows": row_count,
-                "expected_rows": info.get("rows"),
-            }
-        except Exception as e:
-            results["tables"][table] = {"valid": False, "error": str(e)}
-            results["valid"] = False
+            # Verify checksum if present
+            expected_checksum = info.get("checksum")
+            if expected_checksum:
+                with open(parquet_file, "rb") as f:
+                    actual_checksum = _compute_checksum(f.read())
 
-    return results
+                if actual_checksum != expected_checksum:
+                    results["tables"][table] = {
+                        "valid": False,
+                        "error": f"Checksum mismatch: expected {expected_checksum}, got {actual_checksum}",
+                    }
+                    results["valid"] = False
+                    continue
+
+            # Try to read the parquet file
+            try:
+                arrow_table = pq.read_table(parquet_file)
+                row_count = arrow_table.num_rows
+                results["tables"][table] = {
+                    "valid": True,
+                    "rows": row_count,
+                    "expected_rows": info.get("rows"),
+                }
+            except Exception as e:
+                results["tables"][table] = {"valid": False, "error": str(e)}
+                results["valid"] = False
+
+        set_attributes(span, valid=results["valid"], table_count=len(results["tables"]))
+        return results

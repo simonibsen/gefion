@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional
 from gefion.ui.components.chat import render_chat_widget
 from gefion.charts.d3.suggestions import suggest_visualization
+from gefion.observability import create_span, set_attributes
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,8 @@ def get_page_context() -> Dict[str, Any]:
     }
     try:
         from gefion.ui.components.database import get_connection
-        with get_connection() as conn:
+        with create_span("ui.charts.get_page_context"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 # Data age
                 cur.execute("SELECT MAX(date) FROM stock_ohlcv")
@@ -156,18 +158,19 @@ def _render_top_movers_chart(movers: List[Dict[str, Any]]) -> None:
             from gefion.charts.queries import fetch_ohlcv_for_chart
             from gefion.charts.d3.renderers import create_comparison_chart
 
-            start, end = get_period_dates("1 Month")
-            symbol_data = {}
-            with get_connection() as conn:
-                for sym in symbols:
-                    ohlcv = fetch_ohlcv_for_chart(conn, sym, start, end)
-                    if ohlcv:
-                        symbol_data[sym] = ohlcv
-            if len(symbol_data) < 2:
-                st.error("Not enough data for comparison.")
-                return
-            html = create_comparison_chart(symbol_data)
-            components.html(html, height=500, scrolling=False)
+            with create_span("ui.charts._render_top_movers_chart", symbol_count=len(symbols)):
+                start, end = get_period_dates("1 Month")
+                symbol_data = {}
+                with get_connection() as conn:
+                    for sym in symbols:
+                        ohlcv = fetch_ohlcv_for_chart(conn, sym, start, end)
+                        if ohlcv:
+                            symbol_data[sym] = ohlcv
+                if len(symbol_data) < 2:
+                    st.error("Not enough data for comparison.")
+                    return
+                html = create_comparison_chart(symbol_data)
+                components.html(html, height=500, scrolling=False)
         except Exception as e:
             st.error(f"Error: {e}")
 
@@ -180,8 +183,9 @@ def _render_quick_calibration(model_name: str) -> None:
             from gefion.charts.queries import fetch_model_calibration
             from gefion.charts.d3.renderers import create_calibration_chart
 
-            with get_connection() as conn:
-                data = fetch_model_calibration(conn, model_name)
+            with create_span("ui.charts._render_quick_calibration", model_name=model_name):
+                with get_connection() as conn:
+                    data = fetch_model_calibration(conn, model_name)
             if not data:
                 st.info("No calibration data available.")
                 return
@@ -199,45 +203,46 @@ def _render_quick_sector() -> None:
             from gefion.charts.queries import fetch_ohlcv_for_chart
             from gefion.charts.d3.renderers import create_sector_heatmap
 
-            start, end = get_period_dates("1 Month")
-            sector_data: Dict[str, Dict[str, float]] = {}
+            with create_span("ui.charts._render_quick_sector"):
+                start, end = get_period_dates("1 Month")
+                sector_data: Dict[str, Dict[str, float]] = {}
 
-            with get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        SELECT symbol, COALESCE(sector, 'Unknown') as sector
-                        FROM stocks
-                        WHERE status = 'Active' AND sector IS NOT NULL
-                        ORDER BY sector, symbol
-                    """)
-                    rows = cur.fetchall()
+                with get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT symbol, COALESCE(sector, 'Unknown') as sector
+                            FROM stocks
+                            WHERE status = 'Active' AND sector IS NOT NULL
+                            ORDER BY sector, symbol
+                        """)
+                        rows = cur.fetchall()
 
-                sector_symbols: Dict[str, List[str]] = {}
-                for symbol, sector in rows:
-                    if sector not in sector_symbols:
-                        sector_symbols[sector] = []
-                    if len(sector_symbols[sector]) < 20:
-                        sector_symbols[sector].append(symbol)
+                    sector_symbols: Dict[str, List[str]] = {}
+                    for symbol, sector in rows:
+                        if sector not in sector_symbols:
+                            sector_symbols[sector] = []
+                        if len(sector_symbols[sector]) < 20:
+                            sector_symbols[sector].append(symbol)
 
-                for sector, symbols in sector_symbols.items():
-                    sector_data[sector] = {}
-                    for symbol in symbols:
-                        ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
-                        if ohlcv and len(ohlcv) >= 2:
-                            start_price = ohlcv[0]["close"]
-                            end_price = ohlcv[-1]["close"]
-                            if start_price > 0:
-                                ret = ((end_price / start_price) - 1) * 100
-                                sector_data[sector][symbol] = ret
+                    for sector, symbols in sector_symbols.items():
+                        sector_data[sector] = {}
+                        for symbol in symbols:
+                            ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
+                            if ohlcv and len(ohlcv) >= 2:
+                                start_price = ohlcv[0]["close"]
+                                end_price = ohlcv[-1]["close"]
+                                if start_price > 0:
+                                    ret = ((end_price / start_price) - 1) * 100
+                                    sector_data[sector][symbol] = ret
 
-                sector_data = {k: v for k, v in sector_data.items() if v}
+                    sector_data = {k: v for k, v in sector_data.items() if v}
 
-            if not sector_data:
-                st.warning("No sector data available.")
-                return
+                if not sector_data:
+                    st.warning("No sector data available.")
+                    return
 
-            html = create_sector_heatmap(sector_data)
-            components.html(html, height=500, scrolling=False)
+                html = create_sector_heatmap(sector_data)
+                components.html(html, height=500, scrolling=False)
         except Exception as e:
             st.error(f"Error: {e}")
 
@@ -282,10 +287,11 @@ def _render_quick_pipeline() -> None:
             from gefion.charts.queries import fetch_pipeline_health
             from gefion.charts.d3.renderers import create_pipeline_health_chart
 
-            with get_connection() as conn:
-                data = fetch_pipeline_health(conn)
-            html = create_pipeline_health_chart(data)
-            components.html(html, height=500, scrolling=False)
+            with create_span("ui.charts._render_quick_pipeline"):
+                with get_connection() as conn:
+                    data = fetch_pipeline_health(conn)
+                html = create_pipeline_health_chart(data)
+                components.html(html, height=500, scrolling=False)
         except Exception as e:
             st.error(f"Error: {e}")
 
@@ -298,35 +304,36 @@ def _render_quick_top_movers() -> None:
             from gefion.charts.queries import fetch_ohlcv_for_chart
             from gefion.charts.d3.renderers import create_comparison_chart
 
-            with get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        SELECT s.symbol
-                        FROM stock_ohlcv o
-                        JOIN stocks s ON o.data_id = s.id
-                        WHERE o.date = (SELECT MAX(date) FROM stock_ohlcv)
-                        ORDER BY ABS((o.close - o.open) / NULLIF(o.open, 0)) DESC
-                        LIMIT 5
-                    """)
-                    symbols = [row[0] for row in cur.fetchall()]
+            with create_span("ui.charts._render_quick_top_movers"):
+                with get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT s.symbol
+                            FROM stock_ohlcv o
+                            JOIN stocks s ON o.data_id = s.id
+                            WHERE o.date = (SELECT MAX(date) FROM stock_ohlcv)
+                            ORDER BY ABS((o.close - o.open) / NULLIF(o.open, 0)) DESC
+                            LIMIT 5
+                        """)
+                        symbols = [row[0] for row in cur.fetchall()]
 
-                if len(symbols) < 2:
-                    st.warning("Not enough data for top movers chart.")
+                    if len(symbols) < 2:
+                        st.warning("Not enough data for top movers chart.")
+                        return
+
+                    start, end = get_period_dates("1 Month")
+                    symbol_data = {}
+                    for sym in symbols:
+                        ohlcv = fetch_ohlcv_for_chart(conn, sym, start, end)
+                        if ohlcv:
+                            symbol_data[sym] = ohlcv
+
+                if len(symbol_data) < 2:
+                    st.error("Not enough price history for comparison.")
                     return
 
-                start, end = get_period_dates("1 Month")
-                symbol_data = {}
-                for sym in symbols:
-                    ohlcv = fetch_ohlcv_for_chart(conn, sym, start, end)
-                    if ohlcv:
-                        symbol_data[sym] = ohlcv
-
-            if len(symbol_data) < 2:
-                st.error("Not enough price history for comparison.")
-                return
-
-            html = create_comparison_chart(symbol_data)
-            components.html(html, height=500, scrolling=False)
+                html = create_comparison_chart(symbol_data)
+                components.html(html, height=500, scrolling=False)
         except Exception as e:
             st.error(f"Error: {e}")
 
@@ -339,36 +346,37 @@ def _render_quick_volatility() -> None:
             from gefion.charts.queries import fetch_ohlcv_for_chart
             from gefion.charts.d3.renderers import create_volatility_chart
 
-            with get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        SELECT s.symbol,
-                               STDDEV((o.close - o.open) / NULLIF(o.open, 0)) AS vol
-                        FROM stock_ohlcv o
-                        JOIN stocks s ON o.data_id = s.id
-                        WHERE o.date >= CURRENT_DATE - INTERVAL '30 days'
-                        GROUP BY s.symbol
-                        HAVING COUNT(*) >= 5
-                        ORDER BY vol DESC
-                        LIMIT 1
-                    """)
-                    row = cur.fetchone()
+            with create_span("ui.charts._render_quick_volatility"):
+                with get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT s.symbol,
+                                   STDDEV((o.close - o.open) / NULLIF(o.open, 0)) AS vol
+                            FROM stock_ohlcv o
+                            JOIN stocks s ON o.data_id = s.id
+                            WHERE o.date >= CURRENT_DATE - INTERVAL '30 days'
+                            GROUP BY s.symbol
+                            HAVING COUNT(*) >= 5
+                            ORDER BY vol DESC
+                            LIMIT 1
+                        """)
+                        row = cur.fetchone()
 
-                if not row:
-                    st.warning("No volatility data available.")
+                    if not row:
+                        st.warning("No volatility data available.")
+                        return
+
+                    symbol = row[0]
+                    start, end = get_period_dates("3 Months")
+                    ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
+
+                if not ohlcv:
+                    st.error(f"No data for {symbol}")
                     return
 
-                symbol = row[0]
-                start, end = get_period_dates("3 Months")
-                ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
-
-            if not ohlcv:
-                st.error(f"No data for {symbol}")
-                return
-
-            st.caption(f"Most volatile: **{symbol}**")
-            html = create_volatility_chart(ohlcv, symbol, window=20)
-            components.html(html, height=650, scrolling=False)
+                st.caption(f"Most volatile: **{symbol}**")
+                html = create_volatility_chart(ohlcv, symbol, window=20)
+                components.html(html, height=650, scrolling=False)
         except Exception as e:
             st.error(f"Error: {e}")
 
