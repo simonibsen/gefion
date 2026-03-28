@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 import jinja2
 
 from gefion.charts.d3.theme import get_css
+from gefion.observability import create_span, set_attributes
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 VENDOR_DIR = Path(__file__).parent / "vendor"
@@ -75,12 +76,15 @@ def render_d3_chart(
     Returns:
         Self-contained HTML string with embedded D3.js and data.
     """
-    template = load_template(template_name)
-    return template.render(
-        data_json=serialize_for_d3(data),
-        config_json=serialize_for_d3(config or {}),
-        width=width,
-        height=height,
-        theme_css=get_css(),
-        d3_script=_get_d3_script_tag(),
-    )
+    with create_span("charts.d3.render", template=template_name, width=width, height=height) as span:
+        template = load_template(template_name)
+        html = template.render(
+            data_json=serialize_for_d3(data),
+            config_json=serialize_for_d3(config or {}),
+            width=width,
+            height=height,
+            theme_css=get_css(),
+            d3_script=_get_d3_script_tag(),
+        )
+        set_attributes(span, html_length=len(html))
+        return html

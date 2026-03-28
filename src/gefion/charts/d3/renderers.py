@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from gefion.charts.d3.base import render_d3_chart
 from gefion.charts.d3.theme import COLORS, CHART_PALETTE
+from gefion.observability import create_span, set_attributes
 
 
 def create_candlestick_chart(
@@ -20,15 +21,16 @@ def create_candlestick_chart(
     height: int = 600,
 ) -> str:
     """Candlestick chart with volume subplot, moving averages, and annotations."""
-    config = {
-        "symbol": symbol,
-        "title": title or f"{symbol} Price Chart",
-        "show_ma": show_ma,
-        "colors": COLORS,
-    }
-    if insights and insights.get("areas_of_interest"):
-        config["annotations"] = insights["areas_of_interest"]
-    return render_d3_chart("candlestick.html", ohlcv_data, config, width, height)
+    with create_span("charts.d3.candlestick", symbol=symbol):
+        config = {
+            "symbol": symbol,
+            "title": title or f"{symbol} Price Chart",
+            "show_ma": show_ma,
+            "colors": COLORS,
+        }
+        if insights and insights.get("areas_of_interest"):
+            config["annotations"] = insights["areas_of_interest"]
+        return render_d3_chart("candlestick.html", ohlcv_data, config, width, height)
 
 
 def create_prediction_chart(
@@ -40,23 +42,24 @@ def create_prediction_chart(
     height: int = 500,
 ) -> str:
     """Price line with q10/q50/q90 prediction bands."""
-    # Merge OHLCV and predictions by date
-    pred_by_date = {p["date"]: p for p in predictions} if predictions else {}
-    merged = []
-    for row in ohlcv_data:
-        entry = {"date": row["date"], "close": row.get("close", row.get("price"))}
-        pred = pred_by_date.get(row["date"], {})
-        entry["q10"] = pred.get("q10")
-        entry["q50"] = pred.get("q50")
-        entry["q90"] = pred.get("q90")
-        merged.append(entry)
+    with create_span("charts.d3.predictions", symbol=symbol):
+        # Merge OHLCV and predictions by date
+        pred_by_date = {p["date"]: p for p in predictions} if predictions else {}
+        merged = []
+        for row in ohlcv_data:
+            entry = {"date": row["date"], "close": row.get("close", row.get("price"))}
+            pred = pred_by_date.get(row["date"], {})
+            entry["q10"] = pred.get("q10")
+            entry["q50"] = pred.get("q50")
+            entry["q90"] = pred.get("q90")
+            merged.append(entry)
 
-    config = {
-        "symbol": symbol,
-        "title": title or f"{symbol} Predictions",
-        "colors": COLORS,
-    }
-    return render_d3_chart("predictions.html", merged, config, width, height)
+        config = {
+            "symbol": symbol,
+            "title": title or f"{symbol} Predictions",
+            "colors": COLORS,
+        }
+        return render_d3_chart("predictions.html", merged, config, width, height)
 
 
 def create_equity_curve_chart(
@@ -109,17 +112,18 @@ def create_comparison_chart(
     height: int = 500,
 ) -> str:
     """Multi-symbol normalized price comparison."""
-    symbols = []
-    for sym, rows in symbol_data.items():
-        symbols.append({"symbol": sym, "data": rows})
+    with create_span("charts.d3.comparison", symbol_count=len(symbol_data)):
+        symbols = []
+        for sym, rows in symbol_data.items():
+            symbols.append({"symbol": sym, "data": rows})
 
-    data = {"symbols": symbols}
-    config = {
-        "title": title or "Price Comparison",
-        "normalize": normalize,
-        "palette": CHART_PALETTE,
-    }
-    return render_d3_chart("comparison.html", data, config, width, height)
+        data = {"symbols": symbols}
+        config = {
+            "title": title or "Price Comparison",
+            "normalize": normalize,
+            "palette": CHART_PALETTE,
+        }
+        return render_d3_chart("comparison.html", data, config, width, height)
 
 
 def create_correlation_matrix(
@@ -129,6 +133,16 @@ def create_correlation_matrix(
     height: int = 600,
 ) -> str:
     """Correlation heatmap matrix."""
+    with create_span("charts.d3.correlation", symbol_count=len(symbol_data)):
+        return _compute_correlation_matrix(symbol_data, title, width, height)
+
+
+def _compute_correlation_matrix(
+    symbol_data: Dict[str, List[Dict]],
+    title: Optional[str] = None,
+    width: int = 600,
+    height: int = 600,
+) -> str:
     import math
 
     symbols = sorted(symbol_data.keys())
@@ -168,15 +182,16 @@ def create_sector_heatmap(
     height: int = 500,
 ) -> str:
     """Treemap-style sector performance visualization."""
-    sectors = []
-    for sector_name, symbols in sector_data.items():
-        sym_list = [{"symbol": s, "return_pct": r} for s, r in symbols.items()]
-        avg_return = sum(symbols.values()) / len(symbols) if symbols else 0
-        sectors.append({"name": sector_name, "return_pct": avg_return, "symbols": sym_list})
+    with create_span("charts.d3.sector_heatmap"):
+        sectors = []
+        for sector_name, symbols in sector_data.items():
+            sym_list = [{"symbol": s, "return_pct": r} for s, r in symbols.items()]
+            avg_return = sum(symbols.values()) / len(symbols) if symbols else 0
+            sectors.append({"name": sector_name, "return_pct": avg_return, "symbols": sym_list})
 
-    data = {"sectors": sectors}
-    config = {"title": title or "Sector Performance"}
-    return render_d3_chart("sector_heatmap.html", data, config, width, height)
+        data = {"sectors": sectors}
+        config = {"title": title or "Sector Performance"}
+        return render_d3_chart("sector_heatmap.html", data, config, width, height)
 
 
 def create_volatility_chart(
@@ -188,50 +203,51 @@ def create_volatility_chart(
     height: int = 600,
 ) -> str:
     """Bollinger Bands + ATR + Historical Volatility subplots."""
-    import math
+    with create_span("charts.d3.volatility", symbol=symbol, window=window):
+        import math
 
-    # Compute Bollinger Bands, ATR, and HV from OHLCV
-    closes = [d["close"] for d in ohlcv_data]
-    enriched = []
-    for i, d in enumerate(ohlcv_data):
-        entry = dict(d)
-        if i >= window - 1:
-            window_closes = closes[i - window + 1:i + 1]
-            mean = sum(window_closes) / window
-            std = math.sqrt(sum((c - mean)**2 for c in window_closes) / window)
-            entry["bb_upper"] = mean + 2 * std
-            entry["bb_middle"] = mean
-            entry["bb_lower"] = mean - 2 * std
+        # Compute Bollinger Bands, ATR, and HV from OHLCV
+        closes = [d["close"] for d in ohlcv_data]
+        enriched = []
+        for i, d in enumerate(ohlcv_data):
+            entry = dict(d)
+            if i >= window - 1:
+                window_closes = closes[i - window + 1:i + 1]
+                mean = sum(window_closes) / window
+                std = math.sqrt(sum((c - mean)**2 for c in window_closes) / window)
+                entry["bb_upper"] = mean + 2 * std
+                entry["bb_middle"] = mean
+                entry["bb_lower"] = mean - 2 * std
 
-            # Historical volatility (annualized)
-            if i >= window:
-                rets = [(closes[j] - closes[j-1]) / closes[j-1] for j in range(i - window + 1, i + 1) if closes[j-1] != 0]
-                if rets:
-                    ret_mean = sum(rets) / len(rets)
-                    ret_std = math.sqrt(sum((r - ret_mean)**2 for r in rets) / len(rets))
-                    entry["hv"] = ret_std * math.sqrt(252) * 100
+                # Historical volatility (annualized)
+                if i >= window:
+                    rets = [(closes[j] - closes[j-1]) / closes[j-1] for j in range(i - window + 1, i + 1) if closes[j-1] != 0]
+                    if rets:
+                        ret_mean = sum(rets) / len(rets)
+                        ret_std = math.sqrt(sum((r - ret_mean)**2 for r in rets) / len(rets))
+                        entry["hv"] = ret_std * math.sqrt(252) * 100
+                    else:
+                        entry["hv"] = None
                 else:
                     entry["hv"] = None
-            else:
-                entry["hv"] = None
 
-            # ATR
-            if i >= 1:
-                tr = max(d["high"] - d["low"],
-                         abs(d["high"] - ohlcv_data[i-1]["close"]),
-                         abs(d["low"] - ohlcv_data[i-1]["close"]))
-                entry["atr"] = tr
-            else:
-                entry["atr"] = d["high"] - d["low"]
-        enriched.append(entry)
+                # ATR
+                if i >= 1:
+                    tr = max(d["high"] - d["low"],
+                             abs(d["high"] - ohlcv_data[i-1]["close"]),
+                             abs(d["low"] - ohlcv_data[i-1]["close"]))
+                    entry["atr"] = tr
+                else:
+                    entry["atr"] = d["high"] - d["low"]
+            enriched.append(entry)
 
-    config = {
-        "symbol": symbol,
-        "title": title or f"{symbol} Volatility Analysis",
-        "window": window,
-        "colors": COLORS,
-    }
-    return render_d3_chart("volatility.html", enriched, config, width, height)
+        config = {
+            "symbol": symbol,
+            "title": title or f"{symbol} Volatility Analysis",
+            "window": window,
+            "colors": COLORS,
+        }
+        return render_d3_chart("volatility.html", enriched, config, width, height)
 
 
 def create_drawdown_chart(
@@ -242,23 +258,24 @@ def create_drawdown_chart(
     height: int = 500,
 ) -> str:
     """Price + drawdown area subplot."""
-    # Compute drawdown from OHLCV
-    closes = [d["close"] for d in ohlcv_data]
-    peak = closes[0] if closes else 0
-    enriched = []
-    for i, d in enumerate(ohlcv_data):
-        entry = dict(d)
-        if closes[i] > peak:
-            peak = closes[i]
-        entry["drawdown"] = ((closes[i] - peak) / peak * 100) if peak > 0 else 0
-        enriched.append(entry)
+    with create_span("charts.d3.drawdown", symbol=symbol):
+        # Compute drawdown from OHLCV
+        closes = [d["close"] for d in ohlcv_data]
+        peak = closes[0] if closes else 0
+        enriched = []
+        for i, d in enumerate(ohlcv_data):
+            entry = dict(d)
+            if closes[i] > peak:
+                peak = closes[i]
+            entry["drawdown"] = ((closes[i] - peak) / peak * 100) if peak > 0 else 0
+            enriched.append(entry)
 
-    config = {
-        "symbol": symbol,
-        "title": title or f"{symbol} Drawdown Analysis",
-        "colors": COLORS,
-    }
-    return render_d3_chart("drawdown.html", enriched, config, width, height)
+        config = {
+            "symbol": symbol,
+            "title": title or f"{symbol} Drawdown Analysis",
+            "colors": COLORS,
+        }
+        return render_d3_chart("drawdown.html", enriched, config, width, height)
 
 
 def create_rolling_returns_chart(
@@ -413,8 +430,9 @@ def create_calibration_chart(
     height: int = 500,
 ) -> str:
     """Calibration curve: predicted probability vs observed frequency."""
-    config = {"title": title or f"Calibration — {model_name}", "model_name": model_name}
-    return render_d3_chart("calibration.html", calibration_data, config, width, height)
+    with create_span("charts.d3.calibration", model_name=model_name):
+        config = {"title": title or f"Calibration — {model_name}", "model_name": model_name}
+        return render_d3_chart("calibration.html", calibration_data, config, width, height)
 
 
 def create_pred_vs_actual_chart(
@@ -448,8 +466,9 @@ def create_pipeline_health_chart(
     height: int = 500,
 ) -> str:
     """Multi-panel pipeline health dashboard."""
-    config = {"title": title or "Pipeline Health"}
-    return render_d3_chart("pipeline_health.html", data, config, width, height)
+    with create_span("charts.d3.pipeline_health"):
+        config = {"title": title or "Pipeline Health"}
+        return render_d3_chart("pipeline_health.html", data, config, width, height)
 
 
 def create_accuracy_over_time_chart(

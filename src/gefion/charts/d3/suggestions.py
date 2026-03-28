@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from gefion.charts.d3.base import render_d3_chart
 from gefion.charts.d3.theme import CHART_PALETTE, COLORS
+from gefion.observability import create_span, set_attributes
 
 
 # Generic chart primitives the AI can compose with arbitrary data
@@ -29,53 +30,66 @@ def suggest_visualization(
 
     Returns: {"chart_type": str, "params": dict, "reason": str}
     """
-    page = page_context.get("page_name", "")
-    stats = page_context.get("data_stats", {})
-    empty = page_context.get("empty_states", [])
+    with create_span("charts.suggest", page=page_context.get("page_name", "")) as span:
+        page = page_context.get("page_name", "")
+        stats = page_context.get("data_stats", {})
+        empty = page_context.get("empty_states", [])
 
-    # Rule-based suggestions
-    if page == "ML Pipeline":
-        preds = stats.get("prediction_totals", stats.get("predictions", {}))
-        if isinstance(preds, dict) and preds.get("quantile"):
-            return {
-                "chart_type": "predictions",
-                "params": {"chart": "pred_vs_actual"},
-                "reason": f"You have {preds['quantile']} quantile predictions — see how they compare to actual returns.",
-            }
-        if isinstance(preds, dict) and preds.get("trend_class"):
-            return {
-                "chart_type": "confusion_matrix",
+        # Rule-based suggestions
+        if page == "ML Pipeline":
+            preds = stats.get("prediction_totals", stats.get("predictions", {}))
+            if isinstance(preds, dict) and preds.get("quantile"):
+                result = {
+                    "chart_type": "predictions",
+                    "params": {"chart": "pred_vs_actual"},
+                    "reason": f"You have {preds['quantile']} quantile predictions — see how they compare to actual returns.",
+                }
+                set_attributes(span, chart_type=result["chart_type"])
+                return result
+            if isinstance(preds, dict) and preds.get("trend_class"):
+                result = {
+                    "chart_type": "confusion_matrix",
+                    "params": {},
+                    "reason": f"You have {preds['trend_class']} trend predictions — see the confusion matrix.",
+                }
+                set_attributes(span, chart_type=result["chart_type"])
+                return result
+
+        if page == "Dashboard":
+            result = {
+                "chart_type": "pipeline_health",
                 "params": {},
-                "reason": f"You have {preds['trend_class']} trend predictions — see the confusion matrix.",
+                "reason": "Quick overview of data freshness, feature coverage, and prediction status.",
             }
+            set_attributes(span, chart_type=result["chart_type"])
+            return result
 
-    if page == "Dashboard":
-        return {
-            "chart_type": "pipeline_health",
-            "params": {},
-            "reason": "Quick overview of data freshness, feature coverage, and prediction status.",
-        }
+        if page == "Features":
+            result = {
+                "chart_type": "line",
+                "params": {"x": "date", "y": "value", "title": "Feature Values Over Time"},
+                "reason": "Visualize how a feature changes over time for a specific symbol.",
+            }
+            set_attributes(span, chart_type=result["chart_type"])
+            return result
 
-    if page == "Features":
-        return {
+        if page == "Backtesting":
+            result = {
+                "chart_type": "portfolio",
+                "params": {},
+                "reason": "Compare equity curves and risk metrics across strategies.",
+            }
+            set_attributes(span, chart_type=result["chart_type"])
+            return result
+
+        # Default
+        result = {
             "chart_type": "line",
-            "params": {"x": "date", "y": "value", "title": "Feature Values Over Time"},
-            "reason": "Visualize how a feature changes over time for a specific symbol.",
+            "params": {"title": "Custom Visualization"},
+            "reason": "Ask a specific question to get a tailored chart.",
         }
-
-    if page == "Backtesting":
-        return {
-            "chart_type": "portfolio",
-            "params": {},
-            "reason": "Compare equity curves and risk metrics across strategies.",
-        }
-
-    # Default
-    return {
-        "chart_type": "line",
-        "params": {"title": "Custom Visualization"},
-        "reason": "Ask a specific question to get a tailored chart.",
-    }
+        set_attributes(span, chart_type=result["chart_type"])
+        return result
 
 
 def render_generic_chart(
@@ -100,37 +114,38 @@ def render_generic_chart(
     Returns:
         Self-contained HTML string.
     """
-    cfg = config or {}
-    cfg.setdefault("palette", CHART_PALETTE)
-    cfg.setdefault("colors", COLORS)
+    with create_span("charts.render_generic", chart_type=chart_type):
+        cfg = config or {}
+        cfg.setdefault("palette", CHART_PALETTE)
+        cfg.setdefault("colors", COLORS)
 
-    # Map generic primitives to templates
-    template_map = {
-        "line": "comparison.html",  # multi-line chart
-        "scatter": "pred_vs_actual.html",
-        "bar": "pipeline_health.html",
-        "heatmap": "correlation.html",
-        "histogram": "pipeline_health.html",
-        "area": "equity_curve.html",
-        "candlestick": "candlestick.html",
-        "treemap": "sector_heatmap.html",
-        # Specific chart types map directly
-        "predictions": "predictions.html",
-        "calibration": "calibration.html",
-        "pred_vs_actual": "pred_vs_actual.html",
-        "confusion_matrix": "confusion_matrix.html",
-        "pipeline_health": "pipeline_health.html",
-        "portfolio": "portfolio.html",
-        "accuracy_over_time": "accuracy_over_time.html",
-        "volatility": "volatility.html",
-        "drawdown": "drawdown.html",
-        "rolling_returns": "rolling_returns.html",
-        "correlation": "correlation.html",
-        "sector_heatmap": "sector_heatmap.html",
-        "equity_curve": "equity_curve.html",
-        "features": "features.html",
-        "comparison": "comparison.html",
-    }
+        # Map generic primitives to templates
+        template_map = {
+            "line": "comparison.html",  # multi-line chart
+            "scatter": "pred_vs_actual.html",
+            "bar": "pipeline_health.html",
+            "heatmap": "correlation.html",
+            "histogram": "pipeline_health.html",
+            "area": "equity_curve.html",
+            "candlestick": "candlestick.html",
+            "treemap": "sector_heatmap.html",
+            # Specific chart types map directly
+            "predictions": "predictions.html",
+            "calibration": "calibration.html",
+            "pred_vs_actual": "pred_vs_actual.html",
+            "confusion_matrix": "confusion_matrix.html",
+            "pipeline_health": "pipeline_health.html",
+            "portfolio": "portfolio.html",
+            "accuracy_over_time": "accuracy_over_time.html",
+            "volatility": "volatility.html",
+            "drawdown": "drawdown.html",
+            "rolling_returns": "rolling_returns.html",
+            "correlation": "correlation.html",
+            "sector_heatmap": "sector_heatmap.html",
+            "equity_curve": "equity_curve.html",
+            "features": "features.html",
+            "comparison": "comparison.html",
+        }
 
-    template = template_map.get(chart_type, "base.html")
-    return render_d3_chart(template, data, cfg, width, height)
+        template = template_map.get(chart_type, "base.html")
+        return render_d3_chart(template, data, cfg, width, height)

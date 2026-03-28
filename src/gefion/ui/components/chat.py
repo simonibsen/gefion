@@ -10,6 +10,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import streamlit as st
 
+from gefion.observability import create_span, set_attributes
+
 # MCP tool name -> (CLI command prefix, description)
 MCP_TOOL_MAP = {
     "data_update": ("data-update", "Update prices and features"),
@@ -245,38 +247,41 @@ def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
     if not page_context:
         return None
 
-    parts = [f"The user is on the '{page_context.get('page_name', 'unknown')}' page."]
+    with create_span("chat.build_context", page=page_context.get("page_name", "")) as span:
+        parts = [f"The user is on the '{page_context.get('page_name', 'unknown')}' page."]
 
-    summary = page_context.get("summary")
-    if summary:
-        parts.append(summary)
+        summary = page_context.get("summary")
+        if summary:
+            parts.append(summary)
 
-    filters = page_context.get("filters")
-    if filters:
-        filter_str = ", ".join(f"{k}={v}" for k, v in filters.items() if v)
-        if filter_str:
-            parts.append(f"Active filters: {filter_str}")
+        filters = page_context.get("filters")
+        if filters:
+            filter_str = ", ".join(f"{k}={v}" for k, v in filters.items() if v)
+            if filter_str:
+                parts.append(f"Active filters: {filter_str}")
 
-    stats = page_context.get("data_stats")
-    if stats:
-        stat_str = ", ".join(f"{k}: {v}" for k, v in stats.items())
-        if stat_str:
-            parts.append(f"Data on screen: {stat_str}")
+        stats = page_context.get("data_stats")
+        if stats:
+            stat_str = ", ".join(f"{k}: {v}" for k, v in stats.items())
+            if stat_str:
+                parts.append(f"Data on screen: {stat_str}")
 
-    empty = page_context.get("empty_states")
-    if empty:
-        parts.append(f"Empty/missing: {'; '.join(empty)}")
+        empty = page_context.get("empty_states")
+        if empty:
+            parts.append(f"Empty/missing: {'; '.join(empty)}")
 
-    errors = page_context.get("errors")
-    if errors:
-        parts.append(f"Errors shown: {'; '.join(errors)}")
+        errors = page_context.get("errors")
+        if errors:
+            parts.append(f"Errors shown: {'; '.join(errors)}")
 
-    # Add shared system context so AI knows cross-page state
-    sys_ctx = _get_system_context()
-    if sys_ctx:
-        parts.append(sys_ctx)
+        # Add shared system context so AI knows cross-page state
+        sys_ctx = _get_system_context()
+        if sys_ctx:
+            parts.append(sys_ctx)
 
-    return " ".join(parts)
+        result = " ".join(parts)
+        set_attributes(span, prompt_length=len(result) if result else 0)
+        return result
 
 
 def _render_inline_charts(message: Dict[str, Any]) -> None:
@@ -348,34 +353,35 @@ _CHAT_BAR_HIDE_BUTTON_JS = """
 @st.cache_data(ttl=600)
 def _check_mcp_status() -> Dict[str, Any]:
     """Lightweight check: verify claude CLI exists and MCP config is present."""
-    import shutil
-    import os
-    from pathlib import Path
+    with create_span("chat.check_mcp"):
+        import shutil
+        import os
+        from pathlib import Path
 
-    # Check claude CLI exists
-    if not shutil.which("claude"):
-        return {"available": False, "status": "claude CLI not found"}
+        # Check claude CLI exists
+        if not shutil.which("claude"):
+            return {"available": False, "status": "claude CLI not found"}
 
-    # Check MCP config exists (don't spawn a process)
-    config_paths = [
-        Path.home() / ".claude.json",
-        Path.home() / ".config" / "claude" / "config.json",
-    ]
-    for config_path in config_paths:
-        if config_path.exists():
-            try:
-                import json
-                config = json.loads(config_path.read_text())
-                servers = config.get("mcpServers", {})
-                if "gefion" in servers:
-                    return {"available": True, "status": "configured"}
-                if "g2" in servers:
-                    return {"available": True, "status": "configured (as g2)"}
-            except Exception:
-                pass
+        # Check MCP config exists (don't spawn a process)
+        config_paths = [
+            Path.home() / ".claude.json",
+            Path.home() / ".config" / "claude" / "config.json",
+        ]
+        for config_path in config_paths:
+            if config_path.exists():
+                try:
+                    import json
+                    config = json.loads(config_path.read_text())
+                    servers = config.get("mcpServers", {})
+                    if "gefion" in servers:
+                        return {"available": True, "status": "configured"}
+                    if "g2" in servers:
+                        return {"available": True, "status": "configured (as g2)"}
+                except Exception:
+                    pass
 
-    # Fallback: assume available if claude exists (config might be elsewhere)
-    return {"available": True, "status": "assumed"}
+        # Fallback: assume available if claude exists (config might be elsewhere)
+        return {"available": True, "status": "assumed"}
 
 
 def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
