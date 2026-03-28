@@ -65,11 +65,20 @@ def get_system_stats() -> Optional[SystemStats]:
                     cur.execute("SELECT COUNT(*) FROM stocks WHERE status = 'Active'")
                     active_stocks = cur.fetchone()[0]
 
-                    cur.execute("SELECT COUNT(*) FROM stock_ohlcv")
-                    ohlcv_rows = cur.fetchone()[0]
+                    # Use pg_stat approximation for large hypertables (instant vs 20s+ scans)
+                    cur.execute("""
+                        SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables
+                        WHERE relname = 'stock_ohlcv'
+                    """)
+                    row = cur.fetchone()
+                    ohlcv_rows = row[0] if row else 0
 
-                    cur.execute("SELECT COUNT(*) FROM computed_features")
-                    feature_rows = cur.fetchone()[0]
+                    cur.execute("""
+                        SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables
+                        WHERE relname = 'computed_features'
+                    """)
+                    row = cur.fetchone()
+                    feature_rows = row[0] if row else 0
 
                     cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
                     date_range = cur.fetchone()
@@ -84,8 +93,12 @@ def get_system_stats() -> Optional[SystemStats]:
                         pass
 
                     try:
-                        cur.execute("SELECT COUNT(*) FROM predictions")
-                        prediction_count = cur.fetchone()[0]
+                        cur.execute("""
+                            SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables
+                            WHERE relname = 'predictions'
+                        """)
+                        row = cur.fetchone()
+                        prediction_count = row[0] if row else 0
                     except Exception:
                         pass
 

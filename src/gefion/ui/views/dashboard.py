@@ -88,7 +88,7 @@ class GefionInsights:
     latest_feature_date: Optional[str] = None
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_market_movers() -> Optional[MarketMovers]:
     """Get top gainers and losers with 60-second cache."""
     try:
@@ -97,63 +97,44 @@ def get_market_movers() -> Optional[MarketMovers]:
         with create_span("ui.dashboard.get_market_movers"):
           with get_connection() as conn:
             with conn.cursor() as cur:
-                # Fast query: only look at last 2 trading days
+                # Fast: get the 2 most recent dates first, then join
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                latest = cur.fetchone()[0]
+                if not latest:
+                    return None
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv WHERE date < %s", (latest,))
+                prev = cur.fetchone()[0]
+                if not prev:
+                    return None
+
                 cur.execute("""
-                    WITH last_dates AS (
-                        SELECT DISTINCT date FROM stock_ohlcv
-                        ORDER BY date DESC LIMIT 2
-                    ),
-                    price_changes AS (
-                        SELECT
-                            s.symbol,
-                            MAX(CASE WHEN o.date = (SELECT MAX(date) FROM last_dates) THEN o.close END) as current_close,
-                            MAX(CASE WHEN o.date = (SELECT MIN(date) FROM last_dates) THEN o.close END) as prev_close
-                        FROM stock_ohlcv o
-                        JOIN stocks s ON o.data_id = s.id
-                        WHERE s.status = 'Active'
-                          AND o.date IN (SELECT date FROM last_dates)
-                        GROUP BY s.symbol
-                        HAVING MAX(CASE WHEN o.date = (SELECT MIN(date) FROM last_dates) THEN o.close END) > 0
-                    )
                     SELECT
-                        symbol,
-                        current_close,
-                        prev_close,
-                        ((current_close / prev_close) - 1) * 100 as pct_change
-                    FROM price_changes
-                    WHERE current_close IS NOT NULL AND prev_close IS NOT NULL
+                        s.symbol,
+                        o2.close as current_close,
+                        o1.close as prev_close,
+                        ((o2.close / NULLIF(o1.close, 0)) - 1) * 100 as pct_change
+                    FROM stock_ohlcv o2
+                    JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = %s
+                    JOIN stocks s ON s.id = o2.data_id
+                    WHERE o2.date = %s AND o1.close > 0
                     ORDER BY pct_change DESC
                     LIMIT 5
-                """)
+                """, (prev, latest))
                 gainers = cur.fetchall()
 
                 cur.execute("""
-                    WITH last_dates AS (
-                        SELECT DISTINCT date FROM stock_ohlcv
-                        ORDER BY date DESC LIMIT 2
-                    ),
-                    price_changes AS (
-                        SELECT
-                            s.symbol,
-                            MAX(CASE WHEN o.date = (SELECT MAX(date) FROM last_dates) THEN o.close END) as current_close,
-                            MAX(CASE WHEN o.date = (SELECT MIN(date) FROM last_dates) THEN o.close END) as prev_close
-                        FROM stock_ohlcv o
-                        JOIN stocks s ON o.data_id = s.id
-                        WHERE s.status = 'Active'
-                          AND o.date IN (SELECT date FROM last_dates)
-                        GROUP BY s.symbol
-                        HAVING MAX(CASE WHEN o.date = (SELECT MIN(date) FROM last_dates) THEN o.close END) > 0
-                    )
                     SELECT
-                        symbol,
-                        current_close,
-                        prev_close,
-                        ((current_close / prev_close) - 1) * 100 as pct_change
-                    FROM price_changes
-                    WHERE current_close IS NOT NULL AND prev_close IS NOT NULL
+                        s.symbol,
+                        o2.close as current_close,
+                        o1.close as prev_close,
+                        ((o2.close / NULLIF(o1.close, 0)) - 1) * 100 as pct_change
+                    FROM stock_ohlcv o2
+                    JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = %s
+                    JOIN stocks s ON s.id = o2.data_id
+                    WHERE o2.date = %s AND o1.close > 0
                     ORDER BY pct_change ASC
                     LIMIT 5
-                """)
+                """, (prev, latest))
                 losers = cur.fetchall()
 
         return MarketMovers(gainers=list(gainers), losers=list(losers))
