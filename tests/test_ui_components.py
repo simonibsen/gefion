@@ -420,10 +420,10 @@ class TestChatWidgetIntegration:
             f"{view_file}: render_chat_widget must appear after the title"
         )
 
-    def test_assistant_does_not_have_chat_widget(self, views_dir):
-        """assistant.py should NOT have the chat widget (it has its own full assistant)."""
+    def test_assistant_has_chat_widget(self, views_dir):
+        """System Operations page uses Ask Gefion like all other pages."""
         content = (views_dir / "assistant.py").read_text()
-        assert "render_chat_widget(" not in content
+        assert "render_chat_widget(" in content
 
 
 class TestUILaunchCommand:
@@ -1119,11 +1119,10 @@ class TestActionDashboard:
         content = (ui_dir / "views" / "assistant.py").read_text()
         assert "def check_conditions(" in content
 
-    def test_assistant_has_free_form_command_entry(self, ui_dir):
-        """Assistant should have text input for natural language and CLI commands."""
+    def test_assistant_has_chat_widget_entry(self, ui_dir):
+        """System Operations should use Ask Gefion for chat input."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "st.text_area(" in content or "st.text_input(" in content
-        assert "freeform" in content
+        assert "render_chat_widget" in content
 
     def test_assistant_has_mcp_tool_mapping(self, ui_dir):
         """Assistant should have access to MCP tool map (via import from chat component)."""
@@ -1199,55 +1198,17 @@ class TestActionDashboard:
         # render_action_card should accept a reason parameter
         assert "reason" in content
 
-    def test_assistant_has_freeform_output_renderer(self, ui_dir):
-        """Assistant should have render_freeform_output for plain-text display.
-
-        The freeform section (Ask AI / Run Command) should NOT use
-        render_process_status — that shows data-update metrics (progress,
-        inserted, errors, ETA) which don't apply to AI prompts or general
-        CLI output. Instead, render_freeform_output shows plain text.
-        """
+    def test_assistant_has_suggested_actions(self, ui_dir):
+        """System Operations page should have suggested actions section."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        # Must have the dedicated renderer
-        assert "def render_freeform_output(" in content
-        # Freeform section must call it (not render_process_status)
-        # The function should use st.markdown for plain text output
-        assert "st.markdown(" in content
-        # Should store mode in session state for renderer to use
-        assert "freeform_mode" in content
+        assert "Suggested Actions" in content
+        assert "check_conditions" in content
+        assert "render_action_card" in content
 
-    def test_assistant_freeform_run_not_blocked_by_completed(self, ui_dir):
-        """Run button must be available even after a previous command completes.
-
-        If the freeform state is completed, the user should be able to type
-        a new command and click Run without having to Clear first. The Run
-        button must NOT be guarded by `elif` after checking completed state.
-        """
+    def test_assistant_uses_ask_gefion(self, ui_dir):
+        """System Operations page must use the Ask Gefion chat widget."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        # The run button logic must check "not is_running" rather than
-        # being in an elif that's unreachable when completed=True
-        assert "not freeform_state.is_running" in content
-
-    def test_assistant_freeform_strips_claudecode_env(self, ui_dir):
-        """Freeform command must strip CLAUDECODE env var.
-
-        When g2 ui is launched from Claude Code, the CLAUDECODE env var is set.
-        claude -p refuses to run inside another Claude Code session. The env
-        passed to start_background_process must remove this variable.
-        """
-        content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "CLAUDECODE" in content, "Must handle CLAUDECODE env var for nested sessions"
-
-    def test_assistant_freeform_uses_form(self, ui_dir):
-        """Freeform input and Run button must be wrapped in a st.form.
-
-        Without a form, st.text_input doesn't send its value until the user
-        presses Enter. Wrapping in a form lets the submit button commit
-        the input value in one action.
-        """
-        content = (ui_dir / "views" / "assistant.py").read_text()
-        assert "st.form(" in content, "Freeform section must use st.form"
-        assert "st.form_submit_button(" in content, "Must use form_submit_button inside form"
+        assert "render_chat_widget" in content, "Must use Ask Gefion chat widget"
 
     def test_assistant_freeform_has_auto_refresh(self, ui_dir):
         """Freeform output must auto-refresh while the process is running.
@@ -1360,41 +1321,32 @@ class TestActionDashboard:
         content = (ui_dir / "components" / "chat.py").read_text()
         assert "parse_stream_event" in content, "Must have parse_stream_event function"
 
-    def test_sidebar_ai_actions_position(self, ui_dir):
-        """AI Actions must be the second item in the sidebar PAGES list."""
+    def test_sidebar_system_operations_position(self, ui_dir):
+        """System Operations must be the second item in the sidebar PAGES list."""
         content = (ui_dir / "app.py").read_text()
-        # Find the PAGES list and extract page labels (first element of each tuple)
         import re
-        # Match tuples like ("Label", ":material/icon:")
         tuples = re.findall(r'\("([^"]+)",\s*":[^"]+:"\)', content)
-        if not tuples:
-            # Fallback: old format with plain strings
-            pages_match = re.search(r'PAGES\s*=\s*\[(.*?)\]', content, re.DOTALL)
-            assert pages_match, "PAGES list not found in app.py"
-            tuples = re.findall(r'"([^"]+)"', pages_match.group(1))
         assert len(tuples) >= 2, "PAGES must have at least 2 entries"
-        assert "AI Actions" in tuples[1], (
-            f"AI Actions must be second in PAGES, got '{tuples[1]}'"
+        assert "System Operations" in tuples[1], (
+            f"System Operations must be second in PAGES, got '{tuples[1]}'"
         )
 
-    def test_assistant_renamed_to_ai_actions(self, ui_dir):
-        """The page routing must use 'AI Actions' not 'AI Prompts'."""
+    def test_assistant_renamed_to_system_operations(self, ui_dir):
+        """The page routing must use 'System Operations'."""
         content = (ui_dir / "app.py").read_text()
-        assert "AI Actions" in content, "app.py must reference 'AI Actions'"
+        assert "System Operations" in content
 
-    def test_assistant_input_before_proactive_actions(self, ui_dir):
-        """Chat input must appear before proactive action cards in assistant.py."""
+    def test_assistant_chat_before_proactive_actions(self, ui_dir):
+        """Ask Gefion must appear before proactive action cards in assistant.py."""
         content = (ui_dir / "views" / "assistant.py").read_text()
-        # Look within render_assistant function body only
         render_start = content.find("def render_assistant")
         assert render_start > 0, "render_assistant must exist"
         body = content[render_start:]
-        form_pos = body.find("freeform_form")
-        # Find the call to check_conditions(), not the function definition
+        chat_pos = body.find("render_chat_widget")
         conditions_pos = body.find("check_conditions()")
-        assert form_pos > 0 and conditions_pos > 0, "Both form and conditions call must exist"
-        assert form_pos < conditions_pos, (
-            "Chat input (freeform_form) must appear before proactive actions (check_conditions)"
+        assert chat_pos > 0 and conditions_pos > 0, "Both chat widget and conditions call must exist"
+        assert chat_pos < conditions_pos, (
+            "Ask Gefion must appear before proactive actions (check_conditions)"
         )
 
 

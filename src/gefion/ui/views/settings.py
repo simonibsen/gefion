@@ -106,7 +106,7 @@ def render_about():
     **Gefion** is a comprehensive trading analysis platform that combines:
 
     - :material/bar_chart: **Charts** - Professional Plotly visualizations
-    - :material/bolt: **AI Actions** - Example queries for Claude Code
+    - :material/bolt: **System Operations** - Health monitoring and suggested actions
     - :material/model_training: **ML Pipeline** - Quantile regression & classification models
     - :material/history: **Backtesting** - Strategy testing with realistic execution
 

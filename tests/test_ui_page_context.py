@@ -18,7 +18,7 @@ DATA_VIEWS = [
 ]
 
 # Views that don't need context (static/config pages)
-STATIC_VIEWS = ["documentation", "settings", "assistant"]
+STATIC_VIEWS = ["documentation", "settings"]
 
 
 class TestPageContextFunctions:
@@ -70,7 +70,7 @@ class TestAppContextIntegration:
                 f"{view}.py must call render_chat_widget"
             )
 
-    def test_assistant_does_not_have_chat_widget(self):
-        """AI Actions page has its own full assistant, no chat widget."""
+    def test_assistant_has_chat_widget(self):
+        """System Operations page uses Ask Gefion like all other pages."""
         content = (UI_DIR / "views" / "assistant.py").read_text()
-        assert "render_chat_widget" not in content
+        assert "render_chat_widget" in content

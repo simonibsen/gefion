@@ -1,4 +1,4 @@
-"""AI Actions — context-aware operations center with conversation history."""
+"""System Operations — system health, suggested actions, and operations history."""
 
 import json
 import logging
@@ -507,10 +507,46 @@ def render_freeform_output(key: str, mode: str):
         st.rerun()
 
 
+def get_page_context():
+    """Return context for the System Operations page."""
+    context = {"page_name": "System Operations", "summary": "System health, suggested actions, and operations history."}
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM ml_models WHERE active = true")
+                model_count = cur.fetchone()[0]
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                latest = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM predictions")
+                pred_count = cur.fetchone()[0]
+        from datetime import date as date_type
+        data_age = (date_type.today() - latest).days if latest else None
+        context["data_stats"] = {
+            "active_models": model_count,
+            "predictions": pred_count,
+            "latest_data": str(latest) if latest else "none",
+            "data_age_days": data_age,
+        }
+        suggestions = []
+        if data_age and data_age > 3:
+            suggestions.append(f"Data is {data_age} days old — run gefion data-update")
+        if model_count == 0:
+            suggestions.append("No models — run gefion ml train")
+        context["suggestions"] = suggestions
+    except Exception:
+        pass
+    return context
+
+
 def render_assistant():
-    """Render the AI Actions page."""
-    st.title("AI Actions")
-    st.markdown("Run commands, ask questions, and explore your data.")
+    """Render the System Operations page."""
+    st.title("System Operations")
+    st.markdown("Monitor system health, run suggested actions, and review history.")
+
+    # Ask Gefion chat widget
+    from gefion.ui.components.chat import render_chat_widget
+    render_chat_widget(get_page_context())
 
     # --- Session errors indicator ---
     session_errors = read_session_errors()
@@ -526,125 +562,7 @@ def render_assistant():
                 msg = err.get("message", "")
                 st.error(f"**[{ts}] {source}**: {msg[:300]}")
 
-    # --- Section 1: Prompt entry + conversation history ---
-    st.subheader("Ask AI / Run Command")
-    st.caption(
-        "Type a natural language request (routed to Claude with Gefion MCP tools) "
-        "or a direct command (e.g. `gefion data-update --exchange NASDAQ`)."
-    )
-
-    history = read_exchanges()
-
-    with st.form("freeform_form", clear_on_submit=True):
-        cmd_input = st.text_input(
-            "Prompt or command",
-            placeholder="Which stocks had the biggest moves this week?" if not history else "",
-            key="freeform_cmd",
-        )
-        # Hide submit button, reduce form padding, sharpen input border
-        st.markdown(
-            "<style>"
-            "[data-testid='stFormSubmitButton'] {display: none;}"
-            "[data-testid='stForm'] {border: none; padding: 0;}"
-            "[data-testid='stTextInput'] input {"
-            "  border: 1px solid #ccc; border-radius: 4px;"
-            "  background-color: #f0f2f6;"
-            "}"
-            "[data-testid='stTextInput'] input:focus {"
-            "  border-color: #4a7cf7; box-shadow: 0 0 0 1px #4a7cf7;"
-            "}"
-            "</style>",
-            unsafe_allow_html=True,
-        )
-        submitted = st.form_submit_button("Run")
-
-    cmd_args: List[str] = []
-    display_cmd = ""
-    mode = ""
-    if cmd_input:
-        try:
-            cmd_args, display_cmd, mode = parse_command_input(cmd_input)
-        except ValueError as e:
-            st.error(f"Could not parse input: {e}")
-            cmd_args, display_cmd, mode = [], "", ""
-
-        if mode == "ai":
-            st.caption("Will send to Claude with Gefion MCP tools (operator mode)")
-        elif display_cmd:
-            st.code(display_cmd, language="bash")
-
-    freeform_state = get_process_state("freeform_cmd")
-    if freeform_state.is_running or freeform_state.completed:
-        freeform_mode = st.session_state.get("freeform_mode", "cli")
-        render_freeform_output("freeform_cmd", freeform_mode)
-
-    # Save completed exchange to history (once per completion)
-    if freeform_state.completed and not st.session_state.get("freeform_saved"):
-        prompt_text = st.session_state.get("freeform_prompt", "")
-        freeform_mode = st.session_state.get("freeform_mode", "cli")
-        # For AI mode, extract response from stream-json events
-        if freeform_mode == "ai":
-            all_events = (
-                getattr(freeform_state, "work_events", [])
-                or getattr(freeform_state, "output_lines", [])
-            )
-            response_text = ""
-            for evt_line in all_events:
-                evt = parse_stream_event(evt_line)
-                if evt and evt["type"] == "result":
-                    response_text = evt.get("result", "")
-        else:
-            output_lines = getattr(freeform_state, "output_lines", [])
-            response_text = "\n".join(output_lines) if output_lines else ""
-        append_exchange(
-            prompt=prompt_text,
-            mode=freeform_mode,
-            response=response_text,
-            success=freeform_state.success,
-            duration_sec=0.0,
-        )
-        st.session_state["freeform_saved"] = True
-        # Mark AI session as active so subsequent prompts use --continue
-        if freeform_mode == "ai" and freeform_state.success:
-            st.session_state["ai_session_active"] = True
-
-    if submitted and cmd_args and not freeform_state.is_running:
-        clear_process_state("freeform_cmd")
-        st.session_state["freeform_mode"] = mode
-        st.session_state["freeform_prompt"] = cmd_input
-        st.session_state["freeform_saved"] = False
-        env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
-        # Remove CLAUDECODE so claude -p can run (it refuses nested sessions)
-        env.pop("CLAUDECODE", None)
-        start_background_process("freeform_cmd", cmd_args, env)
-        st.rerun()
-
-    # Render conversation history (nested: History expander > individual exchanges)
-    if history:
-        with st.expander(f"History ({len(history)} exchanges)", expanded=False):
-            if st.button("Clear History", key="clear_history_btn"):
-                clear_history()
-                st.session_state["ai_session_active"] = False
-                st.rerun()
-            for i, ex in enumerate(reversed(history)):
-                status = "✓" if ex.get("success", True) else "✗"
-                prompt_preview = ex["prompt"][:80]
-                with st.expander(f"{status} {prompt_preview}", expanded=(i == 0)):
-                    st.markdown(f"**Prompt:** {ex['prompt']}")
-                    if ex.get("success", True):
-                        st.markdown(ex.get("response", ""))
-                    else:
-                        st.error(ex.get("response", "Command failed"))
-
-    # MCP tool reference
-    with st.expander("Available MCP Tools"):
-        for tool_name, (_, desc) in sorted(MCP_TOOL_MAP.items()):
-            st.markdown(f"- `{tool_name}` — {desc}")
-
-    st.markdown("---")
-
-    # --- Section 2: System conditions -> Action cards ---
+    # --- Suggested Actions ---
     st.subheader("Suggested Actions")
     conditions = check_conditions()
 
@@ -672,3 +590,28 @@ def render_assistant():
         c2.metric("Prices", f"{stats.ohlcv_rows:,}")
         c3.metric("Models", stats.model_count)
         c4.metric("Predictions", f"{stats.prediction_count:,}")
+
+    st.markdown("---")
+
+    # --- Global conversation history (persisted to disk) ---
+    history = read_exchanges()
+    if history:
+        with st.expander(f"History ({len(history)} exchanges)", expanded=False):
+            if st.button("Clear History", key="clear_history_btn"):
+                clear_history()
+                st.session_state["ai_session_active"] = False
+                st.rerun()
+            for i, ex in enumerate(reversed(history)):
+                status = "+" if ex.get("success", True) else "x"
+                prompt_preview = ex["prompt"][:80]
+                with st.expander(f"{status} {prompt_preview}", expanded=(i == 0)):
+                    st.markdown(f"**Prompt:** {ex['prompt']}")
+                    if ex.get("success", True):
+                        st.markdown(ex.get("response", ""))
+                    else:
+                        st.error(ex.get("response", "Command failed"))
+
+    # MCP tool reference
+    with st.expander("Available MCP Tools"):
+        for tool_name, (_, desc) in sorted(MCP_TOOL_MAP.items()):
+            st.markdown(f"- `{tool_name}` — {desc}")

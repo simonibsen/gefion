@@ -41,7 +41,7 @@ st.markdown("""
 # Page definitions: (label, material_icon)
 PAGES = [
     ("Dashboard", ":material/grid_view:"),
-    ("AI Actions", ":material/bolt:"),
+    ("System Operations", ":material/bolt:"),
     ("Data Management", ":material/storage:"),
     ("Features", ":material/tune:"),
     ("ML Pipeline", ":material/model_training:"),
@@ -95,7 +95,7 @@ def main():
         elif current_page == "Charts":
             from gefion.ui.views.charts import render_charts
             render_charts()
-        elif current_page == "AI Actions":
+        elif current_page == "System Operations":
             from gefion.ui.views.assistant import render_assistant
             render_assistant()
         elif current_page == "Data Management":

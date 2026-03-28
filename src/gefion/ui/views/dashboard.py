@@ -261,10 +261,10 @@ def render_dashboard():
             st.rerun()
 
     with col2:
-        st.markdown("### :material/bolt: AI Actions")
-        st.markdown("Ask questions and run commands with AI.")
-        if st.button("AI Actions", key="quick_ai", width="stretch"):
-            st.session_state.current_page = "AI Actions"
+        st.markdown("### :material/bolt: System Operations")
+        st.markdown("System health, actions, and history.")
+        if st.button("System Operations", key="quick_ai", width="stretch"):
+            st.session_state.current_page = "System Operations"
             st.rerun()
 
     with col3:
@@ -386,7 +386,7 @@ def render_dashboard():
 
         **Gefion** is a comprehensive trading analysis platform that combines:
         - :material/bar_chart: **Charts** - Candlesticks, comparisons, volatility analysis
-        - :material/bolt: **AI Actions** - Example queries for Claude Code
+        - :material/bolt: **System Operations** - Health monitoring and suggested actions
         - :material/model_training: **ML Predictions** - Quantile regression and trend classification
         - :material/history: **Backtesting** - Test strategies with realistic execution modeling
 
