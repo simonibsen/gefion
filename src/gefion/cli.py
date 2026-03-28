@@ -9913,7 +9913,29 @@ def launch_ui(
             emit("UI app not found. Please reinstall gefion.", error=True)
             raise typer.Exit(1)
 
-        emit(f"Starting Gefion UI on http://{host}:{port}")
+        # Auto-detect Tempo and enable OTEL if running
+        env = os.environ.copy()
+        otel_auto = False
+        if env.get("OTEL_ENABLED") != "true":
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(("localhost", 4317))
+                sock.close()
+                if result == 0:
+                    env["OTEL_ENABLED"] = "true"
+                    env.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+                    otel_auto = True
+            except Exception:
+                pass
+
+        if otel_auto:
+            emit(f"Starting Gefion UI on http://{host}:{port} (tracing: enabled — Tempo detected)")
+        elif env.get("OTEL_ENABLED") == "true":
+            emit(f"Starting Gefion UI on http://{host}:{port} (tracing: enabled)")
+        else:
+            emit(f"Starting Gefion UI on http://{host}:{port} (tracing: disabled — start Tempo for traces)")
         emit("Press Ctrl+C to stop")
 
         cmd = [
@@ -9933,7 +9955,7 @@ def launch_ui(
         clear_errors()
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, env=env)
         except KeyboardInterrupt:
             emit("\nShutting down UI...")
         except subprocess.CalledProcessError as e:

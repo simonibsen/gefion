@@ -35,7 +35,13 @@ Parse the arguments provided above. Supported forms:
 
 4. **Wait for health** — poll `docker compose ps` until postgres is healthy (up to 30s).
 
-5. **Report status** — show which services are running and on which ports. For dev mode, remind the user that postgres is on the non-standard port from `.env` (e.g., 6432).
+5. **OTEL smoke test** — verify tracing works end-to-end:
+   ```bash
+   bash scripts/otel_smoke_test.sh
+   ```
+   This emits a test span and confirms it arrives in Tempo.
+
+6. **Report status** — show which services are running and on which ports. For dev mode, remind the user that postgres is on the non-standard port from `.env` (e.g., 6432). Also report OTEL status (connected/disconnected).
 
 ### Stop Services
 

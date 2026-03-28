@@ -53,6 +53,8 @@ Performance inspection skill — queries Grafana Tempo for recent traces and ide
 | `/gefion-perf 1000` | Show traces slower than 1 second |
 | `/gefion-perf dashboard` | Show traces matching "dashboard" |
 | `/gefion-perf fix` | Find slowest trace and suggest/implement a fix |
+| `/gefion-perf baseline` | Save current trace durations as a baseline |
+| `/gefion-perf compare` | Compare current traces against saved baseline |
 
 ### Output Format
 
@@ -73,6 +75,31 @@ Bottleneck: ui.status.get_system_stats (22s)
 Suggested fix: Replace COUNT(*) with pg_stat_user_tables.n_live_tup
 ```
 
+### Baseline Management
+
+When the `baseline` argument is provided:
+1. Run `bash scripts/save_trace_baseline.sh [label]`
+2. Report the saved spans and their durations
+
+When the `compare` argument is provided:
+1. Find the latest baseline in `~/.gefion/trace_baselines/`
+2. Query current Tempo traces
+3. Compare each span: current vs baseline duration
+4. Flag regressions (>20% slower) and improvements (>20% faster)
+5. Show a before/after table
+
+### Span-Specific Thresholds
+
+Different operations have different acceptable durations:
+
+| Span prefix | Threshold | Rationale |
+|-------------|-----------|-----------|
+| `ui.*` | 500ms | Page loads should feel instant |
+| `db.*` | 500ms | DB operations should be fast |
+| `charts.*` | 2000ms | Chart rendering has more overhead |
+| `cli.*` | 5000ms | CLI commands can include I/O |
+| default | 1000ms | General operations |
+
 ### For Other Repos
 
 This pattern works for any project with OTEL + Tempo:
@@ -82,3 +109,4 @@ This pattern works for any project with OTEL + Tempo:
 4. Query Tempo API for `minDuration` > threshold
 5. Drill into slow traces to find the bottleneck span
 6. Fix and re-verify
+7. Save baseline: `bash scripts/save_trace_baseline.sh after-fix`
