@@ -427,7 +427,7 @@ def _render_chat_fragment() -> None:
     # Keep expander open while busy, just completed, or just answered
     # Track when we last got a response so we keep it open
     just_answered = st.session_state.get(f"_chat_{page_name}_just_answered", False)
-    should_expand = is_busy or just_completed or just_answered or n_convos == 0
+    should_expand = is_busy or just_completed or just_answered
 
     with st.expander(label, expanded=should_expand):
         # MCP warning
