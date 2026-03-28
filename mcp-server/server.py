@@ -1369,6 +1369,61 @@ async def list_tools() -> List[Tool]:
                 "required": ["symbol", "features"],
             },
         ),
+        Tool(
+            name="chart_calibration",
+            description=(
+                "Generate model calibration curve. Shows how well predicted "
+                "quantile levels (q10/q50/q90) match observed coverage. "
+                "Requires prediction outcomes data."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Model name (e.g., quantile)"},
+                },
+                "required": ["model_name"],
+            },
+        ),
+        Tool(
+            name="chart_confusion_matrix",
+            description=(
+                "Generate confusion matrix for trend classifier model. "
+                "Shows predicted vs actual trend classes (strong_down to strong_up). "
+                "Requires prediction outcomes data."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Model name"},
+                },
+                "required": ["model_name"],
+            },
+        ),
+        Tool(
+            name="chart_pipeline_health",
+            description=(
+                "Generate pipeline health dashboard showing data freshness, "
+                "feature coverage, and prediction distribution at a glance."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        Tool(
+            name="chart_pred_vs_actual",
+            description=(
+                "Generate scatter plot comparing predicted returns (q50) to "
+                "actual returns. Shows prediction accuracy visually."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Model name"},
+                },
+                "required": ["model_name"],
+            },
+        ),
 
         # Backup/Restore Tools
         Tool(
@@ -1549,6 +1604,14 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _chart_predictions(arguments)
         elif name == "chart_features":
             result = await _chart_features(arguments)
+        elif name == "chart_calibration":
+            result = await _chart_calibration(arguments)
+        elif name == "chart_confusion_matrix":
+            result = await _chart_confusion_matrix(arguments)
+        elif name == "chart_pipeline_health":
+            result = await _chart_pipeline_health(arguments)
+        elif name == "chart_pred_vs_actual":
+            result = await _chart_pred_vs_actual(arguments)
         # Backup/Restore tools
         elif name == "backup":
             result = await _backup(arguments)
@@ -3792,6 +3855,46 @@ async def _chart_features(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--start-date", args["start_date"]])
         if args.get("end_date"):
             cmd.extend(["--end-date", args["end_date"]])
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _generate)
+
+
+async def _chart_calibration(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate model calibration chart."""
+    async def _generate():
+        cmd = ["chart", "calibration", args["model_name"], "--no-open"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _generate)
+
+
+async def _chart_confusion_matrix(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate confusion matrix chart."""
+    async def _generate():
+        cmd = ["chart", "confusion-matrix", args["model_name"], "--no-open"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _generate)
+
+
+async def _chart_pipeline_health(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate pipeline health dashboard."""
+    async def _generate():
+        cmd = ["chart", "pipeline-health", "--no-open"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _generate)
+
+
+async def _chart_pred_vs_actual(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate predictions vs actual scatter plot."""
+    async def _generate():
+        cmd = ["chart", "pred-vs-actual", args["model_name"], "--no-open"]
         executor = GefionExecutor()
         return await executor.run(*cmd)
 
