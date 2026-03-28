@@ -203,11 +203,125 @@ def compare_baseline():
             print(f"  {name:38} {'—':>9} {c:>8}ms {'new':>9}")
 
 
+def suggest(traces: list):
+    """Analyze traces and suggest improvements, even for fast ones."""
+    all_spans = {}
+    for t in traces:
+        name = t.get("rootTraceName", "")
+        if name in IGNORE_SPANS:
+            continue
+        dur = t.get("durationMs", 0)
+        tid = t.get("traceID", "")
+        if name not in all_spans or dur > all_spans[name]["dur"]:
+            all_spans[name] = {"dur": dur, "tid": tid}
+
+    print("Performance Suggestions")
+    print("=" * 65)
+    print()
+
+    suggestions = []
+
+    # 1. Check for missing areas — what's NOT traced
+    expected_areas = ["ui.dashboard", "ui.ml", "ui.charts", "ui.data", "ui.features",
+                      "ui.backtest", "ui.experiments", "ui.assistant"]
+    seen_areas = set()
+    for name in all_spans:
+        for area in expected_areas:
+            if name.startswith(area):
+                seen_areas.add(area)
+    missing = [a for a in expected_areas if a not in seen_areas]
+    if missing:
+        suggestions.append(
+            f"No traces from: {', '.join(missing)}\n"
+            f"  → Navigate to those pages with OTEL_ENABLED=true to baseline them"
+        )
+
+    # 2. Check for cache-miss patterns (same span appearing multiple times with high duration)
+    span_counts = {}
+    for t in traces:
+        name = t.get("rootTraceName", "")
+        if name in IGNORE_SPANS:
+            continue
+        span_counts[name] = span_counts.get(name, 0) + 1
+
+    for name, count in span_counts.items():
+        dur = all_spans.get(name, {}).get("dur", 0)
+        thresh = get_threshold(name)
+        if count >= 3 and dur > thresh * 0.5:
+            suggestions.append(
+                f"{name} called {count} times (worst: {dur}ms)\n"
+                f"  → Consider @st.cache_data or moving to a shared context"
+            )
+
+    # 3. Check for near-threshold spans (70-100% of threshold)
+    for name, info in sorted(all_spans.items(), key=lambda x: -x[1]["dur"]):
+        dur = info["dur"]
+        thresh = get_threshold(name)
+        if thresh * 0.7 < dur <= thresh:
+            suggestions.append(
+                f"{name} at {dur}ms is {dur*100//thresh}% of threshold ({thresh}ms)\n"
+                f"  → Approaching limit — consider optimizing before it regresses"
+            )
+
+    # 4. Check for high span count in single trace (indicates N+1 query pattern)
+    for name, info in all_spans.items():
+        detail = fetch_trace_detail(info["tid"])
+        if len(detail) > 8:
+            db_count = sum(1 for s in detail if s["name"] == "SELECT")
+            if db_count > 5:
+                suggestions.append(
+                    f"{name} has {db_count} DB queries in one trace\n"
+                    f"  → Consider combining into fewer queries or using a JOIN"
+                )
+        break  # Only check the slowest trace to avoid hammering Tempo
+
+    # 5. Check for uncached page context functions
+    for name in all_spans:
+        if "get_page_context" in name and all_spans[name]["dur"] > 200:
+            suggestions.append(
+                f"{name} takes {all_spans[name]['dur']}ms\n"
+                f"  → Ensure it uses @st.cache_data(ttl=300) for DB queries"
+            )
+
+    # 6. General suggestions based on what we see
+    if not any("charts" in name for name in all_spans):
+        suggestions.append(
+            "No chart rendering traces\n"
+            "  → Generate a chart on the Charts page to baseline rendering performance"
+        )
+
+    if not any("ml" in name or "predict" in name for name in all_spans):
+        suggestions.append(
+            "No ML pipeline traces\n"
+            "  → Run 'OTEL_ENABLED=true gefion ml predict-list' to baseline ML operations"
+        )
+
+    if suggestions:
+        for i, s in enumerate(suggestions, 1):
+            print(f"{i}. {s}")
+            print()
+    else:
+        print("No suggestions — all traces look healthy.")
+        print()
+        print("Tips:")
+        print("  - Navigate all UI pages to ensure full trace coverage")
+        print("  - Run key CLI commands with OTEL_ENABLED=true")
+        print("  - Save a baseline: python scripts/perf_report.py --baseline")
+
+    print()
+    print(f"Analyzed {len(all_spans)} unique spans from {len(traces)} traces")
+
+
 def main():
     args = sys.argv[1:]
     show_detail = "--detail" in args
     if "--detail" in args:
         args.remove("--detail")
+
+    if "--suggest" in args:
+        traces = query_tempo(min_duration_ms=1)
+        suggest(traces)
+        return
 
     if "--baseline" in args:
         label = ""

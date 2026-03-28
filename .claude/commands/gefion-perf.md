@@ -45,6 +45,14 @@ Performance inspection skill — queries Grafana Tempo for recent traces and ide
    - Slow subprocess → Check timeout, consider async
    - Slow computation → Profile or cache
 
+When the `suggest` argument is provided, run `python scripts/perf_report.py --suggest` which analyzes:
+   - Missing trace coverage (pages/features never exercised with OTEL)
+   - Cache-miss patterns (same span called many times)
+   - Near-threshold spans (approaching limits, at risk of regression)
+   - N+1 query patterns (traces with many DB queries)
+   - Uncached page context functions
+   - Missing ML/chart coverage
+
 ### Usage Examples
 
 | Command | Meaning |
@@ -53,6 +61,7 @@ Performance inspection skill — queries Grafana Tempo for recent traces and ide
 | `/gefion-perf 1000` | Show traces slower than 1 second |
 | `/gefion-perf dashboard` | Show traces matching "dashboard" |
 | `/gefion-perf fix` | Find slowest trace and suggest/implement a fix |
+| `/gefion-perf suggest` | Proactive suggestions: missing coverage, N+1 queries, cache opportunities |
 | `/gefion-perf baseline` | Save current trace durations as a baseline |
 | `/gefion-perf compare` | Compare current traces against saved baseline |
 
