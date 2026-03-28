@@ -215,7 +215,7 @@ def get_gefion_insights() -> Optional[GefionInsights]:
                 except Exception:
                     pass  # Table may not exist
 
-                # Feature coverage — use fast queries (avoid full hypertable scans)
+                # Feature coverage — fast queries only
                 cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
                 insights.features_defined = cur.fetchone()[0] or 0
 
@@ -223,15 +223,18 @@ def get_gefion_insights() -> Optional[GefionInsights]:
                 latest_date = cur.fetchone()[0]
                 insights.latest_feature_date = str(latest_date) if latest_date else None
 
-                # Approximate feature coverage from recent data only (fast)
+                # Use pg_stat for approximate row count (instant, no scan)
                 cur.execute("""
-                    SELECT COUNT(DISTINCT feature_id), COUNT(DISTINCT data_id)
-                    FROM computed_features
-                    WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+                    SELECT n_live_tup FROM pg_stat_user_tables
+                    WHERE relname = 'computed_features'
                 """)
-                feat_computed, symbols_covered = cur.fetchone()
-                insights.features_computed = feat_computed or 0
-                insights.symbols_covered = symbols_covered or 0
+                row = cur.fetchone()
+                approx_rows = row[0] if row else 0
+
+                # Approximate: features_computed = active definitions, symbols = stocks count
+                insights.features_computed = insights.features_defined
+                cur.execute("SELECT COUNT(*) FROM stocks")
+                insights.symbols_covered = cur.fetchone()[0] or 0 if approx_rows > 0 else 0
 
         return insights
     except Exception:
