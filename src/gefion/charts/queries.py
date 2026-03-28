@@ -307,26 +307,37 @@ def fetch_predictions_vs_actuals(
 
 
 def fetch_pipeline_health(conn: psycopg.Connection) -> Dict[str, Any]:
-    """Fetch data freshness, feature coverage, prediction distributions."""
+    """Fetch data freshness, feature coverage, prediction distributions.
+
+    Uses fast queries — avoids full table scans on hypertables.
+    """
     from datetime import date as d
     result: Dict[str, Any] = {"freshness": [], "coverage": {}, "predictions": []}
     with conn.cursor() as cur:
-        for table, col, name in [
-            ("stock_ohlcv", "date", "OHLCV"),
-            ("computed_features", "date", "Features"),
-            ("predictions", "prediction_date", "Predictions"),
-        ]:
-            cur.execute(f"SELECT MAX({col}) FROM {table}")
-            latest = cur.fetchone()[0]
+        # Single query for all freshness data (fast — MAX on indexed columns)
+        cur.execute("""
+            SELECT 'OHLCV', MAX(date) FROM stock_ohlcv
+            UNION ALL
+            SELECT 'Features', MAX(date) FROM computed_features
+            UNION ALL
+            SELECT 'Predictions', MAX(prediction_date) FROM predictions
+        """)
+        for name, latest in cur.fetchall():
             if latest:
                 result["freshness"].append({"name": name, "days_old": (d.today() - latest).days})
 
-        cur.execute("SELECT COUNT(DISTINCT data_id) FROM computed_features")
-        computed = cur.fetchone()[0]
+        # Feature coverage — use stocks table count (fast) vs approximate feature coverage
+        # Instead of expensive COUNT(DISTINCT data_id) on hypertable, check recent features only
         cur.execute("SELECT COUNT(*) FROM stocks")
         total = cur.fetchone()[0]
+        cur.execute("""
+            SELECT COUNT(DISTINCT data_id) FROM computed_features
+            WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+        """)
+        computed = cur.fetchone()[0]
         result["coverage"] = {"computed": computed, "total": total}
 
+        # Prediction counts by type (fast — small result set)
         cur.execute("SELECT prediction_type, COUNT(*) FROM predictions GROUP BY prediction_type")
         result["predictions"] = [{"type": r[0], "count": r[1]} for r in cur.fetchall()]
     return result
