@@ -465,23 +465,34 @@ def _render_chat_fragment() -> None:
                 if prompt_text:
                     st.caption(f"**{prompt_text}**")
 
-                if tool_calls:
-                    for tc in tool_calls:
-                        if tc["type"] == "tool_use":
-                            tool = tc.get("tool", "")
-                            if tool.startswith("mcp__gefion__"):
-                                tool = tool[len("mcp__gefion__"):]
-                            st.markdown(f":material/build: **{tool}**")
-                            if tc.get("input") and tc["input"] != "{}":
-                                st.code(tc["input"], language="json")
-                elif text_parts:
-                    # Show partial response as it streams
-                    partial = "".join(text_parts)
-                    if len(partial) > 200:
-                        st.markdown(partial[:200] + "...")
-                    else:
-                        st.markdown(partial)
-                else:
+                # Show all events in order — tool calls, results, and text
+                has_output = False
+                for evt_line in all_events:
+                    evt = parse_stream_event(evt_line)
+                    if not evt:
+                        continue
+                    if evt["type"] == "tool_use":
+                        has_output = True
+                        tool = evt.get("tool", "")
+                        if tool.startswith("mcp__gefion__"):
+                            tool = tool[len("mcp__gefion__"):]
+                        st.markdown(f":material/build: **{tool}**")
+                        if evt.get("input") and evt["input"] != "{}":
+                            st.code(evt["input"], language="json")
+                    elif evt["type"] == "tool_result":
+                        has_output = True
+                        content = evt.get("content", "")
+                        if content:
+                            # Show truncated result
+                            preview = content[:300]
+                            if len(content) > 300:
+                                preview += "..."
+                            st.caption(preview)
+                    elif evt["type"] == "text":
+                        has_output = True
+                        st.markdown(evt.get("text", ""))
+
+                if not has_output:
                     st.markdown("*Connecting to AI...*")
 
             # Stop button
