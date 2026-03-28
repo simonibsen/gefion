@@ -313,40 +313,37 @@ _CHAT_BAR_HIDE_BUTTON_JS = """
 """
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def _check_mcp_status() -> Dict[str, Any]:
-    """Check if the gefion MCP server is available to Claude CLI. Cached for 5 min."""
-    import subprocess
+    """Lightweight check: verify claude CLI exists and MCP config is present."""
+    import shutil
     import os
-    try:
-        result = subprocess.run(
-            ["claude", "-p", "hi", "--output-format", "stream-json", "--verbose", "--max-turns", "1"],
-            capture_output=True, text=True, timeout=20,
-            env={**os.environ, "OTEL_ENABLED": "false"},
-        )
-        # Init event with mcp_servers goes to stdout
-        all_output = (result.stdout or "") + "\n" + (result.stderr or "")
-        for line in all_output.splitlines():
-            if '"mcp_servers"' in line:
+    from pathlib import Path
+
+    # Check claude CLI exists
+    if not shutil.which("claude"):
+        return {"available": False, "status": "claude CLI not found"}
+
+    # Check MCP config exists (don't spawn a process)
+    config_paths = [
+        Path.home() / ".claude.json",
+        Path.home() / ".config" / "claude" / "config.json",
+    ]
+    for config_path in config_paths:
+        if config_path.exists():
+            try:
                 import json
-                try:
-                    data = json.loads(line.strip())
-                    servers = data.get("mcp_servers", [])
-                    # Check gefion first, then g2 (legacy name)
-                    for name in ("gefion", "g2"):
-                        for s in servers:
-                            if s.get("name") == name:
-                                return {"available": s.get("status") == "connected", "name": name, "status": s.get("status")}
-                    return {"available": False, "name": None, "status": "not configured"}
-                except json.JSONDecodeError:
-                    pass
-        return {"available": False, "name": None, "status": "claude CLI not responding"}
-    except FileNotFoundError:
-        return {"available": False, "name": None, "status": "claude CLI not found"}
-    except subprocess.TimeoutExpired:
-        return {"available": False, "name": None, "status": "claude CLI timed out"}
-    except Exception as e:
-        return {"available": False, "name": None, "status": str(e)}
+                config = json.loads(config_path.read_text())
+                servers = config.get("mcpServers", {})
+                if "gefion" in servers:
+                    return {"available": True, "status": "configured"}
+                if "g2" in servers:
+                    return {"available": True, "status": "configured (as g2)"}
+            except Exception:
+                pass
+
+    # Fallback: assume available if claude exists (config might be elsewhere)
+    return {"available": True, "status": "assumed"}
 
 
 def render_chat_widget(page_context: Optional[Dict[str, Any]] = None) -> None:
