@@ -41,7 +41,7 @@ UI_EXPECTED_INSTRUMENTED_FUNCTIONS = {
         "get_latest_data_date",
     ],
     "gefion.ui.views.charts": [
-        "get_page_context",
+        "_get_charts_context_data",
         "_render_quick_pipeline",
         "_render_quick_top_movers",
         "_render_quick_sector",
@@ -60,7 +60,7 @@ UI_EXPECTED_INSTRUMENTED_FUNCTIONS = {
         "get_page_context",
     ],
     "gefion.ui.views.dashboard": [
-        "get_page_context",
+        "_get_dashboard_context_data",
         "get_market_movers",
         "get_gefion_insights",
     ],
