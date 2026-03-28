@@ -279,6 +279,38 @@ def _build_context_prompt(page_context: Dict[str, Any]) -> Optional[str]:
     return " ".join(parts)
 
 
+def _render_inline_charts(message: Dict[str, Any]) -> None:
+    """Detect chart HTML files in a message and render them inline."""
+    import re
+    from pathlib import Path
+    import streamlit.components.v1 as components
+
+    # Search for chart file paths in the response text and tool results
+    text_to_search = message.get("content", "")
+    for event in message.get("work", []):
+        if event.get("type") == "tool_result":
+            text_to_search += " " + event.get("content", "")
+
+    # Find .html file paths (e.g., /Users/.../charts/AAPL_price_20260328.html)
+    html_paths = re.findall(r'(/[^\s"\']+\.html)', text_to_search)
+    # Also check ~/.gefion/charts/ pattern
+    html_paths += re.findall(r'(~/.+?\.html)', text_to_search)
+
+    rendered = set()
+    for path_str in html_paths:
+        path_str = path_str.replace("~", str(Path.home()))
+        path = Path(path_str)
+        if path.exists() and path.suffix == ".html" and str(path) not in rendered:
+            try:
+                html = path.read_text()
+                if "d3" in html.lower() or "plotly" in html.lower() or "<svg" in html.lower():
+                    st.caption(f"Chart: {path.name}")
+                    components.html(html, height=600, scrolling=True)
+                    rendered.add(str(path))
+            except Exception:
+                pass
+
+
 # ---------------------------------------------------------------------------
 # Chat widget CSS + rendering
 # ---------------------------------------------------------------------------
@@ -599,6 +631,9 @@ def _render_chat_fragment() -> None:
                                             st.code(inp, language="json")
 
                         st.markdown(a["content"])
+
+                        # Render any chart files referenced in the response or tool results
+                        _render_inline_charts(a)
 
                         if a.get("duration_ms"):
                             st.caption(f"{a['duration_ms'] / 1000:.1f}s")
