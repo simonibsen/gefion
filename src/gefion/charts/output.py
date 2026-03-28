@@ -26,7 +26,7 @@ def get_chart_output_dir() -> Path:
     if env_dir:
         output_dir = Path(env_dir)
     else:
-        output_dir = Path.home() / ".g2" / "charts"
+        output_dir = Path.home() / ".gefion" / "charts"
 
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
@@ -61,6 +61,22 @@ def save_chart_html(fig: "go.Figure", filename: str) -> Path:
     output_dir = get_chart_output_dir()
     output_path = output_dir / filename
     fig.write_html(str(output_path), include_plotlyjs=True, full_html=True)
+    return output_path
+
+
+def save_html_string(html: str, filename: str) -> Path:
+    """Save a raw HTML string to the chart output directory.
+
+    Args:
+        html: Self-contained HTML string (e.g., D3 chart)
+        filename: Filename to save as
+
+    Returns:
+        Full path to saved file
+    """
+    output_dir = get_chart_output_dir()
+    output_path = output_dir / filename
+    output_path.write_text(html)
     return output_path
 
 

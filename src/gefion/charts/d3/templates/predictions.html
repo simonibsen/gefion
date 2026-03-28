@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.price-line { fill: none; stroke: var(--color-price); stroke-width: 2; }
+.q50-line { fill: none; stroke: #ff9800; stroke-width: 1.5; stroke-dasharray: 5,3; }
+.band-fill { fill: rgba(41, 98, 255, 0.15); stroke: none; }
+.band-border { fill: none; stroke: rgba(41, 98, 255, 0.3); stroke-width: 1; stroke-dasharray: 2,2; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+// Parse dates
+data.forEach(d => { d._date = new Date(d.date); });
+
+const margin = {top: 40, right: 50, bottom: 30, left: 70};
+const width = TOTAL_WIDTH - margin.left - margin.right;
+const height = TOTAL_HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || (config.symbol || "") + " Predictions");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+// Scales
+const xScale = d3.scaleTime()
+    .domain(d3.extent(data, d => d._date))
+    .range([0, width]);
+
+// Compute price extent and band extent for y-domain
+const priceMin = d3.min(data, d => d.close);
+const priceMax = d3.max(data, d => d.close);
+// q values are predicted returns — compute actual price levels for bands
+const allVals = [];
+data.forEach(d => {
+    allVals.push(d.close);
+    if (d.q10 != null) allVals.push(d.close * (1 + d.q10));
+    if (d.q90 != null) allVals.push(d.close * (1 + d.q90));
+});
+const yMin = d3.min(allVals) * 0.995;
+const yMax = d3.max(allVals) * 1.005;
+
+const yScale = d3.scaleLinear()
+    .domain([yMin, yMax])
+    .range([height, 0]);
+
+const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+// Grid lines
+g.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yScale).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+
+// Y axis
+g.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yScale).tickFormat(d => formatPrice(d)));
+
+// X axis
+g.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(8).tickFormat(d3.timeFormat("%b %d")));
+
+// q10-q90 band (filled area)
+const bandData = data.filter(d => d.q10 != null && d.q90 != null);
+if (bandData.length > 0) {
+    const area = d3.area()
+        .x(d => xScale(d._date))
+        .y0(d => yScale(d.close * (1 + d.q10)))
+        .y1(d => yScale(d.close * (1 + d.q90)));
+    g.append("path")
+        .datum(bandData)
+        .attr("class", "band-fill")
+        .attr("d", area);
+
+    // Band borders
+    const lineQ10 = d3.line().x(d => xScale(d._date)).y(d => yScale(d.close * (1 + d.q10)));
+    const lineQ90 = d3.line().x(d => xScale(d._date)).y(d => yScale(d.close * (1 + d.q90)));
+    g.append("path").datum(bandData).attr("class", "band-border").attr("d", lineQ10);
+    g.append("path").datum(bandData).attr("class", "band-border").attr("d", lineQ90);
+}
+
+// q50 line (orange dashed)
+const q50Data = data.filter(d => d.q50 != null);
+if (q50Data.length > 0) {
+    const lineQ50 = d3.line().x(d => xScale(d._date)).y(d => yScale(d.close * (1 + d.q50)));
+    g.append("path")
+        .datum(q50Data)
+        .attr("class", "q50-line")
+        .attr("d", lineQ50);
+}
+
+// Price line (on top)
+const priceLine = d3.line()
+    .x(d => xScale(d._date))
+    .y(d => yScale(d.close));
+g.append("path")
+    .datum(data)
+    .attr("class", "price-line")
+    .attr("d", priceLine);
+
+// Crosshair + tooltip
+const crosshair = createCrosshair(g, width, height);
+const bisect = d3.bisector(d => d._date).left;
+
+svg.append("rect")
+    .attr("width", width)
+    .attr("height", height)
+    .attr("transform", `translate(${margin.left},${margin.top})`)
+    .attr("fill", "transparent")
+    .on("mousemove", function(event) {
+        const [mx, my] = d3.pointer(event, g.node());
+        const x0 = xScale.invert(mx);
+        const idx = Math.min(data.length - 1, Math.max(0, bisect(data, x0)));
+        const d = data[idx];
+        if (!d) return;
+        crosshair.show(xScale(d._date), my);
+        let html = `<b>${formatDate(d.date)}</b><br>` +
+            `Price: ${formatPrice(d.close)}`;
+        if (d.q10 != null) html += `<br>q10: ${(d.q10 * 100).toFixed(2)}%`;
+        if (d.q50 != null) html += `<br>q50: ${(d.q50 * 100).toFixed(2)}%`;
+        if (d.q90 != null) html += `<br>q90: ${(d.q90 * 100).toFixed(2)}%`;
+        tooltip.show(html, event.pageX, event.pageY);
+    })
+    .on("mouseleave", function() {
+        crosshair.hide();
+        tooltip.hide();
+    });
+</script>
+</body>
+</html>

@@ -96,6 +96,18 @@ class TestD3Templates:
     def test_candlestick_template_exists(self):
         assert (TEMPLATES_DIR / "candlestick.html").exists()
 
+    def test_equity_curve_template_exists(self):
+        assert (TEMPLATES_DIR / "equity_curve.html").exists()
+
+    def test_features_template_exists(self):
+        assert (TEMPLATES_DIR / "features.html").exists()
+
+    def test_sector_heatmap_template_exists(self):
+        assert (TEMPLATES_DIR / "sector_heatmap.html").exists()
+
+    def test_rolling_returns_template_exists(self):
+        assert (TEMPLATES_DIR / "rolling_returns.html").exists()
+
     def test_all_templates_valid_jinja2(self):
         import jinja2
         env = jinja2.Environment(
@@ -145,3 +157,210 @@ class TestCandlestickChart:
         from gefion.charts.d3.renderers import create_candlestick_chart
         html = create_candlestick_chart(sample_ohlcv, "AAPL", title="Test Chart")
         assert "Test Chart" in html
+
+
+class TestEquityCurveChart:
+    """Equity curve D3 chart renders correctly."""
+
+    @pytest.fixture
+    def sample_equity(self):
+        return [
+            {"date": "2026-03-20", "equity": 100000, "drawdown": 0.0},
+            {"date": "2026-03-21", "equity": 100500, "drawdown": 0.0},
+            {"date": "2026-03-22", "equity": 99800, "drawdown": 0.007},
+            {"date": "2026-03-23", "equity": 101000, "drawdown": 0.0},
+            {"date": "2026-03-24", "equity": 100200, "drawdown": 0.008},
+        ]
+
+    def test_equity_curve_returns_html(self, sample_equity):
+        from gefion.charts.d3.renderers import create_equity_curve_chart
+        html = create_equity_curve_chart(sample_equity)
+        assert isinstance(html, str)
+        assert "<!DOCTYPE html>" in html or "<html" in html.lower()
+
+    def test_equity_curve_contains_d3(self, sample_equity):
+        from gefion.charts.d3.renderers import create_equity_curve_chart
+        html = create_equity_curve_chart(sample_equity)
+        assert "d3" in html
+
+    def test_equity_curve_embeds_data(self, sample_equity):
+        from gefion.charts.d3.renderers import create_equity_curve_chart
+        html = create_equity_curve_chart(sample_equity)
+        assert "100000" in html
+        assert "100500" in html
+
+    def test_equity_curve_with_title(self, sample_equity):
+        from gefion.charts.d3.renderers import create_equity_curve_chart
+        html = create_equity_curve_chart(sample_equity, title="My Equity")
+        assert "My Equity" in html
+
+    def test_equity_curve_drawdown_toggle(self, sample_equity):
+        from gefion.charts.d3.renderers import create_equity_curve_chart
+        html_with = create_equity_curve_chart(sample_equity, show_drawdown=True)
+        html_without = create_equity_curve_chart(sample_equity, show_drawdown=False)
+        assert "show_drawdown" in html_with or "drawdown" in html_with.lower()
+        assert isinstance(html_without, str)
+
+
+class TestFeaturesChart:
+    """Features D3 chart renders correctly."""
+
+    @pytest.fixture
+    def sample_ohlcv(self):
+        return [
+            {"date": "2026-03-25", "close": 150.0},
+            {"date": "2026-03-26", "close": 152.0},
+            {"date": "2026-03-27", "close": 148.0},
+        ]
+
+    @pytest.fixture
+    def sample_features(self):
+        return {
+            "rsi_14": [
+                {"date": "2026-03-25", "value": 55.0},
+                {"date": "2026-03-26", "value": 62.0},
+                {"date": "2026-03-27", "value": 45.0},
+            ],
+            "macd": [
+                {"date": "2026-03-25", "value": 1.2},
+                {"date": "2026-03-26", "value": 1.8},
+                {"date": "2026-03-27", "value": -0.5},
+            ],
+        }
+
+    def test_features_returns_html(self, sample_ohlcv, sample_features):
+        from gefion.charts.d3.renderers import create_feature_chart
+        html = create_feature_chart(sample_ohlcv, sample_features, "AAPL")
+        assert isinstance(html, str)
+        assert "<!DOCTYPE html>" in html or "<html" in html.lower()
+
+    def test_features_contains_d3(self, sample_ohlcv, sample_features):
+        from gefion.charts.d3.renderers import create_feature_chart
+        html = create_feature_chart(sample_ohlcv, sample_features, "AAPL")
+        assert "d3" in html
+
+    def test_features_embeds_data(self, sample_ohlcv, sample_features):
+        from gefion.charts.d3.renderers import create_feature_chart
+        html = create_feature_chart(sample_ohlcv, sample_features, "AAPL")
+        assert "150" in html
+        assert "rsi_14" in html
+
+    def test_features_with_title(self, sample_ohlcv, sample_features):
+        from gefion.charts.d3.renderers import create_feature_chart
+        html = create_feature_chart(sample_ohlcv, sample_features, "AAPL", title="Feature View")
+        assert "Feature View" in html
+
+    def test_features_symbol_in_config(self, sample_ohlcv, sample_features):
+        from gefion.charts.d3.renderers import create_feature_chart
+        html = create_feature_chart(sample_ohlcv, sample_features, "MSFT")
+        assert "MSFT" in html
+
+
+class TestSectorHeatmapChart:
+    """Sector heatmap D3 chart renders correctly."""
+
+    @pytest.fixture
+    def sample_sector_data(self):
+        return {
+            "sectors": [
+                {
+                    "name": "Technology",
+                    "return_pct": 12.5,
+                    "symbols": [
+                        {"symbol": "AAPL", "return_pct": 15.2},
+                        {"symbol": "MSFT", "return_pct": 9.8},
+                    ],
+                },
+                {
+                    "name": "Healthcare",
+                    "return_pct": -3.1,
+                    "symbols": [
+                        {"symbol": "JNJ", "return_pct": -5.2},
+                        {"symbol": "PFE", "return_pct": -1.0},
+                    ],
+                },
+            ]
+        }
+
+    def test_sector_heatmap_returns_html(self, sample_sector_data):
+        from gefion.charts.d3.renderers import create_sector_heatmap_d3
+        html = create_sector_heatmap_d3(sample_sector_data)
+        assert isinstance(html, str)
+        assert "<!DOCTYPE html>" in html or "<html" in html.lower()
+
+    def test_sector_heatmap_contains_d3(self, sample_sector_data):
+        from gefion.charts.d3.renderers import create_sector_heatmap_d3
+        html = create_sector_heatmap_d3(sample_sector_data)
+        assert "d3" in html
+
+    def test_sector_heatmap_embeds_data(self, sample_sector_data):
+        from gefion.charts.d3.renderers import create_sector_heatmap_d3
+        html = create_sector_heatmap_d3(sample_sector_data)
+        assert "Technology" in html
+        assert "AAPL" in html
+
+    def test_sector_heatmap_with_title(self, sample_sector_data):
+        from gefion.charts.d3.renderers import create_sector_heatmap_d3
+        html = create_sector_heatmap_d3(sample_sector_data, title="Sector View")
+        assert "Sector View" in html
+
+    def test_sector_heatmap_with_period(self, sample_sector_data):
+        from gefion.charts.d3.renderers import create_sector_heatmap_d3
+        html = create_sector_heatmap_d3(sample_sector_data, period="1M")
+        assert "1M" in html
+
+
+class TestRollingReturnsChart:
+    """Rolling returns D3 chart renders correctly."""
+
+    @pytest.fixture
+    def sample_rolling_data(self):
+        return {
+            "windows": {
+                "20": [
+                    {"date": "2026-03-25", "value": 0.05},
+                    {"date": "2026-03-26", "value": 0.03},
+                    {"date": "2026-03-27", "value": -0.02},
+                ],
+                "60": [
+                    {"date": "2026-03-25", "value": 0.12},
+                    {"date": "2026-03-26", "value": 0.10},
+                    {"date": "2026-03-27", "value": 0.08},
+                ],
+            }
+        }
+
+    def test_rolling_returns_html(self, sample_rolling_data):
+        from gefion.charts.d3.renderers import create_rolling_returns_d3
+        html = create_rolling_returns_d3(sample_rolling_data, "AAPL")
+        assert isinstance(html, str)
+        assert "<!DOCTYPE html>" in html or "<html" in html.lower()
+
+    def test_rolling_returns_contains_d3(self, sample_rolling_data):
+        from gefion.charts.d3.renderers import create_rolling_returns_d3
+        html = create_rolling_returns_d3(sample_rolling_data, "AAPL")
+        assert "d3" in html
+
+    def test_rolling_returns_embeds_data(self, sample_rolling_data):
+        from gefion.charts.d3.renderers import create_rolling_returns_d3
+        html = create_rolling_returns_d3(sample_rolling_data, "AAPL")
+        assert "0.05" in html
+        assert "0.12" in html
+
+    def test_rolling_returns_with_title(self, sample_rolling_data):
+        from gefion.charts.d3.renderers import create_rolling_returns_d3
+        html = create_rolling_returns_d3(sample_rolling_data, "AAPL", title="Rolling View")
+        assert "Rolling View" in html
+
+    def test_rolling_returns_symbol_in_config(self, sample_rolling_data):
+        from gefion.charts.d3.renderers import create_rolling_returns_d3
+        html = create_rolling_returns_d3(sample_rolling_data, "TSLA")
+        assert "TSLA" in html
+
+    def test_rolling_returns_window_labels(self, sample_rolling_data):
+        from gefion.charts.d3.renderers import create_rolling_returns_d3
+        labels = {"20": "20-day", "60": "60-day"}
+        html = create_rolling_returns_d3(
+            sample_rolling_data, "AAPL", window_labels=labels
+        )
+        assert "20-day" in html

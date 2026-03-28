@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.return-line { fill: none; stroke-width: 1.8; }
+.zero-line { stroke: var(--color-text); stroke-dasharray: 5,4; stroke-width: 1; opacity: 0.5; }
+.legend { font-size: 11px; }
+.legend-swatch { width: 16px; height: 3px; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+const CHART_PALETTE = [
+    "#2962ff", "#ff9800", "#9c27b0", "#00bcd4",
+    "#e91e63", "#4caf50", "#ff5722", "#607d8b"
+];
+
+const margin = {top: 40, right: 50, bottom: 30, left: 70};
+const innerWidth = TOTAL_WIDTH - margin.left - margin.right;
+const innerHeight = TOTAL_HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || (config.symbol || "") + " Rolling Returns");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+const chartG = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+// Parse windows data
+const windows = data.windows || {};
+const windowKeys = Object.keys(windows);
+const windowLabels = config.window_labels || {};
+
+// Parse dates and collect all data
+const parsedWindows = {};
+let allDates = [];
+let allValues = [];
+
+windowKeys.forEach(key => {
+    const wData = windows[key] || [];
+    wData.forEach(d => { d._date = new Date(d.date); });
+    parsedWindows[key] = wData;
+    allDates = allDates.concat(wData.map(d => d._date));
+    allValues = allValues.concat(wData.map(d => d.value));
+});
+
+// Scales
+const xScale = d3.scaleTime()
+    .domain(d3.extent(allDates))
+    .range([0, innerWidth]);
+
+const yPadding = Math.max(Math.abs(d3.min(allValues)), Math.abs(d3.max(allValues))) * 0.1;
+const yScale = d3.scaleLinear()
+    .domain([
+        d3.min(allValues) - yPadding,
+        d3.max(allValues) + yPadding
+    ])
+    .range([innerHeight, 0])
+    .nice();
+
+// Grid
+chartG.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yScale).tickSize(-innerWidth).tickFormat(""))
+    .select(".domain").remove();
+
+// Zero line
+chartG.append("line")
+    .attr("class", "zero-line")
+    .attr("x1", 0).attr("x2", innerWidth)
+    .attr("y1", yScale(0)).attr("y2", yScale(0));
+
+// Y axis (percentage)
+chartG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yScale).tickFormat(d => (d * 100).toFixed(1) + "%"));
+
+// X axis
+chartG.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${innerHeight})`)
+    .call(d3.axisBottom(xScale).ticks(8).tickFormat(d3.timeFormat("%b %d")));
+
+// Draw lines for each window
+const lineGen = d3.line()
+    .x(d => xScale(d._date))
+    .y(d => yScale(d.value))
+    .defined(d => d.value != null);
+
+windowKeys.forEach((key, i) => {
+    const wData = parsedWindows[key];
+    const color = CHART_PALETTE[i % CHART_PALETTE.length];
+
+    chartG.append("path")
+        .datum(wData)
+        .attr("class", "return-line")
+        .attr("d", lineGen)
+        .attr("stroke", color);
+});
+
+// Legend
+const legendG = svg.append("g")
+    .attr("transform", `translate(${margin.left + 10},${margin.top + 5})`);
+
+windowKeys.forEach((key, i) => {
+    const color = CHART_PALETTE[i % CHART_PALETTE.length];
+    const label = windowLabels[key] || key + "-day";
+    const lg = legendG.append("g")
+        .attr("transform", `translate(${i * 100}, 0)`);
+
+    lg.append("line")
+        .attr("x1", 0).attr("x2", 16)
+        .attr("y1", 0).attr("y2", 0)
+        .attr("stroke", color)
+        .attr("stroke-width", 2.5);
+
+    lg.append("text")
+        .attr("class", "legend")
+        .attr("x", 20)
+        .attr("y", 4)
+        .text(label);
+});
+
+// Crosshair + tooltip interaction
+const crosshair = createCrosshair(chartG, innerWidth, innerHeight);
+
+// Use first window's dates as reference for bisecting
+const refKey = windowKeys[0];
+const refData = parsedWindows[refKey] || [];
+
+svg.append("rect")
+    .attr("width", innerWidth)
+    .attr("height", innerHeight)
+    .attr("transform", `translate(${margin.left},${margin.top})`)
+    .attr("fill", "transparent")
+    .on("mousemove", function(event) {
+        const [mx, my] = d3.pointer(event, chartG.node());
+        const bisect = d3.bisector(d => d._date).left;
+        const x0 = xScale.invert(mx);
+        const idx = Math.min(refData.length - 1, Math.max(0, bisect(refData, x0)));
+        const d = refData[idx];
+        if (!d) return;
+        crosshair.show(xScale(d._date), my);
+
+        let html = `<b>${formatDate(d.date)}</b><br>`;
+        windowKeys.forEach((key, i) => {
+            const wData = parsedWindows[key];
+            const wi = Math.min(wData.length - 1, Math.max(0, bisect(wData, x0)));
+            const wd = wData[wi];
+            if (wd) {
+                const color = CHART_PALETTE[i % CHART_PALETTE.length];
+                const label = windowLabels[key] || key + "-day";
+                const pct = (wd.value * 100).toFixed(2);
+                html += `<span style="color:${color}">${label}: ${pct}%</span><br>`;
+            }
+        });
+        tooltip.show(html, event.pageX, event.pageY);
+    })
+    .on("mouseleave", function() {
+        crosshair.hide();
+        tooltip.hide();
+    });
+</script>
+</body>
+</html>

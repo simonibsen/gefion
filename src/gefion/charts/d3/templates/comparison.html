@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.series-line { fill: none; stroke-width: 2; }
+.legend { font-size: 12px; }
+.legend-item { cursor: default; }
+.legend-swatch { width: 14px; height: 14px; display: inline-block; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+const PALETTE = ["#2962ff", "#ff9800", "#9c27b0", "#00bcd4",
+                 "#e91e63", "#4caf50", "#ff5722", "#607d8b",
+                 "#795548", "#009688", "#3f51b5", "#cddc39"];
+
+const margin = {top: 40, right: 50, bottom: 30, left: 70};
+const width = TOTAL_WIDTH - margin.left - margin.right;
+const height = TOTAL_HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || "Symbol Comparison");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+// Parse dates and normalize
+const series = data.symbols.map((s, i) => {
+    s.data.forEach(d => { d._date = new Date(d.date); });
+    const basePrice = s.data[0] ? s.data[0].close : 1;
+    const normalized = s.data.map(d => ({
+        _date: d._date,
+        date: d.date,
+        close: d.close,
+        value: config.normalize !== false ? (d.close / basePrice) * 100 : d.close,
+    }));
+    return { symbol: s.symbol, data: normalized, color: PALETTE[i % PALETTE.length] };
+});
+
+// Collect all dates and values for scales
+const allDates = [];
+const allValues = [];
+series.forEach(s => {
+    s.data.forEach(d => {
+        allDates.push(d._date);
+        allValues.push(d.value);
+    });
+});
+
+const xScale = d3.scaleTime()
+    .domain(d3.extent(allDates))
+    .range([0, width]);
+
+const yScale = d3.scaleLinear()
+    .domain([d3.min(allValues) * 0.98, d3.max(allValues) * 1.02])
+    .range([height, 0]);
+
+// Grid
+g.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yScale).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+
+// Y axis
+const yLabel = config.normalize !== false ? "Normalized (base=100)" : "Price";
+g.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yScale).tickFormat(d => d3.format(",.1f")(d)));
+
+// X axis
+g.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(8).tickFormat(d3.timeFormat("%b %d")));
+
+// Draw lines
+const line = d3.line()
+    .x(d => xScale(d._date))
+    .y(d => yScale(d.value));
+
+series.forEach(s => {
+    g.append("path")
+        .datum(s.data)
+        .attr("class", "series-line")
+        .attr("stroke", s.color)
+        .attr("d", line);
+});
+
+// Legend
+const legend = container.append("div")
+    .attr("class", "legend")
+    .style("text-align", "center")
+    .style("padding", "4px 0");
+
+series.forEach(s => {
+    const item = legend.append("span")
+        .attr("class", "legend-item")
+        .style("margin", "0 10px");
+    item.append("span")
+        .attr("class", "legend-swatch")
+        .style("background", s.color);
+    item.append("span").text(s.symbol);
+});
+
+// Crosshair + tooltip
+const crosshair = createCrosshair(g, width, height);
+const bisectors = series.map(s => d3.bisector(d => d._date).left);
+
+svg.append("rect")
+    .attr("width", width)
+    .attr("height", height)
+    .attr("transform", `translate(${margin.left},${margin.top})`)
+    .attr("fill", "transparent")
+    .on("mousemove", function(event) {
+        const [mx, my] = d3.pointer(event, g.node());
+        const x0 = xScale.invert(mx);
+        crosshair.show(mx, my);
+        let html = `<b>${d3.timeFormat("%b %d, %Y")(x0)}</b>`;
+        series.forEach((s, i) => {
+            const idx = Math.min(s.data.length - 1, Math.max(0, bisectors[i](s.data, x0)));
+            const d = s.data[idx];
+            if (d) {
+                html += `<br><span style="color:${s.color}">${s.symbol}</span>: ${formatPrice(d.close)}`;
+                if (config.normalize !== false) {
+                    html += ` (${d.value.toFixed(1)})`;
+                }
+            }
+        });
+        tooltip.show(html, event.pageX, event.pageY);
+    })
+    .on("mouseleave", function() {
+        crosshair.hide();
+        tooltip.hide();
+    });
+</script>
+</body>
+</html>

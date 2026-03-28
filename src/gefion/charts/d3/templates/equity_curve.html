@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.equity-line { fill: none; stroke: var(--color-price); stroke-width: 2; }
+.equity-area { fill: rgba(41, 98, 255, 0.1); }
+.drawdown-area { fill: rgba(239, 83, 80, 0.3); }
+.drawdown-line { fill: none; stroke: var(--color-down); stroke-width: 1.5; }
+.zero-line { stroke: var(--color-grid); stroke-dasharray: 4,3; stroke-width: 1; }
+.annotation { font-size: 12px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+// Parse dates
+data.forEach(d => { d._date = new Date(d.date); });
+
+const margin = {top: 40, right: 50, bottom: 30, left: 70};
+const showDrawdown = config.show_drawdown !== false;
+const gap = 10;
+const innerWidth = TOTAL_WIDTH - margin.left - margin.right;
+const totalInnerHeight = TOTAL_HEIGHT - margin.top - margin.bottom;
+const equityHeight = showDrawdown ? totalInnerHeight * 0.8 - gap : totalInnerHeight;
+const drawdownHeight = showDrawdown ? totalInnerHeight * 0.2 : 0;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || "Equity Curve");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+// Scales
+const xScale = d3.scaleTime()
+    .domain(d3.extent(data, d => d._date))
+    .range([0, innerWidth]);
+
+const yEquity = d3.scaleLinear()
+    .domain([
+        d3.min(data, d => d.equity) * 0.995,
+        d3.max(data, d => d.equity) * 1.005
+    ])
+    .range([equityHeight, 0]);
+
+// Equity chart group
+const equityG = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+// Grid
+equityG.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yEquity).tickSize(-innerWidth).tickFormat(""))
+    .select(".domain").remove();
+
+// Y axis
+equityG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yEquity).tickFormat(d => formatPrice(d)));
+
+// X axis
+const tickInterval = Math.max(1, Math.floor(data.length / 8));
+equityG.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${equityHeight})`)
+    .call(d3.axisBottom(xScale).ticks(8).tickFormat(d3.timeFormat("%b %d")));
+
+// Area under equity line
+const areaGen = d3.area()
+    .x(d => xScale(d._date))
+    .y0(equityHeight)
+    .y1(d => yEquity(d.equity));
+
+equityG.append("path")
+    .datum(data)
+    .attr("class", "equity-area")
+    .attr("d", areaGen);
+
+// Equity line
+const lineGen = d3.line()
+    .x(d => xScale(d._date))
+    .y(d => yEquity(d.equity));
+
+equityG.append("path")
+    .datum(data)
+    .attr("class", "equity-line")
+    .attr("d", lineGen);
+
+// Final return annotation
+const firstEquity = data[0].equity;
+const lastEquity = data[data.length - 1].equity;
+const totalReturn = ((lastEquity - firstEquity) / firstEquity * 100).toFixed(2);
+const returnColor = totalReturn >= 0 ? "var(--color-up)" : "var(--color-down)";
+const lastPoint = data[data.length - 1];
+
+equityG.append("text")
+    .attr("class", "annotation")
+    .attr("x", xScale(lastPoint._date) - 5)
+    .attr("y", yEquity(lastPoint.equity) - 10)
+    .attr("text-anchor", "end")
+    .attr("fill", returnColor)
+    .text(`${totalReturn >= 0 ? "+" : ""}${totalReturn}%`);
+
+// Drawdown subplot
+if (showDrawdown) {
+    const ddTop = margin.top + equityHeight + gap;
+
+    const yDrawdown = d3.scaleLinear()
+        .domain([d3.min(data, d => -d.drawdown) * 1.1, 0])
+        .range([drawdownHeight, 0]);
+
+    const ddG = svg.append("g")
+        .attr("transform", `translate(${margin.left},${ddTop})`);
+
+    // Zero line
+    ddG.append("line")
+        .attr("class", "zero-line")
+        .attr("x1", 0).attr("x2", innerWidth)
+        .attr("y1", yDrawdown(0)).attr("y2", yDrawdown(0));
+
+    // Drawdown area (inverted, red)
+    const ddArea = d3.area()
+        .x(d => xScale(d._date))
+        .y0(yDrawdown(0))
+        .y1(d => yDrawdown(-d.drawdown));
+
+    ddG.append("path")
+        .datum(data)
+        .attr("class", "drawdown-area")
+        .attr("d", ddArea);
+
+    // Drawdown line
+    const ddLine = d3.line()
+        .x(d => xScale(d._date))
+        .y(d => yDrawdown(-d.drawdown));
+
+    ddG.append("path")
+        .datum(data)
+        .attr("class", "drawdown-line")
+        .attr("d", ddLine);
+
+    ddG.append("g").attr("class", "axis")
+        .call(d3.axisLeft(yDrawdown).ticks(3).tickFormat(d => (d * 100).toFixed(1) + "%"));
+}
+
+// Crosshair + tooltip interaction
+const crosshair = createCrosshair(equityG, innerWidth, equityHeight);
+
+svg.append("rect")
+    .attr("width", innerWidth)
+    .attr("height", equityHeight)
+    .attr("transform", `translate(${margin.left},${margin.top})`)
+    .attr("fill", "transparent")
+    .on("mousemove", function(event) {
+        const [mx, my] = d3.pointer(event, equityG.node());
+        const bisect = d3.bisector(d => d._date).left;
+        const x0 = xScale.invert(mx);
+        const idx = Math.min(data.length - 1, Math.max(0, bisect(data, x0)));
+        const d = data[idx];
+        if (!d) return;
+        crosshair.show(xScale(d._date), my);
+        const ret = ((d.equity - firstEquity) / firstEquity * 100).toFixed(2);
+        const dd = (d.drawdown * 100).toFixed(2);
+        tooltip.show(
+            `<b>${formatDate(d.date)}</b><br>` +
+            `Equity: ${formatPrice(d.equity)}<br>` +
+            `Return: <span style="color:${ret >= 0 ? 'var(--color-up)' : 'var(--color-down)'}">${ret >= 0 ? '+' : ''}${ret}%</span><br>` +
+            `Drawdown: <span style="color:var(--color-down)">-${dd}%</span>`,
+            event.pageX, event.pageY
+        );
+    })
+    .on("mouseleave", function() {
+        crosshair.hide();
+        tooltip.hide();
+    });
+</script>
+</body>
+</html>

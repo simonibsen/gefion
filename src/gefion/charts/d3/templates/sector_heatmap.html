@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.sector-rect { stroke: #fff; stroke-width: 2; cursor: pointer; }
+.symbol-rect { stroke: rgba(255,255,255,0.5); stroke-width: 1; cursor: pointer; }
+.sector-label { font-size: 13px; font-weight: 700; fill: #fff; pointer-events: none; text-anchor: middle; }
+.sector-return { font-size: 11px; font-weight: 600; fill: rgba(255,255,255,0.9); pointer-events: none; text-anchor: middle; }
+.symbol-label { font-size: 10px; fill: rgba(255,255,255,0.85); pointer-events: none; text-anchor: middle; }
+.period-label { font-size: 12px; fill: #888; text-anchor: end; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+const margin = {top: 40, right: 50, bottom: 30, left: 70};
+const innerWidth = TOTAL_WIDTH - margin.left - margin.right;
+const innerHeight = TOTAL_HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+const titleText = config.title || "Sector Performance";
+const periodText = config.period || "";
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(titleText + (periodText ? " (" + periodText + ")" : ""));
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+const chartG = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+// Color scale: red for negative, green for positive
+function returnColor(pct) {
+    if (pct >= 0) {
+        const t = Math.min(pct / 30, 1); // 0 to 30% maps 0 to 1
+        return d3.interpolateRgb("#4caf50", "#1b5e20")(t);
+    } else {
+        const t = Math.min(Math.abs(pct) / 30, 1);
+        return d3.interpolateRgb("#ef5350", "#b71c1c")(t);
+    }
+}
+
+// Build hierarchy for d3.treemap
+const sectors = data.sectors || [];
+const hierarchyData = {
+    name: "root",
+    children: sectors.map(s => ({
+        name: s.name,
+        return_pct: s.return_pct,
+        children: (s.symbols || []).map(sym => ({
+            name: sym.symbol,
+            return_pct: sym.return_pct,
+            value: Math.abs(sym.return_pct) + 1 // Ensure positive value for sizing
+        }))
+    }))
+};
+
+const root = d3.hierarchy(hierarchyData)
+    .sum(d => d.value || 0)
+    .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+d3.treemap()
+    .size([innerWidth, innerHeight])
+    .padding(3)
+    .paddingTop(20)
+    .round(true)(root);
+
+// Draw sector groups
+const sectorNodes = root.children || [];
+
+sectorNodes.forEach(sector => {
+    const sG = chartG.append("g");
+
+    // Sector background
+    sG.append("rect")
+        .attr("class", "sector-rect")
+        .attr("x", sector.x0)
+        .attr("y", sector.y0)
+        .attr("width", sector.x1 - sector.x0)
+        .attr("height", sector.y1 - sector.y0)
+        .attr("fill", returnColor(sector.data.return_pct))
+        .attr("opacity", 0.3);
+
+    // Sector label at top
+    const sectorWidth = sector.x1 - sector.x0;
+    if (sectorWidth > 40) {
+        sG.append("text")
+            .attr("class", "sector-label")
+            .attr("x", (sector.x0 + sector.x1) / 2)
+            .attr("y", sector.y0 + 14)
+            .text(sector.data.name);
+
+        sG.append("text")
+            .attr("class", "sector-return")
+            .attr("x", (sector.x0 + sector.x1) / 2)
+            .attr("y", sector.y0 + 14)
+            .attr("dy", "1.1em")
+            .text((sector.data.return_pct >= 0 ? "+" : "") + sector.data.return_pct.toFixed(1) + "%");
+    }
+
+    // Symbol rectangles
+    const leaves = sector.leaves();
+    leaves.forEach(leaf => {
+        const w = leaf.x1 - leaf.x0;
+        const h = leaf.y1 - leaf.y0;
+
+        sG.append("rect")
+            .attr("class", "symbol-rect")
+            .attr("x", leaf.x0)
+            .attr("y", leaf.y0)
+            .attr("width", w)
+            .attr("height", h)
+            .attr("fill", returnColor(leaf.data.return_pct))
+            .on("mousemove", function(event) {
+                tooltip.show(
+                    `<b>${leaf.data.name}</b><br>` +
+                    `Sector: ${sector.data.name}<br>` +
+                    `Return: <span style="color:${leaf.data.return_pct >= 0 ? 'var(--color-up)' : 'var(--color-down)'}">${leaf.data.return_pct >= 0 ? '+' : ''}${leaf.data.return_pct.toFixed(2)}%</span>`,
+                    event.pageX, event.pageY
+                );
+            })
+            .on("mouseleave", function() {
+                tooltip.hide();
+            });
+
+        // Symbol label (only if enough space)
+        if (w > 30 && h > 20) {
+            sG.append("text")
+                .attr("class", "symbol-label")
+                .attr("x", (leaf.x0 + leaf.x1) / 2)
+                .attr("y", (leaf.y0 + leaf.y1) / 2 + 3)
+                .text(leaf.data.name);
+        }
+    });
+});
+</script>
+</body>
+</html>

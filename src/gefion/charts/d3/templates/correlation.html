@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.cell-text { font-size: 11px; text-anchor: middle; dominant-baseline: central; }
+.axis-label { font-size: 12px; }
+.color-legend text { font-size: 10px; fill: var(--color-text); }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+const margin = {top: 40, right: 50, bottom: 30, left: 70};
+const width = TOTAL_WIDTH - margin.left - margin.right;
+const height = TOTAL_HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || "Correlation Matrix");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+const symbols = data.symbols;
+const matrix = data.matrix;
+const n = symbols.length;
+
+const cellSize = Math.min(width, height) / n;
+const gridWidth = cellSize * n;
+const gridHeight = cellSize * n;
+
+// Center the grid
+const offsetX = (width - gridWidth) / 2;
+const offsetY = (height - gridHeight) / 2;
+
+const gridG = g.append("g")
+    .attr("transform", `translate(${offsetX},${offsetY})`);
+
+// Color scale: red (-1) -> white (0) -> blue (+1)
+const colorScale = d3.scaleLinear()
+    .domain([-1, 0, 1])
+    .range(["#ef5350", "#ffffff", "#2962ff"]);
+
+// Flatten matrix into cell data
+const cells = [];
+for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+        cells.push({ row: i, col: j, value: matrix[i][j], rowSym: symbols[i], colSym: symbols[j] });
+    }
+}
+
+// Draw cells
+gridG.selectAll(".cell")
+    .data(cells).join("rect")
+    .attr("class", "cell")
+    .attr("x", d => d.col * cellSize)
+    .attr("y", d => d.row * cellSize)
+    .attr("width", cellSize - 1)
+    .attr("height", cellSize - 1)
+    .attr("fill", d => colorScale(d.value))
+    .attr("stroke", "#eee")
+    .on("mousemove", function(event, d) {
+        tooltip.show(
+            `<b>${d.rowSym} / ${d.colSym}</b><br>Correlation: ${d.value.toFixed(3)}`,
+            event.pageX, event.pageY
+        );
+    })
+    .on("mouseleave", function() { tooltip.hide(); });
+
+// Cell text
+gridG.selectAll(".cell-text")
+    .data(cells).join("text")
+    .attr("class", "cell-text")
+    .attr("x", d => d.col * cellSize + cellSize / 2)
+    .attr("y", d => d.row * cellSize + cellSize / 2)
+    .attr("fill", d => Math.abs(d.value) > 0.6 ? "#fff" : "#333")
+    .text(d => d.value.toFixed(2))
+    .style("pointer-events", "none");
+
+// Row labels (left)
+gridG.selectAll(".row-label")
+    .data(symbols).join("text")
+    .attr("class", "axis-label")
+    .attr("x", -6)
+    .attr("y", (d, i) => i * cellSize + cellSize / 2)
+    .attr("text-anchor", "end")
+    .attr("dominant-baseline", "central")
+    .attr("fill", "var(--color-text)")
+    .text(d => d);
+
+// Column labels (top)
+gridG.selectAll(".col-label")
+    .data(symbols).join("text")
+    .attr("class", "axis-label")
+    .attr("x", (d, i) => i * cellSize + cellSize / 2)
+    .attr("y", -6)
+    .attr("text-anchor", "middle")
+    .attr("fill", "var(--color-text)")
+    .text(d => d);
+
+// Color legend
+const legendWidth = 150;
+const legendHeight = 12;
+const legendX = width - legendWidth - 10;
+const legendY = height + 5;
+const legendG = g.append("g").attr("transform", `translate(${legendX},${legendY})`);
+
+const defs = svg.append("defs");
+const gradient = defs.append("linearGradient").attr("id", "corr-gradient");
+gradient.append("stop").attr("offset", "0%").attr("stop-color", "#ef5350");
+gradient.append("stop").attr("offset", "50%").attr("stop-color", "#ffffff");
+gradient.append("stop").attr("offset", "100%").attr("stop-color", "#2962ff");
+
+legendG.append("rect")
+    .attr("width", legendWidth).attr("height", legendHeight)
+    .attr("fill", "url(#corr-gradient)")
+    .attr("stroke", "#ccc");
+legendG.append("text").attr("class", "color-legend").attr("x", 0).attr("y", legendHeight + 12).text("-1");
+legendG.append("text").attr("class", "color-legend").attr("x", legendWidth / 2).attr("y", legendHeight + 12).attr("text-anchor", "middle").text("0");
+legendG.append("text").attr("class", "color-legend").attr("x", legendWidth).attr("y", legendHeight + 12).attr("text-anchor", "end").text("+1");
+</script>
+</body>
+</html>

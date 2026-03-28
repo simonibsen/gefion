@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.price-line { fill: none; stroke: var(--color-price); stroke-width: 1.5; }
+.bb-middle { fill: none; stroke: #ff9800; stroke-width: 1; }
+.bb-fill { fill: rgba(41, 98, 255, 0.1); stroke: none; }
+.bb-border { fill: none; stroke: rgba(41, 98, 255, 0.3); stroke-width: 1; stroke-dasharray: 2,2; }
+.atr-line { fill: none; stroke: #9c27b0; stroke-width: 1.5; }
+.hv-line { fill: none; stroke: #00bcd4; stroke-width: 1.5; }
+.subplot-label { font-size: 11px; font-weight: 600; fill: var(--color-text); }
+.subplot-divider { stroke: var(--color-grid); stroke-width: 1; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+// Parse dates
+data.forEach(d => { d._date = new Date(d.date); });
+
+const margin = {top: 40, right: 50, bottom: 30, left: 70};
+const width = TOTAL_WIDTH - margin.left - margin.right;
+const totalInner = TOTAL_HEIGHT - margin.top - margin.bottom;
+const gap = 10;
+
+// Subplot heights: price 50%, ATR 25%, HV 25%
+const priceH = totalInner * 0.50 - gap;
+const atrH = totalInner * 0.25 - gap;
+const hvH = totalInner * 0.25;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || (config.symbol || "") + " Volatility");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+// Shared X scale
+const xScale = d3.scaleTime()
+    .domain(d3.extent(data, d => d._date))
+    .range([0, width]);
+
+// ---- Subplot 1: Price + Bollinger Bands ----
+const priceY0 = margin.top;
+const yPrice = d3.scaleLinear()
+    .domain([
+        d3.min(data, d => Math.min(d.close, d.bb_lower || d.close)) * 0.995,
+        d3.max(data, d => Math.max(d.close, d.bb_upper || d.close)) * 1.005
+    ])
+    .range([priceH, 0]);
+
+const priceG = svg.append("g").attr("transform", `translate(${margin.left},${priceY0})`);
+
+priceG.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yPrice).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+priceG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yPrice).tickFormat(d => formatPrice(d)));
+priceG.append("text").attr("class", "subplot-label").attr("x", 4).attr("y", 14).text("Price + BB");
+
+// BB fill
+const bbData = data.filter(d => d.bb_upper != null && d.bb_lower != null);
+if (bbData.length > 0) {
+    const bbArea = d3.area()
+        .x(d => xScale(d._date))
+        .y0(d => yPrice(d.bb_lower))
+        .y1(d => yPrice(d.bb_upper));
+    priceG.append("path").datum(bbData).attr("class", "bb-fill").attr("d", bbArea);
+
+    const bbUpperLine = d3.line().x(d => xScale(d._date)).y(d => yPrice(d.bb_upper));
+    const bbLowerLine = d3.line().x(d => xScale(d._date)).y(d => yPrice(d.bb_lower));
+    priceG.append("path").datum(bbData).attr("class", "bb-border").attr("d", bbUpperLine);
+    priceG.append("path").datum(bbData).attr("class", "bb-border").attr("d", bbLowerLine);
+
+    const bbMiddleLine = d3.line().x(d => xScale(d._date)).y(d => yPrice(d.bb_middle));
+    priceG.append("path").datum(bbData).attr("class", "bb-middle").attr("d", bbMiddleLine);
+}
+
+// Price line
+const priceLine = d3.line().x(d => xScale(d._date)).y(d => yPrice(d.close));
+priceG.append("path").datum(data).attr("class", "price-line").attr("d", priceLine);
+
+// ---- Subplot 2: ATR ----
+const atrY0 = priceY0 + priceH + gap;
+const yAtr = d3.scaleLinear()
+    .domain([0, d3.max(data, d => d.atr || 0) * 1.1])
+    .range([atrH, 0]);
+
+const atrG = svg.append("g").attr("transform", `translate(${margin.left},${atrY0})`);
+
+// Divider
+svg.append("line").attr("class", "subplot-divider")
+    .attr("x1", margin.left).attr("x2", TOTAL_WIDTH - margin.right)
+    .attr("y1", atrY0).attr("y2", atrY0);
+
+atrG.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yAtr).ticks(4).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+atrG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yAtr).ticks(4).tickFormat(d => formatPrice(d)));
+atrG.append("text").attr("class", "subplot-label").attr("x", 4).attr("y", 14).text("ATR");
+
+const atrLine = d3.line().x(d => xScale(d._date)).y(d => yAtr(d.atr || 0));
+atrG.append("path").datum(data).attr("class", "atr-line").attr("d", atrLine);
+
+// ---- Subplot 3: Historical Volatility ----
+const hvY0 = atrY0 + atrH + gap;
+const yHv = d3.scaleLinear()
+    .domain([0, d3.max(data, d => d.hv || 0) * 1.1])
+    .range([hvH, 0]);
+
+const hvG = svg.append("g").attr("transform", `translate(${margin.left},${hvY0})`);
+
+// Divider
+svg.append("line").attr("class", "subplot-divider")
+    .attr("x1", margin.left).attr("x2", TOTAL_WIDTH - margin.right)
+    .attr("y1", hvY0).attr("y2", hvY0);
+
+hvG.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yHv).ticks(4).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+hvG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yHv).ticks(4).tickFormat(d => (d * 100).toFixed(0) + "%"));
+hvG.append("text").attr("class", "subplot-label").attr("x", 4).attr("y", 14).text("Hist. Volatility");
+
+const hvLine = d3.line().x(d => xScale(d._date)).y(d => yHv(d.hv || 0));
+hvG.append("path").datum(data).attr("class", "hv-line").attr("d", hvLine);
+
+// Shared X axis at bottom
+hvG.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${hvH})`)
+    .call(d3.axisBottom(xScale).ticks(8).tickFormat(d3.timeFormat("%b %d")));
+
+// Crosshair + tooltip (spans all subplots)
+const crosshair = createCrosshair(priceG, width, priceH);
+const bisect = d3.bisector(d => d._date).left;
+
+svg.append("rect")
+    .attr("width", width)
+    .attr("height", totalInner)
+    .attr("transform", `translate(${margin.left},${margin.top})`)
+    .attr("fill", "transparent")
+    .on("mousemove", function(event) {
+        const [mx, my] = d3.pointer(event, priceG.node());
+        const x0 = xScale.invert(mx);
+        const idx = Math.min(data.length - 1, Math.max(0, bisect(data, x0)));
+        const d = data[idx];
+        if (!d) return;
+        crosshair.show(xScale(d._date), Math.min(my, priceH));
+        let html = `<b>${formatDate(d.date)}</b><br>` +
+            `Price: ${formatPrice(d.close)}`;
+        if (d.bb_upper != null) html += `<br>BB: ${formatPrice(d.bb_lower)} / ${formatPrice(d.bb_middle)} / ${formatPrice(d.bb_upper)}`;
+        if (d.atr != null) html += `<br>ATR: ${formatPrice(d.atr)}`;
+        if (d.hv != null) html += `<br>HV: ${(d.hv * 100).toFixed(1)}%`;
+        tooltip.show(html, event.pageX, event.pageY);
+    })
+    .on("mouseleave", function() {
+        crosshair.hide();
+        tooltip.hide();
+    });
+</script>
+</body>
+</html>
