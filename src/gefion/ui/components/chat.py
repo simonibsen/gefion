@@ -395,8 +395,10 @@ def _render_chat_fragment() -> None:
     is_busy = chat_state.is_running
     just_completed = chat_state.completed and not st.session_state.get(f"_chat_{page_name}_saved")
 
-    # Keep expander open while busy or just completed
-    should_expand = is_busy or just_completed or n_convos == 0
+    # Keep expander open while busy, just completed, or just answered
+    # Track when we last got a response so we keep it open
+    just_answered = st.session_state.get(f"_chat_{page_name}_just_answered", False)
+    should_expand = is_busy or just_completed or just_answered or n_convos == 0
 
     with st.expander(label, expanded=should_expand):
         # MCP warning
@@ -549,6 +551,7 @@ def _render_chat_fragment() -> None:
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
             })
             st.session_state[f"_chat_{page_name}_saved"] = True
+            st.session_state[f"_chat_{page_name}_just_answered"] = True
             clear_process_state(process_key)
             st.rerun()
 
@@ -607,6 +610,7 @@ def _render_chat_fragment() -> None:
         })
         st.session_state[f"_chat_{page_name}_prompt"] = chat_input
         st.session_state[f"_chat_{page_name}_saved"] = False
+        st.session_state[f"_chat_{page_name}_just_answered"] = False
 
         context_prompt = _build_context_prompt(page_context)
         cmd_args, display_cmd, mode = parse_command_input(
