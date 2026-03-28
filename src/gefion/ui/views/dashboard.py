@@ -8,63 +8,54 @@ from typing import Optional
 from gefion.observability import create_span, set_attributes
 
 
-def get_page_context():
-    """Return compact context dict for the Dashboard page."""
-    context = {"page_name": "Dashboard", "summary": "Market overview with movers, system stats, and prediction insights."}
+@st.cache_data(ttl=300)
+def _get_dashboard_context_data():
+    """Cached dashboard context data — avoids repeated slow queries."""
+    data = {}
     try:
         from gefion.ui.components.database import get_connection
         from datetime import date as date_type
-        with create_span("ui.dashboard.get_page_context"):
-          with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM stocks")
-                stock_count = cur.fetchone()[0]
-                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
-                latest = cur.fetchone()[0]
-
-                # Top movers summary
-                if latest:
-                    cur.execute("""
-                        SELECT s.symbol,
-                               ROUND(((o2.close - o1.close) / NULLIF(o1.close, 0) * 100)::numeric, 2) as pct
-                        FROM stock_ohlcv o2
-                        JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = o2.date - 1
-                        JOIN stocks s ON s.id = o2.data_id
-                        WHERE o2.date = %s
-                        ORDER BY pct DESC LIMIT 3
-                    """, (latest,))
-                    top_gainers = [f"{r[0]} ({r[1]:+.1f}%)" for r in cur.fetchall()]
-
-                    cur.execute("""
-                        SELECT s.symbol,
-                               ROUND(((o2.close - o1.close) / NULLIF(o1.close, 0) * 100)::numeric, 2) as pct
-                        FROM stock_ohlcv o2
-                        JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = o2.date - 1
-                        JOIN stocks s ON s.id = o2.data_id
-                        WHERE o2.date = %s
-                        ORDER BY pct ASC LIMIT 3
-                    """, (latest,))
-                    top_losers = [f"{r[0]} ({r[1]:+.1f}%)" for r in cur.fetchall()]
-                else:
-                    top_gainers, top_losers = [], []
-
-        data_age = (date_type.today() - latest).days if latest else None
-        context["data_stats"] = {
-            "stocks": stock_count,
-            "latest_data": str(latest) if latest else "none",
-            "data_age_days": data_age,
-            "top_gainers": top_gainers,
-            "top_losers": top_losers,
-        }
-        empty = []
-        suggestions = []
-        if data_age and data_age > 3:
-            empty.append(f"price data is {data_age} days old")
-            suggestions.append("Update prices: gefion data-update")
-        context["empty_states"] = empty
-        context["suggestions"] = suggestions
+        with create_span("ui.dashboard._get_dashboard_context_data"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM stocks")
+                    data["stocks"] = cur.fetchone()[0]
+                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                    latest = cur.fetchone()[0]
+                    if latest:
+                        data["latest_data"] = str(latest)
+                        data["data_age_days"] = (date_type.today() - latest).days
+                        # Top movers — use fast direct join
+                        cur.execute("SELECT MAX(date) FROM stock_ohlcv WHERE date < %s", (latest,))
+                        prev = cur.fetchone()[0]
+                        if prev:
+                            cur.execute("""
+                                SELECT s.symbol,
+                                       ROUND(((o2.close / NULLIF(o1.close, 0)) - 1) * 100, 2)
+                                FROM stock_ohlcv o2
+                                JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = %s
+                                JOIN stocks s ON s.id = o2.data_id
+                                WHERE o2.date = %s AND o1.close > 0
+                                ORDER BY ABS((o2.close / NULLIF(o1.close, 0)) - 1) DESC
+                                LIMIT 5
+                            """, (prev, latest))
+                            data["top_movers"] = [
+                                {"symbol": r[0], "pct": float(r[1])} for r in cur.fetchall() if r[1]
+                            ]
     except Exception:
         pass
+    return data
+
+
+def get_page_context():
+    """Return compact context dict for the Dashboard page. Uses cached data."""
+    context = {"page_name": "Dashboard", "summary": "Market overview with movers, system stats, and prediction insights."}
+    cached = _get_dashboard_context_data()
+    context["data_stats"] = cached
+    data_age = cached.get("data_age_days")
+    if data_age and data_age > 3:
+        context["empty_states"] = [f"price data is {data_age} days old"]
+        context["suggestions"] = ["Update prices: gefion data-update"]
     return context
 
 
