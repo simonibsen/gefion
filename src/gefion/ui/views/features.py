@@ -50,9 +50,19 @@ def get_page_context():
                     cur.execute("SELECT COUNT(*) FROM feature_definitions")
                     total = cur.fetchone()[0]
 
-                    # Coverage stats
-                    cur.execute("SELECT COUNT(DISTINCT data_id) FROM computed_features")
-                    symbols_with_features = cur.fetchone()[0]
+                    # Coverage stats — use pg_stat to avoid 52s full hypertable scan
+                    cur.execute("""
+                        SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables
+                        WHERE relname = 'computed_features'
+                    """)
+                    row = cur.fetchone()
+                    # Approximate: if rows exist, assume all stocks have features
+                    has_features = (row[0] if row else 0) > 0
+                    if has_features:
+                        cur.execute("SELECT COUNT(*) FROM stocks")
+                        symbols_with_features = cur.fetchone()[0]
+                    else:
+                        symbols_with_features = 0
 
         context["data_stats"] = {
             "active_definitions": active,
