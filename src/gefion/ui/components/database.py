@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from typing import Generator, List, Optional
 
 import streamlit as st
+from gefion.observability import create_span, set_attributes
 
 
 @st.cache_resource
@@ -33,8 +34,9 @@ def get_connection():
     'rolling back returned connection' warnings from the pool when
     connections are returned with an open transaction.
     """
-    pool = get_db_pool()
-    conn = pool.getconn()
+    with create_span("ui.database.get_connection"):
+        pool = get_db_pool()
+        conn = pool.getconn()
     try:
         conn.autocommit = True
         yield conn
@@ -59,50 +61,54 @@ def get_connection():
 
 def get_symbols(status: str = "Active") -> List[str]:
     """Get list of symbols from database."""
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT symbol FROM stocks WHERE status = %s ORDER BY symbol",
-                (status,)
-            )
-            return [row[0] for row in cur.fetchall()]
+    with create_span("ui.database.get_symbols", status=status):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT symbol FROM stocks WHERE status = %s ORDER BY symbol",
+                    (status,)
+                )
+                return [row[0] for row in cur.fetchall()]
 
 
 def get_sectors() -> List[str]:
     """Get list of unique sectors."""
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT DISTINCT sector FROM stocks WHERE sector IS NOT NULL ORDER BY sector"
-            )
-            return [row[0] for row in cur.fetchall()]
+    with create_span("ui.database.get_sectors"):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT sector FROM stocks WHERE sector IS NOT NULL ORDER BY sector"
+                )
+                return [row[0] for row in cur.fetchall()]
 
 
 def get_models() -> List[dict]:
     """Get list of ML models."""
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT name, version, algorithm, created_at
-                FROM ml_models
-                ORDER BY created_at DESC
-            """)
-            return [
-                {"name": row[0], "version": row[1], "type": row[2], "created": row[3]}
-                for row in cur.fetchall()
-            ]
+    with create_span("ui.database.get_models"):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT name, version, algorithm, created_at
+                    FROM ml_models
+                    ORDER BY created_at DESC
+                """)
+                return [
+                    {"name": row[0], "version": row[1], "type": row[2], "created": row[3]}
+                    for row in cur.fetchall()
+                ]
 
 
 def get_feature_definitions() -> List[dict]:
     """Get list of feature definitions."""
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT name, function_name, active
-                FROM feature_definitions
-                ORDER BY name
-            """)
-            return [
-                {"name": row[0], "function": row[1], "active": row[2]}
-                for row in cur.fetchall()
-            ]
+    with create_span("ui.database.get_feature_definitions"):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT name, function_name, active
+                    FROM feature_definitions
+                    ORDER BY name
+                """)
+                return [
+                    {"name": row[0], "function": row[1], "active": row[2]}
+                    for row in cur.fetchall()
+                ]

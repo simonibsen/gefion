@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+const chartData = {{ data_json }};
+const chartConfig = {{ config_json }};
+const WIDTH = {{ width }};
+const HEIGHT = {{ height }};
+{% block chart_script %}
+// Base template — override in child templates
+const container = d3.select("#chart");
+container.append("div").attr("class", "chart-title").text(chartConfig.title || "Chart");
+container.append("p").text("Data points: " + (Array.isArray(chartData) ? chartData.length : Object.keys(chartData).length));
+{% endblock %}
+</script>
+</body>
+</html>

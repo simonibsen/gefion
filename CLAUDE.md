@@ -100,12 +100,20 @@ Before exiting plan mode, verify:
 - Use type hints for all function signatures
 - Add docstrings for public functions
 
-### Observability
-- New modules should import from `gefion.observability`
-- Use `@traced` decorator for significant operations
-- Add logging with `logger = logging.getLogger(__name__)`
+### Observability (NON-NEGOTIABLE)
+- New modules MUST import from `gefion.observability` — the pre-commit hook blocks commits of significant files without it
+- Use `with create_span("module.function", key=value) as span:` for significant operations
+- Use `set_attributes(span, result_count=N)` to record results
 - Child spans MUST propagate parent context — orphaned spans are defects
-- After implementing a feature, inspect its traces via `gefion span-check` before considering it complete
+- After implementing a feature, inspect its traces via `gefion span-check` or `/gefion-perf` before considering it complete
+
+### Performance Feedback Loop
+- **Tempo MUST be running** during development (`/gefion-services start`)
+- The UI should run with `OTEL_ENABLED=true` during development
+- After pytest runs, a hook automatically checks Tempo for slow spans (>1s)
+- Use `/gefion-perf` to investigate slow traces and identify bottlenecks
+- Common fixes: `COUNT(*)` on hypertables → `pg_stat_user_tables.n_live_tup`; unbounded JOINs → bound with date range
+- Verify fixes via traces (before vs after duration)
 
 ### Database
 - Use parameterized queries (never string interpolation for SQL)

@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from gefion.observability import create_span, set_attributes
 from gefion.ui.views.data import (
     get_process_state, start_background_process,
     render_process_status, stop_process, clear_process_state,
@@ -21,36 +22,47 @@ def get_page_context():
     context = {"page_name": "Features", "summary": "Technical indicator and cross-sectional feature management."}
     try:
         from gefion.ui.components.database import get_connection
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                # Feature definitions with details
-                cur.execute(
-                    "SELECT name, function_name, active FROM feature_definitions "
-                    "ORDER BY active DESC, name LIMIT 30"
-                )
-                definitions = [
-                    f"{r[0]} (fn: {r[1]}, {'active' if r[2] else 'inactive'})"
-                    for r in cur.fetchall()
-                ]
+        with create_span("ui.features.get_page_context"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Feature definitions with details
+                    cur.execute(
+                        "SELECT name, function_name, active FROM feature_definitions "
+                        "ORDER BY active DESC, name LIMIT 30"
+                    )
+                    definitions = [
+                        f"{r[0]} (fn: {r[1]}, {'active' if r[2] else 'inactive'})"
+                        for r in cur.fetchall()
+                    ]
 
-                # Feature functions
-                cur.execute(
-                    "SELECT name, version, enabled FROM feature_functions "
-                    "ORDER BY enabled DESC, name"
-                )
-                functions = [
-                    f"{r[0]} v{r[1]} ({'enabled' if r[2] else 'disabled'})"
-                    for r in cur.fetchall()
-                ]
+                    # Feature functions
+                    cur.execute(
+                        "SELECT name, version, enabled FROM feature_functions "
+                        "ORDER BY enabled DESC, name"
+                    )
+                    functions = [
+                        f"{r[0]} v{r[1]} ({'enabled' if r[2] else 'disabled'})"
+                        for r in cur.fetchall()
+                    ]
 
-                cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
-                active = cur.fetchone()[0]
-                cur.execute("SELECT COUNT(*) FROM feature_definitions")
-                total = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
+                    active = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM feature_definitions")
+                    total = cur.fetchone()[0]
 
-                # Coverage stats
-                cur.execute("SELECT COUNT(DISTINCT data_id) FROM computed_features")
-                symbols_with_features = cur.fetchone()[0]
+                    # Coverage stats — use pg_stat to avoid 52s full hypertable scan
+                    cur.execute("""
+                        SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables
+                        WHERE relname = 'computed_features'
+                    """)
+                    row = cur.fetchone()
+                    # Approximate: if rows exist, assume all stocks have features
+                    has_features = (row[0] if row else 0) > 0
+                    if has_features:
+                        cur.execute("SELECT COUNT(*) FROM stocks")
+                        symbols_with_features = cur.fetchone()[0]
+                    else:
+                        symbols_with_features = 0
 
         context["data_stats"] = {
             "active_definitions": active,

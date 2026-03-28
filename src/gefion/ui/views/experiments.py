@@ -6,6 +6,7 @@ import sys
 from gefion.ui.components.chat import render_chat_widget
 import json
 import os
+from gefion.observability import create_span, set_attributes
 
 
 def get_page_context():
@@ -13,10 +14,11 @@ def get_page_context():
     context = {"page_name": "Experiments", "summary": "AI experimentation framework for strategy optimization."}
     try:
         from gefion.ui.components.database import get_connection
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT status, COUNT(*) FROM experiments GROUP BY status")
-                by_status = {r[0]: r[1] for r in cur.fetchall()}
+        with create_span("ui.experiments.get_page_context"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT status, COUNT(*) FROM experiments GROUP BY status")
+                    by_status = {r[0]: r[1] for r in cur.fetchall()}
         context["data_stats"] = {"experiments_by_status": by_status}
     except Exception:
         pass

@@ -568,17 +568,54 @@ graph TB
 
 Tempo/Grafana docker files live in `docker/tempo/` (start with `docker compose -f docker/tempo/docker-compose.tempo.yml up -d`).
 
-Observability quick start (Tempo):
+### Observability & Performance
+
+Gefion uses OpenTelemetry + Grafana Tempo for tracing. During development, `gefion ui` **auto-detects Tempo** and enables tracing automatically.
 
 ```bash
+# Start all services (postgres + tempo + grafana)
+# In Claude Code: /gefion-services start
+docker compose up -d postgres
 docker compose -f docker/tempo/docker-compose.tempo.yml up -d
-export $(cat .env.example | xargs)
-gefion span-check
+
+# Verify tracing works end-to-end
+bash scripts/otel_smoke_test.sh
+
+# Launch UI (auto-detects Tempo, enables OTEL)
+gefion ui
+# Shows: "Starting Gefion UI on http://localhost:8501 (tracing: enabled — Tempo detected)"
+
+# Check recent traces for slow operations
+gefion span-check --limit 10
 ```
 
-Tip: during development, run `gefion span-check` after performance-sensitive changes to see recent traces and grab the printed Tempo API link for the selected trace.
+**Performance Feedback Loop** (Claude Code skills):
 
-More details: [docs/TEMPO_QUICKSTART.md](docs/TEMPO_QUICKSTART.md) and [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
+| Command | What it does |
+|---------|-------------|
+| `/gefion-perf` | Query Tempo for slow traces, rank by duration, suggest fixes |
+| `/gefion-perf 1000` | Show traces slower than 1 second |
+| `/gefion-perf baseline` | Save current trace durations as a performance baseline |
+| `/gefion-perf compare` | Compare current traces against saved baseline, flag regressions |
+| `/gefion-perf fix` | Find slowest trace and suggest/implement a fix |
+| `/loop 5m /gefion-perf` | Continuous monitoring — check traces every 5 minutes |
+
+**Span-specific thresholds** (what counts as "slow"):
+
+| Operation | Threshold | Rationale |
+|-----------|-----------|-----------|
+| `ui.*` (page loads) | 500ms | Pages should feel instant |
+| `db.*` (database) | 500ms | Queries should be fast |
+| `charts.*` (rendering) | 2000ms | Chart rendering has overhead |
+| `cli.*` (commands) | 5000ms | CLI includes I/O |
+
+**Automated enforcement** (happens without manual action):
+
+- **Session start**: Hook checks if postgres + tempo are running, warns if not
+- **After pytest**: Hook queries Tempo for slow spans, alerts in context
+- **Pre-commit**: Blocks commits of significant files missing `from gefion.observability import`
+
+More details: [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) and [docs/TEMPO_QUICKSTART.md](docs/TEMPO_QUICKSTART.md).
 
 ## Running Tests
 
@@ -626,7 +663,11 @@ gefion feat-def-import --dir feature-definitions # Import definitions from git
 - ✅ E2E test command for quick pipeline validation
 - ✅ Advanced backtesting (6 strategies, execution modeling)
 - ✅ MCP server implemented (natural language interface)
-- ✅ Production-ready database schema
+- ✅ Production-ready database schema (unified predictions table)
+- ✅ D3.js interactive charts (17 chart types across 4 categories)
+- ✅ Ask Gefion — contextual AI chat on every UI page
+- ✅ Comprehensive observability (48 instrumented modules, automated perf detection)
+- ✅ Cascading data cull (`gefion data cull --before DATE`)
 - ✅ Comprehensive documentation
 
 **See:**
@@ -635,19 +676,36 @@ gefion feat-def-import --dir feature-definitions # Import definitions from git
 
 ## Contributing
 
-This project follows strict TDD (test-driven development):
+This project follows the [Gefion Constitution](.specify/memory/constitution.md). Key requirements:
 
-1. Write a failing test that describes the behavior
-2. Implement the smallest change to make it pass
-3. Refactor with tests green
-4. Update documentation
+### Development Workflow
 
-**Key Practices:**
+```
+1. Start services          /gefion-services start (postgres + tempo + grafana)
+2. Write failing tests     tests/ before src/ (TDD — enforced by hooks)
+3. Implement               Minimum code to pass tests
+4. Instrument              from gefion.observability import create_span (enforced by pre-commit)
+5. Verify traces           /gefion-perf — check for slow spans
+6. Save baseline           /gefion-perf baseline (after perf fixes)
+7. Commit                  Tests + implementation together
+```
 
-- Database is source of truth (DB-first architecture)
-- All feature functions stored in database, exported to git
-- Functions execute in sandboxed environment
-- Comprehensive test coverage required
+### Enforcement Layers
+
+| Hook | When | What |
+|------|------|------|
+| SessionStart | Claude Code opens | Checks postgres + tempo running |
+| PreToolUse | Before code edit | TDD: tests before src changes |
+| PreCommit | Before git commit | Observability imports required |
+| PostToolUse | After pytest | Queries Tempo for slow spans |
+
+### Key Practices
+
+- **Database-first**: DB is source of truth, git exports are backups
+- **TDD (non-negotiable)**: Tests before implementation, enforced by hooks
+- **Observability (non-negotiable)**: All significant operations traced, enforced by pre-commit
+- **CLI-first**: Every feature has a CLI command before UI, major commands have MCP tools
+- **Trace-driven performance**: Use `/gefion-perf` to find and fix slow operations
 
 ## License
 

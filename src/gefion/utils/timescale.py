@@ -15,6 +15,7 @@ import warnings
 
 import psycopg
 from psycopg import sql
+from gefion.observability import create_span, set_attributes
 
 
 T = TypeVar('T', bound=Mapping)
@@ -38,21 +39,22 @@ def get_chunk_date_range(
         >>> min_date, max_date = get_chunk_date_range(conn, 'computed_features')
         >>> # min_date might be date(2008, 1, 12), max_date might be date(2025, 12, 31)
     """
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-                MIN(range_start)::date AS min_date,
-                MAX(range_end)::date AS max_date
-            FROM timescaledb_information.chunks
-            WHERE hypertable_name = %s;
-            """,
-            (hypertable_name,)
-        )
-        row = cur.fetchone()
-        if row and row[0] and row[1]:
-            return (row[0], row[1])
-        return (None, None)
+    with create_span("utils.timescale.get_chunk_date_range", hypertable=hypertable_name):
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    MIN(range_start)::date AS min_date,
+                    MAX(range_end)::date AS max_date
+                FROM timescaledb_information.chunks
+                WHERE hypertable_name = %s;
+                """,
+                (hypertable_name,)
+            )
+            row = cur.fetchone()
+            if row and row[0] and row[1]:
+                return (row[0], row[1])
+            return (None, None)
 
 
 def filter_rows_by_chunk_range(
@@ -181,117 +183,118 @@ def create_chunks_for_date_range(
         ... )
         >>> # Creates chunks for the 2000-2008 range
     """
-    current_min, current_max = get_chunk_date_range(conn, hypertable_name)
+    with create_span("utils.timescale.create_chunks_for_date_range", hypertable=hypertable_name, dry_run=dry_run):
+        current_min, current_max = get_chunk_date_range(conn, hypertable_name)
 
-    chunks_to_create = []
+        chunks_to_create = []
 
-    # Calculate chunk boundaries
-    current = start_date
-    while current < end_date:
-        chunk_end = current + timedelta(days=chunk_interval_days)
-        # Check if this chunk already exists
-        if current_min is None or current < current_min:
-            chunks_to_create.append((current, min(chunk_end, end_date)))
-        current = chunk_end
+        # Calculate chunk boundaries
+        current = start_date
+        while current < end_date:
+            chunk_end = current + timedelta(days=chunk_interval_days)
+            # Check if this chunk already exists
+            if current_min is None or current < current_min:
+                chunks_to_create.append((current, min(chunk_end, end_date)))
+            current = chunk_end
 
-    if dry_run:
-        return len(chunks_to_create), [
-            f"{start.isoformat()} to {end.isoformat()}"
-            for start, end in chunks_to_create
-        ]
+        if dry_run:
+            return len(chunks_to_create), [
+                f"{start.isoformat()} to {end.isoformat()}"
+                for start, end in chunks_to_create
+            ]
 
-    # Get IDs needed for chunk creation
-    feature_id = None
-    data_id = None
+        # Get IDs needed for chunk creation
+        feature_id = None
+        data_id = None
 
-    with conn.cursor() as cur:
-        if hypertable_name == "computed_features":
-            # Need both feature_id and data_id
-            cur.execute("SELECT id FROM feature_definitions LIMIT 1;")
-            row = cur.fetchone()
-            feature_id = row[0] if row else None
+        with conn.cursor() as cur:
+            if hypertable_name == "computed_features":
+                # Need both feature_id and data_id
+                cur.execute("SELECT id FROM feature_definitions LIMIT 1;")
+                row = cur.fetchone()
+                feature_id = row[0] if row else None
 
-            cur.execute("SELECT id FROM stocks LIMIT 1;")
-            row = cur.fetchone()
-            data_id = row[0] if row else None
+                cur.execute("SELECT id FROM stocks LIMIT 1;")
+                row = cur.fetchone()
+                data_id = row[0] if row else None
 
-            if not feature_id or not data_id:
-                warnings.warn(
-                    f"Cannot create chunks for {hypertable_name}: no feature_id or data_id available. "
-                    f"Insert at least one feature definition and stock first."
-                )
-                return 0, []
-        elif hypertable_name == "stock_ohlcv":
-            # Only need data_id
-            cur.execute("SELECT id FROM stocks LIMIT 1;")
-            row = cur.fetchone()
-            data_id = row[0] if row else None
-
-            if not data_id:
-                warnings.warn(
-                    f"Cannot create chunks for {hypertable_name}: no data_id available. "
-                    f"Insert at least one stock first."
-                )
-                return 0, []
-
-    # Create chunks by inserting and deleting dummy rows
-    created = 0
-    chunk_ranges = []
-
-    for chunk_start, chunk_end in chunks_to_create:
-        try:
-            with conn.cursor() as cur:
-                if hypertable_name == "computed_features":
-                    # Insert dummy row to create chunk
-                    cur.execute(
-                        """
-                        INSERT INTO computed_features (feature_id, data_id, date, value, source)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT DO NOTHING;
-                        """,
-                        (feature_id, data_id, chunk_start, 0.0, "__chunk_creation__")
+                if not feature_id or not data_id:
+                    warnings.warn(
+                        f"Cannot create chunks for {hypertable_name}: no feature_id or data_id available. "
+                        f"Insert at least one feature definition and stock first."
                     )
-                    # Delete dummy row
-                    cur.execute(
-                        """
-                        DELETE FROM computed_features
-                        WHERE feature_id = %s AND data_id = %s AND date = %s AND source = %s;
-                        """,
-                        (feature_id, data_id, chunk_start, "__chunk_creation__")
-                    )
-                elif hypertable_name == "stock_ohlcv":
-                    # Insert dummy row to create chunk
-                    cur.execute(
-                        """
-                        INSERT INTO stock_ohlcv (data_id, date, close, source)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT DO NOTHING;
-                        """,
-                        (data_id, chunk_start, 0.0, "__chunk_creation__")
-                    )
-                    # Delete dummy row
-                    cur.execute(
-                        """
-                        DELETE FROM stock_ohlcv
-                        WHERE data_id = %s AND date = %s AND source = %s;
-                        """,
-                        (data_id, chunk_start, "__chunk_creation__")
-                    )
+                    return 0, []
+            elif hypertable_name == "stock_ohlcv":
+                # Only need data_id
+                cur.execute("SELECT id FROM stocks LIMIT 1;")
+                row = cur.fetchone()
+                data_id = row[0] if row else None
 
-            # Only commit if not in autocommit mode
-            if not conn.autocommit:
-                conn.commit()
-            created += 1
-            chunk_ranges.append(f"{chunk_start.isoformat()} to {chunk_end.isoformat()}")
+                if not data_id:
+                    warnings.warn(
+                        f"Cannot create chunks for {hypertable_name}: no data_id available. "
+                        f"Insert at least one stock first."
+                    )
+                    return 0, []
 
-        except Exception as e:
-            # If chunk creation fails, log but continue
-            warnings.warn(f"Failed to create chunk for {chunk_start}: {e}")
-            # Only rollback if not in autocommit mode
-            if not conn.autocommit:
-                conn.rollback()
+        # Create chunks by inserting and deleting dummy rows
+        created = 0
+        chunk_ranges = []
 
-    return created, chunk_ranges
+        for chunk_start, chunk_end in chunks_to_create:
+            try:
+                with conn.cursor() as cur:
+                    if hypertable_name == "computed_features":
+                        # Insert dummy row to create chunk
+                        cur.execute(
+                            """
+                            INSERT INTO computed_features (feature_id, data_id, date, value, source)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT DO NOTHING;
+                            """,
+                            (feature_id, data_id, chunk_start, 0.0, "__chunk_creation__")
+                        )
+                        # Delete dummy row
+                        cur.execute(
+                            """
+                            DELETE FROM computed_features
+                            WHERE feature_id = %s AND data_id = %s AND date = %s AND source = %s;
+                            """,
+                            (feature_id, data_id, chunk_start, "__chunk_creation__")
+                        )
+                    elif hypertable_name == "stock_ohlcv":
+                        # Insert dummy row to create chunk
+                        cur.execute(
+                            """
+                            INSERT INTO stock_ohlcv (data_id, date, close, source)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT DO NOTHING;
+                            """,
+                            (data_id, chunk_start, 0.0, "__chunk_creation__")
+                        )
+                        # Delete dummy row
+                        cur.execute(
+                            """
+                            DELETE FROM stock_ohlcv
+                            WHERE data_id = %s AND date = %s AND source = %s;
+                            """,
+                            (data_id, chunk_start, "__chunk_creation__")
+                        )
+
+                # Only commit if not in autocommit mode
+                if not conn.autocommit:
+                    conn.commit()
+                created += 1
+                chunk_ranges.append(f"{chunk_start.isoformat()} to {chunk_end.isoformat()}")
+
+            except Exception as e:
+                # If chunk creation fails, log but continue
+                warnings.warn(f"Failed to create chunk for {chunk_start}: {e}")
+                # Only rollback if not in autocommit mode
+                if not conn.autocommit:
+                    conn.rollback()
+
+        return created, chunk_ranges
 
 
 def ensure_chunks_for_date_range(
@@ -323,20 +326,21 @@ def ensure_chunks_for_date_range(
         ...     date(2000, 1, 1), date(2025, 12, 31))
         >>> # Now insert can proceed safely
     """
-    try:
-        created, ranges = create_chunks_for_date_range(
-            conn, hypertable_name, start_date, end_date,
-            chunk_interval_days, dry_run=False
-        )
-        if created > 0:
-            warnings.warn(
-                f"Auto-created {created} chunks for {hypertable_name} "
-                f"to accommodate date range {start_date} to {end_date}"
+    with create_span("utils.timescale.ensure_chunks_for_date_range", hypertable=hypertable_name):
+        try:
+            created, ranges = create_chunks_for_date_range(
+                conn, hypertable_name, start_date, end_date,
+                chunk_interval_days, dry_run=False
             )
-        return True
-    except Exception as e:
-        warnings.warn(f"Failed to ensure chunks for {hypertable_name}: {e}")
-        return False
+            if created > 0:
+                warnings.warn(
+                    f"Auto-created {created} chunks for {hypertable_name} "
+                    f"to accommodate date range {start_date} to {end_date}"
+                )
+            return True
+        except Exception as e:
+            warnings.warn(f"Failed to ensure chunks for {hypertable_name}: {e}")
+            return False
 
 
 def validate_and_filter_insert_data(
@@ -373,24 +377,25 @@ def validate_and_filter_insert_data(
         ... )
         >>> print(f"Filtered {stats['filtered_rows']} / {stats['total_rows']} rows")
     """
-    # Get chunk range
-    min_date, max_date = get_chunk_date_range(conn, hypertable_name)
+    with create_span("utils.timescale.validate_and_filter_insert_data", hypertable=hypertable_name):
+        # Get chunk range
+        min_date, max_date = get_chunk_date_range(conn, hypertable_name)
 
-    # Convert to list to count total rows
-    rows_list = list(rows)
-    total_rows = len(rows_list)
+        # Convert to list to count total rows
+        rows_list = list(rows)
+        total_rows = len(rows_list)
 
-    # Filter rows
-    filtered, skipped = filter_rows_by_chunk_range(
-        rows_list, date_column, min_date, max_date, warn_on_skip
-    )
+        # Filter rows
+        filtered, skipped = filter_rows_by_chunk_range(
+            rows_list, date_column, min_date, max_date, warn_on_skip
+        )
 
-    stats = {
-        "total_rows": total_rows,
-        "filtered_rows": len(filtered),
-        "skipped_rows": skipped,
-        "chunk_min": min_date,
-        "chunk_max": max_date
-    }
+        stats = {
+            "total_rows": total_rows,
+            "filtered_rows": len(filtered),
+            "skipped_rows": skipped,
+            "chunk_min": min_date,
+            "chunk_max": max_date
+        }
 
-    return filtered, stats
+        return filtered, stats

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.price-line { fill: none; stroke: var(--color-price); stroke-width: 2; }
+.drawdown-area { fill: rgba(239, 83, 80, 0.3); stroke: none; }
+.drawdown-line { fill: none; stroke: #ef5350; stroke-width: 1.5; }
+.max-dd-label { font-size: 11px; font-weight: 600; fill: #ef5350; }
+.subplot-divider { stroke: var(--color-grid); stroke-width: 1; }
+.subplot-label { font-size: 11px; font-weight: 600; fill: var(--color-text); }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+// Parse dates
+data.forEach(d => { d._date = new Date(d.date); });
+
+const margin = {top: 40, right: 50, bottom: 30, left: 70};
+const width = TOTAL_WIDTH - margin.left - margin.right;
+const totalInner = TOTAL_HEIGHT - margin.top - margin.bottom;
+const gap = 10;
+
+// Top 70% price, bottom 30% drawdown
+const priceH = totalInner * 0.70 - gap;
+const ddH = totalInner * 0.30;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || (config.symbol || "") + " Drawdown");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+// Shared X scale
+const xScale = d3.scaleTime()
+    .domain(d3.extent(data, d => d._date))
+    .range([0, width]);
+
+// ---- Subplot 1: Price ----
+const priceY0 = margin.top;
+const yPrice = d3.scaleLinear()
+    .domain([d3.min(data, d => d.close) * 0.995, d3.max(data, d => d.close) * 1.005])
+    .range([priceH, 0]);
+
+const priceG = svg.append("g").attr("transform", `translate(${margin.left},${priceY0})`);
+
+priceG.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yPrice).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+priceG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yPrice).tickFormat(d => formatPrice(d)));
+priceG.append("text").attr("class", "subplot-label").attr("x", 4).attr("y", 14).text("Price");
+
+const priceLine = d3.line().x(d => xScale(d._date)).y(d => yPrice(d.close));
+priceG.append("path").datum(data).attr("class", "price-line").attr("d", priceLine);
+
+// ---- Subplot 2: Drawdown ----
+const ddY0 = priceY0 + priceH + gap;
+const minDD = d3.min(data, d => d.drawdown || 0);
+const yDD = d3.scaleLinear()
+    .domain([minDD * 1.1, 0])  // 0% at top, negative values down
+    .range([ddH, 0]);
+
+const ddG = svg.append("g").attr("transform", `translate(${margin.left},${ddY0})`);
+
+// Divider
+svg.append("line").attr("class", "subplot-divider")
+    .attr("x1", margin.left).attr("x2", TOTAL_WIDTH - margin.right)
+    .attr("y1", ddY0).attr("y2", ddY0);
+
+ddG.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yDD).ticks(4).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+ddG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yDD).ticks(4).tickFormat(d => d.toFixed(1) + "%"));
+ddG.append("text").attr("class", "subplot-label").attr("x", 4).attr("y", 14).text("Drawdown");
+
+// Drawdown area (filled from 0 line down to drawdown value)
+const ddArea = d3.area()
+    .x(d => xScale(d._date))
+    .y0(yDD(0))
+    .y1(d => yDD(d.drawdown || 0));
+ddG.append("path").datum(data).attr("class", "drawdown-area").attr("d", ddArea);
+
+// Drawdown line
+const ddLine = d3.line().x(d => xScale(d._date)).y(d => yDD(d.drawdown || 0));
+ddG.append("path").datum(data).attr("class", "drawdown-line").attr("d", ddLine);
+
+// Max drawdown marker
+const maxDDPoint = data.reduce((worst, d) => (d.drawdown || 0) < (worst.drawdown || 0) ? d : worst, data[0]);
+if (maxDDPoint && maxDDPoint.drawdown < 0) {
+    ddG.append("circle")
+        .attr("cx", xScale(maxDDPoint._date))
+        .attr("cy", yDD(maxDDPoint.drawdown))
+        .attr("r", 5)
+        .attr("fill", "#ef5350")
+        .attr("stroke", "#fff")
+        .attr("stroke-width", 1.5);
+    ddG.append("text")
+        .attr("class", "max-dd-label")
+        .attr("x", xScale(maxDDPoint._date) + 8)
+        .attr("y", yDD(maxDDPoint.drawdown) + 4)
+        .text(`Max: ${maxDDPoint.drawdown.toFixed(2)}%`);
+}
+
+// X axis at bottom
+ddG.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${ddH})`)
+    .call(d3.axisBottom(xScale).ticks(8).tickFormat(d3.timeFormat("%b %d")));
+
+// Crosshair + tooltip
+const crosshair = createCrosshair(priceG, width, priceH);
+const bisect = d3.bisector(d => d._date).left;
+
+svg.append("rect")
+    .attr("width", width)
+    .attr("height", totalInner)
+    .attr("transform", `translate(${margin.left},${margin.top})`)
+    .attr("fill", "transparent")
+    .on("mousemove", function(event) {
+        const [mx, my] = d3.pointer(event, priceG.node());
+        const x0 = xScale.invert(mx);
+        const idx = Math.min(data.length - 1, Math.max(0, bisect(data, x0)));
+        const d = data[idx];
+        if (!d) return;
+        crosshair.show(xScale(d._date), Math.min(my, priceH));
+        const ddColor = (d.drawdown || 0) < -5 ? "var(--color-down)" : "var(--color-text)";
+        tooltip.show(
+            `<b>${formatDate(d.date)}</b><br>` +
+            `Price: ${formatPrice(d.close)}<br>` +
+            `Drawdown: <span style="color:${ddColor}">${(d.drawdown || 0).toFixed(2)}%</span>`,
+            event.pageX, event.pageY
+        );
+    })
+    .on("mouseleave", function() {
+        crosshair.hide();
+        tooltip.hide();
+    });
+</script>
+</body>
+</html>

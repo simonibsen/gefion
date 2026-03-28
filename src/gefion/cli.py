@@ -9179,9 +9179,9 @@ def chart_price(
     """Generate candlestick price chart for a symbol."""
     try:
         from gefion.charts.queries import fetch_ohlcv_for_chart, fetch_features_for_chart
-        from gefion.charts.renderers import create_candlestick_chart
+        from gefion.charts.d3.renderers import create_candlestick_chart
         from gefion.charts.analysis import compute_price_insights
-        from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+        from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
         emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
@@ -9209,11 +9209,11 @@ def chart_price(
         insights = compute_price_insights(ohlcv, indicator_data)
 
         # Create chart with insights panel
-        fig = create_candlestick_chart(ohlcv, symbol.upper(), indicators=indicator_data, insights=insights)
+        html = create_candlestick_chart(ohlcv, symbol.upper(), indicators=indicator_data, insights=insights)
 
         # Save chart
         filename = generate_chart_filename(symbol.upper(), "price")
-        chart_path = save_chart_html(fig, filename)
+        chart_path = save_html_string(html, filename)
 
         if json_output:
             emit_json({
@@ -9248,9 +9248,9 @@ def chart_predictions(
     """Generate price chart with prediction bands (q10/q50/q90)."""
     try:
         from gefion.charts.queries import fetch_ohlcv_for_chart, fetch_predictions_for_chart
-        from gefion.charts.renderers import create_prediction_chart
+        from gefion.charts.d3.renderers import create_prediction_chart
         from gefion.charts.analysis import compute_prediction_insights
-        from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+        from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
         emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
@@ -9271,14 +9271,14 @@ def chart_predictions(
         current_price = ohlcv[-1]["close"]
 
         # Create chart
-        fig = create_prediction_chart(ohlcv, predictions, symbol.upper())
+        html = create_prediction_chart(ohlcv, predictions, symbol.upper())
 
         # Compute insights for rich context
         insights = compute_prediction_insights(predictions, current_price)
 
         # Save chart
         filename = generate_chart_filename(symbol.upper(), "predictions")
-        chart_path = save_chart_html(fig, filename)
+        chart_path = save_html_string(html, filename)
 
         if json_output:
             emit_json({
@@ -9318,9 +9318,9 @@ def chart_features(
     """Generate price chart with feature overlays."""
     try:
         from gefion.charts.queries import fetch_ohlcv_for_chart, fetch_features_for_chart
-        from gefion.charts.renderers import create_feature_chart
+        from gefion.charts.d3.renderers import create_feature_chart
         from gefion.charts.analysis import compute_price_insights, detect_technical_signals
-        from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+        from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
         emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
@@ -9348,7 +9348,7 @@ def chart_features(
             raise typer.Exit(1)
 
         # Create chart
-        fig = create_feature_chart(ohlcv, features_with_data, symbol.upper())
+        html = create_feature_chart(ohlcv, features_with_data, symbol.upper())
 
         # Compute insights
         price_insights = compute_price_insights(ohlcv, features_with_data)
@@ -9356,7 +9356,7 @@ def chart_features(
 
         # Save chart
         filename = generate_chart_filename(symbol.upper(), "features")
-        chart_path = save_chart_html(fig, filename)
+        chart_path = save_html_string(html, filename)
 
         if json_output:
             emit_json({
@@ -9396,8 +9396,8 @@ def chart_compare(
     """Compare price performance of multiple symbols."""
     try:
         from gefion.charts.queries import fetch_ohlcv_for_chart
-        from gefion.charts.renderers import create_comparison_chart
-        from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+        from gefion.charts.d3.renderers import create_comparison_chart
+        from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
         emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
@@ -9433,7 +9433,7 @@ def chart_compare(
         raise typer.Exit(1)
 
     # Create comparison chart
-    fig = create_comparison_chart(symbol_data, normalize=not no_normalize)
+    html = create_comparison_chart(symbol_data, normalize=not no_normalize)
 
     # Calculate performance metrics
     performance = {}
@@ -9452,7 +9452,7 @@ def chart_compare(
 
     # Save chart
     filename = generate_chart_filename("_".join(symbol_list[:3]), "compare")
-    chart_path = save_chart_html(fig, filename)
+    chart_path = save_html_string(html, filename)
 
     if json_output:
         emit_json({
@@ -9488,8 +9488,8 @@ def chart_correlation(
     """Generate correlation matrix heatmap for multiple symbols."""
     try:
         from gefion.charts.queries import fetch_ohlcv_for_chart
-        from gefion.charts.renderers import create_correlation_matrix
-        from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+        from gefion.charts.d3.renderers import create_correlation_matrix
+        from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
         raise typer.Exit(1)
@@ -9516,9 +9516,9 @@ def chart_correlation(
         emit("Need at least 2 symbols with data", json_output=json_output, error=True)
         raise typer.Exit(1)
 
-    fig = create_correlation_matrix(symbol_data)
+    html = create_correlation_matrix(symbol_data)
     filename = generate_chart_filename("correlation", "matrix")
-    chart_path = save_chart_html(fig, filename)
+    chart_path = save_html_string(html, filename)
 
     if json_output:
         emit_json({"status": "ok", "chart_path": str(chart_path), "symbols": list(symbol_data.keys())})
@@ -9540,8 +9540,8 @@ def chart_sector(
     """Generate sector performance heatmap."""
     try:
         from gefion.charts.queries import fetch_ohlcv_for_chart
-        from gefion.charts.renderers import create_sector_heatmap
-        from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+        from gefion.charts.d3.renderers import create_sector_heatmap
+        from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
         raise typer.Exit(1)
@@ -9591,9 +9591,9 @@ def chart_sector(
         emit("No sector data found", json_output=json_output, error=True)
         raise typer.Exit(1)
 
-    fig = create_sector_heatmap(sector_data)
+    html = create_sector_heatmap(sector_data)
     filename = generate_chart_filename("sector", "heatmap")
-    chart_path = save_chart_html(fig, filename)
+    chart_path = save_html_string(html, filename)
 
     if json_output:
         emit_json({"status": "ok", "chart_path": str(chart_path), "sectors": list(sector_data.keys())})
@@ -9616,8 +9616,8 @@ def chart_volatility(
     """Generate volatility analysis chart (Bollinger Bands, ATR, Historical Vol)."""
     try:
         from gefion.charts.queries import fetch_ohlcv_for_chart
-        from gefion.charts.renderers import create_volatility_chart
-        from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+        from gefion.charts.d3.renderers import create_volatility_chart
+        from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
         raise typer.Exit(1)
@@ -9635,9 +9635,9 @@ def chart_volatility(
         emit(f"No data found for {symbol}", json_output=json_output, error=True)
         raise typer.Exit(1)
 
-    fig = create_volatility_chart(ohlcv, symbol.upper(), window=window)
+    html = create_volatility_chart(ohlcv, symbol.upper(), window=window)
     filename = generate_chart_filename(symbol.upper(), "volatility")
-    chart_path = save_chart_html(fig, filename)
+    chart_path = save_html_string(html, filename)
 
     if json_output:
         emit_json({"status": "ok", "chart_path": str(chart_path), "symbol": symbol.upper()})
@@ -9658,8 +9658,8 @@ def chart_drawdown(
     """Generate drawdown analysis chart."""
     try:
         from gefion.charts.queries import fetch_ohlcv_for_chart
-        from gefion.charts.renderers import create_drawdown_chart
-        from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+        from gefion.charts.d3.renderers import create_drawdown_chart
+        from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
         raise typer.Exit(1)
@@ -9677,9 +9677,9 @@ def chart_drawdown(
         emit(f"No data found for {symbol}", json_output=json_output, error=True)
         raise typer.Exit(1)
 
-    fig = create_drawdown_chart(ohlcv, symbol.upper())
+    html = create_drawdown_chart(ohlcv, symbol.upper())
     filename = generate_chart_filename(symbol.upper(), "drawdown")
-    chart_path = save_chart_html(fig, filename)
+    chart_path = save_html_string(html, filename)
 
     if json_output:
         emit_json({"status": "ok", "chart_path": str(chart_path), "symbol": symbol.upper()})
@@ -9701,8 +9701,8 @@ def chart_rolling(
     """Generate rolling returns comparison chart."""
     try:
         from gefion.charts.queries import fetch_ohlcv_for_chart
-        from gefion.charts.renderers import create_rolling_returns_chart
-        from gefion.charts.output import save_chart_html, open_in_browser, generate_chart_filename
+        from gefion.charts.d3.renderers import create_rolling_returns_chart
+        from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
     except ImportError as e:
         emit(f"Charts not available: {e}", json_output=json_output, error=True)
         raise typer.Exit(1)
@@ -9727,9 +9727,9 @@ def chart_rolling(
         emit("No data found for any symbols", json_output=json_output, error=True)
         raise typer.Exit(1)
 
-    fig = create_rolling_returns_chart(symbol_data, windows=window_list)
+    html = create_rolling_returns_chart(symbol_data, windows=window_list)
     filename = generate_chart_filename("_".join(symbol_list[:3]), "rolling")
-    chart_path = save_chart_html(fig, filename)
+    chart_path = save_html_string(html, filename)
 
     if json_output:
         emit_json({"status": "ok", "chart_path": str(chart_path), "symbols": list(symbol_data.keys())})
@@ -9738,6 +9738,145 @@ def chart_rolling(
 
     if not no_open and not json_output:
         open_in_browser(chart_path)
+
+
+@chart_app.command("calibration")
+def chart_calibration(
+    model_name: str = typer.Argument(..., help="Model name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate model calibration curve."""
+    with create_span("cli.chart.calibration", model_name=model_name):
+        try:
+            from gefion.charts.queries import fetch_model_calibration
+            from gefion.charts.d3.renderers import create_calibration_chart
+            from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
+        except ImportError as e:
+            emit(f"Charts not available: {e}", json_output=json_output, error=True)
+            emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        with db_connection(db_url) as conn:
+            data = fetch_model_calibration(conn, model_name)
+
+        if not data:
+            emit_error("No calibration data found", json_output=json_output)
+            return
+
+        html = create_calibration_chart(data, model_name)
+        filename = generate_chart_filename(model_name, "calibration")
+        chart_path = save_html_string(html, filename)
+
+        if not no_open and not json_output:
+            open_in_browser(chart_path)
+
+        emit("Calibration chart generated", data={"path": str(chart_path)}, json_output=json_output)
+
+
+@chart_app.command("confusion-matrix")
+def chart_confusion_matrix(
+    model_name: str = typer.Argument(..., help="Model name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate trend classifier confusion matrix."""
+    with create_span("cli.chart.confusion_matrix", model_name=model_name):
+        try:
+            from gefion.charts.queries import fetch_confusion_matrix
+            from gefion.charts.d3.renderers import create_confusion_matrix_chart
+            from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
+        except ImportError as e:
+            emit(f"Charts not available: {e}", json_output=json_output, error=True)
+            emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        with db_connection(db_url) as conn:
+            data = fetch_confusion_matrix(conn, model_name)
+
+        if not data:
+            emit_error("No confusion matrix data found", json_output=json_output)
+            return
+
+        html = create_confusion_matrix_chart(data, model_name)
+        filename = generate_chart_filename(model_name, "confusion_matrix")
+        chart_path = save_html_string(html, filename)
+
+        if not no_open and not json_output:
+            open_in_browser(chart_path)
+
+        emit("Confusion matrix chart generated", data={"path": str(chart_path)}, json_output=json_output)
+
+
+@chart_app.command("pipeline-health")
+def chart_pipeline_health(
+    db_url: Optional[str] = typer.Option(None, "--db-url"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate pipeline health dashboard."""
+    with create_span("cli.chart.pipeline_health"):
+        try:
+            from gefion.charts.queries import fetch_pipeline_health
+            from gefion.charts.d3.renderers import create_pipeline_health_chart
+            from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
+        except ImportError as e:
+            emit(f"Charts not available: {e}", json_output=json_output, error=True)
+            emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        with db_connection(db_url) as conn:
+            data = fetch_pipeline_health(conn)
+
+        if not data:
+            emit_error("No pipeline health data found", json_output=json_output)
+            return
+
+        html = create_pipeline_health_chart(data)
+        filename = generate_chart_filename("pipeline", "health")
+        chart_path = save_html_string(html, filename)
+
+        if not no_open and not json_output:
+            open_in_browser(chart_path)
+
+        emit("Pipeline health chart generated", data={"path": str(chart_path)}, json_output=json_output)
+
+
+@chart_app.command("pred-vs-actual")
+def chart_pred_vs_actual(
+    model_name: str = typer.Argument(..., help="Model name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate predictions vs actual scatter chart."""
+    with create_span("cli.chart.pred_vs_actual", model_name=model_name):
+        try:
+            from gefion.charts.queries import fetch_predictions_vs_actuals
+            from gefion.charts.d3.renderers import create_pred_vs_actual_chart
+            from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
+        except ImportError as e:
+            emit(f"Charts not available: {e}", json_output=json_output, error=True)
+            emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        with db_connection(db_url) as conn:
+            data = fetch_predictions_vs_actuals(conn, model_name)
+
+        if not data:
+            emit_error("No prediction vs actual data found", json_output=json_output)
+            return
+
+        html = create_pred_vs_actual_chart(data, model_name)
+        filename = generate_chart_filename(model_name, "pred_vs_actual")
+        chart_path = save_html_string(html, filename)
+
+        if not no_open and not json_output:
+            open_in_browser(chart_path)
+
+        emit("Pred vs actual chart generated", data={"path": str(chart_path)}, json_output=json_output)
 
 
 @app.command("ui")
@@ -9774,7 +9913,29 @@ def launch_ui(
             emit("UI app not found. Please reinstall gefion.", error=True)
             raise typer.Exit(1)
 
-        emit(f"Starting Gefion UI on http://{host}:{port}")
+        # Auto-detect Tempo and enable OTEL if running
+        env = os.environ.copy()
+        otel_auto = False
+        if env.get("OTEL_ENABLED") != "true":
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(("localhost", 4317))
+                sock.close()
+                if result == 0:
+                    env["OTEL_ENABLED"] = "true"
+                    env.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+                    otel_auto = True
+            except Exception:
+                pass
+
+        if otel_auto:
+            emit(f"Starting Gefion UI on http://{host}:{port} (tracing: enabled — Tempo detected)")
+        elif env.get("OTEL_ENABLED") == "true":
+            emit(f"Starting Gefion UI on http://{host}:{port} (tracing: enabled)")
+        else:
+            emit(f"Starting Gefion UI on http://{host}:{port} (tracing: disabled — start Tempo for traces)")
         emit("Press Ctrl+C to stop")
 
         cmd = [
@@ -9794,7 +9955,7 @@ def launch_ui(
         clear_errors()
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, env=env)
         except KeyboardInterrupt:
             emit("\nShutting down UI...")
         except subprocess.CalledProcessError as e:

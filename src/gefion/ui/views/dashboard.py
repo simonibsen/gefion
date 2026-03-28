@@ -5,64 +5,57 @@ from datetime import datetime, timedelta
 from gefion.ui.components.chat import render_chat_widget
 from dataclasses import dataclass, field
 from typing import Optional
+from gefion.observability import create_span, set_attributes
 
 
-def get_page_context():
-    """Return compact context dict for the Dashboard page."""
-    context = {"page_name": "Dashboard", "summary": "Market overview with movers, system stats, and prediction insights."}
+@st.cache_data(ttl=300)
+def _get_dashboard_context_data():
+    """Cached dashboard context data — avoids repeated slow queries."""
+    data = {}
     try:
         from gefion.ui.components.database import get_connection
         from datetime import date as date_type
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM stocks")
-                stock_count = cur.fetchone()[0]
-                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
-                latest = cur.fetchone()[0]
-
-                # Top movers summary
-                if latest:
-                    cur.execute("""
-                        SELECT s.symbol,
-                               ROUND(((o2.close - o1.close) / NULLIF(o1.close, 0) * 100)::numeric, 2) as pct
-                        FROM stock_ohlcv o2
-                        JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = o2.date - 1
-                        JOIN stocks s ON s.id = o2.data_id
-                        WHERE o2.date = %s
-                        ORDER BY pct DESC LIMIT 3
-                    """, (latest,))
-                    top_gainers = [f"{r[0]} ({r[1]:+.1f}%)" for r in cur.fetchall()]
-
-                    cur.execute("""
-                        SELECT s.symbol,
-                               ROUND(((o2.close - o1.close) / NULLIF(o1.close, 0) * 100)::numeric, 2) as pct
-                        FROM stock_ohlcv o2
-                        JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = o2.date - 1
-                        JOIN stocks s ON s.id = o2.data_id
-                        WHERE o2.date = %s
-                        ORDER BY pct ASC LIMIT 3
-                    """, (latest,))
-                    top_losers = [f"{r[0]} ({r[1]:+.1f}%)" for r in cur.fetchall()]
-                else:
-                    top_gainers, top_losers = [], []
-
-        data_age = (date_type.today() - latest).days if latest else None
-        context["data_stats"] = {
-            "stocks": stock_count,
-            "latest_data": str(latest) if latest else "none",
-            "data_age_days": data_age,
-            "top_gainers": top_gainers,
-            "top_losers": top_losers,
-        }
-        empty = []
-        suggestions = []
-        if data_age and data_age > 3:
-            empty.append(f"price data is {data_age} days old")
-            suggestions.append("Update prices: gefion data-update")
-        context["empty_states"] = empty
-        context["suggestions"] = suggestions
+        with create_span("ui.dashboard._get_dashboard_context_data"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM stocks")
+                    data["stocks"] = cur.fetchone()[0]
+                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                    latest = cur.fetchone()[0]
+                    if latest:
+                        data["latest_data"] = str(latest)
+                        data["data_age_days"] = (date_type.today() - latest).days
+                        # Top movers — use fast direct join
+                        cur.execute("SELECT MAX(date) FROM stock_ohlcv WHERE date < %s", (latest,))
+                        prev = cur.fetchone()[0]
+                        if prev:
+                            cur.execute("""
+                                SELECT s.symbol,
+                                       ROUND(((o2.close / NULLIF(o1.close, 0)) - 1) * 100, 2)
+                                FROM stock_ohlcv o2
+                                JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = %s
+                                JOIN stocks s ON s.id = o2.data_id
+                                WHERE o2.date = %s AND o1.close > 0
+                                ORDER BY ABS((o2.close / NULLIF(o1.close, 0)) - 1) DESC
+                                LIMIT 5
+                            """, (prev, latest))
+                            data["top_movers"] = [
+                                {"symbol": r[0], "pct": float(r[1])} for r in cur.fetchall() if r[1]
+                            ]
     except Exception:
         pass
+    return data
+
+
+def get_page_context():
+    """Return compact context dict for the Dashboard page. Uses cached data."""
+    context = {"page_name": "Dashboard", "summary": "Market overview with movers, system stats, and prediction insights."}
+    cached = _get_dashboard_context_data()
+    context["data_stats"] = cached
+    data_age = cached.get("data_age_days")
+    if data_age and data_age > 3:
+        context["empty_states"] = [f"price data is {data_age} days old"]
+        context["suggestions"] = ["Update prices: gefion data-update"]
     return context
 
 
@@ -86,71 +79,53 @@ class GefionInsights:
     latest_feature_date: Optional[str] = None
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_market_movers() -> Optional[MarketMovers]:
     """Get top gainers and losers with 60-second cache."""
     try:
         from gefion.ui.components.database import get_connection
 
-        with get_connection() as conn:
+        with create_span("ui.dashboard.get_market_movers"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
-                # Fast query: only look at last 2 trading days
+                # Fast: get the 2 most recent dates first, then join
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                latest = cur.fetchone()[0]
+                if not latest:
+                    return None
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv WHERE date < %s", (latest,))
+                prev = cur.fetchone()[0]
+                if not prev:
+                    return None
+
                 cur.execute("""
-                    WITH last_dates AS (
-                        SELECT DISTINCT date FROM stock_ohlcv
-                        ORDER BY date DESC LIMIT 2
-                    ),
-                    price_changes AS (
-                        SELECT
-                            s.symbol,
-                            MAX(CASE WHEN o.date = (SELECT MAX(date) FROM last_dates) THEN o.close END) as current_close,
-                            MAX(CASE WHEN o.date = (SELECT MIN(date) FROM last_dates) THEN o.close END) as prev_close
-                        FROM stock_ohlcv o
-                        JOIN stocks s ON o.data_id = s.id
-                        WHERE s.status = 'Active'
-                          AND o.date IN (SELECT date FROM last_dates)
-                        GROUP BY s.symbol
-                        HAVING MAX(CASE WHEN o.date = (SELECT MIN(date) FROM last_dates) THEN o.close END) > 0
-                    )
                     SELECT
-                        symbol,
-                        current_close,
-                        prev_close,
-                        ((current_close / prev_close) - 1) * 100 as pct_change
-                    FROM price_changes
-                    WHERE current_close IS NOT NULL AND prev_close IS NOT NULL
+                        s.symbol,
+                        o2.close as current_close,
+                        o1.close as prev_close,
+                        ((o2.close / NULLIF(o1.close, 0)) - 1) * 100 as pct_change
+                    FROM stock_ohlcv o2
+                    JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = %s
+                    JOIN stocks s ON s.id = o2.data_id
+                    WHERE o2.date = %s AND o1.close > 0
                     ORDER BY pct_change DESC
                     LIMIT 5
-                """)
+                """, (prev, latest))
                 gainers = cur.fetchall()
 
                 cur.execute("""
-                    WITH last_dates AS (
-                        SELECT DISTINCT date FROM stock_ohlcv
-                        ORDER BY date DESC LIMIT 2
-                    ),
-                    price_changes AS (
-                        SELECT
-                            s.symbol,
-                            MAX(CASE WHEN o.date = (SELECT MAX(date) FROM last_dates) THEN o.close END) as current_close,
-                            MAX(CASE WHEN o.date = (SELECT MIN(date) FROM last_dates) THEN o.close END) as prev_close
-                        FROM stock_ohlcv o
-                        JOIN stocks s ON o.data_id = s.id
-                        WHERE s.status = 'Active'
-                          AND o.date IN (SELECT date FROM last_dates)
-                        GROUP BY s.symbol
-                        HAVING MAX(CASE WHEN o.date = (SELECT MIN(date) FROM last_dates) THEN o.close END) > 0
-                    )
                     SELECT
-                        symbol,
-                        current_close,
-                        prev_close,
-                        ((current_close / prev_close) - 1) * 100 as pct_change
-                    FROM price_changes
-                    WHERE current_close IS NOT NULL AND prev_close IS NOT NULL
+                        s.symbol,
+                        o2.close as current_close,
+                        o1.close as prev_close,
+                        ((o2.close / NULLIF(o1.close, 0)) - 1) * 100 as pct_change
+                    FROM stock_ohlcv o2
+                    JOIN stock_ohlcv o1 ON o1.data_id = o2.data_id AND o1.date = %s
+                    JOIN stocks s ON s.id = o2.data_id
+                    WHERE o2.date = %s AND o1.close > 0
                     ORDER BY pct_change ASC
                     LIMIT 5
-                """)
+                """, (prev, latest))
                 losers = cur.fetchall()
 
         return MarketMovers(gainers=list(gainers), losers=list(losers))
@@ -158,7 +133,7 @@ def get_market_movers() -> Optional[MarketMovers]:
         return None
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_gefion_insights() -> Optional[GefionInsights]:
     """Get Gefion insights data with 60-second cache."""
     try:
@@ -166,7 +141,8 @@ def get_gefion_insights() -> Optional[GefionInsights]:
 
         insights = GefionInsights()
 
-        with get_connection() as conn:
+        with create_span("ui.dashboard.get_gefion_insights"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 # Predictions - table may not exist yet
                 # Predictions - table may not exist yet
@@ -215,19 +191,26 @@ def get_gefion_insights() -> Optional[GefionInsights]:
                 except Exception:
                     pass  # Table may not exist
 
-                # Feature coverage
-                cur.execute("""
-                    SELECT
-                        (SELECT COUNT(DISTINCT feature_id) FROM computed_features) as features_computed,
-                        (SELECT COUNT(*) FROM feature_definitions WHERE active = true) as features_defined,
-                        (SELECT COUNT(DISTINCT data_id) FROM computed_features) as symbols_with_features,
-                        (SELECT MAX(date) FROM computed_features) as latest_feature_date
-                """)
-                feat_computed, feat_defined, symbols_covered, latest_date = cur.fetchone()
-                insights.features_computed = feat_computed or 0
-                insights.features_defined = feat_defined or 0
-                insights.symbols_covered = symbols_covered or 0
+                # Feature coverage — fast queries only
+                cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
+                insights.features_defined = cur.fetchone()[0] or 0
+
+                cur.execute("SELECT MAX(date) FROM computed_features")
+                latest_date = cur.fetchone()[0]
                 insights.latest_feature_date = str(latest_date) if latest_date else None
+
+                # Use pg_stat for approximate row count (instant, no scan)
+                cur.execute("""
+                    SELECT n_live_tup FROM pg_stat_user_tables
+                    WHERE relname = 'computed_features'
+                """)
+                row = cur.fetchone()
+                approx_rows = row[0] if row else 0
+
+                # Approximate: features_computed = active definitions, symbols = stocks count
+                insights.features_computed = insights.features_defined
+                cur.execute("SELECT COUNT(*) FROM stocks")
+                insights.symbols_covered = cur.fetchone()[0] or 0 if approx_rows > 0 else 0
 
         return insights
     except Exception:

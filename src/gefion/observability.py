@@ -102,7 +102,7 @@ def _initialize_otel() -> bool:
         return False
 
     try:
-        service_name = os.getenv("OTEL_SERVICE_NAME", "g2")
+        service_name = os.getenv("OTEL_SERVICE_NAME", "gefion")
         exporter_type = os.getenv("OTEL_EXPORTER", "otlp").lower()
         sampling_rate = float(os.getenv("OTEL_SAMPLING_RATE", "1.0"))
     except Exception as e:

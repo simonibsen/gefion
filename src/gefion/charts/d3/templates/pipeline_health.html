@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.panel-title { font-size: 13px; font-weight: 600; fill: var(--color-text); }
+.bar-label { font-size: 11px; fill: var(--color-text); }
+.bar-value { font-size: 11px; fill: var(--color-text); font-weight: 600; }
+.donut-text { text-anchor: middle; dominant-baseline: central; fill: var(--color-text); }
+.donut-pct { font-size: 22px; font-weight: 700; }
+.donut-sub { font-size: 11px; opacity: 0.7; }
+.freshness-bar { rx: 3; ry: 3; }
+.hist-bar { rx: 2; ry: 2; fill: #2962ff; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || "Pipeline Health");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+const padding = 20;
+const gap = 30;
+const panelW = (TOTAL_WIDTH - padding * 2 - gap) / 2;
+const panelH = (TOTAL_HEIGHT - padding * 2 - gap) / 2;
+
+// ── Panel 1: Data Freshness (top left) ──
+const p1 = svg.append("g").attr("transform", `translate(${padding},${padding})`);
+p1.append("text").attr("class", "panel-title").attr("x", 0).attr("y", 15).text("Data Freshness (days since update)");
+
+const freshness = data.freshness || [];
+const fMargin = {top: 30, right: 10, bottom: 20, left: 80};
+const fW = panelW - fMargin.left - fMargin.right;
+const fH = panelH - fMargin.top - fMargin.bottom;
+const fG = p1.append("g").attr("transform", `translate(${fMargin.left},${fMargin.top})`);
+
+const fxScale = d3.scaleLinear()
+    .domain([0, d3.max(freshness, d => d.days_old) || 1])
+    .range([0, fW]);
+const fyScale = d3.scaleBand()
+    .domain(freshness.map(d => d.name))
+    .range([0, fH])
+    .padding(0.3);
+
+fG.selectAll(".freshness-bar")
+    .data(freshness).join("rect")
+    .attr("class", "freshness-bar")
+    .attr("x", 0)
+    .attr("y", d => fyScale(d.name))
+    .attr("width", d => fxScale(d.days_old))
+    .attr("height", fyScale.bandwidth())
+    .attr("fill", d => d.days_old <= 1 ? "#4caf50" : d.days_old <= 3 ? "#ff9800" : "#ef5350")
+    .on("mousemove", function(event, d) {
+        tooltip.show(`<b>${d.name}</b><br>${d.days_old} days old`, event.pageX, event.pageY);
+    })
+    .on("mouseleave", function() { tooltip.hide(); });
+
+fG.selectAll(".bar-label")
+    .data(freshness).join("text")
+    .attr("class", "bar-label")
+    .attr("x", -5)
+    .attr("y", d => fyScale(d.name) + fyScale.bandwidth() / 2)
+    .attr("text-anchor", "end")
+    .attr("dominant-baseline", "central")
+    .text(d => d.name);
+
+fG.selectAll(".bar-value")
+    .data(freshness).join("text")
+    .attr("class", "bar-value")
+    .attr("x", d => fxScale(d.days_old) + 5)
+    .attr("y", d => fyScale(d.name) + fyScale.bandwidth() / 2)
+    .attr("dominant-baseline", "central")
+    .text(d => d.days_old + "d");
+
+// ── Panel 2: Feature Coverage Donut (top right) ──
+const p2 = svg.append("g").attr("transform", `translate(${padding + panelW + gap},${padding})`);
+p2.append("text").attr("class", "panel-title").attr("x", 0).attr("y", 15).text("Feature Coverage");
+
+const coverage = data.coverage || {computed: 0, total: 1};
+const pct = ((coverage.computed / coverage.total) * 100).toFixed(1);
+const donutR = Math.min(panelW, panelH - 30) / 2 - 10;
+const donutCx = panelW / 2;
+const donutCy = (panelH + 30) / 2;
+const donutG = p2.append("g").attr("transform", `translate(${donutCx},${donutCy})`);
+
+const pieData = [
+    {label: "Computed", value: coverage.computed},
+    {label: "Missing", value: coverage.total - coverage.computed}
+];
+const pie = d3.pie().value(d => d.value).sort(null);
+const arc = d3.arc().innerRadius(donutR * 0.6).outerRadius(donutR);
+const colors = ["#4caf50", "#e0e0e0"];
+
+donutG.selectAll(".arc")
+    .data(pie(pieData)).join("path")
+    .attr("d", arc)
+    .attr("fill", (d, i) => colors[i])
+    .attr("stroke", "#fff")
+    .attr("stroke-width", 2)
+    .on("mousemove", function(event, d) {
+        tooltip.show(`<b>${d.data.label}</b><br>${d.data.value} symbols`, event.pageX, event.pageY);
+    })
+    .on("mouseleave", function() { tooltip.hide(); });
+
+donutG.append("text")
+    .attr("class", "donut-text donut-pct")
+    .attr("y", -5)
+    .text(pct + "%");
+donutG.append("text")
+    .attr("class", "donut-text donut-sub")
+    .attr("y", 15)
+    .text(coverage.computed + " / " + coverage.total);
+
+// ── Panel 3: Prediction Distribution Histogram (bottom, full width) ──
+const p3 = svg.append("g").attr("transform", `translate(${padding},${padding + panelH + gap})`);
+p3.append("text").attr("class", "panel-title").attr("x", 0).attr("y", 15).text("Prediction Distribution");
+
+const predictions = data.predictions || [];
+const hMargin = {top: 30, right: 20, bottom: 25, left: 60};
+const hW = TOTAL_WIDTH - padding * 2 - hMargin.left - hMargin.right;
+const hH = panelH - hMargin.top - hMargin.bottom;
+const hG = p3.append("g").attr("transform", `translate(${hMargin.left},${hMargin.top})`);
+
+const hxScale = d3.scaleBand()
+    .domain(predictions.map(d => d.type))
+    .range([0, hW])
+    .padding(0.3);
+const hyScale = d3.scaleLinear()
+    .domain([0, d3.max(predictions, d => d.count) || 1])
+    .range([hH, 0]);
+
+hG.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${hH})`)
+    .call(d3.axisBottom(hxScale));
+hG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(hyScale).ticks(4));
+
+hG.selectAll(".hist-bar")
+    .data(predictions).join("rect")
+    .attr("class", "hist-bar")
+    .attr("x", d => hxScale(d.type))
+    .attr("y", d => hyScale(d.count))
+    .attr("width", hxScale.bandwidth())
+    .attr("height", d => hH - hyScale(d.count))
+    .on("mousemove", function(event, d) {
+        tooltip.show(`<b>${d.type}</b><br>Count: ${d.count}`, event.pageX, event.pageY);
+    })
+    .on("mouseleave", function() { tooltip.hide(); });
+
+hG.selectAll(".bar-value")
+    .data(predictions).join("text")
+    .attr("class", "bar-value")
+    .attr("x", d => hxScale(d.type) + hxScale.bandwidth() / 2)
+    .attr("y", d => hyScale(d.count) - 5)
+    .attr("text-anchor", "middle")
+    .text(d => d.count);
+</script>
+</body>
+</html>

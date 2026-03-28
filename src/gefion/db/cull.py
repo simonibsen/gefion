@@ -6,6 +6,8 @@ from typing import Dict, List, Optional
 
 from psycopg import Connection
 
+from gefion.observability import create_span, set_attributes, add_event
+
 logger = logging.getLogger(__name__)
 
 # Deletion order: leaf tables first, root last.
@@ -99,31 +101,34 @@ def plan_cull(
     symbols: Optional[List[str]] = None,
 ) -> Dict[str, int]:
     """Dry-run: return {table_name: row_count_to_delete} in dependency order."""
-    result: Dict[str, int] = OrderedDict()
-    data_ids = None
+    with create_span("db.cull.plan", before_date=str(before_date)) as span:
+        result: Dict[str, int] = OrderedDict()
+        data_ids = None
 
-    with conn.cursor() as cur:
-        if symbols:
-            data_ids = _symbol_ids(cur, symbols)
-            if not data_ids:
-                return result
+        with conn.cursor() as cur:
+            if symbols:
+                data_ids = _symbol_ids(cur, symbols)
+                if not data_ids:
+                    set_attributes(span, total_rows=0)
+                    return result
 
-        for table, date_col, has_symbol in CULL_ORDER:
-            if not _table_exists(cur, table):
-                continue
+            for table, date_col, has_symbol in CULL_ORDER:
+                if not _table_exists(cur, table):
+                    continue
 
-            if date_col is not None:
-                sym_ids = data_ids if (has_symbol and data_ids is not None) else None
-                count = _count_date_filtered(cur, table, date_col, before_date, sym_ids)
-            else:
-                # Orphan detection — only after date-filtered deletes would happen
-                # In plan mode we report current orphan count (conservative estimate)
-                count = _count_orphaned(cur, table)
+                if date_col is not None:
+                    sym_ids = data_ids if (has_symbol and data_ids is not None) else None
+                    count = _count_date_filtered(cur, table, date_col, before_date, sym_ids)
+                else:
+                    # Orphan detection — only after date-filtered deletes would happen
+                    # In plan mode we report current orphan count (conservative estimate)
+                    count = _count_orphaned(cur, table)
 
-            if count > 0:
-                result[table] = count
+                if count > 0:
+                    result[table] = count
 
-    return result
+        set_attributes(span, total_rows=sum(result.values()))
+        return result
 
 
 def _delete_date_filtered(
@@ -178,28 +183,32 @@ def execute_cull(
     symbols: Optional[List[str]] = None,
 ) -> Dict[str, int]:
     """Execute the cull, deleting in dependency order. Returns {table: rows_deleted}."""
-    result: Dict[str, int] = OrderedDict()
-    data_ids = None
+    with create_span("db.cull.execute", before_date=str(before_date)) as span:
+        result: Dict[str, int] = OrderedDict()
+        data_ids = None
 
-    with conn.cursor() as cur:
-        if symbols:
-            data_ids = _symbol_ids(cur, symbols)
-            if not data_ids:
-                return result
+        with conn.cursor() as cur:
+            if symbols:
+                data_ids = _symbol_ids(cur, symbols)
+                if not data_ids:
+                    set_attributes(span, total_deleted=0)
+                    return result
 
-        for table, date_col, has_symbol in CULL_ORDER:
-            if not _table_exists(cur, table):
-                continue
+            for table, date_col, has_symbol in CULL_ORDER:
+                if not _table_exists(cur, table):
+                    continue
 
-            if date_col is not None:
-                sym_ids = data_ids if (has_symbol and data_ids is not None) else None
-                deleted = _delete_date_filtered(cur, table, date_col, before_date, sym_ids)
-            else:
-                deleted = _delete_orphaned(cur, table)
+                if date_col is not None:
+                    sym_ids = data_ids if (has_symbol and data_ids is not None) else None
+                    deleted = _delete_date_filtered(cur, table, date_col, before_date, sym_ids)
+                else:
+                    deleted = _delete_orphaned(cur, table)
 
-            if deleted > 0:
-                result[table] = deleted
-                logger.info("Culled %d rows from %s (before %s)", deleted, table, before_date)
+                if deleted > 0:
+                    result[table] = deleted
+                    add_event(span, f"deleted_{table}", count=deleted)
+                    logger.info("Culled %d rows from %s (before %s)", deleted, table, before_date)
 
-    conn.commit()
-    return result
+        conn.commit()
+        set_attributes(span, total_deleted=sum(result.values()))
+        return result

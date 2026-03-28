@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 
 import psycopg
 
+from gefion.observability import create_span, set_attributes
+
 
 def compute_return_vs_market(price_data: List[Dict[str, Any]], date: str) -> List[Dict[str, Any]]:
     """
@@ -315,60 +317,64 @@ def fetch_feature_with_sectors(
         #     {"symbol": "MSFT", "data_id": 2, "value": 58.1, "sector": "TECHNOLOGY", ...},
         # ]
     """
-    with conn.cursor() as cur:
-        # Get feature_id
-        cur.execute(
-            "SELECT id FROM feature_definitions WHERE name = %s",
-            (feature_name,)
-        )
-        row = cur.fetchone()
-        if not row:
-            return []
-        feature_id = row[0]
-
-        # Determine target date
-        if target_date is None:
+    with create_span("compute.cross_sectional.fetch_feature_with_sectors", feature_name=feature_name) as span:
+        with conn.cursor() as cur:
+            # Get feature_id
             cur.execute(
-                "SELECT MAX(date) FROM computed_features WHERE feature_id = %s",
-                (feature_id,)
+                "SELECT id FROM feature_definitions WHERE name = %s",
+                (feature_name,)
             )
             row = cur.fetchone()
-            if not row or not row[0]:
+            if not row:
+                set_attributes(span, result_count=0)
                 return []
-            target_date = row[0]
+            feature_id = row[0]
 
-        # Fetch feature values with stock sector/industry
-        cur.execute(
-            """
-            SELECT
-                s.symbol,
-                s.id as data_id,
-                cf.value,
-                s.sector,
-                s.industry,
-                cf.date
-            FROM computed_features cf
-            JOIN stocks s ON cf.data_id = s.id
-            WHERE cf.feature_id = %s
-              AND cf.date = %s
-              AND s.status IS DISTINCT FROM 'Inactive'
-            ORDER BY s.symbol
-            """,
-            (feature_id, target_date)
-        )
+            # Determine target date
+            if target_date is None:
+                cur.execute(
+                    "SELECT MAX(date) FROM computed_features WHERE feature_id = %s",
+                    (feature_id,)
+                )
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    set_attributes(span, result_count=0)
+                    return []
+                target_date = row[0]
 
-        results = []
-        for row in cur.fetchall():
-            results.append({
-                "symbol": row[0],
-                "data_id": row[1],
-                "value": float(row[2]) if row[2] is not None else None,
-                "sector": row[3],
-                "industry": row[4],
-                "date": row[5],
-            })
+            # Fetch feature values with stock sector/industry
+            cur.execute(
+                """
+                SELECT
+                    s.symbol,
+                    s.id as data_id,
+                    cf.value,
+                    s.sector,
+                    s.industry,
+                    cf.date
+                FROM computed_features cf
+                JOIN stocks s ON cf.data_id = s.id
+                WHERE cf.feature_id = %s
+                  AND cf.date = %s
+                  AND s.status IS DISTINCT FROM 'Inactive'
+                ORDER BY s.symbol
+                """,
+                (feature_id, target_date)
+            )
 
-        return results
+            results = []
+            for row in cur.fetchall():
+                results.append({
+                    "symbol": row[0],
+                    "data_id": row[1],
+                    "value": float(row[2]) if row[2] is not None else None,
+                    "sector": row[3],
+                    "industry": row[4],
+                    "date": row[5],
+                })
+
+            set_attributes(span, result_count=len(results))
+            return results
 
 
 def store_cross_sectional_rankings(
@@ -389,38 +395,41 @@ def store_cross_sectional_rankings(
     Returns:
         Number of rows inserted
     """
-    if not rankings:
-        return 0
+    with create_span("compute.cross_sectional.store_cross_sectional_rankings", feature_name=feature_name, target_date=str(target_date)) as span:
+        if not rankings:
+            set_attributes(span, row_count=0)
+            return 0
 
-    with conn.cursor() as cur:
-        # Batch insert
-        values = []
-        for r in rankings:
-            values.append((
-                r["data_id"],
-                target_date,
-                feature_name,
-                r["comparison_group"],
-                r["value"],
-                r["rank"],
-                r["percentile"],
-            ))
+        with conn.cursor() as cur:
+            # Batch insert
+            values = []
+            for r in rankings:
+                values.append((
+                    r["data_id"],
+                    target_date,
+                    feature_name,
+                    r["comparison_group"],
+                    r["value"],
+                    r["rank"],
+                    r["percentile"],
+                ))
 
-        # Use ON CONFLICT to handle updates
-        from psycopg import sql
-        cur.executemany(
-            """
-            INSERT INTO cross_sectional_features
-                (data_id, date, feature_name, comparison_group, value, rank, percentile)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (data_id, date, feature_name, comparison_group)
-            DO UPDATE SET value = EXCLUDED.value, rank = EXCLUDED.rank, percentile = EXCLUDED.percentile
-            """,
-            values
-        )
+            # Use ON CONFLICT to handle updates
+            from psycopg import sql
+            cur.executemany(
+                """
+                INSERT INTO cross_sectional_features
+                    (data_id, date, feature_name, comparison_group, value, rank, percentile)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (data_id, date, feature_name, comparison_group)
+                DO UPDATE SET value = EXCLUDED.value, rank = EXCLUDED.rank, percentile = EXCLUDED.percentile
+                """,
+                values
+            )
 
-    conn.commit()
-    return len(rankings)
+        conn.commit()
+        set_attributes(span, row_count=len(rankings))
+        return len(rankings)
 
 
 def compute_and_store_rankings(
@@ -451,42 +460,45 @@ def compute_and_store_rankings(
         result = compute_and_store_rankings(conn, "indicator_rsi_14")
         # {"success": True, "total_rankings": 15, "groups": ["market", "sector:TECHNOLOGY", ...]}
     """
-    # Fetch feature data with sectors
-    data = fetch_feature_with_sectors(conn, feature_name, target_date)
+    with create_span("compute.cross_sectional.compute_and_store_rankings", feature_name=feature_name) as span:
+        # Fetch feature data with sectors
+        data = fetch_feature_with_sectors(conn, feature_name, target_date)
 
-    if not data:
+        if not data:
+            set_attributes(span, success=False, total_rankings=0)
+            return {
+                "success": False,
+                "error": f"No data found for feature '{feature_name}'",
+                "total_rankings": 0,
+            }
+
+        # Use actual date from data
+        actual_date = data[0]["date"]
+
+        # Compute all rankings
+        rankings = compute_all_rankings(
+            data,
+            value_key="value",
+            include_market=include_market,
+            include_sectors=include_sectors,
+            include_industries=include_industries,
+        )
+
+        # Store to database
+        stored = store_cross_sectional_rankings(conn, rankings, feature_name, actual_date)
+
+        # Get unique comparison groups
+        groups = list({r["comparison_group"] for r in rankings})
+
+        set_attributes(span, success=True, total_rankings=stored, stocks_count=len(data))
         return {
-            "success": False,
-            "error": f"No data found for feature '{feature_name}'",
-            "total_rankings": 0,
+            "success": True,
+            "feature_name": feature_name,
+            "date": str(actual_date),
+            "total_rankings": stored,
+            "groups": sorted(groups),
+            "stocks_count": len(data),
         }
-
-    # Use actual date from data
-    actual_date = data[0]["date"]
-
-    # Compute all rankings
-    rankings = compute_all_rankings(
-        data,
-        value_key="value",
-        include_market=include_market,
-        include_sectors=include_sectors,
-        include_industries=include_industries,
-    )
-
-    # Store to database
-    stored = store_cross_sectional_rankings(conn, rankings, feature_name, actual_date)
-
-    # Get unique comparison groups
-    groups = list({r["comparison_group"] for r in rankings})
-
-    return {
-        "success": True,
-        "feature_name": feature_name,
-        "date": str(actual_date),
-        "total_rankings": stored,
-        "groups": sorted(groups),
-        "stocks_count": len(data),
-    }
 
 
 def compute_percentiles(data: List[Dict[str, Any]], value_key: str = "value") -> List[Dict[str, Any]]:

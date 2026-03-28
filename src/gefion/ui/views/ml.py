@@ -9,6 +9,7 @@ import os
 import re
 from datetime import datetime, date, timedelta
 from typing import Dict, Any
+from gefion.observability import create_span, set_attributes
 
 
 def get_page_context():
@@ -16,7 +17,8 @@ def get_page_context():
     context = {"page_name": "ML Pipeline", "summary": "ML model training, predictions, and evaluation."}
     try:
         from gefion.ui.components.database import get_connection
-        with get_connection() as conn:
+        with create_span("ui.ml.get_page_context"):
+          with get_connection() as conn:
             with conn.cursor() as cur:
                 # Model details
                 cur.execute(

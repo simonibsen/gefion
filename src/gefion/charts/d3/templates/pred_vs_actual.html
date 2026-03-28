@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.perfect-line { fill: none; stroke: #999; stroke-width: 1.5; stroke-dasharray: 6,4; }
+.scatter-dot { stroke: #fff; stroke-width: 1; cursor: pointer; }
+.model-label { font-size: 12px; fill: var(--color-text); opacity: 0.7; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+const margin = {top: 40, right: 50, bottom: 50, left: 70};
+const width = TOTAL_WIDTH - margin.left - margin.right;
+const height = TOTAL_HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || "Predicted vs Actual");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+// Compute error for each point
+data.forEach(d => { d._error = Math.abs(d.predicted - d.actual); });
+
+// Scales
+const allVals = data.flatMap(d => [d.predicted, d.actual]);
+const extent = [d3.min(allVals) * 1.1, d3.max(allVals) * 1.1];
+// Ensure symmetric around zero if data crosses zero
+const absMax = Math.max(Math.abs(extent[0]), Math.abs(extent[1]));
+const domain = [-absMax, absMax];
+
+const xScale = d3.scaleLinear().domain(domain).range([0, width]);
+const yScale = d3.scaleLinear().domain(domain).range([height, 0]);
+
+// Grid
+g.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yScale).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+
+// Axes
+g.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yScale).ticks(6).tickFormat(d => (d * 100).toFixed(1) + "%"));
+g.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => (d * 100).toFixed(1) + "%"));
+
+// Axis labels
+g.append("text")
+    .attr("x", width / 2).attr("y", height + 40)
+    .attr("text-anchor", "middle")
+    .attr("fill", "var(--color-text)")
+    .attr("font-size", "12px")
+    .text("Predicted Return");
+g.append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("x", -height / 2).attr("y", -55)
+    .attr("text-anchor", "middle")
+    .attr("fill", "var(--color-text)")
+    .attr("font-size", "12px")
+    .text("Actual Return");
+
+// Perfect prediction diagonal (gray dashed)
+g.append("line")
+    .attr("class", "perfect-line")
+    .attr("x1", xScale(domain[0])).attr("y1", yScale(domain[0]))
+    .attr("x2", xScale(domain[1])).attr("y2", yScale(domain[1]));
+
+// Color scale: green (low error) -> red (high error)
+const maxError = d3.max(data, d => d._error) || 0.01;
+const colorScale = d3.scaleLinear()
+    .domain([0, maxError])
+    .range(["#4caf50", "#ef5350"]);
+
+// Scatter dots
+g.selectAll(".scatter-dot")
+    .data(data).join("circle")
+    .attr("class", "scatter-dot")
+    .attr("cx", d => xScale(d.predicted))
+    .attr("cy", d => yScale(d.actual))
+    .attr("r", 5)
+    .attr("fill", d => colorScale(d._error))
+    .on("mousemove", function(event, d) {
+        const err = (d._error * 100).toFixed(3);
+        tooltip.show(
+            `<b>${d.symbol}</b><br>` +
+            `Date: ${formatDate(d.date)}<br>` +
+            `Predicted: ${(d.predicted * 100).toFixed(2)}%<br>` +
+            `Actual: ${(d.actual * 100).toFixed(2)}%<br>` +
+            `Error: <span style="color:${colorScale(d._error)}">${err}%</span>`,
+            event.pageX, event.pageY
+        );
+    })
+    .on("mouseleave", function() { tooltip.hide(); });
+
+// Model name label
+if (config.model_name) {
+    g.append("text")
+        .attr("class", "model-label")
+        .attr("x", width - 5).attr("y", 15)
+        .attr("text-anchor", "end")
+        .text("Model: " + config.model_name);
+}
+</script>
+</body>
+</html>
