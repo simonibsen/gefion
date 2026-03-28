@@ -500,7 +500,7 @@ def _render_chat_fragment() -> None:
                         st.markdown(evt.get("text", ""))
 
                 if not has_output:
-                    st.markdown("*Connecting to AI...*")
+                    st.empty()  # spinner animation is sufficient
 
             # Stop button
             if st.button("Stop", key=f"_chat_stop_{page_name}"):
