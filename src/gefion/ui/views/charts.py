@@ -1,23 +1,351 @@
 """Charts page - Interactive visualizations."""
 
+import logging
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import datetime, timedelta, date
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from gefion.ui.components.chat import render_chat_widget
+from gefion.charts.d3.suggestions import suggest_visualization
+
+logger = logging.getLogger(__name__)
 
 
-def get_page_context():
+def get_page_context() -> Dict[str, Any]:
     """Return compact context dict for the Charts page."""
-    return {"page_name": "Charts", "summary": "Price charts, predictions, and technical analysis visualizations."}
+    context: Dict[str, Any] = {
+        "page_name": "Charts",
+        "summary": "Price charts, predictions, and technical analysis visualizations.",
+    }
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # Data age
+                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                row = cur.fetchone()
+                if row and row[0]:
+                    data_age = (date.today() - row[0]).days
+                    context["data_age_days"] = data_age
+                    context["latest_data_date"] = str(row[0])
+
+                # Top movers (biggest absolute % change on latest date)
+                cur.execute("""
+                    SELECT symbol,
+                           ROUND(((close - open) / NULLIF(open, 0)) * 100, 2) AS pct_change
+                    FROM stock_ohlcv
+                    WHERE date = (SELECT MAX(date) FROM stock_ohlcv)
+                    ORDER BY ABS((close - open) / NULLIF(open, 0)) DESC
+                    LIMIT 5
+                """)
+                movers = cur.fetchall()
+                if movers:
+                    context["top_movers"] = [
+                        {"symbol": sym, "pct_change": float(pct)} for sym, pct in movers if pct is not None
+                    ]
+
+                # Active model info
+                cur.execute("SELECT name, version FROM ml_models WHERE active = true ORDER BY name LIMIT 3")
+                models = cur.fetchall()
+                if models:
+                    context["active_models"] = [{"name": n, "version": v} for n, v in models]
+
+                # Prediction count
+                cur.execute("SELECT COUNT(*) FROM predictions WHERE date >= CURRENT_DATE - INTERVAL '7 days'")
+                row = cur.fetchone()
+                if row:
+                    context["recent_prediction_count"] = row[0]
+    except Exception:
+        pass
+    return context
 
 
-def render_charts():
-    """Render the charts page."""
-    st.markdown("# :material/bar_chart: Charts")
-    render_chat_widget(get_page_context())
+def _build_suggestion_cards(ctx: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Build a list of suggestion cards based on current data context.
 
-    # Chart category + type selection
+    Each card has: title, reason, chart_key (used for session_state dispatch).
+    """
+    cards: List[Dict[str, str]] = []
+
+    # Data freshness suggestion
+    data_age = ctx.get("data_age_days")
+    if data_age is not None and data_age >= 2:
+        cards.append({
+            "title": "Pipeline Health Dashboard",
+            "reason": f"Your data is {data_age} days old -- check freshness.",
+            "chart_key": "suggested_pipeline_health",
+        })
+
+    # Top movers suggestion
+    movers = ctx.get("top_movers", [])
+    if movers:
+        top_names = ", ".join(m["symbol"] for m in movers[:3])
+        top_pcts = ", ".join(f"{m['pct_change']:+.1f}%" for m in movers[:3])
+        cards.append({
+            "title": f"Compare {top_names}",
+            "reason": f"Biggest movers today: {top_pcts}",
+            "chart_key": "suggested_top_movers",
+        })
+
+    # Model calibration suggestion
+    models = ctx.get("active_models", [])
+    if models:
+        model_name = models[0]["name"]
+        cards.append({
+            "title": f"{model_name} Calibration",
+            "reason": f"Check calibration for your active model.",
+            "chart_key": "suggested_calibration",
+        })
+
+    # Always include sector overview
+    cards.append({
+        "title": "Market Sector Overview",
+        "reason": "Compare performance across market sectors.",
+        "chart_key": "suggested_sector",
+    })
+
+    return cards[:4]
+
+
+def _render_suggested_charts() -> None:
+    """Render AI-suggested chart cards based on data context."""
+    ctx = get_page_context()
+    cards = _build_suggestion_cards(ctx)
+
+    if not cards:
+        st.info("No suggestions available -- load some data first.")
+        return
+
+    cols = st.columns(len(cards))
+    for i, card in enumerate(cards):
+        with cols[i]:
+            st.markdown(f"**{card['title']}**")
+            st.caption(card["reason"])
+            if st.button("View", key=card["chart_key"], type="secondary"):
+                st.session_state["_charts_active_suggestion"] = card["chart_key"]
+
+    # Render the selected suggestion inline
+    active = st.session_state.get("_charts_active_suggestion")
+    if active == "suggested_pipeline_health":
+        render_pipeline_health_chart()
+    elif active == "suggested_top_movers":
+        _render_top_movers_chart(ctx.get("top_movers", []))
+    elif active == "suggested_calibration":
+        models = ctx.get("active_models", [])
+        if models:
+            _render_quick_calibration(models[0]["name"])
+    elif active == "suggested_sector":
+        _render_quick_sector()
+
+
+def _render_top_movers_chart(movers: List[Dict[str, Any]]) -> None:
+    """Fetch and render a comparison chart for top movers."""
+    symbols = [m["symbol"] for m in movers[:5]]
+    if len(symbols) < 2:
+        st.warning("Need at least 2 movers to compare.")
+        return
+    with st.spinner("Loading top movers..."):
+        try:
+            from gefion.ui.components.database import get_connection
+            from gefion.charts.queries import fetch_ohlcv_for_chart
+            from gefion.charts.d3.renderers import create_comparison_chart
+
+            start, end = get_period_dates("1 Month")
+            symbol_data = {}
+            with get_connection() as conn:
+                for sym in symbols:
+                    ohlcv = fetch_ohlcv_for_chart(conn, sym, start, end)
+                    if ohlcv:
+                        symbol_data[sym] = ohlcv
+            if len(symbol_data) < 2:
+                st.error("Not enough data for comparison.")
+                return
+            html = create_comparison_chart(symbol_data)
+            components.html(html, height=500, scrolling=False)
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+
+def _render_quick_calibration(model_name: str) -> None:
+    """Render calibration chart for a specific model."""
+    with st.spinner("Loading calibration..."):
+        try:
+            from gefion.ui.components.database import get_connection
+            from gefion.charts.queries import fetch_model_calibration
+            from gefion.charts.d3.renderers import create_calibration_chart
+
+            with get_connection() as conn:
+                data = fetch_model_calibration(conn, model_name)
+            if not data:
+                st.info("No calibration data available.")
+                return
+            html = create_calibration_chart(data, model_name)
+            components.html(html, height=500, scrolling=False)
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+
+def _render_quick_sector() -> None:
+    """Render a quick sector heatmap with default settings."""
+    with st.spinner("Loading sector overview..."):
+        try:
+            from gefion.ui.components.database import get_connection
+            from gefion.charts.queries import fetch_ohlcv_for_chart
+            from gefion.charts.d3.renderers import create_sector_heatmap
+
+            start, end = get_period_dates("1 Month")
+            sector_data: Dict[str, Dict[str, float]] = {}
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT symbol, COALESCE(sector, 'Unknown') as sector
+                        FROM stocks
+                        WHERE status = 'Active' AND sector IS NOT NULL
+                        ORDER BY sector, symbol
+                    """)
+                    rows = cur.fetchall()
+
+                sector_symbols: Dict[str, List[str]] = {}
+                for symbol, sector in rows:
+                    if sector not in sector_symbols:
+                        sector_symbols[sector] = []
+                    if len(sector_symbols[sector]) < 20:
+                        sector_symbols[sector].append(symbol)
+
+                for sector, symbols in sector_symbols.items():
+                    sector_data[sector] = {}
+                    for symbol in symbols:
+                        ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
+                        if ohlcv and len(ohlcv) >= 2:
+                            start_price = ohlcv[0]["close"]
+                            end_price = ohlcv[-1]["close"]
+                            if start_price > 0:
+                                ret = ((end_price / start_price) - 1) * 100
+                                sector_data[sector][symbol] = ret
+
+                sector_data = {k: v for k, v in sector_data.items() if v}
+
+            if not sector_data:
+                st.warning("No sector data available.")
+                return
+
+            html = create_sector_heatmap(sector_data)
+            components.html(html, height=500, scrolling=False)
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+
+def _render_quick_charts() -> None:
+    """Render one-click quick chart buttons."""
+    quick_charts = [
+        ("Sector Heatmap", "quick_sector", ":material/grid_view:"),
+        ("Pipeline Health", "quick_pipeline", ":material/monitor_heart:"),
+        ("Top Movers", "quick_movers", ":material/trending_up:"),
+        ("Volatility Leaders", "quick_volatility", ":material/show_chart:"),
+    ]
+
+    cols = st.columns(len(quick_charts))
+    for i, (label, key, icon) in enumerate(quick_charts):
+        with cols[i]:
+            if st.button(f"{icon} {label}", key=key, use_container_width=True):
+                st.session_state["_charts_quick_active"] = key
+
+    # Render active quick chart
+    active = st.session_state.get("_charts_quick_active")
+    if active == "quick_sector":
+        _render_quick_sector()
+    elif active == "quick_pipeline":
+        render_pipeline_health_chart()
+    elif active == "quick_movers":
+        _render_quick_top_movers()
+    elif active == "quick_volatility":
+        _render_quick_volatility()
+
+
+def _render_quick_top_movers() -> None:
+    """Fetch top 5 movers and render comparison chart."""
+    with st.spinner("Finding top movers..."):
+        try:
+            from gefion.ui.components.database import get_connection
+            from gefion.charts.queries import fetch_ohlcv_for_chart
+            from gefion.charts.d3.renderers import create_comparison_chart
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT symbol
+                        FROM stock_ohlcv
+                        WHERE date = (SELECT MAX(date) FROM stock_ohlcv)
+                        ORDER BY ABS((close - open) / NULLIF(open, 0)) DESC
+                        LIMIT 5
+                    """)
+                    symbols = [row[0] for row in cur.fetchall()]
+
+                if len(symbols) < 2:
+                    st.warning("Not enough data for top movers chart.")
+                    return
+
+                start, end = get_period_dates("1 Month")
+                symbol_data = {}
+                for sym in symbols:
+                    ohlcv = fetch_ohlcv_for_chart(conn, sym, start, end)
+                    if ohlcv:
+                        symbol_data[sym] = ohlcv
+
+            if len(symbol_data) < 2:
+                st.error("Not enough price history for comparison.")
+                return
+
+            html = create_comparison_chart(symbol_data)
+            components.html(html, height=500, scrolling=False)
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+
+def _render_quick_volatility() -> None:
+    """Render volatility chart for the most volatile stock."""
+    with st.spinner("Finding volatility leaders..."):
+        try:
+            from gefion.ui.components.database import get_connection
+            from gefion.charts.queries import fetch_ohlcv_for_chart
+            from gefion.charts.d3.renderers import create_volatility_chart
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT symbol,
+                               STDDEV((close - open) / NULLIF(open, 0)) AS vol
+                        FROM stock_ohlcv
+                        WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+                        GROUP BY symbol
+                        HAVING COUNT(*) >= 5
+                        ORDER BY vol DESC
+                        LIMIT 1
+                    """)
+                    row = cur.fetchone()
+
+                if not row:
+                    st.warning("No volatility data available.")
+                    return
+
+                symbol = row[0]
+                start, end = get_period_dates("3 Months")
+                ohlcv = fetch_ohlcv_for_chart(conn, symbol, start, end)
+
+            if not ohlcv:
+                st.error(f"No data for {symbol}")
+                return
+
+            st.caption(f"Most volatile: **{symbol}**")
+            html = create_volatility_chart(ohlcv, symbol, window=20)
+            components.html(html, height=650, scrolling=False)
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+
+def _render_custom_chart_selector() -> None:
+    """Render the full category/type chart selector (original UI)."""
     categories = {
         "Price Analysis": [
             "Price (Candlestick)", "Compare Symbols", "Correlation Matrix",
@@ -73,6 +401,28 @@ def render_charts():
     # Portfolio
     elif chart_type == "Portfolio Overview":
         render_portfolio_chart()
+
+
+def render_charts() -> None:
+    """Render the charts page with three sections."""
+    st.markdown("# :material/bar_chart: Charts")
+    render_chat_widget(get_page_context())
+
+    # Section 1: AI-Suggested Charts
+    st.subheader("Suggested for You")
+    _render_suggested_charts()
+
+    st.markdown("---")
+
+    # Section 2: Quick Charts
+    st.subheader("Quick Charts")
+    _render_quick_charts()
+
+    st.markdown("---")
+
+    # Section 3: Custom Chart (existing UI in expander)
+    with st.expander("Custom Chart", expanded=False):
+        _render_custom_chart_selector()
 
 
 def get_period_dates(period: str) -> tuple:

@@ -83,21 +83,27 @@ priceG.append("g").attr("class", "axis")
         return d3.timeFormat("%b %d")(dt);
     }));
 
-// Wicks (high-low lines)
+// Wicks (high-low lines) — animated entry
 priceG.selectAll(".wick")
     .data(data).join("line")
     .attr("class", d => "wick " + (d.close >= d.open ? "candle-up" : "candle-down"))
     .attr("x1", d => xScale(d.date) + xScale.bandwidth() / 2)
     .attr("x2", d => xScale(d.date) + xScale.bandwidth() / 2)
+    .attr("y1", d => yPrice((d.high + d.low) / 2))
+    .attr("y2", d => yPrice((d.high + d.low) / 2))
+    .transition().duration(400).delay((d, i) => Math.min(i * 2, 300))
     .attr("y1", d => yPrice(d.high))
     .attr("y2", d => yPrice(d.low));
 
-// Candle bodies (open-close rects)
-priceG.selectAll(".candle")
+// Candle bodies (open-close rects) — animated entry from midpoint
+const candles = priceG.selectAll(".candle")
     .data(data).join("rect")
     .attr("class", d => d.close >= d.open ? "candle-up" : "candle-down")
     .attr("x", d => xScale(d.date))
     .attr("width", xScale.bandwidth())
+    .attr("y", d => yPrice((d.open + d.close) / 2))
+    .attr("height", 0)
+    .transition().duration(400).delay((d, i) => Math.min(i * 2, 300))
     .attr("y", d => yPrice(Math.max(d.open, d.close)))
     .attr("height", d => Math.max(1, Math.abs(yPrice(d.open) - yPrice(d.close))));
 
@@ -126,11 +132,15 @@ const maColors = {"20": "{{ colors.ma_20 if colors else '#ff9800' }}", "50": "{{
 const volG = svg.append("g")
     .attr("transform", `translate(${margin.left},${margin.top + priceHeight + gap})`);
 
+// Volume bars — grow up from bottom
 volG.selectAll(".vol-bar")
     .data(data).join("rect")
     .attr("class", d => d.close >= d.open ? "volume-up" : "volume-down")
     .attr("x", d => xScale(d.date))
     .attr("width", xScale.bandwidth())
+    .attr("y", volumeHeight)
+    .attr("height", 0)
+    .transition().duration(400).delay((d, i) => Math.min(i * 2, 300))
     .attr("y", d => yVolume(d.volume))
     .attr("height", d => volumeHeight - yVolume(d.volume));
 

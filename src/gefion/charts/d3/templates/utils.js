@@ -60,3 +60,96 @@ function responsiveResize(container, drawFn) {
     observer.observe(container.node());
     return observer;
 }
+
+// --- Animation utilities (inspired by lens-of-power viewer) ---
+
+function animateEntry(selection, duration) {
+    // Fade + slide up on initial render
+    duration = duration || 400;
+    selection
+        .style("opacity", 0)
+        .attr("transform", function() {
+            const current = d3.select(this).attr("transform") || "";
+            return current + " translate(0, 8)";
+        })
+        .transition()
+        .duration(duration)
+        .ease(d3.easeCubicOut)
+        .style("opacity", 1)
+        .attr("transform", function() {
+            const current = d3.select(this).attr("data-base-transform") || "";
+            return current;
+        });
+    return selection;
+}
+
+function staggeredEntry(selection, duration, delay) {
+    // Staggered fade-in for grouped elements (bars, dots, etc.)
+    duration = duration || 300;
+    delay = delay || 30;
+    selection.each(function(d, i) {
+        d3.select(this)
+            .style("opacity", 0)
+            .transition()
+            .delay(i * delay)
+            .duration(duration)
+            .ease(d3.easeCubicOut)
+            .style("opacity", 1);
+    });
+    return selection;
+}
+
+function hoverHighlight(selection, opts) {
+    // Add hover effect: brighten on hover, dim siblings
+    opts = opts || {};
+    const hoverOpacity = opts.hoverOpacity || 1;
+    const dimOpacity = opts.dimOpacity || 0.2;
+    const parentSelector = opts.parent || null;
+
+    selection
+        .style("cursor", "pointer")
+        .on("mouseenter.highlight", function() {
+            const self = this;
+            const siblings = parentSelector
+                ? d3.select(this.closest(parentSelector)).selectAll(selection.node().tagName)
+                : selection;
+            siblings.transition().duration(150).style("opacity", function() {
+                return this === self ? hoverOpacity : dimOpacity;
+            });
+        })
+        .on("mouseleave.highlight", function() {
+            const siblings = parentSelector
+                ? d3.select(this.closest(parentSelector)).selectAll(selection.node().tagName)
+                : selection;
+            siblings.transition().duration(300).style("opacity", 1);
+        });
+    return selection;
+}
+
+function pulseElement(selection, duration) {
+    // Subtle pulse animation for emphasis
+    duration = duration || 1500;
+    selection
+        .transition()
+        .duration(duration / 2)
+        .ease(d3.easeSinInOut)
+        .attr("r", function() { return +d3.select(this).attr("r") * 1.3; })
+        .transition()
+        .duration(duration / 2)
+        .ease(d3.easeSinInOut)
+        .attr("r", function() { return +d3.select(this).attr("r") / 1.3; });
+    return selection;
+}
+
+function formatPercent(v) {
+    if (v == null) return "-";
+    return (v >= 0 ? "+" : "") + d3.format(".1f")(v) + "%";
+}
+
+function formatCompact(v) {
+    if (v == null) return "-";
+    if (Math.abs(v) >= 1e9) return d3.format(".1f")(v/1e9) + "B";
+    if (Math.abs(v) >= 1e6) return d3.format(".1f")(v/1e6) + "M";
+    if (Math.abs(v) >= 1e3) return d3.format(".1f")(v/1e3) + "K";
+    return d3.format(".1f")(v);
+}

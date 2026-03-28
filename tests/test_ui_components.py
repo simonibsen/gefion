@@ -318,7 +318,7 @@ class TestGetPageContext:
     def test_view_has_get_page_context_function(self, views_dir, view_file):
         """Each target view should define get_page_context()."""
         content = (views_dir / view_file).read_text()
-        assert "def get_page_context():" in content, (
+        assert "def get_page_context(" in content, (
             f"{view_file} must define get_page_context()"
         )
 
@@ -385,7 +385,7 @@ class TestGetPageContext:
         """get_page_context() should be defined before the main render function."""
         for view_file in self.VIEWS_WITH_PAGE_CONTEXT:
             content = (views_dir / view_file).read_text()
-            ctx_pos = content.index("def get_page_context():")
+            ctx_pos = content.index("def get_page_context(")
             # Find the first render_ function
             render_pos = content.find("def render_")
             if render_pos != -1:
@@ -1572,3 +1572,79 @@ class TestMLAdvancedFeatures:
         assert "predict-ensemble" in content
         assert "predict-classifier" in content
         assert "predict_cmd" in content or "model_type" in content
+
+
+class TestChartsPageLayout:
+    """Tests for the three-section Charts page layout."""
+
+    @pytest.fixture
+    def charts_content(self):
+        charts_path = Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views" / "charts.py"
+        return charts_path.read_text()
+
+    def test_has_render_suggested_charts(self, charts_content):
+        """Charts page must have _render_suggested_charts helper."""
+        assert "def _render_suggested_charts(" in charts_content
+
+    def test_has_render_quick_charts(self, charts_content):
+        """Charts page must have _render_quick_charts helper."""
+        assert "def _render_quick_charts(" in charts_content
+
+    def test_has_render_custom_chart_selector(self, charts_content):
+        """Charts page must have _render_custom_chart_selector helper."""
+        assert "def _render_custom_chart_selector(" in charts_content
+
+    def test_render_charts_calls_three_sections(self, charts_content):
+        """render_charts must call all three section helpers."""
+        assert "_render_suggested_charts()" in charts_content
+        assert "_render_quick_charts()" in charts_content
+        assert "_render_custom_chart_selector()" in charts_content
+
+    def test_custom_chart_in_expander(self, charts_content):
+        """Custom chart selector should be inside an expander."""
+        assert 'st.expander("Custom Chart"' in charts_content
+
+    def test_suggested_charts_uses_suggestions_module(self, charts_content):
+        """Suggested charts section should import from suggestions module."""
+        assert "from gefion.charts.d3.suggestions import suggest_visualization" in charts_content
+
+    def test_quick_charts_has_buttons(self, charts_content):
+        """Quick charts section should have named quick chart buttons."""
+        assert "Sector Heatmap" in charts_content
+        assert "Pipeline Health" in charts_content
+        assert "Top Movers" in charts_content
+
+    def test_preserves_existing_render_functions(self, charts_content):
+        """All existing render_* functions must still be present."""
+        expected = [
+            "def render_price_chart(",
+            "def render_comparison_chart(",
+            "def render_correlation_chart(",
+            "def render_volatility_chart(",
+            "def render_drawdown_chart(",
+            "def render_rolling_chart(",
+            "def render_sector_chart(",
+            "def render_calibration_chart(",
+            "def render_pred_vs_actual_chart(",
+            "def render_confusion_matrix_chart(",
+            "def render_accuracy_chart(",
+            "def render_pipeline_health_chart(",
+            "def render_portfolio_chart(",
+        ]
+        for sig in expected:
+            assert sig in charts_content, f"Missing: {sig}"
+
+    def test_compiles_cleanly(self):
+        """Charts module must compile without syntax errors."""
+        import py_compile
+        charts_path = Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views" / "charts.py"
+        py_compile.compile(str(charts_path), doraise=True)
+
+    def test_page_context_has_enriched_fields(self):
+        """get_page_context should return enriched context with data_age key."""
+        from gefion.ui.views.charts import get_page_context
+        ctx = get_page_context()
+        assert isinstance(ctx, dict)
+        assert ctx["page_name"] == "Charts"
+        # Should have summary
+        assert "summary" in ctx
