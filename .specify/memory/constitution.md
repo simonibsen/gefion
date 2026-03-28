@@ -1,8 +1,8 @@
 <!--
   Sync Impact Report
-  Version change: 1.7.1 → 1.8.0 (db-init + migration governance)
-  Added: db-init as single idempotent entry point (Section I), two-file rule for migrations (Schema Governance)
-  Renamed: g2 → gefion throughout
+  Version change: 1.8.0 → 1.9.0 (performance feedback loop)
+  Added: Performance Feedback Loop section (Section IV), enforcement layers table, common perf patterns
+  Updated: Trace-Driven Development with /gefion-perf skill reference
   Templates requiring updates: none
   Follow-up TODOs: none
 -->
@@ -68,10 +68,37 @@ Every significant operation MUST be traceable and debuggable.
 
 Traces are not just telemetry — they are a development tool. Actively inspecting traces during development catches performance regressions, verifies code paths, and ensures instrumentation is correct.
 
-- **Tempo MUST be running during development** — start it with `/services start`; it is not optional infrastructure
+- **Tempo MUST be running during development** — start it with `/gefion-services start`; it is not optional infrastructure
 - **Trace inspection is part of the dev loop** — after implementing or modifying a feature, verify its traces via `gefion span-check` or the Tempo API before considering the work complete
 - **Span parenting is mandatory** — every child span MUST propagate its parent context. Orphaned spans (spans with no parent inside an operation that should have one) are defects, not style issues. Pass `context` or use `@traced` within an already-traced call stack to ensure linkage
-- **Performance awareness** — use `gefion trace-search` and `gefion trace-compare` to identify slow operations and verify optimizations. If a trace shows unexpected duration or span count, investigate before merging
+- **Performance awareness** — use `/gefion-perf` or `gefion trace-search` to identify slow operations. If a trace shows unexpected duration or span count, investigate before merging
+
+#### Performance Feedback Loop
+
+An automated loop ensures performance regressions are caught during development, not after deployment.
+
+**How it works:**
+
+1. **Instrumentation** — every significant function has `create_span()` recording its duration, attributes (row counts, table names), and parent context
+2. **Emission** — with `OTEL_ENABLED=true`, spans are exported to Tempo via OTLP in real-time
+3. **Automatic detection** — after `pytest` runs, a PostToolUse hook queries Tempo for spans >1s and alerts in the Claude Code context
+4. **Investigation** — `/gefion-perf` queries Tempo, ranks slow traces, drills into span trees, and suggests fixes
+5. **Verification** — after fixing, traces confirm the improvement (e.g., 22s → 100ms)
+
+**Enforcement layers:**
+
+| Hook | When | What |
+|------|------|------|
+| SessionStart | Session opens | Checks postgres + tempo running |
+| PreToolUse | Before Edit/Write | TDD: tests before src changes |
+| PreCommit | Before git commit | Observability imports in significant files |
+| PostToolUse | After pytest | Queries Tempo for slow spans (>1s) |
+
+**Common performance patterns:**
+- `COUNT(*)` or `COUNT(DISTINCT)` on hypertables → use `pg_stat_user_tables.n_live_tup`
+- Unbounded `LEFT JOIN` on hypertables → bound with `WHERE date >= CURRENT_DATE - INTERVAL '30 days'`
+- `SELECT DISTINCT date FROM hypertable` → use `MAX(date)` directly
+- Increase `@st.cache_data` TTL for slow queries (300s for stats, 60s for volatile data)
 
 ### V. Consistent CLI Presentation
 
@@ -174,4 +201,4 @@ This constitution supersedes all ad-hoc practices. Amendments require:
 
 All code changes MUST comply with these principles. Complexity that violates a principle MUST be explicitly justified and documented.
 
-**Version**: 1.8.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-03-27
+**Version**: 1.9.0 | **Ratified**: 2026-02-28 | **Last Amended**: 2026-03-28
