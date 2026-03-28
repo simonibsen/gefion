@@ -158,7 +158,7 @@ def get_market_movers() -> Optional[MarketMovers]:
         return None
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_gefion_insights() -> Optional[GefionInsights]:
     """Get Gefion insights data with 60-second cache."""
     try:
@@ -215,19 +215,23 @@ def get_gefion_insights() -> Optional[GefionInsights]:
                 except Exception:
                     pass  # Table may not exist
 
-                # Feature coverage
-                cur.execute("""
-                    SELECT
-                        (SELECT COUNT(DISTINCT feature_id) FROM computed_features) as features_computed,
-                        (SELECT COUNT(*) FROM feature_definitions WHERE active = true) as features_defined,
-                        (SELECT COUNT(DISTINCT data_id) FROM computed_features) as symbols_with_features,
-                        (SELECT MAX(date) FROM computed_features) as latest_feature_date
-                """)
-                feat_computed, feat_defined, symbols_covered, latest_date = cur.fetchone()
-                insights.features_computed = feat_computed or 0
-                insights.features_defined = feat_defined or 0
-                insights.symbols_covered = symbols_covered or 0
+                # Feature coverage — use fast queries (avoid full hypertable scans)
+                cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
+                insights.features_defined = cur.fetchone()[0] or 0
+
+                cur.execute("SELECT MAX(date) FROM computed_features")
+                latest_date = cur.fetchone()[0]
                 insights.latest_feature_date = str(latest_date) if latest_date else None
+
+                # Approximate feature coverage from recent data only (fast)
+                cur.execute("""
+                    SELECT COUNT(DISTINCT feature_id), COUNT(DISTINCT data_id)
+                    FROM computed_features
+                    WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+                """)
+                feat_computed, symbols_covered = cur.fetchone()
+                insights.features_computed = feat_computed or 0
+                insights.symbols_covered = symbols_covered or 0
 
         return insights
     except Exception:
