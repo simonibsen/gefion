@@ -239,3 +239,129 @@ def fetch_backtest_equity_curve(
         }
         for row in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: New chart category queries
+# ---------------------------------------------------------------------------
+
+
+def fetch_model_calibration(
+    conn: psycopg.Connection,
+    model_name: str,
+) -> List[Dict[str, Any]]:
+    """Fetch calibration data: predicted quantile levels vs observed coverage."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT
+                (p.prediction_values->>'q10')::NUMERIC as q10,
+                (p.prediction_values->>'q50')::NUMERIC as q50,
+                (p.prediction_values->>'q90')::NUMERIC as q90,
+                po.actual_return
+            FROM predictions p
+            JOIN ml_models m ON p.model_id = m.id
+            JOIN prediction_outcomes po ON po.data_id = p.data_id
+                AND po.prediction_date = p.prediction_date
+                AND po.horizon_days = p.horizon_days
+            WHERE p.prediction_type = 'quantile'
+              AND m.name = %s
+        """, (model_name,))
+        rows = cur.fetchall()
+
+    if not rows:
+        return []
+
+    result = []
+    for level, label, idx in [(0.1, "q10", 0), (0.5, "q50", 1), (0.9, "q90", 2)]:
+        below = sum(1 for r in rows if r[3] is not None and r[idx] is not None and float(r[3]) <= float(r[idx]))
+        total = sum(1 for r in rows if r[3] is not None and r[idx] is not None)
+        observed = below / total if total > 0 else 0
+        result.append({"predicted": level, "observed": observed, "count": total, "label": label})
+    return result
+
+
+def fetch_predictions_vs_actuals(
+    conn: psycopg.Connection,
+    model_name: str,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """Fetch prediction-actual pairs for scatter plot."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT s.symbol, p.prediction_date,
+                   (p.prediction_values->>'q50')::NUMERIC, po.actual_return
+            FROM predictions p
+            JOIN ml_models m ON p.model_id = m.id
+            JOIN stocks s ON p.data_id = s.id
+            JOIN prediction_outcomes po ON po.data_id = p.data_id
+                AND po.prediction_date = p.prediction_date
+                AND po.horizon_days = p.horizon_days
+            WHERE p.prediction_type = 'quantile' AND m.name = %s
+                AND po.actual_return IS NOT NULL
+            ORDER BY p.prediction_date DESC LIMIT %s
+        """, (model_name, limit))
+        return [
+            {"symbol": r[0], "date": str(r[1]), "predicted": float(r[2]), "actual": float(r[3])}
+            for r in cur.fetchall()
+        ]
+
+
+def fetch_pipeline_health(conn: psycopg.Connection) -> Dict[str, Any]:
+    """Fetch data freshness, feature coverage, prediction distributions."""
+    from datetime import date as d
+    result: Dict[str, Any] = {"freshness": [], "coverage": {}, "predictions": []}
+    with conn.cursor() as cur:
+        for table, col, name in [
+            ("stock_ohlcv", "date", "OHLCV"),
+            ("computed_features", "date", "Features"),
+            ("predictions", "prediction_date", "Predictions"),
+        ]:
+            cur.execute(f"SELECT MAX({col}) FROM {table}")
+            latest = cur.fetchone()[0]
+            if latest:
+                result["freshness"].append({"name": name, "days_old": (d.today() - latest).days})
+
+        cur.execute("SELECT COUNT(DISTINCT data_id) FROM computed_features")
+        computed = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM stocks")
+        total = cur.fetchone()[0]
+        result["coverage"] = {"computed": computed, "total": total}
+
+        cur.execute("SELECT prediction_type, COUNT(*) FROM predictions GROUP BY prediction_type")
+        result["predictions"] = [{"type": r[0], "count": r[1]} for r in cur.fetchall()]
+    return result
+
+
+def fetch_confusion_matrix(
+    conn: psycopg.Connection,
+    model_name: str,
+) -> Dict[str, Any]:
+    """Fetch confusion matrix for trend classifier."""
+    labels = ["strong_down", "weak_down", "neutral", "weak_up", "strong_up"]
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT p.prediction_values->>'predicted_class', po.actual_return
+            FROM predictions p
+            JOIN ml_models m ON p.model_id = m.id
+            JOIN prediction_outcomes po ON po.data_id = p.data_id
+                AND po.prediction_date = p.prediction_date
+                AND po.horizon_days = p.horizon_days
+            WHERE p.prediction_type = 'trend_class' AND m.name = %s
+                AND po.actual_return IS NOT NULL
+        """, (model_name,))
+        rows = cur.fetchall()
+
+    def classify(ret):
+        r = float(ret) * 100
+        if r < -3: return "strong_down"
+        if r < -1: return "weak_down"
+        if r < 1: return "neutral"
+        if r < 3: return "weak_up"
+        return "strong_up"
+
+    matrix = [[0]*5 for _ in range(5)]
+    for predicted, actual_ret in rows:
+        actual_class = classify(actual_ret)
+        if predicted in labels and actual_class in labels:
+            matrix[labels.index(actual_class)][labels.index(predicted)] += 1
+    return {"labels": labels, "matrix": matrix}

@@ -398,3 +398,79 @@ def create_rolling_returns_d3(
     if window_labels:
         config["window_labels"] = window_labels
     return render_d3_chart("rolling_returns.html", rolling_data, config, width, height)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: New chart category renderers
+# ---------------------------------------------------------------------------
+
+
+def create_calibration_chart(
+    calibration_data: List[Dict],
+    model_name: str = "",
+    title: Optional[str] = None,
+    width: int = 500,
+    height: int = 500,
+) -> str:
+    """Calibration curve: predicted probability vs observed frequency."""
+    config = {"title": title or f"Calibration — {model_name}", "model_name": model_name}
+    return render_d3_chart("calibration.html", calibration_data, config, width, height)
+
+
+def create_pred_vs_actual_chart(
+    data: List[Dict],
+    model_name: str = "",
+    title: Optional[str] = None,
+    width: int = 600,
+    height: int = 500,
+) -> str:
+    """Scatter plot: predicted return vs actual return."""
+    config = {"title": title or f"Predicted vs Actual — {model_name}", "model_name": model_name}
+    return render_d3_chart("pred_vs_actual.html", data, config, width, height)
+
+
+def create_confusion_matrix_chart(
+    data: Dict[str, Any],
+    model_name: str = "",
+    title: Optional[str] = None,
+    width: int = 550,
+    height: int = 550,
+) -> str:
+    """Confusion matrix heatmap for trend classifier."""
+    config = {"title": title or f"Confusion Matrix — {model_name}", "model_name": model_name}
+    return render_d3_chart("confusion_matrix.html", data, config, width, height)
+
+
+def create_pipeline_health_chart(
+    data: Dict[str, Any],
+    title: Optional[str] = None,
+    width: int = 800,
+    height: int = 500,
+) -> str:
+    """Multi-panel pipeline health dashboard."""
+    config = {"title": title or "Pipeline Health"}
+    return render_d3_chart("pipeline_health.html", data, config, width, height)
+
+
+def create_accuracy_over_time_chart(
+    data: List[Dict],
+    model_name: str = "",
+    title: Optional[str] = None,
+    width: int = 800,
+    height: int = 400,
+) -> str:
+    """Line chart showing model accuracy metrics over time."""
+    config = {"title": title or f"Accuracy Over Time — {model_name}", "model_name": model_name}
+    return render_d3_chart("accuracy_over_time.html", data, config, width, height)
+
+
+def create_portfolio_chart(
+    data: Dict[str, Any],
+    strategy_name: str = "",
+    title: Optional[str] = None,
+    width: int = 900,
+    height: int = 500,
+) -> str:
+    """Enhanced equity curve with risk metrics panel."""
+    config = {"title": title or f"Portfolio — {strategy_name}", "strategy_name": strategy_name}
+    return render_d3_chart("portfolio.html", data, config, width, height)

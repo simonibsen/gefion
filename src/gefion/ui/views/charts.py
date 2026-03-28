@@ -17,23 +17,33 @@ def render_charts():
     st.markdown("# :material/bar_chart: Charts")
     render_chat_widget(get_page_context())
 
-    # Chart type selection
-    chart_type = st.selectbox(
-        "Chart Type",
-        [
-            "Price (Candlestick)",
-            "Compare Symbols",
-            "Correlation Matrix",
-            "Volatility Analysis",
-            "Drawdown Analysis",
-            "Rolling Returns",
-            "Sector Heatmap",
+    # Chart category + type selection
+    categories = {
+        "Price Analysis": [
+            "Price (Candlestick)", "Compare Symbols", "Correlation Matrix",
+            "Volatility Analysis", "Drawdown Analysis", "Rolling Returns", "Sector Heatmap",
         ],
-        help="Select the type of chart to generate",
-    )
+        "Model Performance": [
+            "Calibration Curve", "Predictions vs Actual", "Confusion Matrix",
+            "Accuracy Over Time",
+        ],
+        "Pipeline Health": [
+            "Pipeline Dashboard",
+        ],
+        "Portfolio": [
+            "Portfolio Overview",
+        ],
+    }
+
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        category = st.selectbox("Category", list(categories.keys()))
+    with col2:
+        chart_type = st.selectbox("Chart Type", categories[category])
 
     st.markdown("---")
 
+    # Price Analysis
     if chart_type == "Price (Candlestick)":
         render_price_chart()
     elif chart_type == "Compare Symbols":
@@ -48,6 +58,21 @@ def render_charts():
         render_rolling_chart()
     elif chart_type == "Sector Heatmap":
         render_sector_chart()
+    # Model Performance
+    elif chart_type == "Calibration Curve":
+        render_calibration_chart()
+    elif chart_type == "Predictions vs Actual":
+        render_pred_vs_actual_chart()
+    elif chart_type == "Confusion Matrix":
+        render_confusion_matrix_chart()
+    elif chart_type == "Accuracy Over Time":
+        render_accuracy_chart()
+    # Pipeline Health
+    elif chart_type == "Pipeline Dashboard":
+        render_pipeline_health_chart()
+    # Portfolio
+    elif chart_type == "Portfolio Overview":
+        render_portfolio_chart()
 
 
 def get_period_dates(period: str) -> tuple:
@@ -509,3 +534,130 @@ def render_sector_chart():
 
             except Exception as e:
                 st.error(f"Error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: New chart category renderers
+# ---------------------------------------------------------------------------
+
+
+def _get_model_selector():
+    """Shared model selector for model performance charts."""
+    from gefion.ui.components.database import get_connection
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT name, version FROM ml_models WHERE active = true ORDER BY name")
+            models = cur.fetchall()
+    if not models:
+        st.warning("No active models found. Train a model first.")
+        return None
+    model_opts = [f"{n} {v}" for n, v in models]
+    selected = st.selectbox("Model", model_opts)
+    return selected.split()[0] if selected else None
+
+
+def render_calibration_chart():
+    """Render model calibration curve."""
+    st.subheader("Calibration Curve")
+    st.caption("How well do predicted quantile levels match observed coverage?")
+    model_name = _get_model_selector()
+    if not model_name:
+        return
+
+    if st.button("Generate", type="primary", key="gen_calibration"):
+        with st.spinner("Computing calibration..."):
+            try:
+                from gefion.ui.components.database import get_connection
+                from gefion.charts.queries import fetch_model_calibration
+                from gefion.charts.d3.renderers import create_calibration_chart
+
+                with get_connection() as conn:
+                    data = fetch_model_calibration(conn, model_name)
+                if not data:
+                    st.info("No calibration data — need predictions with matching outcomes.")
+                    return
+                html = create_calibration_chart(data, model_name)
+                components.html(html, height=500, scrolling=False)
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+
+def render_pred_vs_actual_chart():
+    """Render predicted vs actual scatter plot."""
+    st.subheader("Predictions vs Actual")
+    st.caption("Scatter plot comparing predicted median returns to actual outcomes.")
+    model_name = _get_model_selector()
+    if not model_name:
+        return
+
+    if st.button("Generate", type="primary", key="gen_pred_actual"):
+        with st.spinner("Fetching data..."):
+            try:
+                from gefion.ui.components.database import get_connection
+                from gefion.charts.queries import fetch_predictions_vs_actuals
+                from gefion.charts.d3.renderers import create_pred_vs_actual_chart
+
+                with get_connection() as conn:
+                    data = fetch_predictions_vs_actuals(conn, model_name)
+                if not data:
+                    st.info("No prediction-outcome pairs found.")
+                    return
+                html = create_pred_vs_actual_chart(data, model_name)
+                components.html(html, height=500, scrolling=False)
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+
+def render_confusion_matrix_chart():
+    """Render confusion matrix for trend classifier."""
+    st.subheader("Confusion Matrix")
+    st.caption("How well does the trend classifier predict actual price movement?")
+    model_name = _get_model_selector()
+    if not model_name:
+        return
+
+    if st.button("Generate", type="primary", key="gen_confusion"):
+        with st.spinner("Computing matrix..."):
+            try:
+                from gefion.ui.components.database import get_connection
+                from gefion.charts.queries import fetch_confusion_matrix
+                from gefion.charts.d3.renderers import create_confusion_matrix_chart
+
+                with get_connection() as conn:
+                    data = fetch_confusion_matrix(conn, model_name)
+                html = create_confusion_matrix_chart(data, model_name)
+                components.html(html, height=550, scrolling=False)
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+
+def render_accuracy_chart():
+    """Render accuracy over time chart."""
+    st.subheader("Accuracy Over Time")
+    st.info("Coming soon — requires accumulated prediction outcome history.")
+
+
+def render_pipeline_health_chart():
+    """Render pipeline health dashboard."""
+    st.subheader("Pipeline Health Dashboard")
+    st.caption("Data freshness, feature coverage, and prediction status at a glance.")
+
+    if st.button("Generate", type="primary", key="gen_pipeline"):
+        with st.spinner("Checking pipeline..."):
+            try:
+                from gefion.ui.components.database import get_connection
+                from gefion.charts.queries import fetch_pipeline_health
+                from gefion.charts.d3.renderers import create_pipeline_health_chart
+
+                with get_connection() as conn:
+                    data = fetch_pipeline_health(conn)
+                html = create_pipeline_health_chart(data)
+                components.html(html, height=500, scrolling=False)
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+
+def render_portfolio_chart():
+    """Render portfolio overview."""
+    st.subheader("Portfolio Overview")
+    st.info("Coming soon — requires backtest equity curve data.")

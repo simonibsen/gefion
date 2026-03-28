@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.calibration-line { fill: none; stroke: #2962ff; stroke-width: 2; }
+.perfect-line { fill: none; stroke: #999; stroke-width: 1.5; stroke-dasharray: 6,4; }
+.calibration-dot { fill: #2962ff; stroke: #fff; stroke-width: 1.5; }
+.model-label { font-size: 12px; fill: var(--color-text); opacity: 0.7; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+const margin = {top: 40, right: 50, bottom: 50, left: 70};
+const width = TOTAL_WIDTH - margin.left - margin.right;
+const height = TOTAL_HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || "Calibration Curve");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+// Scales — both axes 0 to 1
+const xScale = d3.scaleLinear().domain([0, 1]).range([0, width]);
+const yScale = d3.scaleLinear().domain([0, 1]).range([height, 0]);
+
+// Grid
+g.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yScale).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+
+// Axes
+g.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yScale).ticks(5).tickFormat(d3.format(".1f")));
+g.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(5).tickFormat(d3.format(".1f")));
+
+// Axis labels
+g.append("text")
+    .attr("x", width / 2).attr("y", height + 40)
+    .attr("text-anchor", "middle")
+    .attr("fill", "var(--color-text)")
+    .attr("font-size", "12px")
+    .text("Predicted Probability");
+g.append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("x", -height / 2).attr("y", -55)
+    .attr("text-anchor", "middle")
+    .attr("fill", "var(--color-text)")
+    .attr("font-size", "12px")
+    .text("Observed Frequency");
+
+// Perfect calibration diagonal (gray dashed)
+g.append("line")
+    .attr("class", "perfect-line")
+    .attr("x1", xScale(0)).attr("y1", yScale(0))
+    .attr("x2", xScale(1)).attr("y2", yScale(1));
+
+// Sort data by predicted
+const sorted = data.slice().sort((a, b) => a.predicted - b.predicted);
+
+// Calibration line
+const lineGen = d3.line()
+    .x(d => xScale(d.predicted))
+    .y(d => yScale(d.observed));
+g.append("path")
+    .datum(sorted)
+    .attr("class", "calibration-line")
+    .attr("d", lineGen);
+
+// Dots — size proportional to count
+const countExtent = d3.extent(sorted, d => d.count);
+const rScale = d3.scaleSqrt()
+    .domain(countExtent)
+    .range([4, 12]);
+
+g.selectAll(".calibration-dot")
+    .data(sorted).join("circle")
+    .attr("class", "calibration-dot")
+    .attr("cx", d => xScale(d.predicted))
+    .attr("cy", d => yScale(d.observed))
+    .attr("r", d => rScale(d.count))
+    .on("mousemove", function(event, d) {
+        tooltip.show(
+            `<b>Predicted:</b> ${d.predicted.toFixed(2)}<br>` +
+            `<b>Observed:</b> ${d.observed.toFixed(2)}<br>` +
+            `<b>Count:</b> ${d.count}`,
+            event.pageX, event.pageY
+        );
+    })
+    .on("mouseleave", function() { tooltip.hide(); });
+
+// Model name label
+if (config.model_name) {
+    g.append("text")
+        .attr("class", "model-label")
+        .attr("x", width - 5).attr("y", 15)
+        .attr("text-anchor", "end")
+        .text("Model: " + config.model_name);
+}
+</script>
+</body>
+</html>
