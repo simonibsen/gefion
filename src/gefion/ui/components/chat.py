@@ -552,6 +552,9 @@ def _render_chat_fragment() -> None:
             })
             st.session_state[f"_chat_{page_name}_saved"] = True
             st.session_state[f"_chat_{page_name}_just_answered"] = True
+            # Enable --continue for follow-up questions on this page
+            if mode == "ai" and response_text and response_text != "No response received.":
+                st.session_state[f"_chat_{page_name}_ai_active"] = True
             clear_process_state(process_key)
             st.rerun()
 
@@ -600,6 +603,8 @@ def _render_chat_fragment() -> None:
 
             if st.button("Clear History", key=f"_chat_clear_{page_name}"):
                 st.session_state[msg_key] = []
+                st.session_state[f"_chat_{page_name}_ai_active"] = False
+                st.session_state[f"_chat_{page_name}_just_answered"] = False
                 st.rerun()
 
     # --- Handle submission (outside expander) ---
