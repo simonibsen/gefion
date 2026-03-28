@@ -125,18 +125,23 @@ def _render_suggested_charts() -> None:
             if st.button("View", key=card["chart_key"], type="secondary"):
                 st.session_state["_charts_active_suggestion"] = card["chart_key"]
 
-    # Render the selected suggestion inline
+    # Render the selected suggestion inline with close button
     active = st.session_state.get("_charts_active_suggestion")
-    if active == "suggested_pipeline_health":
-        _render_quick_pipeline()
-    elif active == "suggested_top_movers":
-        _render_top_movers_chart(ctx.get("top_movers", []))
-    elif active == "suggested_calibration":
-        models = ctx.get("active_models", [])
-        if models:
-            _render_quick_calibration(models[0]["name"])
-    elif active == "suggested_sector":
-        _render_quick_sector()
+    if active:
+        if active == "suggested_pipeline_health":
+            _render_quick_pipeline()
+        elif active == "suggested_top_movers":
+            _render_top_movers_chart(ctx.get("top_movers", []))
+        elif active == "suggested_calibration":
+            models = ctx.get("active_models", [])
+            if models:
+                _render_quick_calibration(models[0]["name"])
+        elif active == "suggested_sector":
+            _render_quick_sector()
+
+        if st.button("Close", key="close_suggestion"):
+            del st.session_state["_charts_active_suggestion"]
+            st.rerun()
 
 
 def _render_top_movers_chart(movers: List[Dict[str, Any]]) -> None:
@@ -252,16 +257,21 @@ def _render_quick_charts() -> None:
             if st.button(f"{icon} {label}", key=key, use_container_width=True):
                 st.session_state["_charts_quick_active"] = key
 
-    # Render active quick chart
+    # Render active quick chart with close button
     active = st.session_state.get("_charts_quick_active")
-    if active == "quick_sector":
-        _render_quick_sector()
-    elif active == "quick_pipeline":
-        _render_quick_pipeline()
-    elif active == "quick_movers":
-        _render_quick_top_movers()
-    elif active == "quick_volatility":
-        _render_quick_volatility()
+    if active:
+        if active == "quick_sector":
+            _render_quick_sector()
+        elif active == "quick_pipeline":
+            _render_quick_pipeline()
+        elif active == "quick_movers":
+            _render_quick_top_movers()
+        elif active == "quick_volatility":
+            _render_quick_volatility()
+
+        if st.button("Close", key="close_quick"):
+            del st.session_state["_charts_quick_active"]
+            st.rerun()
 
 
 def _render_quick_pipeline() -> None:
