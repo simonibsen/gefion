@@ -12,54 +12,52 @@ from gefion.observability import create_span, set_attributes
 logger = logging.getLogger(__name__)
 
 
+@st.cache_data(ttl=300)
+def _get_charts_context_data() -> Dict[str, Any]:
+    """Cached chart context data — avoids repeated slow queries."""
+    data: Dict[str, Any] = {}
+    try:
+        from gefion.ui.components.database import get_connection
+        with create_span("ui.charts._get_charts_context_data"):
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        data["data_age_days"] = (date.today() - row[0]).days
+                        data["latest_data_date"] = str(row[0])
+
+                    cur.execute("""
+                        SELECT s.symbol,
+                               ROUND(((o.close - o.open) / NULLIF(o.open, 0)) * 100, 2) AS pct_change
+                        FROM stock_ohlcv o
+                        JOIN stocks s ON o.data_id = s.id
+                        WHERE o.date = (SELECT MAX(date) FROM stock_ohlcv)
+                        ORDER BY ABS((o.close - o.open) / NULLIF(o.open, 0)) DESC
+                        LIMIT 5
+                    """)
+                    movers = cur.fetchall()
+                    if movers:
+                        data["top_movers"] = [
+                            {"symbol": sym, "pct_change": float(pct)} for sym, pct in movers if pct is not None
+                        ]
+
+                    cur.execute("SELECT name, version FROM ml_models WHERE active = true ORDER BY name LIMIT 3")
+                    models = cur.fetchall()
+                    if models:
+                        data["active_models"] = [{"name": n, "version": v} for n, v in models]
+    except Exception:
+        pass
+    return data
+
+
 def get_page_context() -> Dict[str, Any]:
-    """Return compact context dict for the Charts page."""
+    """Return compact context dict for the Charts page. Uses cached data."""
     context: Dict[str, Any] = {
         "page_name": "Charts",
         "summary": "Price charts, predictions, and technical analysis visualizations.",
     }
-    try:
-        from gefion.ui.components.database import get_connection
-        with create_span("ui.charts.get_page_context"):
-          with get_connection() as conn:
-            with conn.cursor() as cur:
-                # Data age
-                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
-                row = cur.fetchone()
-                if row and row[0]:
-                    data_age = (date.today() - row[0]).days
-                    context["data_age_days"] = data_age
-                    context["latest_data_date"] = str(row[0])
-
-                # Top movers (biggest absolute % change on latest date)
-                cur.execute("""
-                    SELECT s.symbol,
-                           ROUND(((o.close - o.open) / NULLIF(o.open, 0)) * 100, 2) AS pct_change
-                    FROM stock_ohlcv o
-                    JOIN stocks s ON o.data_id = s.id
-                    WHERE o.date = (SELECT MAX(date) FROM stock_ohlcv)
-                    ORDER BY ABS((o.close - o.open) / NULLIF(o.open, 0)) DESC
-                    LIMIT 5
-                """)
-                movers = cur.fetchall()
-                if movers:
-                    context["top_movers"] = [
-                        {"symbol": sym, "pct_change": float(pct)} for sym, pct in movers if pct is not None
-                    ]
-
-                # Active model info
-                cur.execute("SELECT name, version FROM ml_models WHERE active = true ORDER BY name LIMIT 3")
-                models = cur.fetchall()
-                if models:
-                    context["active_models"] = [{"name": n, "version": v} for n, v in models]
-
-                # Prediction count
-                cur.execute("SELECT COUNT(*) FROM predictions WHERE date >= CURRENT_DATE - INTERVAL '7 days'")
-                row = cur.fetchone()
-                if row:
-                    context["recent_prediction_count"] = row[0]
-    except Exception:
-        pass
+    context.update(_get_charts_context_data())
     return context
 
 
