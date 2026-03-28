@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.candle-up { fill: var(--color-up); stroke: var(--color-up); }
+.candle-down { fill: var(--color-down); stroke: var(--color-down); }
+.wick { stroke-width: 1; }
+.volume-up { fill: rgba(38, 166, 154, 0.5); }
+.volume-down { fill: rgba(239, 83, 80, 0.5); }
+.ma-line { fill: none; stroke-width: 1.5; }
+.annotation { font-size: 10px; fill: #666; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+// Parse dates
+data.forEach(d => { d._date = new Date(d.date); });
+
+const margin = {top: 40, right: 50, bottom: 30, left: 70};
+const volumeRatio = 0.2;
+const gap = 10;
+const priceHeight = (TOTAL_HEIGHT - margin.top - margin.bottom - gap) * (1 - volumeRatio);
+const volumeHeight = (TOTAL_HEIGHT - margin.top - margin.bottom - gap) * volumeRatio;
+const width = TOTAL_WIDTH - margin.left - margin.right;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+// Title
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title || (config.symbol || "") + " Price Chart");
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+
+// Scales
+const xScale = d3.scaleBand()
+    .domain(data.map(d => d.date))
+    .range([0, width])
+    .padding(0.3);
+
+const yPrice = d3.scaleLinear()
+    .domain([d3.min(data, d => d.low) * 0.995, d3.max(data, d => d.high) * 1.005])
+    .range([priceHeight, 0]);
+
+const yVolume = d3.scaleLinear()
+    .domain([0, d3.max(data, d => d.volume) * 1.1])
+    .range([volumeHeight, 0]);
+
+// Price chart group
+const priceG = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+// Grid lines
+priceG.append("g").attr("class", "grid")
+    .call(d3.axisLeft(yPrice).tickSize(-width).tickFormat(""))
+    .select(".domain").remove();
+
+// Y axis (price)
+priceG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yPrice).tickFormat(d => formatPrice(d)));
+
+// X axis (dates) — only show every Nth label
+const tickInterval = Math.max(1, Math.floor(data.length / 10));
+priceG.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${priceHeight})`)
+    .call(d3.axisBottom(xScale).tickValues(
+        xScale.domain().filter((d, i) => i % tickInterval === 0)
+    ).tickFormat(d => {
+        const dt = new Date(d);
+        return d3.timeFormat("%b %d")(dt);
+    }));
+
+// Wicks (high-low lines)
+priceG.selectAll(".wick")
+    .data(data).join("line")
+    .attr("class", d => "wick " + (d.close >= d.open ? "candle-up" : "candle-down"))
+    .attr("x1", d => xScale(d.date) + xScale.bandwidth() / 2)
+    .attr("x2", d => xScale(d.date) + xScale.bandwidth() / 2)
+    .attr("y1", d => yPrice(d.high))
+    .attr("y2", d => yPrice(d.low));
+
+// Candle bodies (open-close rects)
+priceG.selectAll(".candle")
+    .data(data).join("rect")
+    .attr("class", d => d.close >= d.open ? "candle-up" : "candle-down")
+    .attr("x", d => xScale(d.date))
+    .attr("width", xScale.bandwidth())
+    .attr("y", d => yPrice(Math.max(d.open, d.close)))
+    .attr("height", d => Math.max(1, Math.abs(yPrice(d.open) - yPrice(d.close))));
+
+// Moving averages
+const maColors = {"20": "{{ colors.ma_20 if colors else '#ff9800' }}", "50": "{{ colors.ma_50 if colors else '#9c27b0' }}", "200": "{{ colors.ma_200 if colors else '#00bcd4' }}"};
+[20, 50, 200].forEach(period => {
+    if (data.length < period) return;
+    const maData = [];
+    for (let i = period - 1; i < data.length; i++) {
+        let sum = 0;
+        for (let j = i - period + 1; j <= i; j++) sum += data[j].close;
+        maData.push({date: data[i].date, value: sum / period});
+    }
+    const line = d3.line()
+        .x(d => xScale(d.date) + xScale.bandwidth() / 2)
+        .y(d => yPrice(d.value));
+    priceG.append("path")
+        .datum(maData)
+        .attr("class", "ma-line")
+        .attr("d", line)
+        .attr("stroke", maColors[period.toString()])
+        .attr("opacity", 0.8);
+});
+
+// Volume chart group
+const volG = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top + priceHeight + gap})`);
+
+volG.selectAll(".vol-bar")
+    .data(data).join("rect")
+    .attr("class", d => d.close >= d.open ? "volume-up" : "volume-down")
+    .attr("x", d => xScale(d.date))
+    .attr("width", xScale.bandwidth())
+    .attr("y", d => yVolume(d.volume))
+    .attr("height", d => volumeHeight - yVolume(d.volume));
+
+volG.append("g").attr("class", "axis")
+    .call(d3.axisLeft(yVolume).ticks(3).tickFormat(d => formatVolume(d)));
+
+// Crosshair + tooltip interaction
+const crosshair = createCrosshair(priceG, width, priceHeight);
+
+svg.append("rect")
+    .attr("width", width)
+    .attr("height", priceHeight)
+    .attr("transform", `translate(${margin.left},${margin.top})`)
+    .attr("fill", "transparent")
+    .on("mousemove", function(event) {
+        const [mx, my] = d3.pointer(event, priceG.node());
+        // Find nearest data point
+        const bandwidth = xScale.bandwidth();
+        const step = xScale.step();
+        const idx = Math.min(data.length - 1, Math.max(0, Math.floor(mx / step)));
+        const d = data[idx];
+        if (!d) return;
+        crosshair.show(xScale(d.date) + bandwidth / 2, my);
+        const change = ((d.close - d.open) / d.open * 100).toFixed(2);
+        const color = d.close >= d.open ? "var(--color-up)" : "var(--color-down)";
+        tooltip.show(
+            `<b>${formatDate(d.date)}</b><br>` +
+            `O: ${formatPrice(d.open)} H: ${formatPrice(d.high)}<br>` +
+            `L: ${formatPrice(d.low)} C: <span style="color:${color}">${formatPrice(d.close)}</span><br>` +
+            `Vol: ${formatVolume(d.volume)} | <span style="color:${color}">${change}%</span>`,
+            event.pageX, event.pageY
+        );
+    })
+    .on("mouseleave", function() {
+        crosshair.hide();
+        tooltip.hide();
+    });
+
+// Annotations (from insights)
+if (config.annotations) {
+    config.annotations.forEach(ann => {
+        const d = data.find(d => d.date === ann.date);
+        if (!d) return;
+        priceG.append("circle")
+            .attr("cx", xScale(d.date) + xScale.bandwidth() / 2)
+            .attr("cy", yPrice(ann.price || d.close))
+            .attr("r", 4)
+            .attr("fill", ann.color || "#ff9800")
+            .attr("opacity", 0.8);
+        priceG.append("text")
+            .attr("class", "annotation")
+            .attr("x", xScale(d.date) + xScale.bandwidth() / 2 + 6)
+            .attr("y", yPrice(ann.price || d.close) - 6)
+            .text(ann.label || "");
+    });
+}
+</script>
+</body>
+</html>
