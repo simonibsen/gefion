@@ -435,8 +435,9 @@ def _render_chat_fragment() -> None:
             prompt_text = st.session_state.get(f"_chat_{page_name}_prompt", "")
             mode = st.session_state.get(f"_chat_{page_name}_mode", "ai")
 
-            # Show live tool calls and text from stderr
-            all_events = getattr(chat_state, 'work_events', []) or getattr(chat_state, 'output_lines', [])
+            # Stream-json events go to stdout (output_lines), stderr has work_events
+            # Check both — claude may write to either depending on version
+            all_events = list(getattr(chat_state, 'output_lines', [])) + list(getattr(chat_state, 'work_events', []))
             tool_calls = []
             text_parts = []
             for evt_line in all_events:
@@ -517,7 +518,7 @@ def _render_chat_fragment() -> None:
         # --- Process completed response ---
         if just_completed:
             mode = st.session_state.get(f"_chat_{page_name}_mode", "ai")
-            all_events = getattr(chat_state, 'work_events', []) or getattr(chat_state, 'output_lines', [])
+            all_events = list(getattr(chat_state, 'output_lines', [])) + list(getattr(chat_state, 'work_events', []))
 
             if mode == "ai":
                 response_text = ""
