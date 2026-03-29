@@ -237,3 +237,15 @@ def test_execute_cull_is_idempotent(conn):
     second = execute_cull(conn, before_date=cull_date)
     assert second.get("predictions", 0) == 0
     assert second.get("stock_ohlcv", 0) == 0
+
+
+def test_cull_order_models_before_runs():
+    """ml_models must be deleted before ml_runs (train_run_id FK)."""
+    from gefion.db.cull import CULL_ORDER
+    table_order = [t[0] for t in CULL_ORDER]
+    models_idx = table_order.index("ml_models")
+    runs_idx = table_order.index("ml_runs")
+    assert models_idx < runs_idx, (
+        f"ml_models (idx {models_idx}) must come before ml_runs (idx {runs_idx}) "
+        "because ml_models.train_run_id references ml_runs(id)"
+    )

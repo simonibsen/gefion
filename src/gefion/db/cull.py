@@ -19,10 +19,10 @@ CULL_ORDER: List[tuple] = [
     ("prediction_outcomes", "prediction_date", True),
     # Orphaned model performance (models with no remaining predictions)
     ("model_performance", None, False),
+    # Orphaned ML models (must delete before ml_runs due to train_run_id FK)
+    ("ml_models", None, False),
     # Orphaned ML runs (no predictions or outcomes reference them)
     ("ml_runs", None, False),
-    # Orphaned ML models (no predictions reference them)
-    ("ml_models", None, False),
     # Orphaned ML datasets (no models reference them)
     ("ml_datasets", None, False),
     # Features (date-filterable)

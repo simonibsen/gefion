@@ -748,62 +748,43 @@ def render_maintenance_section():
             help="Comma-separated symbols to trim (leave empty for all)",
         )
 
-        if st.button("Cull Data", type="secondary"):
+        # Show cull process status if running or completed
+        cull_state = get_process_state("data_cull")
+        if cull_state.is_running or cull_state.completed:
+            render_process_status("data_cull", "Data Cull")
+            if cull_state.completed:
+                col_clear, _ = st.columns([1, 3])
+                with col_clear:
+                    if st.button("Clear", key="clear_cull"):
+                        clear_process_state("data_cull")
+                        st.rerun()
+
+        if st.button("Cull Data", type="secondary", disabled=cull_state.is_running):
             if not before_date and not after_date:
                 st.error("Please select at least one date boundary")
             elif trim_mode != "Delete old data":
                 st.warning("Only 'Delete old data' mode is supported for cascading cull. Use the CLI for other modes.")
             else:
-                from gefion.db.cull import plan_cull, execute_cull
-                from gefion.ui.components.database import get_connection
-
                 sym_list = [s.strip().upper() for s in symbols_filter.split(",")] if symbols_filter else None
 
+                # Build CLI command for background execution
+                cmd = [sys.executable, "-m", "gefion.cli", "data", "cull",
+                       str(before_date), "--confirm", "--json"]
+                if sym_list:
+                    cmd.extend(["--symbols", ",".join(sym_list)])
+
                 # Show equivalent CLI command
-                cli_cmd = f"gefion data cull {before_date}"
+                cli_cmd = f"gefion data cull {before_date} --confirm"
                 if sym_list:
                     cli_cmd += f" --symbols {','.join(sym_list)}"
                 st.code(cli_cmd, language="bash")
 
-                with st.status("Culling data...", expanded=True) as status:
-                    try:
-                        # Step 1: Plan (fast — no COUNT(*) scans)
-                        status.update(label="Planning cull...")
-                        with get_connection() as conn:
-                            plan = plan_cull(conn, before_date=before_date, symbols=sym_list)
+                env = os.environ.copy()
+                env["OTEL_ENABLED"] = "false"
 
-                        if not plan:
-                            status.update(label="Nothing to cull", state="complete")
-                            st.info(f"No data found before {before_date}")
-                        else:
-                            # Show plan
-                            for table, count in plan.items():
-                                st.markdown(f"- **{table}**: {count:,} rows")
-                            st.markdown(f"**Total: {sum(plan.values()):,} rows**")
-
-                            # Step 2: Execute
-                            status.update(label="Deleting data (leaf → root)...")
-                            with get_connection() as conn:
-                                result = execute_cull(conn, before_date=before_date, symbols=sym_list)
-
-                            # Show results
-                            total = sum(result.values())
-                            for table, count in result.items():
-                                st.markdown(f"- {table}: **{count:,}** deleted")
-
-                            # Step 3: Auto-vacuum
-                            status.update(label="Vacuuming to reclaim disk space...")
-                            with get_connection() as conn:
-                                conn.autocommit = True
-                                with conn.cursor() as cur:
-                                    cur.execute("VACUUM ANALYZE")
-
-                            status.update(label=f"Cull complete — {total:,} rows deleted + vacuumed", state="complete")
-                            st.success(f"Deleted {total:,} rows across {len(result)} tables. Disk space reclaimed.")
-
-                    except Exception as e:
-                        status.update(label="Error", state="error")
-                        st.error(f"Error: {e}")
+                clear_process_state("data_cull")
+                start_background_process("data_cull", cmd, env)
+                st.rerun()
 
     with col2:
         st.markdown("### Vacuum Database")
