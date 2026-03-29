@@ -471,81 +471,252 @@ python custom_ingest.py
 
 ## Architecture
 
+### End-to-End Pipeline
+
+```mermaid
+graph LR
+    AV[AlphaVantage API] -->|fetch| DU[gefion data-update]
+    DU -->|insert| OHLCV[(stock_ohlcv)]
+    OHLCV -->|source| FC[gefion feat-compute]
+    FC -->|insert| CF[(computed_features)]
+    OHLCV & CF -->|join| DB[gefion ml dataset-build]
+    DB -->|export| DS[(ml_datasets)]
+    DS -->|train| TR[gefion ml train]
+    TR -->|save| MOD[(ml_models)]
+    MOD -->|predict| PR[gefion ml predict]
+    PR -->|insert| PRED[(predictions)]
+    PRED -->|evaluate| EV[gefion ml eval]
+    EV -->|store| PERF[(model_performance)]
+    PRED -->|signal| BT[gefion backtest run]
+
+    style OHLCV fill:#e8f5e9
+    style CF fill:#e8f5e9
+    style PRED fill:#e8f5e9
+    style DS fill:#fff4e1
+    style MOD fill:#fff4e1
+```
+
+### Entity Relationship Diagram
+
+```mermaid
+erDiagram
+    stocks ||--o{ stock_ohlcv : "has prices"
+    stocks ||--o{ computed_features : "has features"
+    stocks ||--o{ predictions : "has predictions"
+    stocks ||--o{ prediction_outcomes : "has outcomes"
+
+    feature_definitions ||--o{ computed_features : "defines"
+    feature_functions ||..o{ feature_definitions : "implements (by name)"
+
+    ml_datasets ||--o{ ml_models : "trains"
+    ml_datasets ||--o{ ml_runs : "tracks"
+
+    ml_models ||--o{ predictions : "generates"
+    ml_models ||--o{ model_performance : "evaluated by"
+    ml_runs ||--o{ predictions : "run context"
+
+    strategy_registry ||--o{ strategy_configs : "parameterizes"
+
+    stocks {
+        int id PK
+        text symbol UK
+        text status
+        text sector
+    }
+
+    stock_ohlcv {
+        int data_id FK
+        date date
+        numeric open
+        numeric high
+        numeric low
+        numeric close
+        bigint volume
+    }
+
+    feature_definitions {
+        int id PK
+        text name UK
+        text function_name
+        jsonb params
+        boolean active
+    }
+
+    feature_functions {
+        int id PK
+        text name
+        text version
+        text function_body
+        boolean enabled
+    }
+
+    computed_features {
+        int data_id FK
+        date date
+        int feature_id FK
+        float value
+    }
+
+    ml_datasets {
+        int id PK
+        text name
+        text version
+        text artifact_uri
+    }
+
+    ml_models {
+        int id PK
+        text name
+        text version
+        text algorithm
+        boolean active
+    }
+
+    predictions {
+        int model_id FK
+        int data_id FK
+        date prediction_date
+        int horizon_days
+        text prediction_type
+        jsonb prediction_values
+        jsonb metadata
+    }
+
+    prediction_outcomes {
+        int data_id FK
+        date prediction_date
+        numeric actual_return
+    }
+
+    model_performance {
+        int model_id FK
+        int horizon_days
+        numeric q10_calibration
+        numeric q50_calibration
+        numeric q90_calibration
+    }
+```
+
+### Feature Computation (Dispatcher Pattern)
+
 ```mermaid
 graph TB
-    subgraph "Data Sources"
-        AV[AlphaVantage API]
+    subgraph "CLI"
+        CMD[gefion feat-compute --symbols AAPL,MSFT]
     end
 
-    subgraph "CLI Commands"
-        DataUpdate[Gefion data-update]
-        FeaturesCompute[Gefion feat-compute]
+    subgraph "Dispatcher"
+        D[Feature Dispatcher]
+        D -->|read| FD[(feature_definitions)]
+        FD -->|function_name=indicator| REG[Function Registry]
+        FD -->|function_name=derivative| REG
     end
 
-    subgraph "Application Layer"
-        Ingestion[Ingestion Pipeline]
-        Dispatcher[Feature Dispatcher]
-        Registry[Compute Function Registry]
+    subgraph "Compute Functions (sandboxed)"
+        REG -->|route| IND[indicator: RSI, MACD, SMA...]
+        REG -->|route| DER[derivative: returns, ratios...]
+        REG -->|route| CUS[custom: user functions...]
     end
 
-    subgraph "Compute Functions"
-        IndicatorFn[compute_indicators]
-        DerivativeFn[compute_derivatives]
-        CustomFn[custom functions...]
+    subgraph "Data"
+        IND -->|read| OHLCV[(stock_ohlcv)]
+        DER -->|read| CF[(computed_features)]
+        IND & DER & CUS -->|write| CF
     end
 
-    subgraph "Database - TimescaleDB"
-        direction TB
-        Stocks[(stocks)]
-        Prices[(stock_ohlcv<br/>hypertable)]
-        FeatureDefs[(feature_definitions<br/>metadata)]
-        ComputedFeatures[(computed_features<br/>hypertable)]
+    style D fill:#e1f5ff
+    style REG fill:#e1f5ff
+    style FD fill:#fff4e1
+```
 
-        Stocks -->|1:N| Prices
-        Stocks -->|1:N| ComputedFeatures
-        FeatureDefs -->|1:N| ComputedFeatures
-        Prices -->|source| ComputedFeatures
-        ComputedFeatures -->|source| ComputedFeatures
+### ML Pipeline
+
+```mermaid
+graph TB
+    subgraph "1. Build Dataset"
+        DB[gefion ml dataset-build]
+        DB -->|join prices + features| FILES[CSV/Parquet files]
+        DB -->|register| DSR[(ml_datasets)]
     end
 
-    %% Data ingestion flow
-    AV -->|fetch prices| DataUpdate
-    DataUpdate -->|batch insert| Ingestion
-    Ingestion -->|insert| Stocks
-    Ingestion -->|insert| Prices
+    subgraph "2. Train Model"
+        TR[gefion ml train]
+        FILES -->|load| TR
+        TR -->|quantile regression| QR[q10/q50/q90 predictions]
+        TR -->|trend classifier| TC[5-class: strong_down → strong_up]
+        TR -->|ensemble| EN[multi-algorithm blend]
+        TR -->|save artifact + register| MOD[(ml_models)]
+    end
 
-    %% Feature registration flow
-    FeaturesRegister -->|define| FeatureDefs
+    subgraph "3. Predict"
+        PR[gefion ml predict]
+        MOD -->|load model| PR
+        PR -->|per symbol, per horizon| PRED[(predictions table)]
+    end
 
-    %% Feature computation flow
-    FeaturesCompute -->|dispatch| Dispatcher
-    Dispatcher -->|read metadata| FeatureDefs
-    Dispatcher -->|route by function_name| Registry
-    Registry -->|indicator| IndicatorFn
-    Registry -->|derivative| DerivativeFn
-    Registry -->|custom| CustomFn
+    subgraph "4. Evaluate"
+        EV[gefion ml eval]
+        PRED & ACTUAL[actual returns] -->|compare| EV
+        EV -->|calibration, loss| PERF[(model_performance)]
+    end
 
-    IndicatorFn -->|fetch| Prices
-    DerivativeFn -->|fetch| ComputedFeatures
+    style QR fill:#e8f5e9
+    style TC fill:#e8f5e9
+    style EN fill:#e8f5e9
+    style PRED fill:#e8f5e9
+```
 
-    IndicatorFn -->|insert| ComputedFeatures
-    DerivativeFn -->|insert| ComputedFeatures
-    CustomFn -->|insert| ComputedFeatures
+### UI + Interfaces
 
-    style Dispatcher fill:#e1f5ff
-    style Registry fill:#e1f5ff
-    style FeatureDefs fill:#fff4e1
-    style ComputedFeatures fill:#e8f5e9
+```mermaid
+graph TB
+    subgraph "User Interfaces"
+        UI[Streamlit UI<br/>gefion ui]
+        CLI[CLI<br/>gefion ...]
+        MCP[MCP Server<br/>Natural Language]
+    end
+
+    subgraph "UI Pages"
+        DASH[Dashboard]
+        CHARTS[Charts - D3.js]
+        ML[ML Pipeline]
+        DATA[Data Management]
+        FEAT[Features]
+        BT[Backtesting]
+        OPS[System Operations]
+    end
+
+    subgraph "Ask Gefion"
+        CHAT[Contextual AI Chat]
+        CHAT -->|on every page| DASH & CHARTS & ML & DATA & FEAT & BT & OPS
+    end
+
+    subgraph "Observability"
+        OTEL[OpenTelemetry Spans]
+        TEMPO[Grafana Tempo]
+        PERF[/gefion-perf skill/]
+        OTEL -->|export| TEMPO
+        TEMPO -->|query| PERF
+    end
+
+    UI --> DASH & CHARTS & ML & DATA & FEAT & BT & OPS
+    CLI -->|wraps| MCP
+    MCP -->|routes to| CLI
+
+    style CHAT fill:#e1f5ff
+    style TEMPO fill:#fff4e1
 ```
 
 ### Key Concepts
 
-- **Metadata-Driven**: Features are defined as data in `feature_definitions`, not code
-- **Registry Pattern**: Compute functions register by name (e.g., "indicator", "derivative")
-- **Generic Dispatcher**: Routes computation based on `function_name` in feature definitions
-- **Hypertables**: TimescaleDB optimizes time-series queries on `stock_ohlcv` and `computed_features`
-- **Pure Functions**: Compute functions are side-effect-free, dispatcher handles DB I/O
-- **DB-First**: Custom feature functions stored in database with git backup for version control
+- **Database-First**: Features, functions, and configuration live in the database. Git exports are backups, not primary sources
+- **Metadata-Driven Features**: `feature_definitions` table describes *what* to compute; `feature_functions` stores *how*. The Dispatcher routes by `function_name`
+- **Unified Predictions**: Single `predictions` table with `prediction_type` discriminator and JSONB values — stores both quantile (q10/q50/q90) and trend class (5-class probabilities)
+- **Hypertables**: TimescaleDB partitions `stock_ohlcv`, `computed_features`, and `predictions` into 30-day chunks for efficient time-series queries
+- **Pure Functions**: Compute functions are sandboxed and side-effect-free; the Dispatcher handles all DB I/O
+- **Ask Gefion**: Contextual AI chat on every page with page-aware context injection, non-blocking execution, and inline chart rendering
+- **D3.js Charts**: 17 chart types across 4 categories, rendered as self-contained HTML via Jinja2 templates
+- **Trace-Driven Performance**: All significant operations instrumented with OpenTelemetry. `/gefion-perf` queries Tempo to find and fix bottlenecks automatically
 
 ## Documentation Index
 
