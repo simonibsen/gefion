@@ -75,10 +75,15 @@ def create_stocks_table(conn: Connection) -> None:
                     name TEXT,
                     sector TEXT,
                     industry TEXT,
+                    exchange TEXT,
+                    asset_type TEXT,
                     updated_at TIMESTAMP
                 );
+                ALTER TABLE stocks ADD COLUMN IF NOT EXISTS exchange TEXT;
+                ALTER TABLE stocks ADD COLUMN IF NOT EXISTS asset_type TEXT;
                 CREATE INDEX IF NOT EXISTS stocks_sector_idx ON stocks(sector);
                 CREATE INDEX IF NOT EXISTS stocks_industry_idx ON stocks(industry);
+                CREATE INDEX IF NOT EXISTS stocks_exchange_idx ON stocks(exchange) WHERE exchange IS NOT NULL;
                 """
             )
         conn.commit()
@@ -617,6 +622,48 @@ def create_predictions_table(conn: Connection) -> None:
             )
         conn.commit()
         set_attributes(span, table="predictions")
+
+
+def create_stocks_fundamentals_table(conn: Connection) -> None:
+    """Time-series table for company fundamentals (market cap, PE, etc.)."""
+    _ensure_timescaledb(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stocks_fundamentals (
+                data_id INTEGER NOT NULL REFERENCES stocks(id),
+                date DATE NOT NULL,
+                market_cap BIGINT,
+                pe_ratio NUMERIC(10,2),
+                forward_pe NUMERIC(10,2),
+                peg_ratio NUMERIC(10,4),
+                book_value NUMERIC(12,4),
+                dividend_yield NUMERIC(8,6),
+                eps NUMERIC(10,4),
+                revenue_per_share NUMERIC(10,4),
+                profit_margin NUMERIC(8,6),
+                operating_margin NUMERIC(8,6),
+                return_on_equity NUMERIC(8,6),
+                beta NUMERIC(8,4),
+                ev_to_ebitda NUMERIC(10,2),
+                shares_outstanding BIGINT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (data_id, date)
+            );
+            """
+        )
+        cur.execute("SELECT create_hypertable('stocks_fundamentals', 'date', if_not_exists => TRUE);")
+        try:
+            cur.execute("SELECT set_chunk_time_interval('stocks_fundamentals', INTERVAL '90 days');")
+        except Exception:
+            pass
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS stocks_fundamentals_data_date_idx
+                ON stocks_fundamentals(data_id, date DESC);
+            """
+        )
+    conn.commit()
 
 
 def migrate_stock_tables_to_data_id(conn: Connection) -> None:

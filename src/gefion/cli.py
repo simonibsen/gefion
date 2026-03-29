@@ -7060,12 +7060,111 @@ def _update_all_impl(
         feature_writer_workers=feature_writer,
     )
 
+    # --- Step 3: Auto-populate fundamentals for stocks missing metadata ---
+    fundamentals_updated = 0
+    try:
+        with create_span("data_update.fundamentals_check"):
+            with db_connection(url) as conn:
+                with conn.cursor() as cur:
+                    # Find stocks that have OHLCV data but no sector (never had fundamentals fetched)
+                    # AND haven't been updated in the last 7 days
+                    cur.execute("""
+                        SELECT s.id, s.symbol FROM stocks s
+                        WHERE s.symbol = ANY(%s)
+                          AND (s.sector IS NULL OR s.updated_at IS NULL
+                               OR s.updated_at < NOW() - INTERVAL '7 days')
+                    """, (symbols,))
+                    stale_stocks = cur.fetchall()
+
+            if stale_stocks and len(stale_stocks) <= 200:
+                if not json_output:
+                    emit(f"Updating fundamentals for {len(stale_stocks)} stocks...")
+
+                if client is None:
+                    try:
+                        client = AlphaVantageClient(
+                            api_key=SETTINGS.alphavantage_api_key,
+                            calls_per_minute=calls_per_minute,
+                        )
+                    except ValueError:
+                        client = None
+
+                if client:
+                    from gefion.alphavantage.catalog import parse_overview
+                    from datetime import date as date_cls
+
+                    init_schema_tables_conn = db_connection(url)
+                    with init_schema_tables_conn as conn:
+                        init_schema_tables(conn, ["stocks_fundamentals"])
+
+                    for stock_id, symbol in stale_stocks:
+                        try:
+                            overview = client.fetch_overview(symbol)
+                            if "Error Message" in overview or "Note" in overview:
+                                continue
+                            parsed = parse_overview(overview)
+
+                            with db_connection(url) as conn:
+                                with conn.cursor() as cur:
+                                    # Update stocks table (snapshot)
+                                    cur.execute("""
+                                        UPDATE stocks
+                                        SET name = COALESCE(%s, name),
+                                            sector = COALESCE(%s, sector),
+                                            industry = COALESCE(%s, industry),
+                                            updated_at = NOW()
+                                        WHERE id = %s
+                                    """, (parsed["name"], parsed["sector"],
+                                          parsed["industry"], stock_id))
+
+                                    # Insert into stocks_fundamentals (time-series)
+                                    cur.execute("""
+                                        INSERT INTO stocks_fundamentals
+                                            (data_id, date, market_cap, pe_ratio, forward_pe,
+                                             peg_ratio, book_value, dividend_yield, eps,
+                                             revenue_per_share, profit_margin, operating_margin,
+                                             return_on_equity, beta, ev_to_ebitda, shares_outstanding)
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                        ON CONFLICT (data_id, date) DO UPDATE SET
+                                            market_cap = EXCLUDED.market_cap,
+                                            pe_ratio = EXCLUDED.pe_ratio,
+                                            updated_at = NOW()
+                                    """, (
+                                        stock_id, date_cls.today(),
+                                        parsed["market_cap"], parsed["pe_ratio"],
+                                        parsed["forward_pe"], parsed["peg_ratio"],
+                                        parsed["book_value"], parsed["dividend_yield"],
+                                        parsed["eps"], parsed["revenue_per_share"],
+                                        parsed["profit_margin"], parsed["operating_margin"],
+                                        parsed["return_on_equity"], parsed["beta"],
+                                        parsed["ev_to_ebitda"], parsed["shares_outstanding"],
+                                    ))
+                                conn.commit()
+
+                            fundamentals_updated += 1
+                            if not json_output:
+                                sector = parsed.get("sector") or "N/A"
+                                emit(f"  {symbol}: {sector[:20]}")
+                        except Exception:
+                            pass
+
+                    if not json_output and fundamentals_updated:
+                        emit(f"Fundamentals: {fundamentals_updated} updated")
+
+            elif stale_stocks and len(stale_stocks) > 200:
+                if not json_output:
+                    emit(f"[yellow]{len(stale_stocks)} stocks need fundamentals. "
+                         f"Run 'gefion fundamentals-update --limit 200' to update in batches.[/yellow]")
+    except Exception:
+        pass  # Fundamentals are optional — don't fail data-update
+
     emit(
         "Update complete",
         data={
             "symbols": symbols,
             "price_inserted": price_inserted,
             "features_inserted": features_inserted,
+            "fundamentals_updated": fundamentals_updated,
             "price_fetch_workers": price_fetch,
             "price_writer_workers": price_writer,
             "feature_fetch_workers": feature_fetch,
