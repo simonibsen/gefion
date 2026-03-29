@@ -748,117 +748,58 @@ def render_maintenance_section():
             help="Comma-separated symbols to trim (leave empty for all)",
         )
 
-        if st.button("Trim Data", type="secondary"):
+        if st.button("Cull Data", type="secondary"):
             if not before_date and not after_date:
                 st.error("Please select at least one date boundary")
+            elif trim_mode != "Delete old data":
+                st.warning("Only 'Delete old data' mode is supported for cascading cull. Use the CLI for other modes.")
             else:
-                # Build command
-                cmd = [sys.executable, "-m", "gefion.cli", "prices-trim", "--json"]
-                cli_parts = ["gefion", "prices-trim"]
+                from gefion.db.cull import plan_cull, execute_cull
+                from gefion.ui.components.database import get_connection
 
-                if before_date:
-                    cmd.extend(["--before", str(before_date)])
-                    cli_parts.extend(["--before", str(before_date)])
-                if after_date:
-                    cmd.extend(["--after", str(after_date)])
-                    cli_parts.extend(["--after", str(after_date)])
-                if symbols_filter:
-                    cmd.extend(["--symbols", symbols_filter.upper()])
-                    cli_parts.extend(["--symbols", symbols_filter.upper()])
-                if not trim_features:
-                    cmd.append("--no-trim-features")
-                    cli_parts.append("--no-trim-features")
+                sym_list = [s.strip().upper() for s in symbols_filter.split(",")] if symbols_filter else None
 
-                # Show CLI command
-                st.code(" ".join(cli_parts), language="bash")
+                # Show equivalent CLI command
+                cli_cmd = f"gefion data cull {before_date}"
+                if sym_list:
+                    cli_cmd += f" --symbols {','.join(sym_list)}"
+                st.code(cli_cmd, language="bash")
 
-                env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
-
-                with st.status("Trimming data...", expanded=True) as status:
-                    phase_display = st.empty()
-                    col1, col2 = st.columns(2)
-                    prices_metric = col1.empty()
-                    features_metric = col2.empty()
-                    status_text = st.empty()
-
+                with st.status("Culling data...", expanded=True) as status:
                     try:
-                        # Step 1: Estimate rows to delete
-                        phase_display.write("Phase: **Estimating**")
-                        status_text.write("Counting rows to delete...")
-
-                        from gefion.ui.components.database import get_connection
+                        # Step 1: Plan (fast — no COUNT(*) scans)
+                        status.update(label="Planning cull...")
                         with get_connection() as conn:
-                            with conn.cursor() as cur:
-                                # Build date conditions
-                                date_conds = []
-                                params = []
-                                if before_date:
-                                    date_conds.append("date < %s")
-                                    params.append(str(before_date))
-                                if after_date:
-                                    date_conds.append("date > %s")
-                                    params.append(str(after_date))
-                                date_where = " AND ".join(date_conds) if date_conds else "1=1"
+                            plan = plan_cull(conn, before_date=before_date, symbols=sym_list)
 
-                                # Count prices
-                                if symbols_filter:
-                                    sym_list = [s.strip().upper() for s in symbols_filter.split(",")]
-                                    sym_placeholders = ",".join(["%s"] * len(sym_list))
-                                    cur.execute(f"""
-                                        SELECT COUNT(*) FROM stock_ohlcv o
-                                        JOIN stocks s ON o.data_id = s.id
-                                        WHERE ({date_where}) AND s.symbol IN ({sym_placeholders})
-                                    """, params + sym_list)
-                                else:
-                                    cur.execute(f"SELECT COUNT(*) FROM stock_ohlcv WHERE {date_where}", params)
-                                price_count = cur.fetchone()[0]
-                                prices_metric.metric("Price Rows", f"~{price_count:,}")
-
-                                if trim_features:
-                                    if symbols_filter:
-                                        cur.execute(f"""
-                                            SELECT COUNT(*) FROM computed_features cf
-                                            JOIN stocks s ON cf.data_id = s.id
-                                            WHERE ({date_where.replace('date', 'cf.date')}) AND s.symbol IN ({sym_placeholders})
-                                        """, params + sym_list)
-                                    else:
-                                        cur.execute(f"SELECT COUNT(*) FROM computed_features WHERE {date_where}", params)
-                                    feature_count = cur.fetchone()[0]
-                                    features_metric.metric("Feature Rows", f"~{feature_count:,}")
-
-                        # Step 2: Delete prices
-                        phase_display.write("Phase: **Deleting Prices**")
-                        status_text.write("Deleting price rows...")
-
-                        result = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            env=env,
-                        )
-
-                        if result.returncode == 0:
-                            # Parse the complete JSON output
-                            try:
-                                data = json.loads(result.stdout)
-                                deleted = data.get("deleted_prices", 0)
-                                deleted_features = data.get("deleted_features", 0)
-                                prices_metric.metric("Price Rows", f"{deleted:,}", "deleted")
-                                if trim_features:
-                                    features_metric.metric("Feature Rows", f"{deleted_features:,}", "deleted")
-                                phase_display.write("Phase: **Complete**")
-                                status.update(label="Trim complete!", state="complete")
-                                st.success(
-                                    f"Deleted {deleted:,} price rows"
-                                    + (f", {deleted_features:,} feature rows" if trim_features else "")
-                                )
-                            except json.JSONDecodeError:
-                                status.update(label="Trim complete!", state="complete")
-                                st.info(result.stdout)
+                        if not plan:
+                            status.update(label="Nothing to cull", state="complete")
+                            st.info(f"No data found before {before_date}")
                         else:
-                            status.update(label="Trim failed", state="error")
-                            st.error(f"Failed: {result.stderr}")
+                            # Show plan
+                            for table, count in plan.items():
+                                st.markdown(f"- **{table}**: {count:,} rows")
+                            st.markdown(f"**Total: {sum(plan.values()):,} rows**")
+
+                            # Step 2: Execute
+                            status.update(label="Deleting data (leaf → root)...")
+                            with get_connection() as conn:
+                                result = execute_cull(conn, before_date=before_date, symbols=sym_list)
+
+                            # Show results
+                            total = sum(result.values())
+                            for table, count in result.items():
+                                st.markdown(f"- {table}: **{count:,}** deleted")
+
+                            # Step 3: Auto-vacuum
+                            status.update(label="Vacuuming to reclaim disk space...")
+                            with get_connection() as conn:
+                                conn.autocommit = True
+                                with conn.cursor() as cur:
+                                    cur.execute("VACUUM ANALYZE")
+
+                            status.update(label=f"Cull complete — {total:,} rows deleted + vacuumed", state="complete")
+                            st.success(f"Deleted {total:,} rows across {len(result)} tables. Disk space reclaimed.")
 
                     except Exception as e:
                         status.update(label="Error", state="error")
@@ -866,13 +807,12 @@ def render_maintenance_section():
 
     with col2:
         st.markdown("### Vacuum Database")
-        st.markdown("Reclaim disk space and optimize performance.")
+        st.markdown("Reclaim disk space and optimize performance. Runs automatically after cull.")
 
         if st.button("Vacuum", type="secondary"):
             with st.spinner("Vacuuming..."):
                 try:
                     from gefion.ui.components.database import get_connection
-
                     with get_connection() as conn:
                         conn.autocommit = True
                         with conn.cursor() as cur:
