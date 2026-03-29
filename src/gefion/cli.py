@@ -10168,6 +10168,17 @@ def data_cull(
                     table.add_row("[bold]Total[/bold]", f"[bold]{sum(result.values()):,}[/bold]")
                     console.print(table)
 
+                # Auto-vacuum after cull to reclaim disk space
+                if result and sum(result.values()) > 0:
+                    with create_span("cli.data_cull.vacuum"):
+                        if not json_output:
+                            emit("Vacuuming to reclaim disk space...")
+                        conn.autocommit = True
+                        with conn.cursor() as cur:
+                            cur.execute("VACUUM ANALYZE")
+                        if not json_output:
+                            emit("Vacuum complete")
+
     except Exception as exc:
         import traceback
         emit_error(f"Data cull failed: {exc}", json_output=json_output)
