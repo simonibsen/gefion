@@ -704,10 +704,9 @@ def _render_cull_status(state):
         label = "Cull failed"
         st_state = "error"
 
-    with st.status(label, expanded=True, state=st_state):
+    with st.expander(label, expanded=state.is_running):
         if state.is_running:
-            st.markdown("Deleting data in dependency order (predictions → features → OHLCV)...")
-            st.markdown("This may take several minutes for large datasets.")
+            st.info("Deleting data in dependency order (predictions → features → OHLCV). This may take several minutes.")
 
         # Parse and display JSON output
         output_lines = getattr(state, 'output_lines', [])
