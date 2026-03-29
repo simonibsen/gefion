@@ -627,7 +627,8 @@ def create_predictions_table(conn: Connection) -> None:
 def create_stocks_fundamentals_table(conn: Connection) -> None:
     """Time-series table for company fundamentals (market cap, PE, etc.)."""
     _ensure_timescaledb(conn)
-    with conn.cursor() as cur:
+    with create_span("db.schema.create_stocks_fundamentals_table") as span:
+      with conn.cursor() as cur:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS stocks_fundamentals (
@@ -663,7 +664,8 @@ def create_stocks_fundamentals_table(conn: Connection) -> None:
                 ON stocks_fundamentals(data_id, date DESC);
             """
         )
-    conn.commit()
+      conn.commit()
+      set_attributes(span, table="stocks_fundamentals")
 
 
 def migrate_stock_tables_to_data_id(conn: Connection) -> None:

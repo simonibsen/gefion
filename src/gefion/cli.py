@@ -7063,11 +7063,9 @@ def _update_all_impl(
     # --- Step 3: Auto-populate fundamentals for stocks missing metadata ---
     fundamentals_updated = 0
     try:
-        with create_span("data_update.fundamentals_check"):
+        with create_span("data_update.fundamentals_check") as fund_span:
             with db_connection(url) as conn:
                 with conn.cursor() as cur:
-                    # Find stocks that have OHLCV data but no sector (never had fundamentals fetched)
-                    # AND haven't been updated in the last 7 days
                     cur.execute("""
                         SELECT s.id, s.symbol FROM stocks s
                         WHERE s.symbol = ANY(%s)
@@ -7075,6 +7073,7 @@ def _update_all_impl(
                                OR s.updated_at < NOW() - INTERVAL '7 days')
                     """, (symbols,))
                     stale_stocks = cur.fetchall()
+                    set_attributes(fund_span, stale_count=len(stale_stocks))
 
             if stale_stocks and len(stale_stocks) <= 200:
                 if not json_output:
@@ -7097,7 +7096,9 @@ def _update_all_impl(
                     with init_schema_tables_conn as conn:
                         init_schema_tables(conn, ["stocks_fundamentals"])
 
-                    for stock_id, symbol in stale_stocks:
+                    with create_span("data_update.fundamentals_fetch",
+                                     stock_count=len(stale_stocks)) as fetch_span:
+                      for stock_id, symbol in stale_stocks:
                         try:
                             overview = client.fetch_overview(symbol)
                             if "Error Message" in overview or "Note" in overview:
@@ -7147,6 +7148,8 @@ def _update_all_impl(
                                 emit(f"  {symbol}: {sector[:20]}")
                         except Exception:
                             pass
+
+                      set_attributes(fetch_span, updated=fundamentals_updated)
 
                     if not json_output and fundamentals_updated:
                         emit(f"Fundamentals: {fundamentals_updated} updated")
