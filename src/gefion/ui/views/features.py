@@ -50,14 +50,10 @@ def get_page_context():
                     cur.execute("SELECT COUNT(*) FROM feature_definitions")
                     total = cur.fetchone()[0]
 
-                    # Coverage stats — use pg_stat to avoid 52s full hypertable scan
-                    cur.execute("""
-                        SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables
-                        WHERE relname = 'computed_features'
-                    """)
-                    row = cur.fetchone()
-                    # Approximate: if rows exist, assume all stocks have features
-                    has_features = (row[0] if row else 0) > 0
+                    # Coverage stats — use TimescaleDB chunk stats (parent n_live_tup is always 0)
+                    from gefion.ui.components.database import hypertable_approx_row_count
+                    approx_feature_rows = hypertable_approx_row_count(cur, 'computed_features')
+                    has_features = approx_feature_rows > 0
                     if has_features:
                         cur.execute("SELECT COUNT(*) FROM stocks")
                         symbols_with_features = cur.fetchone()[0]
@@ -827,7 +823,7 @@ def render_compute_tab():
 
         # Set environment
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
 
         # Start background process
         start_background_process("feat_compute", cmd, env)
@@ -1033,7 +1029,7 @@ def save_definition_to_json(defn: dict) -> tuple[bool, str]:
 
         # Run import command
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
 
         result = subprocess.run(
             [sys.executable, "-m", "gefion.cli", "feat-def-import", "--dir", str(definitions_dir)],
@@ -1077,7 +1073,7 @@ def save_function_to_json(func: dict) -> tuple[bool, str]:
 
         # Run import command
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
 
         result = subprocess.run(
             [sys.executable, "-m", "gefion.cli", "feat-fx-import", "--dir", str(functions_dir)],

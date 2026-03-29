@@ -249,3 +249,29 @@ def test_cull_order_models_before_runs():
         f"ml_models (idx {models_idx}) must come before ml_runs (idx {runs_idx}) "
         "because ml_models.train_run_id references ml_runs(id)"
     )
+
+
+def test_execute_cull_accepts_on_progress_callback():
+    """execute_cull should accept an on_progress callback for per-table status updates."""
+    import inspect
+    sig = inspect.signature(__import__('gefion.db.cull', fromlist=['execute_cull']).execute_cull)
+    assert 'on_progress' in sig.parameters, (
+        "execute_cull must accept an on_progress callback parameter"
+    )
+
+
+def test_orphan_detection_respects_train_run_id():
+    """ml_runs must not be considered orphaned if ml_models.train_run_id references them."""
+    from gefion.db.cull import _count_orphaned, _delete_orphaned
+
+    # Verify the SQL in both functions checks ml_models.train_run_id
+    import inspect
+    count_src = inspect.getsource(_count_orphaned)
+    delete_src = inspect.getsource(_delete_orphaned)
+
+    assert "train_run_id" in count_src, (
+        "_count_orphaned for ml_runs must check ml_models.train_run_id references"
+    )
+    assert "train_run_id" in delete_src, (
+        "_delete_orphaned for ml_runs must check ml_models.train_run_id references"
+    )

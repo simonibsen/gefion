@@ -29,7 +29,7 @@ def get_latest_data_date() -> Optional[date]:
         with create_span("ui.status.get_latest_data_date"):
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                    cur.execute("SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1")
                     result = cur.fetchone()
                     return result[0] if result else None
     except Exception:
@@ -65,22 +65,17 @@ def get_system_stats() -> Optional[SystemStats]:
                     cur.execute("SELECT COUNT(*) FROM stocks WHERE status = 'Active'")
                     active_stocks = cur.fetchone()[0]
 
-                    # Use pg_stat approximation for large hypertables (instant vs 20s+ scans)
-                    cur.execute("""
-                        SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables
-                        WHERE relname = 'stock_ohlcv'
-                    """)
-                    row = cur.fetchone()
-                    ohlcv_rows = row[0] if row else 0
+                    # Use TimescaleDB chunk stats for hypertable row counts
+                    # (parent n_live_tup is always 0 for hypertables)
+                    from gefion.ui.components.database import hypertable_approx_row_count
+                    ohlcv_rows = hypertable_approx_row_count(cur, 'stock_ohlcv')
+                    feature_rows = hypertable_approx_row_count(cur, 'computed_features')
 
                     cur.execute("""
-                        SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables
-                        WHERE relname = 'computed_features'
+                        SELECT
+                            (SELECT date FROM stock_ohlcv ORDER BY date ASC LIMIT 1),
+                            (SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1)
                     """)
-                    row = cur.fetchone()
-                    feature_rows = row[0] if row else 0
-
-                    cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
                     date_range = cur.fetchone()
 
                     # ML tables may not exist yet - query gracefully
@@ -93,12 +88,7 @@ def get_system_stats() -> Optional[SystemStats]:
                         pass
 
                     try:
-                        cur.execute("""
-                            SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables
-                            WHERE relname = 'predictions'
-                        """)
-                        row = cur.fetchone()
-                        prediction_count = row[0] if row else 0
+                        prediction_count = hypertable_approx_row_count(cur, 'predictions')
                     except Exception:
                         pass
 

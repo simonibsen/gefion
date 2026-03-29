@@ -69,7 +69,8 @@ def _count_orphaned(cur, table: str) -> int:
         cur.execute(
             "SELECT COUNT(*) FROM ml_runs r "
             "WHERE NOT EXISTS (SELECT 1 FROM predictions p WHERE p.run_id = r.id) "
-            "AND NOT EXISTS (SELECT 1 FROM prediction_outcomes po WHERE po.run_id = r.id)"
+            "AND NOT EXISTS (SELECT 1 FROM prediction_outcomes po WHERE po.run_id = r.id) "
+            "AND NOT EXISTS (SELECT 1 FROM ml_models m WHERE m.train_run_id = r.id)"
         )
     elif table == "ml_models":
         cur.execute(
@@ -99,11 +100,18 @@ def plan_cull(
     conn: Connection,
     before_date: date,
     symbols: Optional[List[str]] = None,
+    on_progress: Optional[callable] = None,
 ) -> Dict[str, int]:
-    """Dry-run: return {table_name: row_count_to_delete} in dependency order."""
+    """Dry-run: return {table_name: row_count_to_delete} in dependency order.
+
+    Args:
+        on_progress: Optional callback(table, count, step, total_steps) called
+                     after each table is scanned.
+    """
     with create_span("db.cull.plan", before_date=str(before_date)) as span:
         result: Dict[str, int] = OrderedDict()
         data_ids = None
+        total_steps = len(CULL_ORDER)
 
         with conn.cursor() as cur:
             if symbols:
@@ -112,20 +120,23 @@ def plan_cull(
                     set_attributes(span, total_rows=0)
                     return result
 
-            for table, date_col, has_symbol in CULL_ORDER:
+            for step, (table, date_col, has_symbol) in enumerate(CULL_ORDER, 1):
                 if not _table_exists(cur, table):
+                    if on_progress:
+                        on_progress(table, 0, step, total_steps)
                     continue
 
                 if date_col is not None:
                     sym_ids = data_ids if (has_symbol and data_ids is not None) else None
                     count = _count_date_filtered(cur, table, date_col, before_date, sym_ids)
                 else:
-                    # Orphan detection — only after date-filtered deletes would happen
-                    # In plan mode we report current orphan count (conservative estimate)
                     count = _count_orphaned(cur, table)
 
                 if count > 0:
                     result[table] = count
+
+                if on_progress:
+                    on_progress(table, count, step, total_steps)
 
         set_attributes(span, total_rows=sum(result.values()))
         return result
@@ -160,7 +171,8 @@ def _delete_orphaned(cur, table: str) -> int:
         cur.execute(
             "DELETE FROM ml_runs r "
             "WHERE NOT EXISTS (SELECT 1 FROM predictions p WHERE p.run_id = r.id) "
-            "AND NOT EXISTS (SELECT 1 FROM prediction_outcomes po WHERE po.run_id = r.id)"
+            "AND NOT EXISTS (SELECT 1 FROM prediction_outcomes po WHERE po.run_id = r.id) "
+            "AND NOT EXISTS (SELECT 1 FROM ml_models m WHERE m.train_run_id = r.id)"
         )
     elif table == "ml_models":
         cur.execute(
@@ -181,11 +193,18 @@ def execute_cull(
     conn: Connection,
     before_date: date,
     symbols: Optional[List[str]] = None,
+    on_progress: Optional[callable] = None,
 ) -> Dict[str, int]:
-    """Execute the cull, deleting in dependency order. Returns {table: rows_deleted}."""
+    """Execute the cull, deleting in dependency order. Returns {table: rows_deleted}.
+
+    Args:
+        on_progress: Optional callback(table, deleted, step, total_steps) called
+                     after each table is processed.
+    """
     with create_span("db.cull.execute", before_date=str(before_date)) as span:
         result: Dict[str, int] = OrderedDict()
         data_ids = None
+        total_steps = len(CULL_ORDER)
 
         with conn.cursor() as cur:
             if symbols:
@@ -194,8 +213,10 @@ def execute_cull(
                     set_attributes(span, total_deleted=0)
                     return result
 
-            for table, date_col, has_symbol in CULL_ORDER:
+            for step, (table, date_col, has_symbol) in enumerate(CULL_ORDER, 1):
                 if not _table_exists(cur, table):
+                    if on_progress:
+                        on_progress(table, 0, step, total_steps)
                     continue
 
                 if date_col is not None:
@@ -208,6 +229,9 @@ def execute_cull(
                     result[table] = deleted
                     add_event(span, f"deleted_{table}", count=deleted)
                     logger.info("Culled %d rows from %s (before %s)", deleted, table, before_date)
+
+                if on_progress:
+                    on_progress(table, deleted, step, total_steps)
 
         conn.commit()
         set_attributes(span, total_deleted=sum(result.values()))

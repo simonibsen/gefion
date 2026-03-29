@@ -10109,7 +10109,33 @@ def data_cull(
     try:
         with db_connection(None) as conn:
             if dry_run:
-                plan = plan_cull(conn, before_date=before_date, symbols=symbol_list)
+                if not json_output:
+                    from rich.console import Console
+                    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+                    console = Console()
+                    _progress = Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        MofNCompleteColumn(),
+                        console=console,
+                    )
+                    _task_id = None
+
+                    def _plan_progress(table, count, step, total_steps):
+                        nonlocal _task_id
+                        if _task_id is None:
+                            _task_id = _progress.add_task("Scanning...", total=total_steps)
+                            _progress.start()
+                        _progress.update(_task_id, completed=step,
+                                         description=f"Scanning [cyan]{table}[/cyan]")
+
+                    plan = plan_cull(conn, before_date=before_date, symbols=symbol_list,
+                                    on_progress=_plan_progress)
+                    if _task_id is not None:
+                        _progress.stop()
+                else:
+                    plan = plan_cull(conn, before_date=before_date, symbols=symbol_list)
 
                 if json_output:
                     emit("Data Cull Plan (dry run)", data={
@@ -10120,9 +10146,7 @@ def data_cull(
                         "dry_run": True,
                     }, json_output=True)
                 else:
-                    from rich.console import Console
                     from rich.table import Table
-                    console = Console()
 
                     if not plan:
                         console.print(f"\n[green]No data found before {before_date}.[/green]")
@@ -10139,10 +10163,48 @@ def data_cull(
                     console.print(table)
                     console.print("\n[dim]Run with --confirm to execute.[/dim]")
             else:
-                result = execute_cull(conn, before_date=before_date, symbols=symbol_list)
+                if json_output:
+                    def _on_progress(table, deleted, step, total_steps):
+                        emit(f"Deleting from {table}", data={
+                            "phase": "cull",
+                            "table": table,
+                            "deleted": deleted,
+                            "step": step,
+                            "total_steps": total_steps,
+                        }, json_output=True)
+                else:
+                    from rich.console import Console
+                    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+                    console = Console()
+                    _progress = Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        MofNCompleteColumn(),
+                        console=console,
+                    )
+                    _task_id = None
+
+                    def _on_progress(table, deleted, step, total_steps):
+                        nonlocal _task_id
+                        if _task_id is None:
+                            _task_id = _progress.add_task("Culling...", total=total_steps)
+                            _progress.start()
+                        suffix = f" ({deleted:,} rows)" if deleted > 0 else ""
+                        _progress.update(_task_id, completed=step,
+                                         description=f"[cyan]{table}[/cyan]{suffix}")
+
+                result = execute_cull(
+                    conn, before_date=before_date, symbols=symbol_list,
+                    on_progress=_on_progress,
+                )
+
+                if not json_output and _task_id is not None:
+                    _progress.stop()
 
                 if json_output:
                     emit("Data Cull Complete", data={
+                        "phase": "complete",
                         "before_date": str(before_date),
                         "symbols": symbol_list,
                         "deleted": result,
@@ -10150,9 +10212,7 @@ def data_cull(
                         "dry_run": False,
                     }, json_output=True)
                 else:
-                    from rich.console import Console
                     from rich.table import Table
-                    console = Console()
 
                     if not result:
                         console.print(f"\n[green]No data found before {before_date}.[/green]")
@@ -10171,13 +10231,15 @@ def data_cull(
                 # Auto-vacuum after cull to reclaim disk space
                 if result and sum(result.values()) > 0:
                     with create_span("cli.data_cull.vacuum"):
-                        if not json_output:
-                            emit("Vacuuming to reclaim disk space...")
+                        if json_output:
+                            emit("Vacuuming database", data={"phase": "vacuum"}, json_output=True)
+                        else:
+                            console.print("\n[dim]Vacuuming to reclaim disk space...[/dim]")
                         conn.autocommit = True
                         with conn.cursor() as cur:
                             cur.execute("VACUUM ANALYZE")
                         if not json_output:
-                            emit("Vacuum complete")
+                            console.print("[green]Vacuum complete.[/green]")
 
     except Exception as exc:
         import traceback

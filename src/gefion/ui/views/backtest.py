@@ -820,7 +820,7 @@ def render_run_section():
 
         # Build command
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
 
         cmd = [
             sys.executable, "-m", "gefion.cli", "backtest", "run",
@@ -1076,7 +1076,7 @@ def render_compare_section():
 
         # Build command
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
 
         cmd = [
             sys.executable, "-m", "gefion.cli", "backtest", "compare",

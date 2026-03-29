@@ -331,7 +331,7 @@ def render_propose_section():
         st.code(cli_cmd, language="bash")
 
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
 
         with st.status("Proposing experiment...", expanded=True) as status:
             try:
@@ -475,7 +475,7 @@ def render_results_section():
 def approve_experiment(exp_id: int):
     """Approve an experiment."""
     env = os.environ.copy()
-    env["OTEL_ENABLED"] = "false"
+    # OTEL_ENABLED inherited from parent
 
     cmd = [sys.executable, "-m", "gefion.cli", "experiment", "approve", "--id", str(exp_id)]
 
@@ -493,7 +493,7 @@ def approve_experiment(exp_id: int):
 def reject_experiment(exp_id: int):
     """Reject an experiment."""
     env = os.environ.copy()
-    env["OTEL_ENABLED"] = "false"
+    # OTEL_ENABLED inherited from parent
 
     cmd = [
         sys.executable, "-m", "gefion.cli", "experiment", "reject",
@@ -512,7 +512,7 @@ def reject_experiment(exp_id: int):
 def run_experiment(exp_id: int):
     """Run an experiment."""
     env = os.environ.copy()
-    env["OTEL_ENABLED"] = "false"
+    # OTEL_ENABLED inherited from parent
 
     cmd = [sys.executable, "-m", "gefion.cli", "experiment", "run", "--id", str(exp_id), "--json"]
 
@@ -565,7 +565,7 @@ def run_experiment(exp_id: int):
 def load_experiment_results(exp_id: int, show_trials: bool = False):
     """Load and display experiment results."""
     env = os.environ.copy()
-    env["OTEL_ENABLED"] = "false"
+    # OTEL_ENABLED inherited from parent
 
     cmd = [sys.executable, "-m", "gefion.cli", "experiment", "results", "--id", str(exp_id), "--json"]
     if show_trials:

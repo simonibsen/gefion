@@ -87,7 +87,7 @@ def check_conditions() -> Optional[SystemConditions]:
                         logger.debug("Could not query stock count: %s", e)
 
                     # 1. Data freshness
-                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                    cur.execute("SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1")
                     row = cur.fetchone()
                     if row and row[0]:
                         cond.data_last_date = row[0]
@@ -407,7 +407,7 @@ def render_action_card(action: Action):
                 parts = parts[1:]
             cmd = [sys.executable, "-m", "gefion.cli"] + parts + ["--json"]
             env = os.environ.copy()
-            env["OTEL_ENABLED"] = "false"
+            # OTEL_ENABLED inherited from parent
             start_background_process(action.process_key, cmd, env)
             st.rerun()
 
@@ -519,7 +519,7 @@ def get_page_context():
                 with conn.cursor() as cur:
                     cur.execute("SELECT COUNT(*) FROM ml_models WHERE active = true")
                     model_count = cur.fetchone()[0]
-                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                    cur.execute("SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1")
                     latest = cur.fetchone()[0]
                     cur.execute("SELECT COUNT(*) FROM predictions")
                     pred_count = cur.fetchone()[0]
