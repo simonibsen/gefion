@@ -59,6 +59,38 @@ def get_connection():
             pass  # Connection may already be closed
 
 
+def hypertable_approx_row_count(cur, table_name: str) -> int:
+    """Get approximate row count for a TimescaleDB hypertable.
+
+    The parent table's n_live_tup is always 0 for hypertables because
+    data lives in chunk tables. This sums n_live_tup across all chunks.
+    Falls back to parent n_live_tup for non-hypertables.
+    """
+    try:
+        cur.execute("""
+            SELECT COALESCE(SUM(s.n_live_tup), 0)
+            FROM timescaledb_information.chunks c
+            JOIN pg_stat_user_tables s ON s.relname = c.chunk_name
+            WHERE c.hypertable_name = %s
+        """, (table_name,))
+        row = cur.fetchone()
+        count = row[0] if row else 0
+        if count > 0:
+            return count
+    except Exception:
+        pass
+    # Fallback: regular table or no chunks yet
+    try:
+        cur.execute(
+            "SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables WHERE relname = %s",
+            (table_name,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else 0
+    except Exception:
+        return 0
+
+
 def get_symbols(status: str = "Active") -> List[str]:
     """Get list of symbols from database."""
     with create_span("ui.database.get_symbols", status=status):

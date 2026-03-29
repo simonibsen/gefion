@@ -7060,12 +7060,114 @@ def _update_all_impl(
         feature_writer_workers=feature_writer,
     )
 
+    # --- Step 3: Auto-populate fundamentals for stocks missing metadata ---
+    fundamentals_updated = 0
+    try:
+        with create_span("data_update.fundamentals_check") as fund_span:
+            with db_connection(url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT s.id, s.symbol FROM stocks s
+                        WHERE s.symbol = ANY(%s)
+                          AND (s.sector IS NULL OR s.updated_at IS NULL
+                               OR s.updated_at < NOW() - INTERVAL '7 days')
+                    """, (symbols,))
+                    stale_stocks = cur.fetchall()
+                    set_attributes(fund_span, stale_count=len(stale_stocks))
+
+            if stale_stocks and len(stale_stocks) <= 200:
+                if not json_output:
+                    emit(f"Updating fundamentals for {len(stale_stocks)} stocks...")
+
+                if client is None:
+                    try:
+                        client = AlphaVantageClient(
+                            api_key=SETTINGS.alphavantage_api_key,
+                            calls_per_minute=calls_per_minute,
+                        )
+                    except ValueError:
+                        client = None
+
+                if client:
+                    from gefion.alphavantage.catalog import parse_overview
+                    from datetime import date as date_cls
+
+                    init_schema_tables_conn = db_connection(url)
+                    with init_schema_tables_conn as conn:
+                        init_schema_tables(conn, ["stocks_fundamentals"])
+
+                    with create_span("data_update.fundamentals_fetch",
+                                     stock_count=len(stale_stocks)) as fetch_span:
+                      for stock_id, symbol in stale_stocks:
+                        try:
+                            overview = client.fetch_overview(symbol)
+                            if "Error Message" in overview or "Note" in overview:
+                                continue
+                            parsed = parse_overview(overview)
+
+                            with db_connection(url) as conn:
+                                with conn.cursor() as cur:
+                                    # Update stocks table (snapshot)
+                                    cur.execute("""
+                                        UPDATE stocks
+                                        SET name = COALESCE(%s, name),
+                                            sector = COALESCE(%s, sector),
+                                            industry = COALESCE(%s, industry),
+                                            updated_at = NOW()
+                                        WHERE id = %s
+                                    """, (parsed["name"], parsed["sector"],
+                                          parsed["industry"], stock_id))
+
+                                    # Insert into stocks_fundamentals (time-series)
+                                    cur.execute("""
+                                        INSERT INTO stocks_fundamentals
+                                            (data_id, date, market_cap, pe_ratio, forward_pe,
+                                             peg_ratio, book_value, dividend_yield, eps,
+                                             revenue_per_share, profit_margin, operating_margin,
+                                             return_on_equity, beta, ev_to_ebitda, shares_outstanding)
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                        ON CONFLICT (data_id, date) DO UPDATE SET
+                                            market_cap = EXCLUDED.market_cap,
+                                            pe_ratio = EXCLUDED.pe_ratio,
+                                            updated_at = NOW()
+                                    """, (
+                                        stock_id, date_cls.today(),
+                                        parsed["market_cap"], parsed["pe_ratio"],
+                                        parsed["forward_pe"], parsed["peg_ratio"],
+                                        parsed["book_value"], parsed["dividend_yield"],
+                                        parsed["eps"], parsed["revenue_per_share"],
+                                        parsed["profit_margin"], parsed["operating_margin"],
+                                        parsed["return_on_equity"], parsed["beta"],
+                                        parsed["ev_to_ebitda"], parsed["shares_outstanding"],
+                                    ))
+                                conn.commit()
+
+                            fundamentals_updated += 1
+                            if not json_output:
+                                sector = parsed.get("sector") or "N/A"
+                                emit(f"  {symbol}: {sector[:20]}")
+                        except Exception:
+                            pass
+
+                      set_attributes(fetch_span, updated=fundamentals_updated)
+
+                    if not json_output and fundamentals_updated:
+                        emit(f"Fundamentals: {fundamentals_updated} updated")
+
+            elif stale_stocks and len(stale_stocks) > 200:
+                if not json_output:
+                    emit(f"[yellow]{len(stale_stocks)} stocks need fundamentals. "
+                         f"Run 'gefion fundamentals-update --limit 200' to update in batches.[/yellow]")
+    except Exception:
+        pass  # Fundamentals are optional — don't fail data-update
+
     emit(
         "Update complete",
         data={
             "symbols": symbols,
             "price_inserted": price_inserted,
             "features_inserted": features_inserted,
+            "fundamentals_updated": fundamentals_updated,
             "price_fetch_workers": price_fetch,
             "price_writer_workers": price_writer,
             "feature_fetch_workers": feature_fetch,
@@ -10007,7 +10109,33 @@ def data_cull(
     try:
         with db_connection(None) as conn:
             if dry_run:
-                plan = plan_cull(conn, before_date=before_date, symbols=symbol_list)
+                if not json_output:
+                    from rich.console import Console
+                    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+                    console = Console()
+                    _progress = Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        MofNCompleteColumn(),
+                        console=console,
+                    )
+                    _task_id = None
+
+                    def _plan_progress(table, count, step, total_steps):
+                        nonlocal _task_id
+                        if _task_id is None:
+                            _task_id = _progress.add_task("Scanning...", total=total_steps)
+                            _progress.start()
+                        _progress.update(_task_id, completed=step,
+                                         description=f"Scanning [cyan]{table}[/cyan]")
+
+                    plan = plan_cull(conn, before_date=before_date, symbols=symbol_list,
+                                    on_progress=_plan_progress)
+                    if _task_id is not None:
+                        _progress.stop()
+                else:
+                    plan = plan_cull(conn, before_date=before_date, symbols=symbol_list)
 
                 if json_output:
                     emit("Data Cull Plan (dry run)", data={
@@ -10018,9 +10146,7 @@ def data_cull(
                         "dry_run": True,
                     }, json_output=True)
                 else:
-                    from rich.console import Console
                     from rich.table import Table
-                    console = Console()
 
                     if not plan:
                         console.print(f"\n[green]No data found before {before_date}.[/green]")
@@ -10037,10 +10163,48 @@ def data_cull(
                     console.print(table)
                     console.print("\n[dim]Run with --confirm to execute.[/dim]")
             else:
-                result = execute_cull(conn, before_date=before_date, symbols=symbol_list)
+                if json_output:
+                    def _on_progress(table, deleted, step, total_steps):
+                        emit(f"Deleting from {table}", data={
+                            "phase": "cull",
+                            "table": table,
+                            "deleted": deleted,
+                            "step": step,
+                            "total_steps": total_steps,
+                        }, json_output=True)
+                else:
+                    from rich.console import Console
+                    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+                    console = Console()
+                    _progress = Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        MofNCompleteColumn(),
+                        console=console,
+                    )
+                    _task_id = None
+
+                    def _on_progress(table, deleted, step, total_steps):
+                        nonlocal _task_id
+                        if _task_id is None:
+                            _task_id = _progress.add_task("Culling...", total=total_steps)
+                            _progress.start()
+                        suffix = f" ({deleted:,} rows)" if deleted > 0 else ""
+                        _progress.update(_task_id, completed=step,
+                                         description=f"[cyan]{table}[/cyan]{suffix}")
+
+                result = execute_cull(
+                    conn, before_date=before_date, symbols=symbol_list,
+                    on_progress=_on_progress,
+                )
+
+                if not json_output and _task_id is not None:
+                    _progress.stop()
 
                 if json_output:
                     emit("Data Cull Complete", data={
+                        "phase": "complete",
                         "before_date": str(before_date),
                         "symbols": symbol_list,
                         "deleted": result,
@@ -10048,9 +10212,7 @@ def data_cull(
                         "dry_run": False,
                     }, json_output=True)
                 else:
-                    from rich.console import Console
                     from rich.table import Table
-                    console = Console()
 
                     if not result:
                         console.print(f"\n[green]No data found before {before_date}.[/green]")
@@ -10065,6 +10227,19 @@ def data_cull(
 
                     table.add_row("[bold]Total[/bold]", f"[bold]{sum(result.values()):,}[/bold]")
                     console.print(table)
+
+                # Auto-vacuum after cull to reclaim disk space
+                if result and sum(result.values()) > 0:
+                    with create_span("cli.data_cull.vacuum"):
+                        if json_output:
+                            emit("Vacuuming database", data={"phase": "vacuum"}, json_output=True)
+                        else:
+                            console.print("\n[dim]Vacuuming to reclaim disk space...[/dim]")
+                        conn.autocommit = True
+                        with conn.cursor() as cur:
+                            cur.execute("VACUUM ANALYZE")
+                        if not json_output:
+                            console.print("[green]Vacuum complete.[/green]")
 
     except Exception as exc:
         import traceback

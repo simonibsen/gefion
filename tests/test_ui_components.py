@@ -636,6 +636,22 @@ class TestStatusComponentStructure:
         assert "def get_latest_data_date(" in content
         assert "get_system_stats.clear()" in content
 
+    def test_uses_hypertable_aware_row_counts(self, status_module_path):
+        """Row counts must sum chunk stats, not parent n_live_tup (always 0 for TimescaleDB)."""
+        content = status_module_path.read_text()
+        # Should use hypertable_approx_row_count or sum across chunks
+        assert "hypertable_approx_row_count" in content or "chunks" in content, (
+            "Status must use TimescaleDB-aware row counts (parent n_live_tup is always 0)"
+        )
+
+    def test_no_max_date_on_hypertables(self, status_module_path):
+        """Must not use MAX(date)/MIN(date) on hypertables — use ORDER BY LIMIT 1 instead."""
+        content = status_module_path.read_text()
+        # MAX(date) FROM stock_ohlcv scans all chunks (1s+), ORDER BY date DESC LIMIT 1 uses index (29ms)
+        assert "MAX(date) FROM stock_ohlcv" not in content, (
+            "Use ORDER BY date DESC LIMIT 1 instead of MAX(date) on hypertables"
+        )
+
     def test_ml_table_queries_handle_missing_tables(self, status_module_path):
         """ML table queries should handle missing tables gracefully.
 
@@ -659,6 +675,20 @@ class TestCLICommandDisplay:
     def views_dir(self):
         """Get the views directory."""
         return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
+
+    def test_data_update_no_raw_timeframe_options(self, views_dir):
+        """Data update should not expose raw API timeframe options (compact/full)."""
+        content = (views_dir / "data.py").read_text()
+        # Should not have a selectbox with compact/full — these are API internals
+        assert '"compact"' not in content or 'Force full re-download' in content, (
+            "Raw AlphaVantage timeframe options should not be in the main UI"
+        )
+
+    def test_data_update_has_advanced_options(self, views_dir):
+        """Data update should have an Advanced expander for power-user options."""
+        content = (views_dir / "data.py").read_text()
+        assert 'Advanced' in content
+        assert 'full re-download' in content.lower() or 'full history' in content.lower()
 
     def test_data_view_shows_cli_command(self, views_dir):
         """Data view should display equivalent CLI commands."""
@@ -804,6 +834,19 @@ class TestBackgroundProcessPersistence:
         # Should store output in background thread
         assert 'state.output_lines.append' in content
 
+    def test_process_state_has_completed_at(self, views_dir):
+        """ProcessState should track completion time for auto-clearing stale states."""
+        content = (views_dir / "data.py").read_text()
+        assert 'completed_at' in content
+
+    def test_stale_process_state_auto_cleared(self, views_dir):
+        """Completed process states should be auto-cleared after a timeout."""
+        content = (views_dir / "data.py").read_text()
+        # get_process_state should auto-clear stale completed states
+        assert 'completed_at' in content
+        # Should check elapsed time since completion
+        assert 'auto-clear' in content.lower() or 'stale' in content.lower()
+
     def test_render_process_status_shows_cli_output(self, views_dir):
         """Process status display should show CLI output log."""
         content = (views_dir / "data.py").read_text()
@@ -816,6 +859,27 @@ class TestBackgroundProcessPersistence:
         # Should handle old session state objects that don't have new fields
         assert "getattr(state, 'rate_per_sec'" in content
         assert "getattr(state, 'output_lines'" in content
+
+
+class TestCullStatusRenderer:
+    """Test the cull status renderer handles per-table progress."""
+
+    @pytest.fixture
+    def views_dir(self):
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
+
+    def test_cull_status_handles_progress_events(self, views_dir):
+        """Cull status renderer should display per-table progress lines."""
+        content = (views_dir / "data.py").read_text()
+        # Should handle "phase" key in JSON progress events
+        assert '"phase"' in content or "'phase'" in content
+        # Should show table name being processed
+        assert 'culling' in content.lower() or 'processing' in content.lower() or 'deleting' in content.lower()
+
+    def test_cull_status_shows_vacuum_phase(self, views_dir):
+        """Cull status should show vacuum phase."""
+        content = (views_dir / "data.py").read_text()
+        assert 'vacuum' in content.lower() or 'Vacuum' in content
 
 
 class TestFeaturesView:

@@ -21,7 +21,7 @@ def _get_charts_context_data() -> Dict[str, Any]:
         with create_span("ui.charts._get_charts_context_data"):
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                    cur.execute("SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1")
                     row = cur.fetchone()
                     if row and row[0]:
                         data["data_age_days"] = (date.today() - row[0]).days
@@ -32,7 +32,7 @@ def _get_charts_context_data() -> Dict[str, Any]:
                                ROUND(((o.close - o.open) / NULLIF(o.open, 0)) * 100, 2) AS pct_change
                         FROM stock_ohlcv o
                         JOIN stocks s ON o.data_id = s.id
-                        WHERE o.date = (SELECT MAX(date) FROM stock_ohlcv)
+                        WHERE o.date = (SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1)
                         ORDER BY ABS((o.close - o.open) / NULLIF(o.open, 0)) DESC
                         LIMIT 5
                     """)
@@ -309,7 +309,7 @@ def _render_quick_top_movers() -> None:
                             SELECT s.symbol
                             FROM stock_ohlcv o
                             JOIN stocks s ON o.data_id = s.id
-                            WHERE o.date = (SELECT MAX(date) FROM stock_ohlcv)
+                            WHERE o.date = (SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1)
                             ORDER BY ABS((o.close - o.open) / NULLIF(o.open, 0)) DESC
                             LIMIT 5
                         """)

@@ -331,13 +331,14 @@ def fetch_pipeline_health(conn: psycopg.Connection) -> Dict[str, Any]:
         from datetime import date as d
         result: Dict[str, Any] = {"freshness": [], "coverage": {}, "predictions": []}
         with conn.cursor() as cur:
-            # Single query for all freshness data (fast -- MAX on indexed columns)
+            # Use ORDER BY LIMIT 1 instead of MAX() — TimescaleDB hypertables
+            # scan all chunks for MAX() but can use index for ORDER BY DESC LIMIT 1
             cur.execute("""
-                SELECT 'OHLCV', MAX(date) FROM stock_ohlcv
+                SELECT 'OHLCV', (SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1)
                 UNION ALL
-                SELECT 'Features', MAX(date) FROM computed_features
+                SELECT 'Features', (SELECT date FROM computed_features ORDER BY date DESC LIMIT 1)
                 UNION ALL
-                SELECT 'Predictions', MAX(prediction_date) FROM predictions
+                SELECT 'Predictions', (SELECT prediction_date FROM predictions ORDER BY prediction_date DESC LIMIT 1)
             """)
             for name, latest in cur.fetchall():
                 if latest:

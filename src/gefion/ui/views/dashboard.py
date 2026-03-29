@@ -20,13 +20,14 @@ def _get_dashboard_context_data():
                 with conn.cursor() as cur:
                     cur.execute("SELECT COUNT(*) FROM stocks")
                     data["stocks"] = cur.fetchone()[0]
-                    cur.execute("SELECT MAX(date) FROM stock_ohlcv")
-                    latest = cur.fetchone()[0]
+                    cur.execute("SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1")
+                    row = cur.fetchone()
+                    latest = row[0] if row else None
                     if latest:
                         data["latest_data"] = str(latest)
                         data["data_age_days"] = (date_type.today() - latest).days
                         # Top movers — use fast direct join
-                        cur.execute("SELECT MAX(date) FROM stock_ohlcv WHERE date < %s", (latest,))
+                        cur.execute("SELECT date FROM stock_ohlcv WHERE date < %s ORDER BY date DESC LIMIT 1", (latest,))
                         prev = cur.fetchone()[0]
                         if prev:
                             cur.execute("""
@@ -89,11 +90,12 @@ def get_market_movers() -> Optional[MarketMovers]:
           with get_connection() as conn:
             with conn.cursor() as cur:
                 # Fast: get the 2 most recent dates first, then join
-                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
-                latest = cur.fetchone()[0]
+                cur.execute("SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1")
+                row = cur.fetchone()
+                latest = row[0] if row else None
                 if not latest:
                     return None
-                cur.execute("SELECT MAX(date) FROM stock_ohlcv WHERE date < %s", (latest,))
+                cur.execute("SELECT date FROM stock_ohlcv WHERE date < %s ORDER BY date DESC LIMIT 1", (latest,))
                 prev = cur.fetchone()[0]
                 if not prev:
                     return None
@@ -195,17 +197,14 @@ def get_gefion_insights() -> Optional[GefionInsights]:
                 cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
                 insights.features_defined = cur.fetchone()[0] or 0
 
-                cur.execute("SELECT MAX(date) FROM computed_features")
-                latest_date = cur.fetchone()[0]
+                cur.execute("SELECT date FROM computed_features ORDER BY date DESC LIMIT 1")
+                row = cur.fetchone()
+                latest_date = row[0] if row else None
                 insights.latest_feature_date = str(latest_date) if latest_date else None
 
-                # Use pg_stat for approximate row count (instant, no scan)
-                cur.execute("""
-                    SELECT n_live_tup FROM pg_stat_user_tables
-                    WHERE relname = 'computed_features'
-                """)
-                row = cur.fetchone()
-                approx_rows = row[0] if row else 0
+                # Use TimescaleDB chunk stats (parent n_live_tup is always 0)
+                from gefion.ui.components.database import hypertable_approx_row_count
+                approx_rows = hypertable_approx_row_count(cur, 'computed_features')
 
                 # Approximate: features_computed = active definitions, symbols = stocks count
                 insights.features_computed = insights.features_defined

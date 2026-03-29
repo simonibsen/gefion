@@ -193,7 +193,7 @@ def _get_models() -> list[dict]:
 def _render_dataset_inspection(ds: dict):
     """Render dataset inspection panel with details and dependent models."""
     env = os.environ.copy()
-    env["OTEL_ENABLED"] = "false"
+    # OTEL_ENABLED inherited from parent
 
     result = subprocess.run(
         [
@@ -304,7 +304,7 @@ def _render_feature_importance(model: dict, model_data: dict):
 
     if st.button("Compute", key=f"fi_compute_{model['id']}"):
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
 
         result = subprocess.run(
             [
@@ -342,7 +342,7 @@ def _render_feature_importance(model: dict, model_data: dict):
 def _render_model_inspection(model: dict):
     """Render model inspection panel with details and predictions."""
     env = os.environ.copy()
-    env["OTEL_ENABLED"] = "false"
+    # OTEL_ENABLED inherited from parent
 
     result = subprocess.run(
         [
@@ -633,7 +633,7 @@ def render_dataset_section():
         disabled=(dataset_exists and not confirm_overwrite),
     ):
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
         env["PYTHONUNBUFFERED"] = "1"  # Ensure real-time output
 
         horizons_str = ",".join(str(h) for h in horizons)
@@ -813,7 +813,7 @@ def render_dataset_section():
                     if st.button("", icon=":material/delete:", key=f"del_{ds['id']}", help="Delete dataset"):
                         # Run delete command
                         env = os.environ.copy()
-                        env["OTEL_ENABLED"] = "false"
+                        # OTEL_ENABLED inherited from parent
                         result = subprocess.run(
                             [
                                 sys.executable, "-m", "gefion.cli", "ml", "dataset-delete",
@@ -1223,7 +1223,7 @@ def render_train_section():
 
     if st.button("Train Model", type="primary", width="stretch"):
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
 
         if model_type == "Quantile Regression":
@@ -1391,7 +1391,7 @@ def render_train_section():
                 if st.button("", icon=":material/delete:", key=f"del_model_{model['id']}", help="Delete model"):
                     # Run delete command
                     env = os.environ.copy()
-                    env["OTEL_ENABLED"] = "false"
+                    # OTEL_ENABLED inherited from parent
                     result = subprocess.run(
                         [
                             sys.executable, "-m", "gefion.cli", "ml", "model-delete",
@@ -1577,7 +1577,7 @@ def _render_tune_section_inline(
 
     if st.button("Start Tuning", key="tune_inline_start"):
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
         env["PYTHONUNBUFFERED"] = "1"
 
         cmd = [
@@ -1783,7 +1783,7 @@ def _render_tune_section(datasets: list):
 
     if st.button("Start Tuning", type="primary", key="tune_start"):
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
 
         cmd = [
@@ -1955,7 +1955,7 @@ def render_predict_section():
             from gefion.ui.components.database import get_connection
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT MAX(date) FROM computed_features")
+                    cur.execute("SELECT date FROM computed_features ORDER BY date DESC LIMIT 1")
                     row = cur.fetchone()
                     if row and row[0]:
                         latest_feature_date = row[0]
@@ -2034,7 +2034,7 @@ def render_predict_section():
 
     if st.button("Generate Predictions", type="primary", width="stretch"):
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
 
         # Select correct predict command based on model type
@@ -2405,7 +2405,7 @@ def render_evaluate_section():
 
     if st.button("Evaluate", type="primary", width="stretch"):
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
         env["PYTHONUNBUFFERED"] = "1"  # Real-time output
 
         cmd = [

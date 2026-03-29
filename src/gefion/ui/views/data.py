@@ -27,13 +27,16 @@ def get_page_context():
                 cur.execute("SELECT COUNT(*) FROM stocks")
                 total_stocks = cur.fetchone()[0]
 
-                # Fast: use pg_stat for approximate row counts (instant vs 10s+ scans)
-                cur.execute("SELECT COALESCE(n_live_tup, 0) FROM pg_stat_user_tables WHERE relname = 'stock_ohlcv'")
-                row = cur.fetchone()
-                total_rows = row[0] if row else 0
+                # Fast: use TimescaleDB chunk stats for hypertable row counts
+                from gefion.ui.components.database import hypertable_approx_row_count
+                total_rows = hypertable_approx_row_count(cur, 'stock_ohlcv')
 
                 # Fast: MIN/MAX on indexed columns
-                cur.execute("SELECT MIN(date), MAX(date) FROM stock_ohlcv")
+                cur.execute("""
+                    SELECT
+                        (SELECT date FROM stock_ohlcv ORDER BY date ASC LIMIT 1),
+                        (SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1)
+                """)
                 min_date, max_date = cur.fetchone()
 
                 # Approximate symbols with data from stocks count (if rows exist, most stocks have data)
@@ -80,6 +83,7 @@ class ProcessState:
     error_message: str = ""
     completed: bool = False
     success: bool = False
+    completed_at: Optional[float] = None  # time.time() when completed
     # Performance metrics
     rate_per_sec: float = 0.0
     eta_seconds: float = 0.0
@@ -118,23 +122,37 @@ def _get_symbol_coverage() -> list:
         return []
 
 
+_STALE_TIMEOUT = 300  # Auto-clear completed process states after 5 minutes
+
+
 def get_process_state(key: str) -> ProcessState:
-    """Get or create process state for a key."""
+    """Get or create process state for a key.
+
+    Auto-clears stale completed states older than 5 minutes so finished
+    processes don't persist across page navigations indefinitely.
+    """
     state_key = f"process_{key}"
     if state_key not in st.session_state:
         st.session_state[state_key] = ProcessState()
     else:
-        # Migrate old ProcessState objects that don't have new fields
         old_state = st.session_state[state_key]
-        if not hasattr(old_state, 'rate_per_sec'):
-            # Create new state and copy over existing fields
+        # Migrate old ProcessState objects that don't have new fields
+        if not hasattr(old_state, 'rate_per_sec') or not hasattr(old_state, 'completed_at'):
             new_state = ProcessState()
-            for field in ['process', 'is_running', 'phase', 'progress', 'done', 'total',
-                          'inserted', 'errors', 'last_ok', 'workers', 'writer_workers',
-                          'mode', 'error_message', 'completed', 'success']:
-                if hasattr(old_state, field):
-                    setattr(new_state, field, getattr(old_state, field))
+            for f in ['process', 'is_running', 'phase', 'progress', 'done', 'total',
+                      'inserted', 'errors', 'last_ok', 'workers', 'writer_workers',
+                      'mode', 'error_message', 'completed', 'success', 'completed_at',
+                      'rate_per_sec', 'eta_seconds', 'successes', 'last_ok_inserted',
+                      'output_lines', 'work_events']:
+                if hasattr(old_state, f):
+                    setattr(new_state, f, getattr(old_state, f))
             st.session_state[state_key] = new_state
+        # Auto-clear stale completed states
+        state = st.session_state[state_key]
+        if state.completed and not state.is_running:
+            completed_at = getattr(state, 'completed_at', None)
+            if completed_at and (time.time() - completed_at) > _STALE_TIMEOUT:
+                st.session_state[state_key] = ProcessState()
     return st.session_state[state_key]
 
 
@@ -254,6 +272,7 @@ def start_background_process(key: str, cmd: list, env: dict):
             returncode = process.wait()
             stderr_thread.join(timeout=2)
             state.completed = True
+            state.completed_at = time.time()
             state.success = returncode == 0
             if returncode != 0:
                 # stderr was captured by the reader thread into work_events
@@ -270,6 +289,7 @@ def start_background_process(key: str, cmd: list, env: dict):
         except Exception as e:
             state.error_message = str(e)
             state.completed = True
+            state.completed_at = time.time()
             state.success = False
             from gefion.ui.errors import log_ui_error
             log_ui_error(source="background_process", message=str(e), context={"key": key})
@@ -420,11 +440,20 @@ def render_update_section():
     if state.is_running or state.completed:
         render_process_status("data_update", "Data Update")
 
-        # Auto-refresh while running
+        # Auto-refresh while running — but check if process actually exited
         if state.is_running:
-            st.caption("Auto-refreshing...")
-            time.sleep(1.5)
-            st.rerun()
+            proc = getattr(state, 'process', None)
+            if proc and proc.poll() is not None and not state.completed:
+                # Process exited but thread hasn't caught up yet — nudge it
+                state.is_running = False
+                state.completed = True
+                state.completed_at = time.time()
+                state.success = proc.returncode == 0
+                st.rerun()
+            else:
+                st.caption("Auto-refreshing...")
+                time.sleep(1.5)
+                st.rerun()
         return  # Don't show update form while process is active
 
     st.info("""
@@ -462,22 +491,30 @@ def render_update_section():
             limit = int(symbol_count)
 
     with col2:
-        timeframe = st.selectbox(
-            "Timeframe",
-            ["auto", "compact", "full"],
-            help="auto=smart update, compact=100 days, full=20+ years",
+        st.caption(
+            "New stocks get full history. "
+            "Stocks with recent data get topped up with the latest prices."
         )
 
-        refresh = st.checkbox(
-            "Refresh existing data",
-            help="Re-fetch and overwrite existing data points",
-        )
+        with st.expander("Advanced options"):
+            force_full = st.checkbox(
+                "Force full re-download",
+                help="Re-download complete history (~20 years) for every stock, "
+                     "even if recent data already exists. Use this to backfill gaps.",
+            )
+            refresh = st.checkbox(
+                "Refresh existing data",
+                help="Re-fetch and overwrite existing data points (upsert mode)",
+            )
+
+    timeframe = "full" if force_full else "auto"
 
     # Show equivalent CLI command
     cli_parts = ["gefion", "data-update", "--exchange", exchange]
     if limit:
         cli_parts.extend(["--limit", str(limit)])
-    cli_parts.extend(["--timeframe", timeframe])
+    if force_full:
+        cli_parts.extend(["--timeframe", "full"])
     if refresh:
         cli_parts.append("--refresh")
     st.code(" ".join(cli_parts), language="bash")
@@ -494,7 +531,7 @@ def render_update_section():
 
         # Set environment
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent — traces go to Tempo if available
 
         # Start background process
         start_background_process("data_update", cmd, env)
@@ -513,7 +550,7 @@ def render_update_section():
 
     if st.button("Update Symbol", width="stretch") and symbol:
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent — traces go to Tempo if available
 
         # Show equivalent CLI commands
         st.code(f"""# Fetch prices
@@ -692,6 +729,84 @@ def render_status_section():
         st.error(f"Error loading status: {e}")
 
 
+def _render_cull_status(state):
+    """Render status for a data cull process — shows per-table progress and results."""
+    if state.is_running:
+        label = "Culling data..."
+    elif state.success:
+        label = "Cull complete"
+    else:
+        label = "Cull failed"
+
+    with st.expander(label, expanded=state.is_running or not state.success):
+        # Parse JSON output lines into progress events and final result
+        output_lines = getattr(state, 'output_lines', [])
+        progress_events = []
+        final_result = None
+
+        for line in output_lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                phase = data.get("phase", "")
+                if phase == "cull":
+                    progress_events.append(data)
+                elif phase == "vacuum":
+                    progress_events.append(data)
+                elif phase == "complete" or "deleted" in data:
+                    final_result = data
+                elif "tables" in data:
+                    final_result = data  # dry-run plan
+            except json.JSONDecodeError:
+                pass
+
+        # Show per-table progress (during run and after)
+        if progress_events:
+            total_steps = progress_events[-1].get("total_steps", len(progress_events))
+            current_step = progress_events[-1].get("step", len(progress_events))
+
+            if state.is_running:
+                st.progress(current_step / total_steps,
+                            text=f"Processing table {current_step}/{total_steps}")
+
+            for evt in progress_events:
+                if evt.get("phase") == "vacuum":
+                    if state.is_running:
+                        st.info("Vacuuming database to reclaim disk space...")
+                    else:
+                        st.markdown("- **vacuum**: complete")
+                elif evt.get("phase") == "cull":
+                    table = evt.get("table", "?")
+                    deleted = evt.get("deleted", 0)
+                    if deleted > 0:
+                        st.markdown(f"- **{table}**: {deleted:,} rows deleted")
+                    else:
+                        st.markdown(f"- ~~{table}~~: 0 rows")
+        elif state.is_running:
+            st.info("Deleting data in dependency order (predictions → features → OHLCV)...")
+
+        # Show final summary
+        if final_result:
+            if "deleted" in final_result:
+                deleted = final_result["deleted"]
+                total = final_result.get("total_rows", sum(deleted.values()) if isinstance(deleted, dict) else 0)
+                st.markdown(f"**Total: {total:,} rows deleted**")
+            elif "tables" in final_result:
+                for table, count in final_result["tables"].items():
+                    st.markdown(f"- **{table}**: {count:,} rows (dry run)")
+
+        if state.error_message:
+            st.error(state.error_message)
+
+    # Auto-refresh while running
+    if state.is_running:
+        import time
+        time.sleep(2)
+        st.rerun()
+
+
 def render_maintenance_section():
     """Render database maintenance section."""
     st.subheader("Database Maintenance")
@@ -744,135 +859,61 @@ def render_maintenance_section():
 
         symbols_filter = st.text_input(
             "Symbols (optional)",
+            value="",
             placeholder="AAPL,MSFT",
             help="Comma-separated symbols to trim (leave empty for all)",
+            key="cull_symbols",
         )
 
-        if st.button("Trim Data", type="secondary"):
+        # Show cull process status if running or completed
+        cull_state = get_process_state("data_cull")
+        if cull_state.is_running or cull_state.completed:
+            _render_cull_status(cull_state)
+            if cull_state.completed:
+                col_clear, _ = st.columns([1, 3])
+                with col_clear:
+                    if st.button("Clear", key="clear_cull"):
+                        clear_process_state("data_cull")
+                        # Reset the symbols input
+                        if "cull_symbols" in st.session_state:
+                            del st.session_state["cull_symbols"]
+                        st.rerun()
+
+        if st.button("Cull Data", type="secondary", disabled=cull_state.is_running):
             if not before_date and not after_date:
                 st.error("Please select at least one date boundary")
+            elif trim_mode != "Delete old data":
+                st.warning("Only 'Delete old data' mode is supported for cascading cull. Use the CLI for other modes.")
             else:
-                # Build command
-                cmd = [sys.executable, "-m", "gefion.cli", "prices-trim", "--json"]
-                cli_parts = ["gefion", "prices-trim"]
+                sym_list = [s.strip().upper() for s in symbols_filter.split(",")] if symbols_filter else None
 
-                if before_date:
-                    cmd.extend(["--before", str(before_date)])
-                    cli_parts.extend(["--before", str(before_date)])
-                if after_date:
-                    cmd.extend(["--after", str(after_date)])
-                    cli_parts.extend(["--after", str(after_date)])
-                if symbols_filter:
-                    cmd.extend(["--symbols", symbols_filter.upper()])
-                    cli_parts.extend(["--symbols", symbols_filter.upper()])
-                if not trim_features:
-                    cmd.append("--no-trim-features")
-                    cli_parts.append("--no-trim-features")
+                # Build CLI command for background execution
+                cmd = [sys.executable, "-m", "gefion.cli", "data", "cull",
+                       str(before_date), "--confirm", "--json"]
+                if sym_list:
+                    cmd.extend(["--symbols", ",".join(sym_list)])
 
-                # Show CLI command
-                st.code(" ".join(cli_parts), language="bash")
+                # Show equivalent CLI command
+                cli_cmd = f"gefion data cull {before_date} --confirm"
+                if sym_list:
+                    cli_cmd += f" --symbols {','.join(sym_list)}"
+                st.code(cli_cmd, language="bash")
 
                 env = os.environ.copy()
-                env["OTEL_ENABLED"] = "false"
+                # OTEL_ENABLED inherited from parent — traces go to Tempo if available
 
-                with st.status("Trimming data...", expanded=True) as status:
-                    phase_display = st.empty()
-                    col1, col2 = st.columns(2)
-                    prices_metric = col1.empty()
-                    features_metric = col2.empty()
-                    status_text = st.empty()
-
-                    try:
-                        # Step 1: Estimate rows to delete
-                        phase_display.write("Phase: **Estimating**")
-                        status_text.write("Counting rows to delete...")
-
-                        from gefion.ui.components.database import get_connection
-                        with get_connection() as conn:
-                            with conn.cursor() as cur:
-                                # Build date conditions
-                                date_conds = []
-                                params = []
-                                if before_date:
-                                    date_conds.append("date < %s")
-                                    params.append(str(before_date))
-                                if after_date:
-                                    date_conds.append("date > %s")
-                                    params.append(str(after_date))
-                                date_where = " AND ".join(date_conds) if date_conds else "1=1"
-
-                                # Count prices
-                                if symbols_filter:
-                                    sym_list = [s.strip().upper() for s in symbols_filter.split(",")]
-                                    sym_placeholders = ",".join(["%s"] * len(sym_list))
-                                    cur.execute(f"""
-                                        SELECT COUNT(*) FROM stock_ohlcv o
-                                        JOIN stocks s ON o.data_id = s.id
-                                        WHERE ({date_where}) AND s.symbol IN ({sym_placeholders})
-                                    """, params + sym_list)
-                                else:
-                                    cur.execute(f"SELECT COUNT(*) FROM stock_ohlcv WHERE {date_where}", params)
-                                price_count = cur.fetchone()[0]
-                                prices_metric.metric("Price Rows", f"~{price_count:,}")
-
-                                if trim_features:
-                                    if symbols_filter:
-                                        cur.execute(f"""
-                                            SELECT COUNT(*) FROM computed_features cf
-                                            JOIN stocks s ON cf.data_id = s.id
-                                            WHERE ({date_where.replace('date', 'cf.date')}) AND s.symbol IN ({sym_placeholders})
-                                        """, params + sym_list)
-                                    else:
-                                        cur.execute(f"SELECT COUNT(*) FROM computed_features WHERE {date_where}", params)
-                                    feature_count = cur.fetchone()[0]
-                                    features_metric.metric("Feature Rows", f"~{feature_count:,}")
-
-                        # Step 2: Delete prices
-                        phase_display.write("Phase: **Deleting Prices**")
-                        status_text.write("Deleting price rows...")
-
-                        result = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            env=env,
-                        )
-
-                        if result.returncode == 0:
-                            # Parse the complete JSON output
-                            try:
-                                data = json.loads(result.stdout)
-                                deleted = data.get("deleted_prices", 0)
-                                deleted_features = data.get("deleted_features", 0)
-                                prices_metric.metric("Price Rows", f"{deleted:,}", "deleted")
-                                if trim_features:
-                                    features_metric.metric("Feature Rows", f"{deleted_features:,}", "deleted")
-                                phase_display.write("Phase: **Complete**")
-                                status.update(label="Trim complete!", state="complete")
-                                st.success(
-                                    f"Deleted {deleted:,} price rows"
-                                    + (f", {deleted_features:,} feature rows" if trim_features else "")
-                                )
-                            except json.JSONDecodeError:
-                                status.update(label="Trim complete!", state="complete")
-                                st.info(result.stdout)
-                        else:
-                            status.update(label="Trim failed", state="error")
-                            st.error(f"Failed: {result.stderr}")
-
-                    except Exception as e:
-                        status.update(label="Error", state="error")
-                        st.error(f"Error: {e}")
+                clear_process_state("data_cull")
+                start_background_process("data_cull", cmd, env)
+                st.rerun()
 
     with col2:
         st.markdown("### Vacuum Database")
-        st.markdown("Reclaim disk space and optimize performance.")
+        st.markdown("Reclaim disk space and optimize performance. Runs automatically after cull.")
 
         if st.button("Vacuum", type="secondary"):
             with st.spinner("Vacuuming..."):
                 try:
                     from gefion.ui.components.database import get_connection
-
                     with get_connection() as conn:
                         conn.autocommit = True
                         with conn.cursor() as cur:
@@ -1005,7 +1046,7 @@ def _run_backup(backup_path, data_types, symbols, start_date, end_date, incremen
         cmd.append("--dry-run")
 
     env = os.environ.copy()
-    env["OTEL_ENABLED"] = "false"
+    # OTEL_ENABLED inherited from parent
 
     action = "Estimating size" if dry_run else "Creating backup"
     with st.status(f"{action}...", expanded=True) as status:
@@ -1123,7 +1164,7 @@ def _run_restore(restore_path, mode, data_types_filter, verify, dry_run):
         cmd.append("--dry-run")
 
     env = os.environ.copy()
-    env["OTEL_ENABLED"] = "false"
+    # OTEL_ENABLED inherited from parent
 
     action = "Previewing restore" if dry_run else "Restoring backup"
     with st.status(f"{action}...", expanded=True) as status:

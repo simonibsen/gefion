@@ -218,7 +218,7 @@ def _get_system_context() -> str:
                 cur.execute("SELECT COUNT(*) FROM stocks")
                 parts.append(f"{cur.fetchone()[0]} stocks tracked")
 
-                cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+                cur.execute("SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1")
                 latest = cur.fetchone()[0]
                 if latest:
                     parts.append(f"latest price data: {latest}")
@@ -669,7 +669,7 @@ def _render_chat_fragment() -> None:
 
         import os
         env = os.environ.copy()
-        env["OTEL_ENABLED"] = "false"
+        # OTEL_ENABLED inherited from parent
         env.pop("CLAUDECODE", None)
         start_background_process(process_key, cmd_args, env)
         st.rerun()
