@@ -692,6 +692,64 @@ def render_status_section():
         st.error(f"Error loading status: {e}")
 
 
+def _render_cull_status(state):
+    """Render status for a data cull process — shows JSON output, not data-update metrics."""
+    if state.is_running:
+        label = "Culling data..."
+        st_state = "running"
+    elif state.success:
+        label = "Cull complete"
+        st_state = "complete"
+    else:
+        label = "Cull failed"
+        st_state = "error"
+
+    with st.status(label, expanded=True, state=st_state):
+        if state.is_running:
+            st.markdown("Deleting data in dependency order (predictions → features → OHLCV)...")
+            st.markdown("This may take several minutes for large datasets.")
+
+        # Parse and display JSON output
+        output_lines = getattr(state, 'output_lines', [])
+        for line in output_lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                # Display structured cull results
+                if "deleted" in data:
+                    deleted = data["deleted"]
+                    total = data.get("total_rows", sum(deleted.values()) if isinstance(deleted, dict) else 0)
+                    if isinstance(deleted, dict):
+                        for table, count in deleted.items():
+                            st.markdown(f"- **{table}**: {count:,} rows deleted")
+                    st.markdown(f"**Total: {total:,} rows deleted**")
+                elif "tables" in data:
+                    # Dry-run plan
+                    for table, count in data["tables"].items():
+                        st.markdown(f"- **{table}**: {count:,} rows")
+                elif "message" in data:
+                    st.info(data["message"])
+                else:
+                    st.json(data)
+            except json.JSONDecodeError:
+                # Plain text output
+                if line.startswith("✓") or line.startswith("✗"):
+                    st.markdown(line)
+                elif "Vacuum" in line:
+                    st.markdown(f"*{line}*")
+
+        if state.error_message:
+            st.error(state.error_message)
+
+    # Auto-refresh while running
+    if state.is_running:
+        import time
+        time.sleep(2)
+        st.rerun()
+
+
 def render_maintenance_section():
     """Render database maintenance section."""
     st.subheader("Database Maintenance")
@@ -751,7 +809,7 @@ def render_maintenance_section():
         # Show cull process status if running or completed
         cull_state = get_process_state("data_cull")
         if cull_state.is_running or cull_state.completed:
-            render_process_status("data_cull", "Data Cull")
+            _render_cull_status(cull_state)
             if cull_state.completed:
                 col_clear, _ = st.columns([1, 3])
                 with col_clear:
