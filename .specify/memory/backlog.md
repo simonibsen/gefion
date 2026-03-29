@@ -79,17 +79,9 @@ g2 trade flatten --confirm
 
 ## Technical Debt (High Priority)
 
-### Unified Predictions Table 🔄 IN PROGRESS
-**Priority**: High
-**Branch**: `predictions`
-
-Replace `quantile_predictions` and `trend_class_predictions` with a single `predictions` table using JSONB for flexible prediction values. Current two-table approach causes UI to only show quantile predictions — classifier predictions are invisible.
-
-**Schema**: `predictions(model_id, data_id, prediction_date, horizon_days, prediction_type TEXT, prediction_values JSONB, metadata JSONB, run_id, created_at)`
-
-**Migration**: `sql/migrations/20260327_000001_unified_predictions_table.sql`
-**Helper module**: `src/gefion/db/predictions.py`
-**Status**: Migration SQL written, helper module implemented and tested, updating CLI + downstream consumers.
+### ~~Unified Predictions Table~~ ✅
+**Completed**: 2026-03-27 (branch: `predictions`)
+Merged `quantile_predictions` and `trend_class_predictions` into single `predictions` table with JSONB values. Migration, helper module, CLI/UI/MCP all updated.
 
 ---
 
@@ -105,7 +97,35 @@ Replace `quantile_predictions` and `trend_class_predictions` with a single `pred
 
 ## Technical Debt
 
-### Cascading Cleanup on Data Cull 🔄 IN PROGRESS
+### Unified CLI Output Component for UI
+**Priority**: Medium
+**Discovered**: 2026-03-29
+
+**Problem**: Three different patterns exist for rendering CLI process output in the UI:
+1. `render_process_status()` in `data.py` — data-update specific metrics (Progress, Inserted, Errors, Workers, Rate, ETA)
+2. `render_freeform_output()` in `assistant.py` — AI/CLI stream-json parsing with work events
+3. `_render_cull_status()` in `data.py` — cull-specific JSON parsing
+
+This violates Constitution Section V (Consistent CLI Presentation). Each new CLI command integrated into the UI requires a new custom renderer.
+
+**Desired outcome**: A single `render_cli_output(key, title)` component in `src/gefion/ui/components/cli_output.py` that:
+- Shows running/complete/error state in an expander
+- Parses JSON output from any CLI `--json` command into structured display (tables, counts, messages)
+- Falls back to plain text for non-JSON output
+- Auto-refreshes while running (polling process state)
+- Supports command-specific display hints via JSON metadata (e.g., `"display": "table"` vs `"display": "metrics"`)
+- Replaces all three existing patterns
+
+**Files to modify**:
+- Create: `src/gefion/ui/components/cli_output.py`
+- Refactor: `src/gefion/ui/views/data.py` (data-update + cull)
+- Refactor: `src/gefion/ui/views/assistant.py` (freeform output)
+- Refactor: `src/gefion/ui/views/backtest.py` (backtest run)
+- Refactor: `src/gefion/ui/views/ml.py` (train/predict/eval)
+
+**Benefits**: New CLI commands automatically get proper UI rendering. No more duplicate rendering logic. Constitution Section V compliance.
+
+### Cascading Cleanup on Data Cull ✅ DONE
 **Discovered**: 2026-03-25
 **Priority**: Medium
 **Branch**: `predictions` (combined with unified predictions work)
