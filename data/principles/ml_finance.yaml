@@ -1,0 +1,288 @@
+# Principles: Machine Learning for Finance
+# Sources: López de Prado (2018), Jansen (2020), Chan (2008, 2013)
+# Domain: ml_finance
+# Extracted: 2026-03-29
+
+# ---------------------------------------------------------------------------
+# Marcos López de Prado — Advances in Financial Machine Learning (2018)
+# ---------------------------------------------------------------------------
+
+- id: fractional-differentiation
+  source:
+    author: "Marcos López de Prado"
+    title: "Advances in Financial Machine Learning"
+    year: 2018
+    chapter: "Chapter 5 — Fractionally Differentiated Features"
+  claim: "Fractional differentiation preserves memory (predictive signal) while achieving stationarity, unlike integer differencing which destroys long-range dependence."
+  mechanism: "By applying a fractional order d (typically 0 < d < 1) to the differencing operator, the series becomes stationary at a lower d than the conventional d=1, retaining the maximum amount of memory as measured by correlation with the original level series."
+  experiment_types: [feature_engineering, model_comparison]
+  testable_prediction: "Models trained on fractionally differentiated price features (d chosen via ADF-stationarity threshold) will produce higher out-of-sample Sharpe ratios than models trained on returns (d=1) or raw prices (d=0)."
+  experiment_design: "For each stock universe subset, compute frac-diff features at the minimum d that passes an ADF test at 5% significance. Train the existing quantile regression model on (a) raw returns, (b) frac-diff features, and (c) log prices. Compare OOS Sharpe, hit rate, and information coefficient across a walk-forward backtest."
+  known_limitations: "The optimal d is asset-specific and regime-dependent. Frac-diff features require a long lookback window and are sensitive to the weight-loss cutoff threshold. Computationally expensive for 5000-stock universes without vectorized implementations."
+  data_requirements: ["ohlcv.close", "ohlcv.volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: purged-cross-validation
+  source:
+    author: "Marcos López de Prado"
+    title: "Advances in Financial Machine Learning"
+    year: 2018
+    chapter: "Chapter 7 — Cross-Validation in Finance"
+  claim: "Standard k-fold cross-validation produces inflated performance estimates in financial ML because of information leakage from overlapping labels; purging and embargoing the folds eliminates this bias."
+  mechanism: "When labels span a time interval (e.g., triple-barrier labels), a training observation whose label period overlaps with a test observation leaks future information. Purging removes training samples whose label spans overlap the test set, and an embargo gap further prevents serial correlation leakage at fold boundaries."
+  experiment_types: [pipeline, model_comparison]
+  testable_prediction: "Purged k-fold CV accuracy estimates will be lower and closer to true OOS performance than standard k-fold CV, reducing the gap between backtest and live accuracy by at least 30%."
+  experiment_design: "Train Gefion's trend classifier using both standard 5-fold CV and purged 5-fold CV with a 2-day embargo. Record in-sample accuracy for each method, then measure true OOS accuracy on the subsequent 3-month holdout. Compare the spread between CV estimate and OOS reality for each method."
+  known_limitations: "Purging reduces effective training set size, which may hurt model performance on small datasets. The embargo period length requires calibration — too short allows leakage, too long wastes data."
+  data_requirements: ["ohlcv.close", "features.*", "ml_labels.start_time", "ml_labels.end_time"]
+  empirical_status: untested
+  experiments: []
+
+- id: meta-labeling
+  source:
+    author: "Marcos López de Prado"
+    title: "Advances in Financial Machine Learning"
+    year: 2018
+    chapter: "Chapter 3 — Meta-Labeling"
+  claim: "A secondary ML model trained to predict whether the primary model's signal will be correct (meta-labeling) improves precision without sacrificing the primary model's recall, enabling effective bet sizing."
+  mechanism: "The primary model generates directional signals (long/short). The meta-label model learns which of those signals are likely to succeed by predicting a binary outcome (1 = primary signal was profitable, 0 = was not). By filtering or sizing bets via the meta-model's probability output, overall portfolio Sharpe improves."
+  experiment_types: [model_comparison, strategy_optimization, label_engineering]
+  testable_prediction: "Adding a meta-labeling layer on top of Gefion's trend classifier will increase the strategy Sharpe ratio by at least 15% relative to using the raw classifier signals, primarily through improved precision."
+  experiment_design: "Take the existing trend classifier predictions as the primary signal. Construct meta-labels: 1 when the classifier's predicted direction matched realized returns over the holding period, 0 otherwise. Train a gradient-boosted meta-model on feature importance scores plus primary model confidence. Backtest the strategy using meta-model-filtered signals versus unfiltered, comparing Sharpe, max drawdown, and hit rate."
+  known_limitations: "Meta-labeling requires the primary model to have acceptable recall — if the primary misses most opportunities, the meta-model has nothing useful to filter. Adds pipeline complexity and a second model to maintain."
+  data_requirements: ["ml_predictions.direction", "ml_predictions.confidence", "ohlcv.close", "features.*"]
+  empirical_status: untested
+  experiments: []
+
+- id: triple-barrier-method
+  source:
+    author: "Marcos López de Prado"
+    title: "Advances in Financial Machine Learning"
+    year: 2018
+    chapter: "Chapter 3 — The Triple-Barrier Method"
+  claim: "Fixed-horizon labels are suboptimal; the triple-barrier method (profit-taking, stop-loss, max-holding-period) produces path-dependent labels that better reflect realistic trading outcomes and reduce noise."
+  mechanism: "Each observation is labeled based on which barrier is hit first: an upper barrier (take-profit), lower barrier (stop-loss), or a vertical barrier (time expiry). This encodes the actual risk-reward dynamics a trader faces, producing cleaner labels than simple forward-return signs."
+  experiment_types: [label_engineering, model_comparison]
+  testable_prediction: "Models trained on triple-barrier labels will produce higher risk-adjusted returns in backtests than models trained on fixed 5-day forward return labels, because the labels incorporate path-dependent risk."
+  experiment_design: "Implement triple-barrier labeling with volatility-scaled barriers (2x daily ATR for profit/stop, 10-day max hold). Generate labels for the stock universe. Train identical quantile regression models on (a) triple-barrier labels and (b) fixed 5-day return labels. Run walk-forward backtests and compare Sharpe, Calmar ratio, and maximum drawdown."
+  known_limitations: "Barrier widths are hyperparameters that require careful tuning per asset class and volatility regime. Narrow barriers in low-vol environments produce excessively noisy labels."
+  data_requirements: ["ohlcv.close", "ohlcv.high", "ohlcv.low", "features.atr"]
+  empirical_status: untested
+  experiments: []
+
+- id: feature-importance-mda-mdi
+  source:
+    author: "Marcos López de Prado"
+    title: "Advances in Financial Machine Learning"
+    year: 2018
+    chapter: "Chapter 8 — Feature Importance"
+  claim: "Mean Decrease Impurity (MDI) is biased toward high-cardinality features, while Mean Decrease Accuracy (MDA) via permutation provides unbiased but noisier importance estimates; using both together and discarding features not ranked by either reduces overfitting."
+  mechanism: "MDI aggregates the impurity reduction from splits on each feature across all trees — continuous features get more splits and appear artificially important. MDA shuffles each feature column and measures the accuracy drop, which is unbiased but has high variance. Their intersection identifies genuinely important features."
+  experiment_types: [feature_selection, feature_engineering]
+  testable_prediction: "Restricting the feature set to features ranked in the top quartile by both MDI and MDA (intersection set) will match or exceed model accuracy while reducing the feature count by more than 50%."
+  experiment_design: "Train a random forest on all computed features in Gefion. Extract MDI and MDA importance rankings. Define the intersection set (top-25% by both). Retrain using only intersection features. Compare OOS accuracy, information coefficient, and training time against the full-feature model across a walk-forward window."
+  known_limitations: "MDA importance is sensitive to feature correlations — permuting one of two correlated features may show low importance for both. Clustered feature importance (CFI) is more robust for correlated feature sets."
+  data_requirements: ["features.*", "ml_models.feature_names", "ohlcv.close"]
+  empirical_status: untested
+  experiments: []
+
+- id: sequential-bootstrapping
+  source:
+    author: "Marcos López de Prado"
+    title: "Advances in Financial Machine Learning"
+    year: 2018
+    chapter: "Chapter 4 — Sample Weights and Sequential Bootstrapping"
+  claim: "Standard bootstrapping draws redundant overlapping samples, inflating effective sample count; sequential bootstrapping accounts for label overlap via an indicator matrix, producing more independent draws and better bagging performance."
+  mechanism: "An indicator matrix records which price bars each label spans. Sequential bootstrapping draws samples one at a time, weighting candidates by their average uniqueness given already-selected samples, ensuring the bootstrap draw has higher effective information content."
+  experiment_types: [pipeline, model_comparison]
+  testable_prediction: "Ensemble models (bagging) using sequential bootstrapping will show lower variance in OOS predictions and higher Sharpe ratios than those using standard bootstrapping, particularly for overlapping-label datasets."
+  experiment_design: "Build the indicator matrix for Gefion's label set. Implement sequential bootstrap sampling. Train two bagged random forests — one with standard bootstrap, one with sequential bootstrap — on the same feature set. Compare OOS prediction variance, accuracy stability across time, and backtest Sharpe over 12-month walk-forward windows."
+  known_limitations: "Sequential bootstrapping is computationally expensive (O(n^2) with the indicator matrix). For non-overlapping labels (e.g., fixed daily bars), it collapses to standard bootstrapping and provides no benefit."
+  data_requirements: ["ml_labels.start_time", "ml_labels.end_time", "features.*"]
+  empirical_status: untested
+  experiments: []
+
+- id: bet-sizing
+  source:
+    author: "Marcos López de Prado"
+    title: "Advances in Financial Machine Learning"
+    year: 2018
+    chapter: "Chapter 10 — Bet Sizing"
+  claim: "Optimal position sizing should be derived from the model's predicted probability of profit and the distribution of expected payoffs, not from equal-weight or conviction-blind allocation."
+  mechanism: "Using the meta-labeling model's output probability and mapping it through a sizing function (e.g., sigmoid, budget-constrained concave function), positions are scaled so that high-confidence signals receive larger allocations while uncertain signals are underweighted, improving the Sharpe ratio of the aggregate portfolio."
+  experiment_types: [strategy_optimization, pipeline]
+  testable_prediction: "A strategy using probability-weighted bet sizing will achieve a higher Sharpe ratio and lower maximum drawdown than the same signals with equal-weight sizing."
+  experiment_design: "Take Gefion's classifier output probabilities. Map to position sizes via (a) equal weight, (b) linear scaling with probability, (c) sigmoid-based concave scaling. Backtest each sizing scheme on identical signals over 2+ years. Compare Sharpe, Calmar ratio, max drawdown, and turnover."
+  known_limitations: "Requires well-calibrated probability outputs — poorly calibrated models will missize bets. Concentrated sizing increases single-stock risk and requires liquidity checks."
+  data_requirements: ["ml_predictions.confidence", "ohlcv.close", "ohlcv.volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: structural-breaks-cusum
+  source:
+    author: "Marcos López de Prado"
+    title: "Advances in Financial Machine Learning"
+    year: 2018
+    chapter: "Chapter 17 — Structural Breaks"
+  claim: "Detecting structural breaks (via CUSUM, Chow, or SADF tests) in feature or return distributions signals regime changes that should trigger model retraining or signal suppression."
+  mechanism: "Financial time series are non-stationary and undergo regime shifts. A CUSUM filter on model residuals or return distributions detects when cumulative deviations exceed a threshold, indicating the data-generating process has changed and the current model is likely stale."
+  experiment_types: [pipeline, strategy_optimization]
+  testable_prediction: "Triggering model retraining upon CUSUM-detected structural breaks will reduce maximum drawdown during regime transitions compared to fixed-schedule retraining."
+  experiment_design: "Implement a CUSUM filter on rolling model residuals (predicted vs. actual returns). When the filter fires, retrain the model on the most recent data window. Compare this adaptive retraining against fixed monthly retraining and no retraining, measuring drawdown during known regime changes (e.g., COVID crash, rate hike cycles), Sharpe, and recovery time."
+  known_limitations: "CUSUM threshold selection is a bias-variance tradeoff — too sensitive causes excessive retraining, too insensitive misses genuine breaks. The filter detects breaks after they occur, introducing lag."
+  data_requirements: ["ohlcv.close", "ml_predictions.*", "features.*"]
+  empirical_status: untested
+  experiments: []
+
+# ---------------------------------------------------------------------------
+# Stefan Jansen — Machine Learning for Algorithmic Trading (2020)
+# ---------------------------------------------------------------------------
+
+- id: alternative-data-integration
+  source:
+    author: "Stefan Jansen"
+    title: "Machine Learning for Algorithmic Trading"
+    year: 2020
+    chapter: "Part 2 — Alternative Data and NLP"
+  claim: "Integrating alternative data signals (sentiment, fundamental ratios, macro indicators) with technical features improves model performance because alternative data captures information orthogonal to price action."
+  mechanism: "Price-derived features are highly correlated with each other and quickly arbitraged. Alternative data introduces independent dimensions of information (e.g., earnings surprise, sector momentum, credit spreads) that provide incremental predictive power, especially at longer horizons."
+  experiment_types: [feature_engineering, model_comparison]
+  testable_prediction: "Adding fundamental and macro features (P/E ratio, sector relative strength, VIX level, yield curve slope) to Gefion's technical feature set will increase OOS information coefficient by at least 10%."
+  experiment_design: "Extend Gefion's feature definitions to include fundamental ratios and macro indicators. Train the quantile regression model on (a) technical features only and (b) technical + fundamental + macro features. Evaluate via walk-forward backtest, measuring IC, rank IC, and Sharpe improvement. Use MDA to verify which alternative features contribute."
+  known_limitations: "Alternative data can be expensive, sparse, or subject to survivorship and look-ahead bias. Fundamental data has lower frequency (quarterly) and requires point-in-time handling to avoid look-ahead bias."
+  data_requirements: ["ohlcv.*", "features.*", "fundamental.pe_ratio", "fundamental.sector", "macro.vix", "macro.yield_curve"]
+  empirical_status: untested
+  experiments: []
+
+- id: factor-models-with-ml
+  source:
+    author: "Stefan Jansen"
+    title: "Machine Learning for Algorithmic Trading"
+    year: 2020
+    chapter: "Chapter 7 — Linear Models: From Risk Factors to Return Forecasts"
+  claim: "Replacing linear factor model weightings with ML-learned nonlinear combinations of the same factors captures interaction effects and time-varying factor premia that linear models miss."
+  mechanism: "Traditional factor models (Fama-French, momentum, quality) assume constant linear factor loadings. ML models learn nonlinear interactions (e.g., value works best in low-volatility regimes) and time-varying exposures, capturing more of the return-generating process."
+  experiment_types: [model_comparison, feature_engineering]
+  testable_prediction: "A gradient-boosted model using standard factor exposures (value, momentum, quality, volatility) as features will produce higher risk-adjusted returns than a linear factor model using the same inputs."
+  experiment_design: "Compute factor exposures for the Gefion stock universe: book-to-market (value), 12-1 month momentum, ROE (quality), and realized volatility. Train a linear regression and a LightGBM model on the same factor features. Walk-forward backtest both on a long-short quintile strategy, comparing annualized alpha, Sharpe, and factor exposure stability."
+  known_limitations: "Nonlinear models may overfit to specific factor regimes and perform poorly during factor rotations. Linear models are more interpretable and stable, which may be preferable for risk management."
+  data_requirements: ["ohlcv.*", "features.momentum_12m", "features.volatility_realized", "fundamental.book_to_market", "fundamental.roe"]
+  empirical_status: untested
+  experiments: []
+
+- id: ensemble-methods-stacking
+  source:
+    author: "Stefan Jansen"
+    title: "Machine Learning for Algorithmic Trading"
+    year: 2020
+    chapter: "Chapter 12 — Boosting and Chapter 11 — Ensemble Methods"
+  claim: "Stacking diverse model families (tree-based, linear, neural) produces more robust predictions than any single model because uncorrelated model errors cancel out."
+  mechanism: "Diverse base learners make different types of errors. A meta-learner trained on their OOS predictions learns which base model to trust in which regime, yielding a composite prediction with lower variance and often lower bias than the best individual model."
+  experiment_types: [model_comparison, pipeline]
+  testable_prediction: "A stacked ensemble of Gefion's quantile regression, trend classifier, and a LightGBM model will achieve a higher Sharpe ratio and lower prediction variance than any single constituent model."
+  experiment_design: "Train three base models on Gefion's feature set using purged CV: quantile regression, trend classifier, and LightGBM. Generate OOS predictions for each via walk-forward splits. Train a ridge-regression meta-learner on the stacked OOS predictions. Compare the ensemble's backtest Sharpe, max drawdown, and turnover against each base model individually."
+  known_limitations: "Ensembles add latency and complexity. If base models are highly correlated (e.g., all tree-based), stacking provides marginal improvement. The meta-learner can overfit if the base model CV is not properly purged."
+  data_requirements: ["features.*", "ohlcv.close", "ml_predictions.*"]
+  empirical_status: untested
+  experiments: []
+
+- id: walk-forward-optimization
+  source:
+    author: "Stefan Jansen"
+    title: "Machine Learning for Algorithmic Trading"
+    year: 2020
+    chapter: "Chapter 6 — The Machine Learning Process"
+  claim: "Walk-forward optimization — retraining models on expanding or rolling windows and testing on the immediately following period — is the only valid backtesting methodology for non-stationary financial data."
+  mechanism: "Financial markets are non-stationary: feature-return relationships drift over time. Walk-forward evaluation retains temporal ordering, prevents look-ahead bias, and measures performance under realistic conditions where the model has never seen future data. It simulates the actual deployment experience."
+  experiment_types: [pipeline, hyperparameter]
+  testable_prediction: "Walk-forward backtest results will be consistently 20-40% lower than single-split train/test results for the same model, and walk-forward results will more closely predict live trading performance."
+  experiment_design: "Run Gefion's quantile regression model through three evaluation frameworks: (a) random 80/20 train-test split, (b) single temporal split (train on 2020-2023, test on 2024), (c) quarterly walk-forward with 2-year expanding training window. Compare the Sharpe ratios and their gap from hypothetical live performance. Track whether walk-forward estimates are more stable and realistic."
+  known_limitations: "Walk-forward is computationally expensive (N retraining cycles). Expanding windows may include stale data from old regimes; rolling windows may discard useful information. Window length is a hyperparameter itself."
+  data_requirements: ["ohlcv.*", "features.*"]
+  empirical_status: untested
+  experiments: []
+
+# ---------------------------------------------------------------------------
+# Ernest Chan — Quantitative Trading (2008) & Algorithmic Trading (2013)
+# ---------------------------------------------------------------------------
+
+- id: half-life-mean-reversion
+  source:
+    author: "Ernest Chan"
+    title: "Algorithmic Trading"
+    year: 2013
+    chapter: "Chapter 2 — Mean Reversion"
+  claim: "The half-life of mean reversion, estimated via the Ornstein-Uhlenbeck process, determines optimal holding periods and signal lookback windows for mean-reversion strategies."
+  mechanism: "Fitting an AR(1) model to the spread or price series yields a mean-reversion speed parameter. The half-life (ln(2)/|speed|) gives the expected time for a deviation to revert halfway to the mean, directly informing lookback windows for z-score computation and expected holding periods for position exits."
+  experiment_types: [strategy_optimization, feature_engineering]
+  testable_prediction: "Mean-reversion strategies whose lookback and holding periods are calibrated to the OU half-life will outperform strategies using arbitrary fixed windows (e.g., 20-day or 60-day)."
+  experiment_design: "For each stock in Gefion's universe, estimate the OU half-life from the most recent 2 years of close prices. Set the Bollinger Band lookback and exit horizon to the half-life. Backtest this adaptive-window mean-reversion strategy against fixed 20-day and 60-day window versions. Compare Sharpe, win rate, and average holding period."
+  known_limitations: "Half-life estimates are noisy for short series and can shift dramatically across regimes. Not all stocks are mean-reverting — the method only applies where the ADF test rejects the unit root null."
+  data_requirements: ["ohlcv.close", "features.bollinger_upper", "features.bollinger_lower"]
+  empirical_status: untested
+  experiments: []
+
+- id: hurst-exponent-regime
+  source:
+    author: "Ernest Chan"
+    title: "Algorithmic Trading"
+    year: 2013
+    chapter: "Chapter 2 — Mean Reversion and Chapter 4 — Mean Reversion of Stocks and ETFs"
+  claim: "The Hurst exponent classifies a time series as mean-reverting (H < 0.5), random walk (H = 0.5), or trending (H > 0.5), enabling regime-dependent strategy selection."
+  mechanism: "The Hurst exponent measures the scaling of the range of cumulative deviations relative to the standard deviation. H < 0.5 indicates anti-persistence (mean reversion), H > 0.5 indicates persistence (trending). By computing rolling Hurst exponents, one can dynamically switch between mean-reversion and trend-following strategies."
+  experiment_types: [feature_engineering, strategy_optimization]
+  testable_prediction: "A regime-switching strategy that applies mean-reversion signals when rolling Hurst < 0.45 and trend-following signals when Hurst > 0.55 will outperform either strategy applied unconditionally."
+  experiment_design: "Compute rolling 252-day Hurst exponent for each stock. Classify regimes: mean-reverting (H < 0.45), trending (H > 0.55), indeterminate (0.45-0.55). Route stocks to Gefion's Bollinger mean-reversion strategy or MACD trend strategy based on regime. Backtest the routed strategy versus each strategy applied uniformly. Measure Sharpe, drawdown, and per-regime hit rates."
+  known_limitations: "Hurst exponent estimation is sensitive to the method (R/S, DFA, variance ratio) and sample length. Regime boundaries (0.45, 0.55) are arbitrary and should be optimized. Transitions between regimes cause whipsaws."
+  data_requirements: ["ohlcv.close", "features.rsi", "features.macd", "features.bollinger_upper", "features.bollinger_lower"]
+  empirical_status: untested
+  experiments: []
+
+- id: kelly-criterion-sizing
+  source:
+    author: "Ernest Chan"
+    title: "Quantitative Trading"
+    year: 2008
+    chapter: "Chapter 6 — Money and Risk Management"
+  claim: "The Kelly criterion determines the growth-optimal fraction of capital to allocate to each bet, but in practice half-Kelly is preferred because the full Kelly is highly sensitive to estimation error and produces severe drawdowns."
+  mechanism: "Full Kelly (f* = edge/odds or equivalently mean/variance of returns) maximizes the long-run geometric growth rate of the portfolio. However, estimation errors in expected return and variance cause the realized allocation to overshoot, leading to excessive drawdowns. Half-Kelly (f*/2) sacrifices ~25% of growth rate for ~50% reduction in variance of drawdowns."
+  experiment_types: [strategy_optimization]
+  testable_prediction: "Half-Kelly position sizing will produce a higher Sharpe ratio and lower maximum drawdown than full Kelly, equal-weight, or inverse-volatility sizing when applied to Gefion's strategy signals."
+  experiment_design: "Estimate per-stock Kelly fraction from Gefion's rolling 6-month mean and variance of predicted returns. Backtest four sizing schemes: full Kelly, half-Kelly, equal-weight, and inverse-volatility. Cap any single position at 5% of portfolio. Compare geometric growth rate, Sharpe, max drawdown, and tail risk (CVaR 5%) over 3+ year walk-forward."
+  known_limitations: "Kelly assumes returns are iid and normally distributed — financial returns are neither. With highly correlated positions, Kelly can produce leverage beyond available capital. Must be combined with gross leverage and single-name concentration limits."
+  data_requirements: ["ml_predictions.expected_return", "ohlcv.close", "ohlcv.volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: pairs-trading-cointegration
+  source:
+    author: "Ernest Chan"
+    title: "Algorithmic Trading"
+    year: 2013
+    chapter: "Chapter 3 — Cointegration"
+  claim: "Pairs trading based on cointegration (Engle-Granger or Johansen test) is more robust than correlation-based pair selection because cointegration captures a long-run equilibrium relationship, not just co-movement."
+  mechanism: "Two correlated stocks may drift apart permanently, but cointegrated stocks share a stochastic trend — their spread is stationary and mean-reverting by construction. Trading the z-score of the cointegrated spread provides a statistically grounded entry/exit framework with a defined half-life."
+  experiment_types: [strategy_optimization, feature_engineering]
+  testable_prediction: "Pairs selected by cointegration (Engle-Granger p < 0.05) will have more persistent profitability over 12+ months than pairs selected by top correlation, because correlated-but-not-cointegrated pairs will experience spread divergence."
+  experiment_design: "Screen all within-sector stock pairs in Gefion's universe for cointegration (Engle-Granger test, rolling 2-year window). Also select the top pairs by Pearson correlation. Trade both sets using a z-score mean-reversion strategy (enter at |z| > 2, exit at |z| < 0.5). Walk-forward backtest over 3 years, comparing Sharpe, pair survival rate (% still cointegrated after 12 months), and max drawdown."
+  known_limitations: "Cointegration relationships can break down, especially during structural changes (mergers, sector shifts). Transaction costs and slippage erode thin mean-reversion profits. Requires frequent re-screening of the pair universe."
+  data_requirements: ["ohlcv.close", "fundamental.sector", "fundamental.industry"]
+  empirical_status: untested
+  experiments: []
+
+- id: regime-detection-hmm
+  source:
+    author: "Ernest Chan"
+    title: "Algorithmic Trading"
+    year: 2013
+    chapter: "Chapter 7 — Regime Detection"
+  claim: "Hidden Markov Models can identify latent market regimes (bull, bear, sideways) from observable features, enabling regime-conditional strategy execution that reduces drawdowns during unfavorable regimes."
+  mechanism: "An HMM models the market as transitioning between a finite number of hidden states, each with distinct return/volatility distributions. The Viterbi algorithm decodes the most likely state sequence, and transition probabilities estimate the persistence of each regime, enabling the system to reduce exposure during high-volatility or bear states."
+  experiment_types: [strategy_optimization, feature_engineering]
+  testable_prediction: "A strategy that reduces position sizes by 50% during HMM-detected bear/high-volatility regimes will achieve lower maximum drawdown and higher risk-adjusted returns than a regime-unaware strategy."
+  experiment_design: "Fit a 3-state Gaussian HMM on rolling SPY returns and VIX levels. Label states as bull, sideways, and bear based on emission parameters. Apply regime-conditional scaling to Gefion's strategy signals: full size in bull, 50% in sideways, 20% in bear. Backtest against unscaled signals over 5+ years including at least one major drawdown. Compare max drawdown, Sharpe, and Calmar ratio."
+  known_limitations: "HMMs are sensitive to the number of states and initialization. Regime detection is lagging — by the time a bear regime is identified, much of the drawdown may have already occurred. Overfitting to historical regimes is a significant risk."
+  data_requirements: ["ohlcv.close", "features.volatility_realized", "macro.vix", "macro.spy_returns"]
+  empirical_status: untested
+  experiments: []

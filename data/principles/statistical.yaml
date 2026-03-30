@@ -1,0 +1,180 @@
+# Principles: Statistical/Econometric Foundations
+# Sources: Campbell/Lo/MacKinlay (1997), Hamilton (1994)
+# Domain: statistical
+# Extracted: 2026-03-29
+
+- id: variance-ratio-rejects-random-walk
+  source:
+    author: "Campbell, Lo, MacKinlay"
+    title: "The Econometrics of Financial Markets"
+    year: 1997
+    chapter: "Chapter 2: The Predictability of Asset Returns"
+  claim: "Variance ratios that deviate significantly from unity indicate serial dependence in returns, rejecting the random walk hypothesis and implying short-horizon predictability."
+  mechanism: "Under a random walk, the variance of q-period returns should equal q times the variance of one-period returns. Positive autocorrelation inflates the ratio above 1 (momentum), negative autocorrelation compresses it below 1 (mean reversion). This asymmetry reveals exploitable structure."
+  experiment_types: [feature_engineering, model_comparison]
+  testable_prediction: "Stocks with variance ratios significantly different from 1.0 at weekly horizons will produce higher out-of-sample Sharpe ratios when used as features in quantile regression models compared to stocks where the ratio is near unity."
+  experiment_design: "Compute Lo-MacKinlay variance ratios VR(q) for q in {2, 5, 10, 20} on daily returns for all stocks. Rank stocks by |VR(q) - 1|. Split into terciles. Train separate quantile regression models on each tercile. Compare out-of-sample hit rates and Sharpe ratios across terciles."
+  known_limitations: "Variance ratio tests lose power in small samples and are sensitive to heteroskedasticity. The overlap correction (Newey-West) is required for overlapping returns. Results may not persist after transaction costs."
+  data_requirements: ["ohlcv.close", "ohlcv.volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: unit-root-pretesting-prevents-spurious-regression
+  source:
+    author: "Hamilton"
+    title: "Time Series Analysis"
+    year: 1994
+    chapter: "Chapter 17: Univariate Processes with Unit Roots"
+  claim: "Regressing one non-stationary I(1) series on another produces spuriously significant t-statistics and high R-squared even when the series are independent; all features must be tested for stationarity before use in predictive models."
+  mechanism: "OLS with I(1) regressors violates standard asymptotic theory. The t-statistic diverges rather than converging to a standard normal, so any significance level will eventually reject the null of no relationship. Differencing or cointegration-based modeling restores valid inference."
+  experiment_types: [feature_engineering, pipeline]
+  testable_prediction: "ML models trained on ADF-pretested stationary features will have lower overfitting (smaller gap between in-sample and out-of-sample performance) than models trained on raw price levels."
+  experiment_design: "For each computed feature, run the Augmented Dickey-Fuller test with automatic lag selection (AIC). Partition features into stationary (p < 0.05) and non-stationary groups. Train identical quantile regression models on each feature set. Compare in-sample vs out-of-sample R-squared gap as an overfitting metric."
+  known_limitations: "ADF tests have low power against near-unit-root alternatives. Structural breaks can cause false non-rejection. Some inherently non-stationary features (like price level) may still be useful inside tree-based models that implicitly difference via splits."
+  data_requirements: ["ohlcv.close", "features.*"]
+  empirical_status: untested
+  experiments: []
+
+- id: cointegration-pairs-outperform-correlation-pairs
+  source:
+    author: "Campbell, Lo, MacKinlay"
+    title: "The Econometrics of Financial Markets"
+    year: 1997
+    chapter: "Chapter 8: Present-Value Relations"
+  claim: "Pairs of assets selected by cointegration (shared stochastic trend) produce more reliable mean-reversion signals than pairs selected by correlation alone."
+  mechanism: "Correlation measures co-movement of returns (stationary), while cointegration identifies a linear combination of prices that is stationary despite each price being I(1). The cointegrating residual has a well-defined mean to revert to, whereas high-correlation pairs can diverge permanently."
+  experiment_types: [strategy_optimization, feature_engineering]
+  testable_prediction: "Mean-reversion strategies built on Engle-Granger cointegrated pairs will have higher Sharpe ratios and lower maximum drawdowns in backtests than strategies built on the highest-correlated pairs."
+  experiment_design: "Select the top 100 stock pairs by rolling 252-day correlation and separately the top 100 by Engle-Granger cointegration test (lowest p-value). Build a simple z-score mean-reversion strategy (enter at |z| > 2, exit at |z| < 0.5) for each set. Backtest both universes and compare Sharpe ratio, max drawdown, and trade count."
+  known_limitations: "Cointegration relationships can break down due to structural changes (mergers, regime shifts). The Engle-Granger two-step method has size distortions in small samples. Transaction costs for frequent rebalancing may erode profits."
+  data_requirements: ["ohlcv.close", "ohlcv.volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: autocorrelation-structure-informs-feature-lags
+  source:
+    author: "Hamilton"
+    title: "Time Series Analysis"
+    year: 1994
+    chapter: "Chapter 3: Stationary ARMA Processes"
+  claim: "The sample autocorrelation function (ACF) and partial autocorrelation function (PACF) reveal the optimal lag structure for feature engineering; using lags beyond significant autocorrelation adds noise without signal."
+  mechanism: "The ACF identifies the total linear dependence at each lag, while the PACF isolates the direct effect of each lag after removing intermediate effects. An AR(p) process has PACF cutting off at lag p, providing a principled rule for how many lagged features to include."
+  experiment_types: [feature_engineering, hyperparameter]
+  testable_prediction: "Quantile regression models using lag counts selected by PACF cutoff will outperform models using a fixed lag window (e.g., 5 or 20 lags) in out-of-sample prediction accuracy."
+  experiment_design: "For each stock, compute PACF of daily returns and identify the last significant lag (95% confidence band). Use that stock-specific lag count for feature construction. Train quantile regression with adaptive lags vs fixed 5-lag and 20-lag baselines. Compare directional accuracy and quantile loss across all stocks."
+  known_limitations: "PACF assumes linear dependence; nonlinear dependencies (e.g., volatility clustering) are invisible to it. The 95% confidence band assumes Gaussian white noise, which is violated by fat-tailed returns. Regime changes can shift the optimal lag structure over time."
+  data_requirements: ["ohlcv.close", "features.rsi", "features.macd"]
+  empirical_status: untested
+  experiments: []
+
+- id: garch-volatility-improves-position-sizing
+  source:
+    author: "Campbell, Lo, MacKinlay"
+    title: "The Econometrics of Financial Markets"
+    year: 1997
+    chapter: "Chapter 12: Non-linearities in Financial Data"
+  claim: "GARCH-estimated conditional volatility provides more accurate risk forecasts than historical volatility, enabling better position sizing and risk-adjusted returns."
+  mechanism: "GARCH captures volatility clustering — large returns tend to follow large returns. By modeling the conditional variance as a function of past squared returns and past variances, it adapts faster to regime changes than a fixed rolling window, producing tighter prediction intervals."
+  experiment_types: [feature_engineering, strategy_optimization]
+  testable_prediction: "Strategies that size positions inversely proportional to GARCH(1,1) conditional volatility will achieve higher risk-adjusted returns (Sharpe ratio) than those using 20-day rolling standard deviation for sizing."
+  experiment_design: "Fit GARCH(1,1) to daily returns for each stock using a rolling 252-day window. Compute the one-step-ahead conditional volatility forecast. Build two versions of the same trend-following strategy: one sizing positions by 1/sigma_GARCH, the other by 1/sigma_rolling_20d. Backtest both and compare Sharpe ratio, maximum drawdown, and tail risk (CVaR 5%)."
+  known_limitations: "GARCH(1,1) assumes symmetric volatility response; leverage effects require EGARCH or GJR-GARCH. Estimation can be numerically unstable for short series. The improvement may be marginal in low-volatility regimes."
+  data_requirements: ["ohlcv.close", "ohlcv.high", "ohlcv.low"]
+  empirical_status: untested
+  experiments: []
+
+- id: heteroskedasticity-robust-inference
+  source:
+    author: "Hamilton"
+    title: "Time Series Analysis"
+    year: 1994
+    chapter: "Chapter 10: Covariance-Stationary Vector Processes"
+  claim: "Standard OLS standard errors are biased in the presence of heteroskedasticity; using White or Newey-West robust standard errors prevents false discovery of predictive features."
+  mechanism: "When error variance is not constant (heteroskedasticity), OLS coefficient estimates remain unbiased but their standard errors are wrong — typically too small, producing inflated t-statistics. Heteroskedasticity-consistent (HC) estimators correct the covariance matrix without assuming a parametric form for the variance."
+  experiment_types: [feature_selection, pipeline]
+  testable_prediction: "Feature sets selected using heteroskedasticity-robust t-statistics will contain fewer false positives and produce better out-of-sample model performance than features selected using naive OLS t-statistics."
+  experiment_design: "For all computed features, run univariate regressions of next-day returns on each feature. Rank features by significance using (a) naive OLS t-stats and (b) White HC3 robust t-stats. Select the top 20 features from each ranking. Train quantile regression models on each feature set and compare out-of-sample quantile loss."
+  known_limitations: "Robust standard errors can be unreliable in small samples (HC3 or bootstrap recommended). They correct inference but do not improve estimation efficiency. In very large samples, the correction may be negligible."
+  data_requirements: ["ohlcv.close", "features.*"]
+  empirical_status: untested
+  experiments: []
+
+- id: event-study-abnormal-returns
+  source:
+    author: "Campbell, Lo, MacKinlay"
+    title: "The Econometrics of Financial Markets"
+    year: 1997
+    chapter: "Chapter 4: Event-Study Analysis"
+  claim: "Cumulative abnormal returns (CARs) around identifiable events reveal whether the market fully incorporates information, and persistent post-event drift implies exploitable inefficiency."
+  mechanism: "By estimating a normal return model (market model) in an estimation window, subtracting expected returns in the event window yields abnormal returns attributable to the event. Statistically significant CARs after the event date indicate delayed price adjustment — a tradeable anomaly."
+  experiment_types: [strategy_optimization, label_engineering]
+  testable_prediction: "Stocks with significant positive CARs in the [+1, +5] day window after large volume spikes will continue to outperform over the subsequent 10 trading days, providing a usable signal for the trend classifier."
+  experiment_design: "Identify event dates as days where volume exceeds the 60-day rolling mean by 3 standard deviations. Estimate market model betas using [-252, -21] estimation window. Compute CARs for [0, +5] and [+6, +20] windows. Test if average CAR[+6,+20] is significantly positive using cross-sectional t-test. If significant, add CAR[0,+5] as a feature to the trend classifier and measure improvement in classification accuracy."
+  known_limitations: "Event clustering (many events on the same day) violates cross-sectional independence. The market model assumes constant beta, which may shift during volatile periods. Event identification from volume alone is noisy — fundamental events would be more precise."
+  data_requirements: ["ohlcv.close", "ohlcv.volume", "ohlcv.open"]
+  empirical_status: untested
+  experiments: []
+
+- id: arima-residual-features
+  source:
+    author: "Hamilton"
+    title: "Time Series Analysis"
+    year: 1994
+    chapter: "Chapter 5: Estimation, Inference, and Forecasting for ARIMA Models"
+  claim: "ARIMA model residuals represent the unpredictable component of returns after removing linear structure; features computed on residuals rather than raw returns reduce multicollinearity and improve ML model stability."
+  mechanism: "An ARIMA(p,d,q) model extracts all linear autocorrelation from the series. The residuals are (by construction) white noise if the model is correctly specified. Computing features like RSI or Bollinger Bands on these residuals isolates nonlinear patterns that the linear model could not capture, reducing redundancy among features."
+  experiment_types: [feature_engineering, pipeline]
+  testable_prediction: "Technical indicators computed on ARIMA-filtered residuals will have lower pairwise correlation and produce models with better out-of-sample performance than the same indicators computed on raw returns."
+  experiment_design: "Fit ARIMA(p,d,q) with automatic order selection (AIC) to daily returns for each stock. Extract residuals. Compute RSI, MACD, and Bollinger Band width on both raw returns and residuals. Measure average pairwise correlation within each feature set. Train quantile regression on each set and compare out-of-sample quantile loss and feature importance stability across rolling windows."
+  known_limitations: "ARIMA assumes linearity and Gaussianity, both violated by financial returns. Automatic order selection may overfit in-sample. The residual features lose interpretability compared to standard technical indicators."
+  data_requirements: ["ohlcv.close", "features.rsi", "features.macd", "features.bollinger_bands"]
+  empirical_status: untested
+  experiments: []
+
+- id: spurious-regression-detection
+  source:
+    author: "Hamilton"
+    title: "Time Series Analysis"
+    year: 1994
+    chapter: "Chapter 18: Unit Roots in Multivariate Time Series"
+  claim: "Regressions between unrelated I(1) variables produce R-squared values that converge to 1 rather than 0; any model with trending features must be tested for spurious regression using residual-based diagnostics."
+  mechanism: "Two independent random walks both trend stochastically, so OLS finds a best-fit line that captures the common trending behavior. The Durbin-Watson statistic approaches 0 and R-squared approaches 1. Testing whether the regression residuals are stationary (via ADF) distinguishes genuine relationships from spurious ones."
+  experiment_types: [pipeline, feature_selection]
+  testable_prediction: "Adding a spurious regression filter (residual ADF test) to the feature selection pipeline will reduce the number of selected features by 10-30% and improve out-of-sample model performance."
+  experiment_design: "Build the current feature pipeline and identify all features that are I(1) (fail ADF at 5%). For every I(1) feature used to predict returns, test the regression residuals for stationarity. Flag features where residuals are non-stationary as potentially spurious. Compare model performance (quantile loss) with and without the flagged features removed."
+  known_limitations: "The residual-based test has low power when the cointegrating relationship is weak. Some genuinely useful features may be discarded. This filter is unnecessary for features that are already stationary (most technical indicators)."
+  data_requirements: ["ohlcv.close", "features.*"]
+  empirical_status: untested
+  experiments: []
+
+- id: volatility-asymmetry-leverage-effect
+  source:
+    author: "Campbell, Lo, MacKinlay"
+    title: "The Econometrics of Financial Markets"
+    year: 1997
+    chapter: "Chapter 12: Non-linearities in Financial Data"
+  claim: "Negative returns increase future volatility more than positive returns of equal magnitude (leverage effect); models that capture this asymmetry produce better downside risk estimates."
+  mechanism: "When stock prices fall, firm leverage (debt/equity ratio) rises mechanically, increasing equity risk. Additionally, the volatility feedback effect amplifies the initial price drop. Standard GARCH treats positive and negative shocks symmetrically, missing this effect; GJR-GARCH or EGARCH capture it via an asymmetric news impact curve."
+  experiment_types: [feature_engineering, model_comparison]
+  testable_prediction: "Volatility features derived from GJR-GARCH (which captures asymmetry) will improve trend classifier accuracy during market downturns compared to symmetric GARCH volatility features."
+  experiment_design: "Fit both GARCH(1,1) and GJR-GARCH(1,1) to daily returns for each stock. Extract the conditional volatility series from each. Add both as features to the trend classifier. Compare classification accuracy in the full sample and in a down-market subsample (S&P 500 monthly return < -2%). Measure whether the GJR feature receives higher importance in the down-market subsample."
+  known_limitations: "The leverage effect is strongest for indices and large-cap stocks; small-cap stocks may show different asymmetry patterns. GJR-GARCH estimation requires sufficient data (at least 500 daily observations). The asymmetry parameter may be unstable across regimes."
+  data_requirements: ["ohlcv.close", "ohlcv.high", "ohlcv.low"]
+  empirical_status: untested
+  experiments: []
+
+- id: long-horizon-regression-bias
+  source:
+    author: "Campbell, Lo, MacKinlay"
+    title: "The Econometrics of Financial Markets"
+    year: 1997
+    chapter: "Chapter 2: The Predictability of Asset Returns"
+  claim: "Long-horizon return regressions using overlapping observations inflate t-statistics via the Stambaugh bias; predictability claims at horizons beyond 1 month require bias-corrected inference or bootstrap testing."
+  mechanism: "When the predictor is persistent (near unit root) and its innovation is correlated with return innovations, the OLS slope estimate is biased in finite samples. Overlapping returns compound this by inducing moving-average residual structure. Standard Newey-West corrections are insufficient; bootstrap or exact bias correction methods are needed."
+  experiment_types: [pipeline, label_engineering]
+  testable_prediction: "Predictive features that appear significant at the monthly horizon using naive t-tests will lose significance when tested with the block bootstrap, revealing false discoveries that degrade out-of-sample performance."
+  experiment_design: "Construct labels at multiple horizons (5-day, 21-day, 63-day forward returns). Regress each label on all features. For the 21-day and 63-day horizons, compare p-values from (a) Newey-West t-stats and (b) circular block bootstrap (block size = horizon). Identify features that are significant under (a) but not (b). Remove those features and measure the change in out-of-sample model performance."
+  known_limitations: "Block bootstrap requires choosing block size, which affects results. Bias correction methods assume a specific data-generating process. Short time series limit the reliability of long-horizon tests."
+  data_requirements: ["ohlcv.close", "features.*"]
+  empirical_status: untested
+  experiments: []

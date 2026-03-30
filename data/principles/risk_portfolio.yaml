@@ -1,0 +1,180 @@
+# Principles: Risk & Portfolio Construction
+# Sources: Meucci (2005), Grinold & Kahn (1999)
+# Domain: risk_portfolio
+# Extracted: 2026-03-29
+
+- id: fundamental-law-active-management
+  source:
+    author: "Grinold & Kahn"
+    title: "Active Portfolio Management"
+    year: 1999
+    chapter: "Ch. 6 — The Fundamental Law of Active Management"
+  claim: "The information ratio of a strategy equals the information coefficient times the square root of breadth: IR = IC * sqrt(BR)."
+  mechanism: "A manager's risk-adjusted performance decomposes into skill (IC — correlation between forecasts and realised returns) and opportunity (BR — number of independent bets per period). Doubling breadth with constant skill improves IR by ~41%, while doubling IC with constant breadth doubles IR, making forecast accuracy the higher-leverage input."
+  experiment_types: [model_comparison, strategy_optimization, feature_engineering]
+  testable_prediction: "Expanding the stock universe from 500 to 2000 names while holding the same ML signal should increase the backtest IR by roughly sqrt(4) = 2x, adjusting for correlation among bets."
+  experiment_design: "Run backtest_compare on the momentum strategy across four nested universes (500, 1000, 2000, 5000 tickers). Hold signal, rebalance frequency, and risk limits constant. Measure annualised IR for each universe and regress log(IR) on log(BR) to estimate the exponent (should be near 0.5)."
+  known_limitations: "The law assumes independent bets. Cross-sectional correlation among stocks (e.g., sector or factor exposure) reduces effective breadth well below the raw count of positions."
+  data_requirements: ["ohlcv_daily", "ml_predictions", "strategy_configs"]
+  empirical_status: untested
+  experiments: []
+
+- id: information-coefficient-measurement
+  source:
+    author: "Grinold & Kahn"
+    title: "Active Portfolio Management"
+    year: 1999
+    chapter: "Ch. 7 — Expected Returns and the Arbitrage Pricing Theory"
+  claim: "The information coefficient (rank correlation between predicted and realised returns) is the single most important diagnostic of any alpha signal."
+  mechanism: "IC directly enters the fundamental law as the multiplier on breadth. Even a small stable IC (0.03-0.05) can generate economically significant IR when breadth is large. IC that is noisy or trending toward zero signals model decay and requires retraining or signal replacement."
+  experiment_types: [model_comparison, feature_engineering, label_engineering]
+  testable_prediction: "Gefion's quantile q50 predictions should show a statistically significant Spearman rank IC (> 0.02) against next-period realised returns, and higher IC should correspond to higher backtest Sharpe."
+  experiment_design: "For each ML model vintage, compute rolling 20-day Spearman IC between predicted q50 and realised 5-day forward returns across all tickers. Plot IC time series and compute IC_IR (mean IC / std IC). Compare IC_IR across model types (quantile vs. classifier) using ml_eval results."
+  known_limitations: "Rank IC can be misleading when return distributions are highly skewed. A signal can have positive IC but still lose money if the tails dominate PnL."
+  data_requirements: ["ml_predictions", "ohlcv_daily"]
+  empirical_status: untested
+  experiments: []
+
+- id: breadth-vs-accuracy-tradeoff
+  source:
+    author: "Grinold & Kahn"
+    title: "Active Portfolio Management"
+    year: 1999
+    chapter: "Ch. 6 — The Fundamental Law of Active Management"
+  claim: "There is a diminishing-returns tradeoff between breadth (number of independent bets) and accuracy (IC per bet); strategies should optimise along the IR = IC * sqrt(BR) frontier."
+  mechanism: "Adding more assets or increasing rebalance frequency raises BR but often dilutes signal quality (lower IC per marginal bet) due to higher transaction costs, weaker coverage, or noisier data. The optimum balances marginal IC loss against the sqrt(BR) gain."
+  experiment_types: [strategy_optimization, hyperparameter]
+  testable_prediction: "Increasing rebalance frequency from monthly to weekly to daily for the momentum strategy will initially improve IR but eventually degrade it as transaction-cost drag outpaces the breadth gain."
+  experiment_design: "Run backtest_compare on momentum with rebalance periods of [1, 5, 10, 21, 63] days over the same date range and universe. Record net IR (after estimated transaction costs of 5 bps per turn). Plot IR vs rebalance frequency to identify the peak and the shape of the tradeoff curve."
+  known_limitations: "Transaction cost estimates are approximate. In live trading, market impact and slippage can shift the optimal rebalance frequency significantly versus backtest."
+  data_requirements: ["ohlcv_daily", "strategy_configs"]
+  empirical_status: untested
+  experiments: []
+
+- id: kelly-criterion-position-sizing
+  source:
+    author: "Grinold & Kahn"
+    title: "Active Portfolio Management"
+    year: 1999
+    chapter: "Ch. 14 — Portfolio Construction"
+  claim: "The Kelly criterion sets the theoretically optimal position size proportional to edge divided by variance, maximising long-run geometric growth."
+  mechanism: "Full Kelly sizing allocates w* = mu / sigma^2 to each independent bet. In practice full Kelly produces extreme drawdowns, so half-Kelly or fractional Kelly (f * w*) is used, sacrificing some growth for substantially lower variance and drawdown. The key insight is that position size should scale linearly with expected excess return and inversely with return variance."
+  experiment_types: [strategy_optimization, hyperparameter]
+  testable_prediction: "A half-Kelly sized version of the momentum strategy should achieve a higher geometric mean return and lower maximum drawdown than either the current fixed-weight version or a full-Kelly version."
+  experiment_design: "Implement three sizing regimes for the momentum strategy: (a) equal-weight, (b) full Kelly using rolling 60-day mean and variance estimates, (c) half Kelly. Run backtest_compare over the full history. Compare geometric CAGR, max drawdown, and Sharpe ratio across the three."
+  known_limitations: "Kelly assumes known edge and variance. Estimation error in mu and sigma (especially mu) can make full Kelly extremely dangerous. Parameter uncertainty should be incorporated via shrinkage or Bayesian estimates."
+  data_requirements: ["ohlcv_daily", "ml_predictions", "strategy_configs"]
+  empirical_status: untested
+  experiments: []
+
+- id: effective-number-of-bets
+  source:
+    author: "Attilio Meucci"
+    title: "Risk and Asset Allocation"
+    year: 2005
+    chapter: "Ch. 9 — Estimating the Distribution of the Market Invariants"
+  claim: "The effective number of bets (ENB) in a portfolio — derived from the entropy of the principal-component variance contributions — reveals true diversification far better than a raw position count."
+  mechanism: "ENB = exp(-sum(p_i * log(p_i))) where p_i is the fraction of portfolio variance explained by the i-th principal component. A portfolio of 100 stocks heavily loaded on one factor may have ENB near 1. Maximising ENB subject to return constraints yields genuine diversification, not naive 1/N weighting."
+  experiment_types: [strategy_optimization, pipeline]
+  testable_prediction: "The current momentum strategy likely has ENB significantly below its position count (e.g., ENB < 10 for a 50-stock portfolio) due to sector and market-beta concentration."
+  experiment_design: "After running a backtest of the momentum strategy, extract daily portfolio weights. Compute the covariance matrix of held positions (rolling 120-day window). Perform PCA, compute p_i = eigenvalue_i / sum(eigenvalues), and calculate ENB = exp(entropy). Track ENB over time and compare to position count. Then test a modified strategy that penalises low-ENB portfolios in optimisation."
+  known_limitations: "ENB relies on a well-estimated covariance matrix. With high-dimensional portfolios and short estimation windows, PCA eigenvalues are noisy and ENB estimates are unreliable."
+  data_requirements: ["ohlcv_daily", "strategy_configs"]
+  empirical_status: untested
+  experiments: []
+
+- id: covariance-shrinkage-estimation
+  source:
+    author: "Attilio Meucci"
+    title: "Risk and Asset Allocation"
+    year: 2005
+    chapter: "Ch. 4 — Modeling the Market"
+  claim: "Sample covariance matrices are severely biased in high dimensions; shrinkage toward a structured target (e.g., single-factor or constant-correlation) dramatically improves out-of-sample portfolio performance."
+  mechanism: "When the number of assets N approaches or exceeds the sample size T, the sample covariance matrix is singular or near-singular, inflating extreme eigenvalues. Ledoit-Wolf shrinkage blends the sample matrix with a structured target: Sigma_shrunk = delta * Target + (1 - delta) * S_sample. This reduces estimation error in the off-diagonal elements where noise is worst, producing more stable and better-performing minimum-variance and mean-variance portfolios."
+  experiment_types: [feature_engineering, strategy_optimization, pipeline]
+  testable_prediction: "Replacing the sample covariance with a Ledoit-Wolf shrinkage estimator in a minimum-variance portfolio optimiser should reduce realised portfolio volatility by 10-30% out of sample."
+  experiment_design: "Build two minimum-variance portfolios rebalanced monthly over the top 500 liquid stocks: (a) using 120-day sample covariance, (b) using Ledoit-Wolf shrinkage (sklearn.covariance.LedoitWolf). Backtest both and compare realised volatility, turnover, and Sharpe. Also test with the full 5000-stock universe where the benefit should be larger."
+  known_limitations: "Shrinkage improves the covariance estimate but does not fix errors in the mean estimate, which dominate mean-variance optimisation error. Works best for minimum-variance or risk-parity strategies that do not rely on return forecasts."
+  data_requirements: ["ohlcv_daily"]
+  empirical_status: untested
+  experiments: []
+
+- id: alpha-decay-and-signal-halflife
+  source:
+    author: "Grinold & Kahn"
+    title: "Active Portfolio Management"
+    year: 1999
+    chapter: "Ch. 17 — Performance Analysis"
+  claim: "Alpha signals decay over time; the rate of decay (half-life) determines optimal holding period, rebalance frequency, and urgency of execution."
+  mechanism: "After a signal is generated, the information it contains is gradually incorporated into prices through trading. The autocorrelation of the signal's returns drops exponentially with a characteristic half-life. Short half-life signals (hours to days) require fast execution and frequent rebalancing; long half-life signals (weeks to months) tolerate slower execution but are more crowded."
+  experiment_types: [feature_engineering, strategy_optimization, hyperparameter]
+  testable_prediction: "The IC of Gefion's ML predictions should decay measurably as the lag between prediction date and evaluation date increases, with a quantifiable half-life that differs between the momentum and mean_reversion signals."
+  experiment_design: "For each prediction vintage, compute Spearman IC at horizons [1, 2, 5, 10, 21, 42] days forward. Fit an exponential decay IC(t) = IC_0 * exp(-t / tau) and extract half-life = tau * ln(2). Compare half-lives across the momentum vs. mean_reversion strategies. Then verify that backtest performance is maximised when the rebalance period approximately matches the half-life."
+  known_limitations: "Decay rates are non-stationary and regime-dependent. A signal's half-life may shorten as more capital exploits it (crowding). Single-exponential fit may be too simple for signals with multiple decay components."
+  data_requirements: ["ml_predictions", "ohlcv_daily"]
+  empirical_status: untested
+  experiments: []
+
+- id: transfer-coefficient
+  source:
+    author: "Grinold & Kahn"
+    title: "Active Portfolio Management"
+    year: 1999
+    chapter: "Ch. 14 — Portfolio Construction"
+  claim: "The transfer coefficient (TC) measures the fidelity with which a portfolio translates alpha signals into active weights; constraints reduce TC below 1 and degrade realised IR proportionally."
+  mechanism: "TC = correlation(alpha_signal, active_weight). In the unconstrained case TC = 1 and the full IR is realised. Adding long-only constraints, sector limits, turnover caps, or position bounds reduces TC, yielding realised IR = IC * TC * sqrt(BR). Understanding TC tells managers which constraints are most costly and where to relax them for the biggest IR improvement."
+  experiment_types: [strategy_optimization, pipeline]
+  testable_prediction: "Adding a long-only constraint to a momentum strategy that would otherwise go short should reduce the realised TC from near 1.0 to 0.4-0.7, with a proportional drop in IR."
+  experiment_design: "Run two versions of the momentum strategy: (a) long-short with no position constraints, (b) long-only. For each, compute daily TC as rank-correlation between the raw ML alpha score and the resulting active portfolio weights. Compare mean TC and realised IR between the two. Quantify the IR loss attributable to the long-only constraint."
+  known_limitations: "TC estimation requires knowing the unconstrained optimal portfolio, which itself depends on covariance estimates. In practice, TC is a useful diagnostic but hard to optimise directly."
+  data_requirements: ["ml_predictions", "ohlcv_daily", "strategy_configs"]
+  empirical_status: untested
+  experiments: []
+
+- id: signal-combination-blending
+  source:
+    author: "Grinold & Kahn"
+    title: "Active Portfolio Management"
+    year: 1999
+    chapter: "Ch. 8 — Valuation in Theory"
+  claim: "Combining multiple weakly correlated alpha signals via optimal weighting yields a composite signal with higher IC and more stable performance than any individual signal."
+  mechanism: "If signals have ICs of IC_1, IC_2, ... IC_n with pairwise correlation rho, the combined IC scales roughly as IC_combined ~ sqrt(n) * IC_avg when signals are uncorrelated. Even when signals are correlated, the combination improves IC as long as the correlation among signals is lower than the correlation of each signal with returns. Optimal weights are proportional to IC / sigma_alpha, analogous to a Sharpe-optimal portfolio of signals."
+  experiment_types: [model_comparison, feature_engineering, pipeline]
+  testable_prediction: "A blended signal combining momentum, mean_reversion, and breakout alpha scores should achieve a higher and more stable IC than any individual strategy signal."
+  experiment_design: "Extract raw alpha scores from each of Gefion's four strategies (momentum, mean_reversion, ma_crossover, breakout) for the same universe and date range. Compute pairwise signal correlations and individual ICs. Form a combined signal using (a) equal weights, (b) IC-weighted, (c) regression-optimised weights estimated on a rolling training window. Backtest each composite and compare IR, IC stability, and max drawdown to the individual strategies."
+  known_limitations: "In-sample optimised combination weights overfit easily, especially with few signals. Use cross-validation or Bayesian shrinkage on combination weights. Signal correlations are time-varying and increase in crises."
+  data_requirements: ["ml_predictions", "ohlcv_daily", "strategy_configs"]
+  empirical_status: untested
+  experiments: []
+
+- id: risk-budgeting-allocation
+  source:
+    author: "Attilio Meucci"
+    title: "Risk and Asset Allocation"
+    year: 2005
+    chapter: "Ch. 7 — Evaluating Allocations"
+  claim: "Risk budgeting — allocating a target fraction of total portfolio risk to each strategy or factor — produces more robust multi-strategy portfolios than return-based allocation."
+  mechanism: "Each position's marginal contribution to risk (MCTR) equals its weight times its beta to the portfolio times portfolio volatility. A risk-budgeted portfolio equalises or targets specific ratios of MCTR across strategies. This prevents any single strategy from dominating portfolio risk, is less sensitive to return forecast errors than mean-variance, and naturally deleverage strategies as their volatility rises."
+  experiment_types: [strategy_optimization, pipeline]
+  testable_prediction: "A risk-parity allocation across Gefion's four strategies should produce a higher Sharpe ratio and lower maximum drawdown than an equal-capital allocation, especially during high-volatility regimes."
+  experiment_design: "Run backtests for all four strategies independently. Combine them using (a) equal capital allocation, (b) inverse-volatility weighting (simple risk parity), (c) full risk-parity targeting equal risk contribution using rolling 60-day covariance. Compare portfolio-level Sharpe, max drawdown, and Calmar ratio. Segment results by VIX regime (low/medium/high volatility)."
+  known_limitations: "Risk parity implicitly assumes all strategies have equal expected Sharpe ratios. If one strategy has persistently higher Sharpe, risk parity underweights it. Also requires leverage to achieve target returns when individual strategies have low volatility."
+  data_requirements: ["ohlcv_daily", "strategy_configs"]
+  empirical_status: untested
+  experiments: []
+
+- id: estimation-error-impact-on-allocation
+  source:
+    author: "Attilio Meucci"
+    title: "Risk and Asset Allocation"
+    year: 2005
+    chapter: "Ch. 6 — The Mean-Variance Approach"
+  claim: "Estimation error in expected returns is the dominant source of poor out-of-sample portfolio performance; the mean-variance optimizer amplifies input errors, making robust estimation techniques essential."
+  mechanism: "The mean-variance optimiser inverts the covariance matrix and multiplies by the return vector, amplifying any noise in both inputs. Since expected return estimates have far larger relative error than covariance estimates, the resulting portfolios take extreme, unstable positions. Shrinkage, Bayesian priors, resampling (Michaud), or Black-Litterman blending with equilibrium returns all regularise the optimisation and produce more stable, better-performing portfolios."
+  experiment_types: [strategy_optimization, hyperparameter, pipeline]
+  testable_prediction: "A Black-Litterman style approach that blends ML return predictions with a market-cap-weighted prior should produce more stable portfolio weights and higher out-of-sample Sharpe than raw mean-variance optimisation on ML predictions alone."
+  experiment_design: "Build two portfolio optimisers for the top 500 stocks: (a) classical mean-variance using ML q50 predictions as expected returns and sample covariance, (b) Black-Litterman blending ML predictions (as views) with a market-cap equilibrium prior. Backtest both monthly over 3 years. Compare weight stability (average turnover), out-of-sample Sharpe, and maximum drawdown."
+  known_limitations: "Black-Litterman requires specifying a confidence matrix for views, which introduces another estimation problem. The market-cap prior assumes market efficiency as the starting point, which may not hold in the small/mid-cap segment of a 5000-stock universe."
+  data_requirements: ["ohlcv_daily", "ml_predictions"]
+  empirical_status: untested
+  experiments: []
