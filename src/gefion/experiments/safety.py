@@ -7,7 +7,7 @@ import logging
 import shutil
 from typing import Optional
 
-from gefion.observability import create_span
+from gefion.observability import create_span, set_attributes
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ def run_preflight_checks(
 
     Returns dict with ok (all checks passed) and checks (list of individual results).
     """
-    with create_span("experiments.safety.preflight"):
+    with create_span("experiments.safety.preflight") as span:
         checks = []
 
         checks.append(check_disk_space(min_free_gb))
@@ -85,4 +85,5 @@ def run_preflight_checks(
             checks.append(check_db_health(conn))
 
         all_ok = all(c["ok"] for c in checks)
+        set_attributes(span, all_ok=all_ok, checks_run=len(checks))
         return {"ok": all_ok, "checks": checks}

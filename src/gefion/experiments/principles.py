@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 
 import yaml
 
-from gefion.observability import create_span
+from gefion.observability import create_span, set_attributes
 
 logger = logging.getLogger(__name__)
 
@@ -77,21 +77,25 @@ def query_principles(
 
     Pure function — does not mutate the input list.
     """
-    result = principles
+    with create_span("experiments.principles.query",
+                      experiment_type=experiment_type or "all",
+                      status=status or "all") as span:
+        result = principles
 
-    if experiment_type is not None:
-        result = [
-            p for p in result
-            if experiment_type in p.get("experiment_types", [])
-        ]
+        if experiment_type is not None:
+            result = [
+                p for p in result
+                if experiment_type in p.get("experiment_types", [])
+            ]
 
-    if status is not None:
-        result = [
-            p for p in result
-            if p.get("empirical_status") == status
-        ]
+        if status is not None:
+            result = [
+                p for p in result
+                if p.get("empirical_status") == status
+            ]
 
-    return result
+        set_attributes(span, result_count=len(result))
+        return result
 
 
 def validate_principle_schema(principle: Dict) -> List[str]:
@@ -122,34 +126,37 @@ def update_empirical_status(
     if outcome not in valid_outcomes:
         raise ValueError(f"Invalid outcome '{outcome}'. Must be one of: {valid_outcomes}")
 
-    principles_dir = _get_principles_dir()
+    with create_span("experiments.principles.update_status",
+                      principle_id=principle_id, outcome=outcome,
+                      experiment_id=experiment_id):
+        principles_dir = _get_principles_dir()
 
-    # Search all YAML files for the principle
-    for yaml_file in principles_dir.glob("*.yaml"):
-        with open(yaml_file) as f:
-            data = yaml.safe_load(f)
+        # Search all YAML files for the principle
+        for yaml_file in principles_dir.glob("*.yaml"):
+            with open(yaml_file) as f:
+                data = yaml.safe_load(f)
 
-        if not isinstance(data, list):
-            continue
+            if not isinstance(data, list):
+                continue
 
-        for principle in data:
-            if principle.get("id") == principle_id:
-                principle["empirical_status"] = outcome
-                # Add experiment reference
-                if "experiments" not in principle:
-                    principle["experiments"] = []
-                principle["experiments"].append({
-                    "experiment_id": experiment_id,
-                    "outcome": outcome,
-                })
+            for principle in data:
+                if principle.get("id") == principle_id:
+                    principle["empirical_status"] = outcome
+                    # Add experiment reference
+                    if "experiments" not in principle:
+                        principle["experiments"] = []
+                    principle["experiments"].append({
+                        "experiment_id": experiment_id,
+                        "outcome": outcome,
+                    })
 
-                with open(yaml_file, "w") as f:
-                    yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+                    with open(yaml_file, "w") as f:
+                        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
-                logger.info(
-                    "Updated principle '%s' to status '%s' (experiment %d)",
-                    principle_id, outcome, experiment_id,
-                )
-                return
+                    logger.info(
+                        "Updated principle '%s' to status '%s' (experiment %d)",
+                        principle_id, outcome, experiment_id,
+                    )
+                    return
 
-    raise KeyError(f"Principle '{principle_id}' not found in any YAML file")
+        raise KeyError(f"Principle '{principle_id}' not found in any YAML file")
