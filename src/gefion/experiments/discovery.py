@@ -3,25 +3,58 @@
 Inventories available data sources, features, and functions, then
 cross-references against the principles catalog to identify gaps and
 generate actionable experiment hypotheses.
+
+Uses data/registry.yaml for semantic metadata about what each table/column
+means and how it can be used. Live DB metadata provides actual coverage
+and freshness.
 """
 import logging
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import yaml
 
 from gefion.observability import create_span, set_attributes
 
 logger = logging.getLogger(__name__)
 
 
+def _get_registry_path() -> Path:
+    """Get path to the data source registry."""
+    env_path = os.environ.get("GEFION_REGISTRY_PATH")
+    if env_path:
+        return Path(env_path)
+    return Path(__file__).resolve().parent.parent.parent.parent / "data" / "registry.yaml"
+
+
+def load_registry() -> List[Dict[str, Any]]:
+    """Load the data source registry from YAML."""
+    path = _get_registry_path()
+    if not path.exists():
+        logger.warning("Data registry not found: %s", path)
+        return []
+    with open(path) as f:
+        data = yaml.safe_load(f)
+    return data if isinstance(data, list) else []
+
+
 def discover_data_sources(conn) -> List[Dict[str, Any]]:
     """Query database metadata for available data sources.
 
-    Returns list of {table, columns, row_count, date_range, coverage_pct, freshness_days}.
-    Uses information_schema and pg_stat for fast metadata queries.
+    Merges the static registry (semantic metadata) with live DB stats
+    (row counts, date ranges, freshness).
+
+    Returns list of {table, columns, row_count, date_range, coverage_pct,
+    freshness_days, description, column_details}.
     """
     with create_span("experiments.discovery.data_sources"):
         sources = []
-        # Target tables that hold time-series or fundamental data
-        target_tables = [
+        registry = load_registry()
+        registry_map = {r["table"]: r for r in registry if "table" in r}
+
+        # Use registry tables + any additional known tables
+        target_tables = list(registry_map.keys()) or [
             "stock_ohlcv", "stocks_fundamentals", "computed_features",
             "cross_sectional_features", "predictions",
         ]
@@ -91,14 +124,24 @@ def discover_data_sources(conn) -> List[Dict[str, Any]]:
                 # Coverage: approximate as percentage of stocks with data
                 coverage_pct = 100.0 if row_count > 0 else 0.0
 
-                sources.append({
+                # Merge with registry metadata
+                reg = registry_map.get(table, {})
+                source = {
                     "table": table,
                     "columns": columns,
                     "row_count": int(row_count),
                     "date_range": date_range,
                     "coverage_pct": coverage_pct,
                     "freshness_days": freshness_days if freshness_days is not None else 0,
-                })
+                    "description": reg.get("description", ""),
+                    "time_series": reg.get("time_series", True),
+                    "update_frequency": reg.get("update_frequency", "unknown"),
+                }
+                # Include column-level semantic metadata from registry
+                if "columns" in reg:
+                    source["column_details"] = reg["columns"]
+
+                sources.append(source)
 
         return sources
 

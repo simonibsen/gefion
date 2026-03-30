@@ -194,6 +194,7 @@ When experiments confirm or contradict principles from the catalog, the results 
 - **FR-002**: Discovery MUST identify gaps between available data and principles catalog — data that exists but has no derived features, or principles that suggest features from available data
 - **FR-003**: Discovery MUST detect when proposed experiments depend on data that is missing or has insufficient coverage
 - **FR-004**: Discovery results MUST be available to the agent as structured context when planning experiments
+- **FR-004b**: System MUST maintain a data source registry (YAML) describing available tables, columns, their semantic meaning, and how they can be used (feature input, label input, cross-sectional). New data sources (e.g., sentiment, macro indicators) are registered here so the agent knows what they are and how to use them
 
 **Principles Catalog**
 
@@ -234,7 +235,7 @@ When experiments confirm or contradict principles from the catalog, the results 
 
 **Experiment Configuration**
 
-- **FR-030**: Every experiment MUST have a serializable configuration object that fully describes it: experiment type, parameters, search space, data split definitions, holdout window, principle reference, null hypothesis, and guardrail settings
+- **FR-030**: Every experiment MUST have a serializable configuration object that fully describes it: experiment type, parameters, search space, data split definitions, holdout window, null hypothesis, and guardrail settings. Principle reference and discovery context are OPTIONAL (experiments may originate from principles, data discovery, performance observations, or user requests)
 - **FR-031**: Experiment configurations MUST be reproducible — re-running an experiment with the same configuration on the same data MUST produce identical results (given deterministic settings)
 - **FR-032**: Experiment configurations MUST be reusable — a successful experiment's configuration can be re-applied to a different time period or stock universe without modification beyond the data parameters
 
@@ -242,7 +243,7 @@ When experiments confirm or contradict principles from the catalog, the results 
 
 - **FR-033**: System MUST track artifacts as experimental or production, preventing accidental use of unvalidated results
 - **FR-034**: System MUST prevent deletion of artifacts that are referenced by other experiments or production models
-- **FR-035**: Completed experiments MUST store: hypothesis, principle reference, discovery context, baseline metrics, experimental metrics, holdout p-value, FDR-corrected status, and promotion decision
+- **FR-035**: Completed experiments MUST store: hypothesis, baseline metrics, experimental metrics, holdout p-value, FDR-corrected status, and promotion decision. Principle reference, discovery context, and experiment origin (principle/discovery/performance/user) are stored when available
 - **FR-036**: The experiment lifecycle MUST follow: discover → hypothesize → design → execute → evaluate (holdout + FDR) → promote/reject
 
 **Feedback Loop**
