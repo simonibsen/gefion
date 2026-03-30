@@ -782,6 +782,45 @@ class TestModelComparisonExperiment:
 # ---------------------------------------------------------------------------
 
 
+class TestSearchSpaceBareLists:
+    """Search strategies must handle bare lists as categorical values."""
+
+    def test_grid_search_bare_list(self):
+        """GridSearch must handle {"key": ["a", "b"]} as categorical."""
+        from gefion.experiments.search import GridSearch
+        gs = GridSearch({"model_type": ["lightgbm", "xgboost"]})
+        results = []
+        while True:
+            p = gs.suggest()
+            if p is None:
+                break
+            results.append(p)
+        assert len(results) == 2
+        assert {"model_type": "lightgbm"} in results
+        assert {"model_type": "xgboost"} in results
+
+    def test_random_search_bare_list(self):
+        """RandomSearch must handle {"key": ["a", "b"]} as categorical."""
+        from gefion.experiments.search import RandomSearch
+        rs = RandomSearch({"model_type": ["lightgbm", "xgboost"]}, max_trials=5)
+        p = rs.suggest()
+        assert p is not None
+        assert p["model_type"] in ["lightgbm", "xgboost"]
+
+    def test_bayesian_search_bare_list(self):
+        """BayesianSearch must handle {"key": ["a", "b"]} as categorical."""
+        from gefion.experiments.search import BayesianSearch
+        bs = BayesianSearch(
+            {"model_type": ["lightgbm", "xgboost"]},
+            direction="minimize",
+            max_trials=3,
+        )
+        p = bs.suggest()
+        assert p is not None
+        assert p["model_type"] in ["lightgbm", "xgboost"]
+        bs.report(p, 0.5)
+
+
 class TestExperimentRunnerWiring:
     """Tests that ExperimentRunner.run() can instantiate ML evaluators."""
 

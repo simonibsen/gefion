@@ -69,6 +69,10 @@ class GridSearch(SearchStrategy):
 
         for key in keys:
             spec = self.search_space[key]
+            # Handle bare lists as categorical values
+            if isinstance(spec, list):
+                values.append(spec)
+                continue
             param_type = spec.get("type", "categorical")
 
             if param_type == "categorical":
@@ -132,6 +136,10 @@ class RandomSearch(SearchStrategy):
 
         params = {}
         for key, spec in self.search_space.items():
+            # Handle bare lists as categorical values
+            if isinstance(spec, list):
+                params[key] = random.choice(spec)
+                continue
             param_type = spec.get("type", "categorical")
 
             if param_type == "categorical":
@@ -217,6 +225,10 @@ class BayesianSearch(SearchStrategy):
 
         params = {}
         for key, spec in self.search_space.items():
+            # Handle bare lists as categorical values
+            if isinstance(spec, list):
+                params[key] = self._current_trial.suggest_categorical(key, spec)
+                continue
             param_type = spec.get("type", "categorical")
 
             if param_type == "categorical":
