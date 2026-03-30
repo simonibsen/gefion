@@ -4,16 +4,94 @@ Core experiment abstractions.
 Provides ExperimentConfig for defining experiments and ExperimentRunner
 for managing experiment lifecycle (propose, approve, reject, run).
 """
+import hashlib
 import logging
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Dict, Any, Optional, List
 import json
 import psycopg
-from datetime import datetime
 
 from gefion.observability import create_span, set_attributes
 
 logger = logging.getLogger(__name__)
+
+# Risk classification by experiment type
+_RISK_LEVELS = {
+    "feature_engineering": "medium",
+    "feature_selection": "low",
+    "hyperparameter": "low",
+    "model_comparison": "low",
+    "label_engineering": "high",
+    "strategy_params": "low",
+    "pipeline": "high",
+}
+
+
+def classify_risk_level(experiment_type: str) -> str:
+    """Classify experiment risk level based on type.
+
+    Returns 'low', 'medium', or 'high'.
+    """
+    return _RISK_LEVELS.get(experiment_type, "medium")
+
+
+def is_duplicate_experiment(
+    experiment_type: str,
+    search_space: Dict[str, Any],
+    principle_id: Optional[str],
+    existing_experiments: List[Dict[str, Any]],
+) -> bool:
+    """Detect if an experiment duplicates an existing one.
+
+    Compares experiment type + search space + principle_id hash.
+    """
+    def _config_hash(etype, space, pid):
+        key = json.dumps({"type": etype, "space": space, "principle": pid}, sort_keys=True)
+        return hashlib.md5(key.encode()).hexdigest()
+
+    new_hash = _config_hash(experiment_type, search_space, principle_id)
+
+    for exp in existing_experiments:
+        existing_hash = _config_hash(
+            exp.get("experiment_type", ""),
+            exp.get("search_space", {}),
+            exp.get("principle_id"),
+        )
+        if new_hash == existing_hash:
+            return True
+
+    return False
+
+
+@dataclass
+class ExperimentCycle:
+    """A batch of experiments evaluated together with shared holdout and FDR."""
+    name: str
+    holdout_start_date: date
+    holdout_end_date: date
+    fdr_rate: float = 0.10
+    compute_budget_seconds: int = 7200
+    max_experiments: int = 20
+    status: str = "proposed"
+    discovery_snapshot: Optional[Dict[str, Any]] = None
+    principles_consulted: Optional[List[str]] = None
+    summary: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a JSON-friendly dictionary."""
+        return {
+            "name": self.name,
+            "holdout_start_date": str(self.holdout_start_date),
+            "holdout_end_date": str(self.holdout_end_date),
+            "fdr_rate": self.fdr_rate,
+            "compute_budget_seconds": self.compute_budget_seconds,
+            "max_experiments": self.max_experiments,
+            "status": self.status,
+            "discovery_snapshot": self.discovery_snapshot,
+            "principles_consulted": self.principles_consulted,
+            "summary": self.summary,
+        }
 
 
 @dataclass
