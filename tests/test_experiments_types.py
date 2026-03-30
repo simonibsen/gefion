@@ -402,8 +402,8 @@ class TestLabelEngineeringExperiment:
         )
         assert exp.risk_level == "high"
 
-    def test_evaluation_metric_defaults_to_sharpe_ratio(self):
-        """Default evaluation metric should be sharpe_ratio (backtest-based, not prediction accuracy)."""
+    def test_evaluation_metric_defaults_to_quantile_loss(self):
+        """Default evaluation metric should be quantile_loss (CV-based calibration)."""
         from gefion.experiments.types.label_engineering import LabelEngineeringExperiment
 
         exp = LabelEngineeringExperiment(
@@ -412,7 +412,7 @@ class TestLabelEngineeringExperiment:
             null_hypothesis="No improvement",
             label_type="triple_barrier",
         )
-        assert exp.evaluation_metric == "sharpe_ratio"
+        assert exp.evaluation_metric == "quantile_loss"
 
 
 # ---------------------------------------------------------------------------
@@ -782,6 +782,85 @@ class TestModelComparisonExperiment:
 # ---------------------------------------------------------------------------
 
 
+class TestLabelEngineeringEvaluate:
+    """Tests for LabelEngineeringExperiment.evaluate()."""
+
+    def test_evaluate_returns_metrics_dict(self):
+        """evaluate() must return Dict[str, float] with quantile_loss."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.label_engineering import LabelEngineeringExperiment
+
+        exp = LabelEngineeringExperiment(
+            name="test-labels",
+            principle_id="p1",
+            null_hypothesis="label scheme doesn't matter",
+            label_type="threshold_return",
+            label_config={"threshold": 0.02},
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 3), columns=["f0", "f1", "f2"])
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        with patch("gefion.experiments.types.label_engineering.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.label_engineering.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.label_engineering.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.label_engineering.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05, "avg_iqr": 0.12}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            result = exp.evaluate({"threshold": 0.03})
+
+        assert isinstance(result, dict)
+        assert "quantile_loss" in result
+
+    def test_evaluate_transforms_labels(self):
+        """evaluate() must transform labels before training."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.label_engineering import LabelEngineeringExperiment
+
+        exp = LabelEngineeringExperiment(
+            name="test-labels",
+            principle_id="p1",
+            null_hypothesis="test",
+            label_type="log_return",
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 3), columns=["f0", "f1", "f2"])
+        y = pd.Series(np.random.uniform(0.9, 1.1, 100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        with patch("gefion.experiments.types.label_engineering.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.label_engineering.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.label_engineering.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.label_engineering.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            exp.evaluate({})
+
+        # y_train passed to train should be transformed (not the raw forward_return)
+        for call in mock_train.call_args_list:
+            y_train = call[0][1]  # second positional arg
+            # log_return transform should produce different values than raw
+            assert not np.allclose(y_train.values[:10], y.values[:10], atol=0.001)
+
+    def test_evaluate_has_observability_span(self):
+        """evaluate() must create an observability span."""
+        import inspect
+        from gefion.experiments.types.label_engineering import LabelEngineeringExperiment
+        src = inspect.getsource(LabelEngineeringExperiment.evaluate)
+        assert "create_span" in src
+
+
 class TestFeatureEngineeringEvaluate:
     """Tests for FeatureEngineeringExperiment.evaluate()."""
 
@@ -1003,6 +1082,13 @@ class TestExperimentRunnerWiring:
         assert '"model_comparison"' in src or "'model_comparison'" in src, (
             "ExperimentRunner.run() must handle experiment_type='model_comparison'"
         )
+
+    def test_run_handles_label_engineering_type(self):
+        """ExperimentRunner.run() must handle experiment_type='label_engineering'."""
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+        src = inspect.getsource(ExperimentRunner.run)
+        assert '"label_engineering"' in src or "'label_engineering'" in src
 
     def test_run_handles_feature_engineering_type(self):
         """ExperimentRunner.run() must handle experiment_type='feature_engineering'."""
