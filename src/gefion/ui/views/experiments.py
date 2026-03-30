@@ -754,7 +754,7 @@ def render_discovery_section():
             return
         cmd = [
             sys.executable, "-m", "gefion.cli", "experiment", "cycle-start",
-            cycle_name,
+            "--name", cycle_name,
             "--fdr-rate", str(fdr_rate),
             "--holdout-weeks", str(holdout_weeks),
             "--max-experiments", str(max_experiments),
