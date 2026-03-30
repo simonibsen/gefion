@@ -782,6 +782,90 @@ class TestModelComparisonExperiment:
 # ---------------------------------------------------------------------------
 
 
+class TestFeatureEngineeringEvaluate:
+    """Tests for FeatureEngineeringExperiment.evaluate()."""
+
+    def test_evaluate_returns_metrics_dict(self):
+        """evaluate() must return Dict[str, float] with quantile_loss."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.feature_engineering import FeatureEngineeringExperiment
+
+        exp = FeatureEngineeringExperiment(
+            name="test-feature",
+            principle_id="p1",
+            null_hypothesis="new feature doesn't help",
+            feature_config={"function_name": "rolling_zscore", "params": {"window": 20}},
+            source_column="close",
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 3), columns=["f0", "f1", "f2"])
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05, "avg_iqr": 0.12}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            result = exp.evaluate({"window": 20})
+
+        assert isinstance(result, dict)
+        assert "quantile_loss" in result
+
+    def test_evaluate_adds_engineered_feature(self):
+        """evaluate() must add a new feature column to the training data."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.feature_engineering import FeatureEngineeringExperiment
+
+        exp = FeatureEngineeringExperiment(
+            name="test-feature",
+            principle_id="p1",
+            null_hypothesis="test",
+            feature_config={"function_name": "rolling_zscore", "params": {"window": 10}},
+            source_column="close",
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+        )
+
+        # Include a 'close' column that the feature function uses
+        X = pd.DataFrame({
+            "f0": np.random.randn(100),
+            "f1": np.random.randn(100),
+            "close": np.random.randn(100).cumsum() + 100,
+        })
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            exp.evaluate({"window": 10})
+
+        # The training data should have more columns than the original
+        for call in mock_train.call_args_list:
+            X_train = call[0][0]
+            assert X_train.shape[1] > 3, "Should have added the engineered feature column"
+
+    def test_evaluate_has_observability_span(self):
+        """evaluate() must create an observability span."""
+        import inspect
+        from gefion.experiments.types.feature_engineering import FeatureEngineeringExperiment
+        src = inspect.getsource(FeatureEngineeringExperiment.evaluate)
+        assert "create_span" in src
+
+
 class TestFeatureSelectionEvaluate:
     """Tests for FeatureSelectionExperiment.evaluate()."""
 
@@ -919,6 +1003,13 @@ class TestExperimentRunnerWiring:
         assert '"model_comparison"' in src or "'model_comparison'" in src, (
             "ExperimentRunner.run() must handle experiment_type='model_comparison'"
         )
+
+    def test_run_handles_feature_engineering_type(self):
+        """ExperimentRunner.run() must handle experiment_type='feature_engineering'."""
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+        src = inspect.getsource(ExperimentRunner.run)
+        assert '"feature_engineering"' in src or "'feature_engineering'" in src
 
     def test_run_handles_feature_selection_type(self):
         """ExperimentRunner.run() must handle experiment_type='feature_selection'."""
