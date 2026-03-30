@@ -44,6 +44,35 @@ class ExperimentConfig:
     # Additional config stored as JSON
     extra_config: Dict[str, Any] = field(default_factory=dict)
 
+    # Autonomous experimentation fields
+    holdout_config: Optional[Dict[str, Any]] = None   # {holdout_weeks, holdout_start_date, holdout_end_date}
+    data_split: Optional[Dict[str, Any]] = None       # {train_start, train_end, validation_start, validation_end}
+    principle_id: Optional[str] = None                 # slug referencing YAML principle
+    null_hypothesis: Optional[str] = None
+    cv_config: Optional[Dict[str, Any]] = None         # {n_splits, embargo_pct, prediction_horizon}
+    resource_limits: Optional[Dict[str, Any]] = None   # {max_wall_seconds, max_disk_mb, max_memory_mb}
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a JSON-friendly dictionary."""
+        d: Dict[str, Any] = {}
+        for f in self.__dataclass_fields__:
+            val = getattr(self, f)
+            if isinstance(val, dict):
+                d[f] = dict(val)  # shallow copy
+            elif isinstance(val, list):
+                d[f] = list(val)
+            else:
+                d[f] = val
+        return d
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ExperimentConfig":
+        """Reconstruct an ExperimentConfig from a dictionary."""
+        # Only pass keys that are valid dataclass fields
+        valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered = {k: v for k, v in d.items() if k in valid_keys}
+        return cls(**filtered)
+
 
 class ExperimentRunner:
     """
