@@ -690,6 +690,23 @@ class TestCLICommandDisplay:
         assert 'Advanced' in content
         assert 'full re-download' in content.lower() or 'full history' in content.lower()
 
+    def test_data_update_no_orphaned_caption_above_expander(self, views_dir):
+        """The update form must not have a floating caption next to an expander.
+
+        A bare st.caption beside an st.expander creates ambiguous ? icons and
+        chevrons that look like they belong together. The caption text should
+        be inside the info block or removed.
+        """
+        content = (views_dir / "data.py").read_text()
+        # The caption about "topped up" should not exist as a standalone element
+        # — it creates visual clutter next to the expander
+        import re
+        pattern = r'st\.caption\([^)]*topped up[^)]*\)'
+        assert not re.search(pattern, content, re.DOTALL), (
+            "Floating st.caption about 'topped up' creates ambiguous UI — "
+            "merge the text into the existing st.info block"
+        )
+
     def test_data_view_shows_cli_command(self, views_dir):
         """Data view should display equivalent CLI commands."""
         content = (views_dir / "data.py").read_text()
@@ -697,6 +714,22 @@ class TestCLICommandDisplay:
         assert 'st.code(' in content
         assert 'language="bash"' in content
         assert 'gefion data-update' in content or 'gefion", "data-update' in content
+
+    def test_cli_data_update_has_since_param(self):
+        """CLI data-update must accept a --since option for date lower bound."""
+        import inspect
+        from gefion.cli import update_all
+        sig = inspect.signature(update_all)
+        assert "since" in sig.parameters, (
+            "data-update CLI must have --since parameter for date lower bound"
+        )
+
+    def test_ui_data_update_passes_since_to_cli(self, views_dir):
+        """UI data update must pass --since to CLI command when set."""
+        content = (views_dir / "data.py").read_text()
+        assert "--since" in content, (
+            "UI data update must pass --since to CLI command"
+        )
 
     def test_ml_view_shows_cli_commands(self, views_dir):
         """ML view should display equivalent CLI commands for all operations."""
@@ -880,6 +913,29 @@ class TestCullStatusRenderer:
         """Cull status should show vacuum phase."""
         content = (views_dir / "data.py").read_text()
         assert 'vacuum' in content.lower() or 'Vacuum' in content
+
+    def test_cull_status_shows_summary_when_no_events(self, views_dir):
+        """Cull complete must show a fallback when no structured progress events are available.
+
+        The renderer must handle the case where output_lines exist but none
+        match the expected JSON structure (no 'phase' keys), showing raw output
+        or a 'no data found' message instead of an empty expander.
+        """
+        content = (views_dir / "data.py").read_text()
+        import re
+        # After the progress_events/final_result parsing, there must be a
+        # fallback path that shows something when both are empty
+        # Look for: handles case where no progress_events AND no final_result
+        assert re.search(
+            r'not\s+progress_events.*not\s+final_result|'
+            r'not\s+final_result.*not\s+progress_events|'
+            r'No data|no rows deleted',
+            content,
+            re.DOTALL,
+        ), (
+            "_render_cull_status must have a fallback for when no structured "
+            "events or results are captured (empty expander body)"
+        )
 
 
 class TestFeaturesView:

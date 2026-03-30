@@ -554,6 +554,113 @@ class TestHyperparameterExperiment:
         )
         assert exp.risk_level == "low"
 
+    def test_evaluate_returns_metrics_dict(self):
+        """evaluate() must return Dict[str, float] with quantile_loss key."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.hyperparameter import HyperparameterExperiment
+
+        exp = HyperparameterExperiment(
+            name="tune-lgbm",
+            model_type="lightgbm",
+            search_space={"learning_rate": [0.01, 0.1]},
+            cv_config={"n_splits": 3, "embargo_pct": 0.0, "prediction_horizon": 0},
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 5), columns=[f"f{i}" for i in range(5)])
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(20), "q50": np.random.randn(20), "q90": np.random.randn(20)})
+
+        with patch("gefion.experiments.types.hyperparameter.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.hyperparameter.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.hyperparameter.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.hyperparameter.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05, "q50_calibration": 48.0, "avg_iqr": 0.12}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            result = exp.evaluate({"learning_rate": 0.05, "max_depth": 6})
+
+        assert isinstance(result, dict)
+        assert "quantile_loss" in result
+        assert all(isinstance(v, float) for v in result.values())
+
+    def test_evaluate_uses_purged_kfold(self):
+        """evaluate() must use PurgedKFold, not random splits."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.hyperparameter import HyperparameterExperiment
+
+        exp = HyperparameterExperiment(
+            name="tune-lgbm",
+            model_type="lightgbm",
+            search_space={},
+            cv_config={"n_splits": 3, "embargo_pct": 0.02, "prediction_horizon": 5},
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 5), columns=[f"f{i}" for i in range(5)])
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(20), "q50": np.random.randn(20), "q90": np.random.randn(20)})
+
+        with patch("gefion.experiments.types.hyperparameter.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.hyperparameter.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.hyperparameter.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.hyperparameter.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            exp.evaluate({"learning_rate": 0.05})
+
+        # 3 folds = 3 train calls
+        assert mock_train.call_count == 3
+
+    def test_evaluate_averages_across_folds(self):
+        """evaluate() must average metrics across CV folds."""
+        from unittest.mock import patch, MagicMock, call
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.hyperparameter import HyperparameterExperiment
+
+        exp = HyperparameterExperiment(
+            name="tune-lgbm",
+            model_type="lightgbm",
+            search_space={},
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 5), columns=[f"f{i}" for i in range(5)])
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        # Return different metrics for each fold
+        fold_metrics = [
+            {"quantile_loss": 0.04, "avg_iqr": 0.10},
+            {"quantile_loss": 0.06, "avg_iqr": 0.14},
+        ]
+
+        with patch("gefion.experiments.types.hyperparameter.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.hyperparameter.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.hyperparameter.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.hyperparameter.calculate_calibration_metrics",
+                   side_effect=fold_metrics):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            result = exp.evaluate({"learning_rate": 0.05})
+
+        assert abs(result["quantile_loss"] - 0.05) < 1e-9  # avg of 0.04, 0.06
+        assert abs(result["avg_iqr"] - 0.12) < 1e-9  # avg of 0.10, 0.14
+
+    def test_evaluate_has_observability_span(self):
+        """evaluate() must create an observability span."""
+        import inspect
+        from gefion.experiments.types.hyperparameter import HyperparameterExperiment
+        src = inspect.getsource(HyperparameterExperiment.evaluate)
+        assert "create_span" in src, "evaluate() must use create_span for observability"
+
 
 # ---------------------------------------------------------------------------
 # Model Comparison Experiment
@@ -600,3 +707,98 @@ class TestModelComparisonExperiment:
             model_types=["quantile", "xgboost"],
         )
         assert exp.risk_level == "low"
+
+    def test_evaluate_returns_metrics_dict(self):
+        """evaluate() must return Dict[str, float] with quantile_loss key."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.model_comparison import ModelComparisonExperiment
+
+        exp = ModelComparisonExperiment(
+            name="compare-models",
+            model_types=["quantile", "xgboost", "lightgbm"],
+            cv_config={"n_splits": 3, "embargo_pct": 0.0, "prediction_horizon": 0},
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 5), columns=[f"f{i}" for i in range(5)])
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(20), "q50": np.random.randn(20), "q90": np.random.randn(20)})
+
+        with patch("gefion.experiments.types.model_comparison.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.model_comparison.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.model_comparison.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.model_comparison.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05, "avg_iqr": 0.12}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            result = exp.evaluate({"model_type": "lightgbm"})
+
+        assert isinstance(result, dict)
+        assert "quantile_loss" in result
+
+    def test_evaluate_uses_trial_algorithm(self):
+        """evaluate() must pass params['model_type'] as the algorithm to train."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.model_comparison import ModelComparisonExperiment
+
+        exp = ModelComparisonExperiment(
+            name="compare-models",
+            model_types=["quantile", "xgboost", "lightgbm"],
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 5), columns=[f"f{i}" for i in range(5)])
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        with patch("gefion.experiments.types.model_comparison.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.model_comparison.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.model_comparison.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.model_comparison.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            exp.evaluate({"model_type": "xgboost"})
+
+        # All calls should use the trial's algorithm
+        for c in mock_train.call_args_list:
+            assert c.kwargs.get("algorithm") == "xgboost" or c[1].get("algorithm") == "xgboost"
+
+    def test_evaluate_has_observability_span(self):
+        """evaluate() must create an observability span."""
+        import inspect
+        from gefion.experiments.types.model_comparison import ModelComparisonExperiment
+        src = inspect.getsource(ModelComparisonExperiment.evaluate)
+        assert "create_span" in src, "evaluate() must use create_span for observability"
+
+
+# ---------------------------------------------------------------------------
+# Wiring: ExperimentRunner.run() must handle ML experiment types
+# ---------------------------------------------------------------------------
+
+
+class TestExperimentRunnerWiring:
+    """Tests that ExperimentRunner.run() can instantiate ML evaluators."""
+
+    def test_run_handles_hyperparameter_type(self):
+        """ExperimentRunner.run() must handle experiment_type='hyperparameter'."""
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+        src = inspect.getsource(ExperimentRunner.run)
+        assert '"hyperparameter"' in src or "'hyperparameter'" in src, (
+            "ExperimentRunner.run() must handle experiment_type='hyperparameter'"
+        )
+
+    def test_run_handles_model_comparison_type(self):
+        """ExperimentRunner.run() must handle experiment_type='model_comparison'."""
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+        src = inspect.getsource(ExperimentRunner.run)
+        assert '"model_comparison"' in src or "'model_comparison'" in src, (
+            "ExperimentRunner.run() must handle experiment_type='model_comparison'"
+        )

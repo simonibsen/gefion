@@ -447,6 +447,29 @@ class ExperimentRunner:
                     objective=objective_metric,
                     db_url=self.db_url,
                 )
+            elif experiment["experiment_type"] == "hyperparameter":
+                from gefion.experiments.types.hyperparameter import HyperparameterExperiment
+                evaluator = HyperparameterExperiment(
+                    name=experiment["name"],
+                    model_type=config.get("model_type", "lightgbm"),
+                    search_space=search_space,
+                    cv_config=config.get("cv_config", {"n_splits": 5, "embargo_pct": 0.02}),
+                    objective_metric=objective_metric,
+                    dataset_uri=config.get("dataset_uri"),
+                    horizon_days=config.get("horizon_days", 7),
+                    quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                )
+            elif experiment["experiment_type"] == "model_comparison":
+                from gefion.experiments.types.model_comparison import ModelComparisonExperiment
+                evaluator = ModelComparisonExperiment(
+                    name=experiment["name"],
+                    model_types=config.get("model_types", []),
+                    cv_config=config.get("cv_config", {"n_splits": 5, "embargo_pct": 0.02}),
+                    objective_metric=objective_metric,
+                    dataset_uri=config.get("dataset_uri"),
+                    horizon_days=config.get("horizon_days", 7),
+                    quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                )
             else:
                 raise ValueError(f"Unknown experiment type: {experiment['experiment_type']}")
 

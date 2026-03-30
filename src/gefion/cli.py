@@ -6672,6 +6672,7 @@ def update_all(
     writer_workers: Optional[int] = typer.Option(None, help="Parallel writers to DB"),
     calls_per_minute: int = typer.Option(75, help="AlphaVantage rate limit (premium default)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    since: Optional[str] = typer.Option(None, "--since", help="Only load data since this date (YYYY-MM-DD). Rows before this date are discarded."),
     listings_file: Optional[Path] = typer.Option(None, help="Optional path to listings CSV/JSON (bypass network fetch)"),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress updates"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
@@ -6695,6 +6696,9 @@ def update_all(
         # Update NASDAQ stocks (limited to 20 for testing)
         gefion data-update --exchange NASDAQ --limit 20
 
+        # Only load data from 2025 onwards
+        gefion data-update --exchange NASDAQ --since 2025-01-01
+
         # Full refresh of all features
         gefion data-update --exchange NYSE --refresh
 
@@ -6707,18 +6711,19 @@ def update_all(
         timeframe=timeframe,
         refresh=refresh,
         limit=limit or 0,
+        since=since or "none",
     ):
         _update_all_impl(
             exchange, status, timeframe, feature_batch_size, refresh_existing,
             refresh, limit, max_workers, writer_workers, calls_per_minute,
-            db_url, listings_file, progress, json_output
+            db_url, listings_file, progress, json_output, since
         )
 
 
 def _update_all_impl(
     exchange, status, timeframe, feature_batch_size, refresh_existing,
     refresh, limit, max_workers, writer_workers, calls_per_minute,
-    db_url, listings_file, progress, json_output
+    db_url, listings_file, progress, json_output, since=None
 ):
     """Implementation of data-update (separated for tracing)."""
     url = _db_url(db_url)
@@ -6841,6 +6846,16 @@ def _update_all_impl(
     target_date = _expected_market_date()
     set_attributes(main_span, target_date=str(target_date))
 
+    # Parse --since lower bound
+    since_date = None
+    if since:
+        since_date = _parse_date_or_error(since, json_output)
+        if since_date is None:
+            return
+        set_attributes(main_span, since_date=str(since_date))
+        if not json_output:
+            emit(f"Filtering data to only include rows since {since_date}")
+
     # Bulk filter symbols that don't need price updates (skip API calls for up-to-date symbols)
     price_symbols = symbols
     price_skipped = 0
@@ -6902,6 +6917,7 @@ def _update_all_impl(
                     update_existing=refresh_existing,
                     progress=price_reporter,
                     target_date=target_date,
+                    since_date=since_date,
                 )
                 add_event(
                     price_span,
@@ -10480,7 +10496,7 @@ def data_cull(
     Pass --confirm to actually execute the deletion.
     """
     from datetime import date as date_type, datetime
-    from gefion.db.cull import plan_cull, execute_cull
+    from gefion.db.cull import plan_cull, execute_cull, vacuum_after_cull
     from gefion.cli_helpers import db_connection
 
     try:
@@ -10613,18 +10629,15 @@ def data_cull(
                     table.add_row("[bold]Total[/bold]", f"[bold]{sum(result.values()):,}[/bold]")
                     console.print(table)
 
-                # Auto-vacuum after cull to reclaim disk space
+                # Auto-vacuum affected tables to update pg_stat row counts
                 if result and sum(result.values()) > 0:
-                    with create_span("cli.data_cull.vacuum"):
-                        if json_output:
-                            emit("Vacuuming database", data={"phase": "vacuum"}, json_output=True)
-                        else:
-                            console.print("\n[dim]Vacuuming to reclaim disk space...[/dim]")
-                        conn.autocommit = True
-                        with conn.cursor() as cur:
-                            cur.execute("VACUUM ANALYZE")
-                        if not json_output:
-                            console.print("[green]Vacuum complete.[/green]")
+                    if json_output:
+                        emit("Vacuuming database", data={"phase": "vacuum"}, json_output=True)
+                    else:
+                        console.print("\n[dim]Vacuuming to reclaim disk space...[/dim]")
+                    vacuum_after_cull(conn, affected_tables=result)
+                    if not json_output:
+                        console.print("[green]Vacuum complete.[/green]")
 
     except Exception as exc:
         import traceback
