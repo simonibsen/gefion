@@ -29,26 +29,34 @@ def render_experiments():
     """Render the experiments page."""
     st.markdown("# :material/science: Experiments")
     render_chat_widget(get_page_context())
-    st.markdown("AI-driven parameter optimization with human approval.")
+    st.markdown("Autonomous experimentation with human approval gates.")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        ":material/explore: Discovery",
         ":material/list: List",
         ":material/add_circle: Propose",
         ":material/play_arrow: Run",
-        ":material/assessment: Results"
+        ":material/assessment: Results",
+        ":material/loop: Cycles",
     ])
 
     with tab1:
-        render_list_section()
+        render_discovery_section()
 
     with tab2:
-        render_propose_section()
+        render_list_section()
 
     with tab3:
-        render_run_section()
+        render_propose_section()
 
     with tab4:
+        render_run_section()
+
+    with tab5:
         render_results_section()
+
+    with tab6:
+        render_cycles_section()
 
 
 def render_list_section():
@@ -67,7 +75,8 @@ def render_list_section():
     with col2:
         type_filter = st.selectbox(
             "Type",
-            ["all", "strategy_params", "feature_selection", "hyperparameter"],
+            ["all", "strategy_params", "hyperparameter", "model_comparison",
+             "feature_engineering", "feature_selection", "label_engineering", "pipeline"],
             help="Filter by experiment type",
         )
 
@@ -162,27 +171,23 @@ def render_list_section():
 
 
 def render_propose_section():
-    """Render experiment proposal form."""
+    """Render experiment proposal form supporting all experiment types."""
     st.subheader("Propose New Experiment")
 
-    st.info("""
-    Create a new experiment to optimize trading strategy parameters.
-    The experiment will be created with status 'proposed' and requires approval before running.
-    """)
+    experiment_type = st.selectbox(
+        "Experiment Type",
+        ["strategy_params", "hyperparameter", "model_comparison",
+         "feature_engineering", "feature_selection", "label_engineering"],
+        help="Type of experiment to run",
+    )
 
     col1, col2 = st.columns(2)
 
     with col1:
         name = st.text_input(
             "Experiment Name",
-            placeholder="momentum_optimization",
+            placeholder="tune-lgbm-h7",
             help="Descriptive name for the experiment",
-        )
-
-        strategy = st.selectbox(
-            "Strategy",
-            ["momentum", "mean_reversion", "ma_crossover", "breakout"],
-            help="Trading strategy to optimize",
         )
 
         search_method = st.selectbox(
@@ -193,107 +198,49 @@ def render_propose_section():
 
         max_trials = st.number_input(
             "Max Trials",
-            min_value=5,
+            min_value=1,
             max_value=500,
-            value=50,
-            help="Maximum number of parameter combinations to test",
+            value=10,
         )
 
     with col2:
-        objective = st.selectbox(
-            "Objective Metric",
-            ["sharpe_ratio", "total_return_pct", "sortino_ratio", "max_drawdown_pct"],
-            help="Metric to optimize",
-        )
+        if experiment_type == "strategy_params":
+            objective = st.selectbox("Objective", ["sharpe_ratio", "total_return_pct", "max_drawdown_pct"])
+            direction = st.selectbox("Direction", ["maximize", "minimize"])
+        else:
+            objective = st.selectbox("Objective", ["quantile_loss", "q50_calibration", "avg_iqr"])
+            direction = st.selectbox("Direction", ["minimize", "maximize"])
 
-        direction = st.selectbox(
-            "Direction",
-            ["maximize", "minimize"],
-            help="Maximize for returns/Sharpe, minimize for drawdown",
-        )
+        horizon_days = None
+        dataset_uri = None
+        if experiment_type != "strategy_params":
+            horizon_days = st.selectbox("Horizon (days)", [7, 30], index=0)
+            # Auto-detect datasets
+            from pathlib import Path
+            dataset_dirs = sorted(Path("datasets").glob("*/manifest.json")) if Path("datasets").exists() else []
+            dataset_options = [str(d) for d in dataset_dirs]
+            if dataset_options:
+                dataset_uri = st.selectbox("Dataset", dataset_options)
+            else:
+                dataset_uri = st.text_input("Dataset URI", placeholder="datasets/baseline_v2/manifest.json")
 
-        # Symbol selection
-        from gefion.ui.components.database import get_symbols
-        symbols = get_symbols()
-
-        selected_symbols = st.multiselect(
-            "Symbols",
-            symbols,
-            default=symbols[:10] if len(symbols) >= 10 else symbols,
-            help="Symbols to backtest on",
-        )
-
-    # Date range
-    st.markdown("##### Backtest Period")
-    from datetime import date, timedelta
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input(
-            "Start Date",
-            value=date.today() - timedelta(days=365),
-        )
-    with col2:
-        end_date = st.date_input(
-            "End Date",
-            value=date.today() - timedelta(days=1),
-        )
-
-    # Search space definition
-    st.markdown("##### Search Space")
-    st.caption("Define the parameter ranges to search")
-
-    # Strategy-specific parameters
+    # Type-specific configuration
     search_space = {}
+    extra_config = {}
 
-    if strategy == "momentum":
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            lb_low = st.number_input("Lookback Min", value=5, min_value=1)
-            lb_high = st.number_input("Lookback Max", value=30, min_value=2)
-            search_space["lookback_days"] = {"type": "int", "low": lb_low, "high": lb_high}
-        with col2:
-            tn_low = st.number_input("Top N Min", value=3, min_value=1)
-            tn_high = st.number_input("Top N Max", value=15, min_value=2)
-            search_space["top_n"] = {"type": "int", "low": tn_low, "high": tn_high}
-        with col3:
-            rb_low = st.number_input("Rebalance Min", value=1, min_value=1)
-            rb_high = st.number_input("Rebalance Max", value=10, min_value=2)
-            search_space["rebalance_days"] = {"type": "int", "low": rb_low, "high": rb_high}
+    if experiment_type == "strategy_params":
+        _render_strategy_params_config(search_space, extra_config)
+    elif experiment_type == "hyperparameter":
+        _render_hyperparameter_config(search_space, extra_config)
+    elif experiment_type == "model_comparison":
+        _render_model_comparison_config(search_space, extra_config)
+    elif experiment_type == "feature_engineering":
+        _render_feature_engineering_config(search_space, extra_config)
+    elif experiment_type == "feature_selection":
+        _render_feature_selection_config(search_space, extra_config)
+    elif experiment_type == "label_engineering":
+        _render_label_engineering_config(search_space, extra_config)
 
-    elif strategy == "mean_reversion":
-        col1, col2 = st.columns(2)
-        with col1:
-            rsi_low = st.number_input("RSI Oversold Min", value=20, min_value=10)
-            rsi_high = st.number_input("RSI Oversold Max", value=40, min_value=15)
-            search_space["rsi_oversold"] = {"type": "int", "low": rsi_low, "high": rsi_high}
-        with col2:
-            rsi_ob_low = st.number_input("RSI Overbought Min", value=60, min_value=50)
-            rsi_ob_high = st.number_input("RSI Overbought Max", value=80, min_value=55)
-            search_space["rsi_overbought"] = {"type": "int", "low": rsi_ob_low, "high": rsi_ob_high}
-
-    elif strategy == "ma_crossover":
-        col1, col2 = st.columns(2)
-        with col1:
-            fast_low = st.number_input("Fast MA Min", value=10, min_value=5)
-            fast_high = st.number_input("Fast MA Max", value=50, min_value=10)
-            search_space["fast_period"] = {"type": "int", "low": fast_low, "high": fast_high}
-        with col2:
-            slow_low = st.number_input("Slow MA Min", value=100, min_value=50)
-            slow_high = st.number_input("Slow MA Max", value=200, min_value=100)
-            search_space["slow_period"] = {"type": "int", "low": slow_low, "high": slow_high}
-
-    elif strategy == "breakout":
-        col1, col2 = st.columns(2)
-        with col1:
-            lb_low = st.number_input("Lookback Min", value=10, min_value=5)
-            lb_high = st.number_input("Lookback Max", value=30, min_value=10)
-            search_space["lookback_days"] = {"type": "int", "low": lb_low, "high": lb_high}
-        with col2:
-            vol_low = st.number_input("Volume Threshold Min", value=1.0, min_value=1.0)
-            vol_high = st.number_input("Volume Threshold Max", value=3.0, min_value=1.5)
-            search_space["volume_threshold"] = {"type": "float", "low": vol_low, "high": vol_high}
-
-    # Show search space JSON
     with st.expander("View Search Space JSON"):
         st.json(search_space)
 
@@ -301,47 +248,47 @@ def render_propose_section():
         if not name:
             st.error("Please enter an experiment name")
             return
-        if not selected_symbols:
-            st.error("Please select at least one symbol")
-            return
 
-        # Build CLI command
         search_space_json = json.dumps(search_space)
-        symbols_str = ",".join(selected_symbols)
 
         cmd = [
             sys.executable, "-m", "gefion.cli", "experiment", "propose",
             "--name", name,
-            "--strategy", strategy,
+            "--type", experiment_type,
             "--search-space", search_space_json,
-            "--symbols", symbols_str,
-            "--start-date", str(start_date),
-            "--end-date", str(end_date),
             "--objective", objective,
-            "--direction", direction,
+            "--objective-direction", direction,
             "--search-method", search_method,
             "--max-trials", str(max_trials),
             "--json",
         ]
 
-        # Show CLI command
-        cli_cmd = (f"gefion experiment propose --name {name} --strategy {strategy} "
-                   f"--search-method {search_method} --max-trials {max_trials} "
-                   f"--objective {objective}")
-        st.code(cli_cmd, language="bash")
+        if dataset_uri:
+            cmd.extend(["--dataset-uri", str(dataset_uri)])
+        if horizon_days:
+            cmd.extend(["--horizon-days", str(horizon_days)])
+
+        # Add extra config
+        if extra_config:
+            cmd.extend(["--config", json.dumps(extra_config)])
+
+        # Strategy-specific options
+        if extra_config.get("strategy"):
+            cmd.extend(["--strategy", extra_config["strategy"]])
+        if extra_config.get("symbols"):
+            cmd.extend(["--symbols", extra_config["symbols"]])
+        if extra_config.get("start_date"):
+            cmd.extend(["--start-date", extra_config["start_date"]])
+        if extra_config.get("end_date"):
+            cmd.extend(["--end-date", extra_config["end_date"]])
+        if extra_config.get("model_type"):
+            cmd.extend(["--model-type", extra_config["model_type"]])
 
         env = os.environ.copy()
-        # OTEL_ENABLED inherited from parent
 
         with st.status("Proposing experiment...", expanded=True) as status:
             try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    env=env,
-                    timeout=30,
-                )
+                result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30)
 
                 if result.returncode == 0:
                     status.update(label="Experiment proposed!", state="complete")
@@ -355,10 +302,120 @@ def render_propose_section():
                     status.update(label="Failed", state="error")
                     st.error("Failed to create experiment")
                     st.code(result.stderr)
-
             except Exception as e:
                 status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
+
+
+def _render_strategy_params_config(search_space, extra_config):
+    """Render strategy parameter search space config."""
+    from datetime import date, timedelta
+
+    strategy = st.selectbox("Strategy", ["momentum", "mean_reversion", "ma_crossover", "breakout"])
+    extra_config["strategy"] = strategy
+
+    from gefion.ui.components.database import get_symbols
+    symbols = get_symbols()
+    selected = st.multiselect("Symbols", symbols, default=symbols[:10] if len(symbols) >= 10 else symbols)
+    extra_config["symbols"] = ",".join(selected)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        start = st.date_input("Start Date", value=date.today() - timedelta(days=365), key="sp_start")
+        extra_config["start_date"] = str(start)
+    with col2:
+        end = st.date_input("End Date", value=date.today() - timedelta(days=1), key="sp_end")
+        extra_config["end_date"] = str(end)
+
+    st.markdown("##### Search Space")
+    if strategy == "momentum":
+        col1, col2 = st.columns(2)
+        with col1:
+            search_space["lookback_days"] = {"type": "int", "low": st.number_input("Lookback Min", value=5, min_value=1, key="m_lb_lo"), "high": st.number_input("Lookback Max", value=30, min_value=2, key="m_lb_hi")}
+        with col2:
+            search_space["top_n"] = {"type": "int", "low": st.number_input("Top N Min", value=3, min_value=1, key="m_tn_lo"), "high": st.number_input("Top N Max", value=15, min_value=2, key="m_tn_hi")}
+    elif strategy == "mean_reversion":
+        col1, col2 = st.columns(2)
+        with col1:
+            search_space["rsi_oversold"] = {"type": "int", "low": st.number_input("RSI Oversold Min", value=20, key="mr_os_lo"), "high": st.number_input("RSI Oversold Max", value=40, key="mr_os_hi")}
+        with col2:
+            search_space["rsi_overbought"] = {"type": "int", "low": st.number_input("RSI Overbought Min", value=60, key="mr_ob_lo"), "high": st.number_input("RSI Overbought Max", value=80, key="mr_ob_hi")}
+
+
+def _render_hyperparameter_config(search_space, extra_config):
+    """Render hyperparameter tuning config."""
+    model_type = st.selectbox("Model Type", ["lightgbm", "xgboost", "quantile_regression"], key="hp_model")
+    extra_config["model_type"] = model_type
+
+    st.markdown("##### Search Space")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        search_space["learning_rate"] = {"type": "float", "low": 0.005, "high": 0.3, "log": True}
+        st.caption("Learning rate: 0.005 - 0.3 (log)")
+    with col2:
+        search_space["n_estimators"] = {"type": "int", "low": 50, "high": 500}
+        st.caption("Estimators: 50 - 500")
+    with col3:
+        search_space["max_depth"] = {"type": "int", "low": 2, "high": 12}
+        st.caption("Max depth: 2 - 12")
+
+
+def _render_model_comparison_config(search_space, extra_config):
+    """Render model comparison config."""
+    models = st.multiselect(
+        "Models to Compare",
+        ["lightgbm", "xgboost", "quantile_regression"],
+        default=["lightgbm", "xgboost", "quantile_regression"],
+    )
+    search_space["model_type"] = models
+    extra_config["model_types"] = models
+
+
+def _render_feature_engineering_config(search_space, extra_config):
+    """Render feature engineering config."""
+    function_name = st.selectbox(
+        "Feature Function",
+        ["rolling_zscore", "rolling_return", "rolling_std", "momentum", "ema", "log_return"],
+    )
+    source_column = st.selectbox("Source Column", ["close", "volume", "high", "low", "open"])
+    extra_config["feature_config"] = {"function_name": function_name}
+    extra_config["source_column"] = source_column
+
+    st.markdown("##### Parameter Search")
+    if function_name in ("rolling_zscore", "rolling_return", "rolling_std", "momentum", "ema"):
+        low = st.number_input("Window Min", value=5, min_value=2, key="fe_w_lo")
+        high = st.number_input("Window Max", value=30, min_value=3, key="fe_w_hi")
+        step = st.number_input("Window Step", value=5, min_value=1, key="fe_w_step")
+        search_space["window"] = {"type": "int", "low": low, "high": high, "step": step}
+
+
+def _render_feature_selection_config(search_space, extra_config):
+    """Render feature selection config."""
+    st.markdown("Define feature subsets to compare as JSON arrays.")
+    subsets_json = st.text_area(
+        "Feature Subsets (JSON)",
+        value='[["indicator_rsi_14", "indicator_ema_12", "indicator_psar"], '
+              '["indicator_bb_middle", "indicator_bb_upper", "indicator_bb_lower"]]',
+        help="JSON array of arrays — each inner array is a feature subset to test",
+    )
+    try:
+        subsets = json.loads(subsets_json)
+        search_space["features"] = subsets
+        all_features = list({f for s in subsets for f in s})
+        extra_config["feature_names"] = all_features
+    except json.JSONDecodeError:
+        st.error("Invalid JSON for feature subsets")
+
+
+def _render_label_engineering_config(search_space, extra_config):
+    """Render label engineering config."""
+    label_types = st.multiselect(
+        "Label Transforms to Compare",
+        ["raw", "log_return", "winsorized", "threshold_return", "sign", "rank"],
+        default=["raw", "log_return", "winsorized"],
+    )
+    search_space["label_type"] = label_types
+    extra_config["label_type"] = "raw"
 
 
 def render_run_section():
@@ -613,3 +670,178 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
             st.code(result.stdout)
     else:
         st.error(f"Failed: {result.stderr}")
+
+
+def render_discovery_section():
+    """Render data discovery and hypothesis generation."""
+    st.subheader("Data Discovery")
+    st.markdown("Inventory available data, identify gaps, and generate experiment hypotheses.")
+
+    if st.button("Run Discovery", type="primary", width="stretch"):
+        env = os.environ.copy()
+        cmd = [sys.executable, "-m", "gefion.cli", "experiment", "discover", "--json"]
+
+        with st.status("Discovering data sources...", expanded=True) as status:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
+                if result.returncode == 0:
+                    status.update(label="Discovery complete", state="complete")
+                    try:
+                        data = json.loads(result.stdout)
+
+                        # Data sources
+                        sources = data.get("data_sources", data.get("sources", []))
+                        if sources:
+                            st.markdown("### Data Sources")
+                            import pandas as pd
+                            if isinstance(sources, list):
+                                df = pd.DataFrame(sources)
+                                st.dataframe(df, use_container_width=True)
+                            elif isinstance(sources, dict):
+                                for name, info in sources.items():
+                                    with st.expander(f"{name}"):
+                                        st.json(info)
+
+                        # Hypotheses
+                        hypotheses = data.get("hypotheses", [])
+                        if hypotheses:
+                            st.markdown("### Generated Hypotheses")
+                            for i, h in enumerate(hypotheses):
+                                with st.expander(
+                                    f"{h.get('name', f'Hypothesis {i+1}')} "
+                                    f"({'ready' if h.get('status') == 'ready' else h.get('status', '?')})"
+                                ):
+                                    st.markdown(f"**Type:** {h.get('experiment_type', 'N/A')}")
+                                    st.markdown(f"**Principle:** {h.get('principle_id', 'N/A')}")
+                                    if h.get('null_hypothesis'):
+                                        st.markdown(f"**H0:** {h['null_hypothesis']}")
+                                    st.markdown(f"**Status:** {h.get('status', 'N/A')}")
+                                    if h.get('blocked_reason'):
+                                        st.warning(f"Blocked: {h['blocked_reason']}")
+
+                        if not sources and not hypotheses:
+                            st.info("Discovery returned no results. Ensure data is loaded.")
+
+                    except json.JSONDecodeError:
+                        st.code(result.stdout)
+                else:
+                    status.update(label="Failed", state="error")
+                    st.error(f"Discovery failed: {result.stderr}")
+            except Exception as e:
+                status.update(label="Error", state="error")
+                st.error(f"Error: {e}")
+
+    # Autonomous cycle launcher
+    st.markdown("---")
+    st.markdown("### Start Autonomous Cycle")
+    st.markdown(
+        "Launch an autonomous experiment cycle: discover data, consult principles, "
+        "propose experiments, and run them with FDR-controlled evaluation."
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        cycle_name = st.text_input("Cycle Name", placeholder="exploration-cycle-1", key="disc_cycle_name")
+        max_experiments = st.number_input("Max Experiments", value=5, min_value=1, max_value=50, key="disc_max_exp")
+    with col2:
+        fdr_rate = st.slider("FDR Rate", min_value=0.01, max_value=0.20, value=0.05, step=0.01,
+                             help="False Discovery Rate threshold for multiple testing correction")
+        holdout_weeks = st.number_input("Holdout Weeks", value=4, min_value=1, max_value=12, key="disc_holdout")
+
+    if st.button("Start Cycle", type="secondary", width="stretch", key="disc_start_cycle"):
+        if not cycle_name:
+            st.error("Please enter a cycle name")
+            return
+        cmd = [
+            sys.executable, "-m", "gefion.cli", "experiment", "cycle-start",
+            cycle_name,
+            "--fdr-rate", str(fdr_rate),
+            "--holdout-weeks", str(holdout_weeks),
+            "--max-experiments", str(max_experiments),
+            "--json",
+        ]
+        env = os.environ.copy()
+        with st.status("Starting cycle...", expanded=True) as status:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30)
+                if result.returncode == 0:
+                    status.update(label="Cycle started!", state="complete")
+                    try:
+                        data = json.loads(result.stdout)
+                        st.success(f"Cycle created: ID {data.get('cycle_id', '?')}")
+                    except json.JSONDecodeError:
+                        st.success("Cycle started!")
+                else:
+                    status.update(label="Failed", state="error")
+                    st.error(result.stderr)
+            except Exception as e:
+                status.update(label="Error", state="error")
+                st.error(f"Error: {e}")
+
+
+def render_cycles_section():
+    """Render experiment cycles list and status."""
+    st.subheader("Experiment Cycles")
+    st.markdown("View and manage experiment cycles with FDR-controlled evaluation.")
+
+    # List cycles
+    try:
+        from gefion.ui.components.database import get_connection
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, name, status, fdr_rate, max_experiments,
+                           created_at, completed_at
+                    FROM experiment_cycles
+                    ORDER BY created_at DESC
+                    LIMIT 20
+                """)
+                cycles = cur.fetchall()
+
+        if cycles:
+            import pandas as pd
+            df = pd.DataFrame(
+                cycles,
+                columns=["ID", "Name", "Status", "FDR Rate", "Max Experiments",
+                         "Created", "Completed"]
+            )
+            st.dataframe(df, use_container_width=True)
+
+            # Cycle detail
+            cycle_options = {f"{c[1]} (ID: {c[0]})": c[0] for c in cycles}
+            selected = st.selectbox("View Cycle Details", list(cycle_options.keys()))
+            cycle_id = cycle_options[selected]
+
+            if st.button("Load Cycle Status", width="stretch"):
+                env = os.environ.copy()
+                cmd = [
+                    sys.executable, "-m", "gefion.cli", "experiment",
+                    "cycle-status", str(cycle_id), "--json"
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30)
+                if result.returncode == 0:
+                    try:
+                        data = json.loads(result.stdout)
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Status", data.get("status", "N/A"))
+                        with col2:
+                            st.metric("Experiments", data.get("experiment_count", 0))
+                        with col3:
+                            st.metric("FDR Survivors", data.get("fdr_survivors", "N/A"))
+
+                        if data.get("experiments"):
+                            st.markdown("### Cycle Experiments")
+                            exp_df = pd.DataFrame(data["experiments"])
+                            st.dataframe(exp_df, use_container_width=True)
+                    except json.JSONDecodeError:
+                        st.code(result.stdout)
+                else:
+                    st.error(result.stderr)
+        else:
+            st.info("No experiment cycles yet. Start one from the Discovery tab.")
+
+    except Exception as e:
+        st.error(f"Error loading cycles: {e}")
+        st.info("The experiment_cycles table may not exist. Run `gefion db-migrate` to create it.")

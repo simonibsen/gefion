@@ -1244,6 +1244,38 @@ class TestExperimentsUIQuery:
         assert "def render_list_section(" in content
 
 
+class TestExperimentsUITabs:
+    """Test experiments page has Discovery and Cycles tabs."""
+
+    @pytest.fixture
+    def experiments_content(self):
+        return (Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views" / "experiments.py").read_text()
+
+    def test_has_discovery_tab(self, experiments_content):
+        """Experiments page must have a Discovery tab."""
+        assert "Discovery" in experiments_content
+        assert "render_discovery_section" in experiments_content
+
+    def test_has_cycles_tab(self, experiments_content):
+        """Experiments page must have a Cycles tab."""
+        assert "Cycles" in experiments_content
+        assert "render_cycles_section" in experiments_content
+
+    def test_propose_supports_all_experiment_types(self, experiments_content):
+        """Propose form must support all experiment types, not just strategy_params."""
+        assert "hyperparameter" in experiments_content
+        assert "model_comparison" in experiments_content
+        assert "feature_engineering" in experiments_content
+        assert "feature_selection" in experiments_content
+        assert "label_engineering" in experiments_content
+
+    def test_type_filter_includes_all_types(self, experiments_content):
+        """List type filter must include all experiment types."""
+        assert "model_comparison" in experiments_content
+        assert "feature_engineering" in experiments_content
+        assert "label_engineering" in experiments_content
+
+
 class TestActionDashboard:
     """Test the Action Dashboard (formerly AI Prompts page)."""
 
