@@ -128,9 +128,9 @@ class TestDiscoverGaps:
             assert "missing" in gap
             assert "hypothesis" in gap
 
-    def test_no_gaps_when_all_requirements_met(self, sample_features):
+    def test_no_missing_when_all_requirements_met(self, sample_features):
         """When every principle's data requirements are satisfied,
-        discover_gaps should return an empty list."""
+        gaps should have no missing items (feasibility=ready)."""
         from gefion.experiments.discovery import discover_gaps
 
         # Craft data sources that cover everything
@@ -157,7 +157,9 @@ class TestDiscoverGaps:
         gaps = discover_gaps(full_data_sources, sample_features, principles)
 
         assert isinstance(gaps, list)
-        assert len(gaps) == 0
+        # Should have an entry but with no missing data (it's an opportunity)
+        for gap in gaps:
+            assert len(gap["missing"]) == 0, f"Unexpected missing data: {gap['missing']}"
 
     def test_missing_data_marked_correctly(
         self, sample_data_sources, sample_features, sample_principles
@@ -195,7 +197,7 @@ class TestGenerateHypotheses:
             assert h["feasibility"] is not None
 
     def test_empty_gaps_returns_empty(self, sample_principles):
-        """With no gaps, generate_hypotheses should return an empty list."""
+        """With no gap entries at all, generate_hypotheses should return an empty list."""
         from gefion.experiments.discovery import generate_hypotheses
 
         hypotheses = generate_hypotheses([], sample_principles)

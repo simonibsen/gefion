@@ -179,15 +179,14 @@ def discover_gaps(
     features: List[Dict],
     principles: List[Dict],
 ) -> List[Dict[str, Any]]:
-    """Cross-reference available data against principles to find gaps.
+    """Cross-reference available data against principles to find gaps and opportunities.
 
     Pure function — no database access.
 
-    A gap exists when a principle requires data that:
-    - Doesn't exist at all (missing table/column) → marked in 'missing'
-    - Exists but has no derived feature → marked as available with hypothesis
-
     Returns list of {principle_id, required_data, available, missing, hypothesis}.
+    Each entry is either:
+    - A gap (missing data) → feasibility "blocked"
+    - An opportunity (data available, experiment possible) → feasibility "ready"
     """
     # Build lookup: "table.column" → True for available data
     available_data = set()
@@ -198,6 +197,11 @@ def discover_gaps(
         # Also add just the table name for table-level requirements
         available_data.add(table)
 
+    # Also index by table name → columns for partial matching
+    table_columns = {}
+    for source in data_sources:
+        table_columns[source["table"]] = set(source["columns"])
+
     gaps = []
     for principle in principles:
         requirements = principle.get("data_requirements", [])
@@ -207,35 +211,48 @@ def discover_gaps(
         available = []
         missing = []
         for req in requirements:
-            # Check if requirement is satisfied (table.column or just table)
             if req in available_data:
                 available.append(req)
-            else:
-                # Check if at least the table exists
-                table_part = req.split(".")[0] if "." in req else req
-                if any(s["table"] == table_part for s in data_sources):
-                    # Table exists but specific column might not
-                    col_part = req.split(".")[1] if "." in req else None
-                    if col_part and any(
-                        col_part in s["columns"]
-                        for s in data_sources
-                        if s["table"] == table_part
-                    ):
+            elif "." in req:
+                table_part, col_part = req.split(".", 1)
+                if table_part in table_columns:
+                    if col_part in table_columns[table_part]:
                         available.append(req)
                     else:
+                        # Table exists but column missing — check aliases
+                        # e.g., "fundamentals.market_cap" → "stocks_fundamentals.market_cap"
+                        found = False
+                        for tbl, cols in table_columns.items():
+                            if table_part in tbl and col_part in cols:
+                                available.append(req)
+                                found = True
+                                break
+                        if not found:
+                            missing.append(req)
+                else:
+                    # Try fuzzy table match (e.g., "fundamentals" → "stocks_fundamentals")
+                    found = False
+                    for tbl, cols in table_columns.items():
+                        if table_part in tbl and col_part in cols:
+                            available.append(req)
+                            found = True
+                            break
+                    if not found:
                         missing.append(req)
+            else:
+                if req in table_columns:
+                    available.append(req)
                 else:
                     missing.append(req)
 
-        # Only report as gap if something is missing
-        if missing:
-            gaps.append({
-                "principle_id": principle["id"],
-                "required_data": requirements,
-                "available": available,
-                "missing": missing,
-                "hypothesis": principle.get("experiment_design") if not missing else None,
-            })
+        # Report both gaps (missing data) and opportunities (data available)
+        gaps.append({
+            "principle_id": principle["id"],
+            "required_data": requirements,
+            "available": available,
+            "missing": missing,
+            "hypothesis": principle.get("experiment_design", ""),
+        })
 
     return gaps
 
@@ -244,11 +261,12 @@ def generate_hypotheses(
     gaps: List[Dict],
     principles: List[Dict],
 ) -> List[Dict[str, Any]]:
-    """Generate actionable experiment hypotheses from gaps.
+    """Generate actionable experiment hypotheses from gaps and opportunities.
 
     Pure function — no database access.
 
     Returns list of {principle_id, description, experiment_type, feasibility}.
+    Includes both ready (data available) and blocked (data missing) hypotheses.
     """
     if not gaps:
         return []

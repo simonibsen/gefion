@@ -1314,6 +1314,74 @@ async def list_tools() -> List[Tool]:
         ),
 
         # ============================================================
+        # Autonomous Experiment Framework Tools
+        # ============================================================
+        Tool(
+            name="experiment_discover",
+            description=(
+                "Discover available data sources and experiment opportunities"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        Tool(
+            name="experiment_cycle_start",
+            description=(
+                "Start a new experiment cycle with holdout and FDR configuration"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Cycle name"},
+                    "fdr_rate": {"type": "number", "default": 0.10, "description": "False discovery rate threshold"},
+                    "holdout_weeks": {"type": "integer", "default": 6, "description": "Holdout period in weeks"},
+                    "max_experiments": {"type": "integer", "default": 20, "description": "Maximum experiments per cycle"},
+                },
+            },
+        ),
+        Tool(
+            name="experiment_cycle_status",
+            description=(
+                "Get status of an experiment cycle"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cycle_id": {"type": "integer", "description": "Cycle ID"},
+                },
+                "required": ["cycle_id"],
+            },
+        ),
+        Tool(
+            name="principles_list",
+            description=(
+                "List principles from the quantitative finance catalog"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "domain": {"type": "string", "description": "Filter by domain"},
+                    "experiment_type": {"type": "string", "description": "Filter by experiment type"},
+                    "status": {"type": "string", "description": "Filter by status"},
+                },
+            },
+        ),
+        Tool(
+            name="principles_suggest",
+            description=(
+                "Suggest experiments based on principles and current data"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_type": {"type": "string", "description": "Filter suggestions by experiment type"},
+                },
+            },
+        ),
+
+        # ============================================================
         # Chart Tools
         # ============================================================
         Tool(
@@ -1597,6 +1665,17 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _experiment_children(arguments)
         elif name == "experiment_status":
             result = await _experiment_status(arguments)
+        # Autonomous experiment framework tools
+        elif name == "experiment_discover":
+            result = await _experiment_discover(arguments)
+        elif name == "experiment_cycle_start":
+            result = await _experiment_cycle_start(arguments)
+        elif name == "experiment_cycle_status":
+            result = await _experiment_cycle_status(arguments)
+        elif name == "principles_list":
+            result = await _principles_list(arguments)
+        elif name == "principles_suggest":
+            result = await _principles_suggest(arguments)
         # Chart tools
         elif name == "chart_price":
             result = await _chart_price(arguments)
@@ -3811,6 +3890,82 @@ async def _experiment_status(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _status)
+
+
+# ============================================================================
+# Autonomous Experiment Framework Tools
+# ============================================================================
+
+async def _experiment_discover(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Discover available data sources and experiment opportunities."""
+    async def _discover():
+        cmd = ["experiment", "discover", "--json"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _discover)
+
+
+async def _experiment_cycle_start(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Start a new experiment cycle with holdout and FDR configuration."""
+    async def _start():
+        cmd = ["experiment", "cycle-start", "--json"]
+
+        if args.get("name"):
+            cmd.extend(["--name", args["name"]])
+        if args.get("fdr_rate") is not None:
+            cmd.extend(["--fdr-rate", str(args["fdr_rate"])])
+        if args.get("holdout_weeks") is not None:
+            cmd.extend(["--holdout-weeks", str(args["holdout_weeks"])])
+        if args.get("max_experiments") is not None:
+            cmd.extend(["--max-experiments", str(args["max_experiments"])])
+
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _start)
+
+
+async def _experiment_cycle_status(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Get status of an experiment cycle."""
+    async def _status():
+        cmd = ["experiment", "cycle-status", str(args["cycle_id"]), "--json"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _status)
+
+
+async def _principles_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List principles from the quantitative finance catalog."""
+    async def _list():
+        cmd = ["principles", "list", "--json"]
+
+        if args.get("domain"):
+            cmd.extend(["--domain", args["domain"]])
+        if args.get("experiment_type"):
+            cmd.extend(["--experiment-type", args["experiment_type"]])
+        if args.get("status"):
+            cmd.extend(["--status", args["status"]])
+
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _list)
+
+
+async def _principles_suggest(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Suggest experiments based on principles and current data."""
+    async def _suggest():
+        cmd = ["principles", "suggest", "--json"]
+
+        if args.get("experiment_type"):
+            cmd.extend(["--experiment-type", args["experiment_type"]])
+
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _suggest)
 
 
 # ============================================================================
