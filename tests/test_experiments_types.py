@@ -782,6 +782,53 @@ class TestModelComparisonExperiment:
 # ---------------------------------------------------------------------------
 
 
+class TestPipelineEvaluate:
+    """Tests for PipelineExperiment.evaluate()."""
+
+    def test_evaluate_returns_metrics_dict(self):
+        """evaluate() must return Dict[str, float]."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.pipeline import PipelineExperiment
+
+        exp = PipelineExperiment(
+            name="test-pipeline",
+            stages=[
+                {"type": "feature_engineering", "function_name": "rolling_zscore", "source_column": "close"},
+                {"type": "train", "algorithm": "lightgbm"},
+            ],
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+        )
+
+        X = pd.DataFrame({
+            "f0": np.random.randn(100),
+            "close": np.random.randn(100).cumsum() + 100,
+        })
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        with patch("gefion.experiments.types.pipeline.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.pipeline.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.pipeline.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.pipeline.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            result = exp.evaluate({"window": 10})
+
+        assert isinstance(result, dict)
+        assert "quantile_loss" in result
+
+    def test_evaluate_has_observability_span(self):
+        """evaluate() must create an observability span."""
+        import inspect
+        from gefion.experiments.types.pipeline import PipelineExperiment
+        src = inspect.getsource(PipelineExperiment.evaluate)
+        assert "create_span" in src
+
+
 class TestLabelEngineeringEvaluate:
     """Tests for LabelEngineeringExperiment.evaluate()."""
 
