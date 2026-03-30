@@ -1188,20 +1188,28 @@ async def list_tools() -> List[Tool]:
             description=(
                 "Propose a new experiment for approval. "
                 "Creates an experiment with 'proposed' status. "
-                "Supports strategy parameter optimization with grid, random, or bayesian search."
+                "Supports all experiment types: strategy_params, hyperparameter, model_comparison, "
+                "feature_engineering, feature_selection, label_engineering, pipeline."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Experiment name"},
-                    "strategy": {"type": "string", "description": "Strategy name (momentum, mean_reversion, ma_crossover, breakout)"},
+                    "experiment_type": {"type": "string", "default": "strategy_params",
+                                        "description": "Experiment type: strategy_params, hyperparameter, model_comparison, feature_engineering, feature_selection, label_engineering, pipeline"},
                     "search_space": {"type": "string", "description": "JSON search space definition"},
-                    "symbols": {"type": "string", "description": "Comma-separated symbols"},
+                    "objective": {"type": "string", "default": "sharpe_ratio", "description": "Metric to optimize (sharpe_ratio, quantile_loss, etc.)"},
+                    "objective_direction": {"type": "string", "default": "maximize", "description": "minimize or maximize"},
+                    "max_trials": {"type": "integer", "default": 10, "description": "Maximum trials"},
+                    "search_method": {"type": "string", "default": "bayesian", "description": "Search method: grid, random, or bayesian"},
+                    "model_type": {"type": "string", "description": "ML model type (lightgbm, xgboost, quantile_regression) — for hyperparameter type"},
+                    "dataset_uri": {"type": "string", "description": "Path to dataset manifest (e.g., datasets/baseline_v2/manifest.json)"},
+                    "horizon_days": {"type": "integer", "description": "Prediction horizon in days (7, 30)"},
+                    "strategy": {"type": "string", "description": "Strategy name — for strategy_params type"},
+                    "symbols": {"type": "string", "description": "Comma-separated symbols — for strategy_params type"},
                     "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
                     "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
-                    "objective": {"type": "string", "default": "sharpe_ratio", "description": "Metric to optimize"},
-                    "max_trials": {"type": "integer", "default": 50, "description": "Maximum trials"},
-                    "search_method": {"type": "string", "default": "grid", "description": "Search method: grid, random, or bayesian"},
+                    "extra_config": {"type": "string", "description": "Extra config as JSON (merged into experiment config)"},
                     "goal_type": {"type": "string", "description": "Goal type: achieve, improve"},
                     "goal_target": {"type": "number", "description": "Target value for goal"},
                     "baseline": {"type": "number", "description": "Baseline for improvement goals"},
@@ -1220,7 +1228,7 @@ async def list_tools() -> List[Tool]:
                 "type": "object",
                 "properties": {
                     "status": {"type": "string", "description": "Filter by status (proposed, approved, running, completed, failed)"},
-                    "experiment_type": {"type": "string", "description": "Filter by type (strategy_params)"},
+                    "experiment_type": {"type": "string", "description": "Filter by type (strategy_params, hyperparameter, model_comparison, feature_engineering, feature_selection, label_engineering, pipeline)"},
                     "limit": {"type": "integer", "default": 20, "description": "Max results"},
                 },
             },
@@ -3708,7 +3716,7 @@ async def _backtest_compare(args: Dict[str, Any]) -> Dict[str, Any]:
 # ============================================================================
 
 async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Propose a new experiment for approval."""
+    """Propose a new experiment for approval. Supports all experiment types."""
     async def _propose():
         cmd = ["experiment", "propose"]
 
@@ -3716,7 +3724,21 @@ async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd.extend(["--name", args["name"]])
         cmd.extend(["--search-space", args["search_space"]])
 
-        # Optional arguments
+        # Experiment type
+        if args.get("experiment_type"):
+            cmd.extend(["--type", args["experiment_type"]])
+
+        # ML-specific options
+        if args.get("model_type"):
+            cmd.extend(["--model-type", args["model_type"]])
+        if args.get("dataset_uri"):
+            cmd.extend(["--dataset-uri", args["dataset_uri"]])
+        if args.get("horizon_days"):
+            cmd.extend(["--horizon-days", str(args["horizon_days"])])
+        if args.get("objective_direction"):
+            cmd.extend(["--objective-direction", args["objective_direction"]])
+
+        # Strategy options
         if args.get("strategy"):
             cmd.extend(["--strategy", args["strategy"]])
         if args.get("symbols"):
@@ -3725,12 +3747,18 @@ async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--start-date", args["start_date"]])
         if args.get("end_date"):
             cmd.extend(["--end-date", args["end_date"]])
+
+        # General options
         if args.get("objective"):
             cmd.extend(["--objective", args["objective"]])
         if args.get("max_trials"):
             cmd.extend(["--max-trials", str(args["max_trials"])])
         if args.get("search_method"):
             cmd.extend(["--search-method", args["search_method"]])
+        if args.get("extra_config"):
+            cmd.extend(["--config", args["extra_config"]])
+
+        # Goal options
         if args.get("goal_type"):
             cmd.extend(["--goal-type", args["goal_type"]])
         if args.get("goal_target") is not None:

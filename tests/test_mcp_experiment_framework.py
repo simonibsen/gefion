@@ -43,6 +43,68 @@ class TestExperimentDiscoverTool:
         assert '"--json"' in handler_block
 
 
+class TestExperimentProposeTool:
+    """Test experiment_propose supports all experiment types."""
+
+    def test_has_experiment_type_param(self):
+        """experiment_propose schema must include experiment_type."""
+        src = _read_server_source()
+        idx = src.index('name="experiment_propose"')
+        block = src[idx:idx + 3000]
+        assert '"experiment_type"' in block
+
+    def test_has_model_type_param(self):
+        """experiment_propose schema must include model_type for ML experiments."""
+        src = _read_server_source()
+        idx = src.index('name="experiment_propose"')
+        block = src[idx:idx + 3000]
+        assert '"model_type"' in block
+
+    def test_has_dataset_uri_param(self):
+        """experiment_propose schema must include dataset_uri."""
+        src = _read_server_source()
+        idx = src.index('name="experiment_propose"')
+        block = src[idx:idx + 3000]
+        assert '"dataset_uri"' in block
+
+    def test_has_horizon_days_param(self):
+        """experiment_propose schema must include horizon_days."""
+        src = _read_server_source()
+        idx = src.index('name="experiment_propose"')
+        block = src[idx:idx + 3000]
+        assert '"horizon_days"' in block
+
+    def test_has_objective_direction_param(self):
+        """experiment_propose schema must include objective_direction."""
+        src = _read_server_source()
+        idx = src.index('name="experiment_propose"')
+        block = src[idx:idx + 3000]
+        assert '"objective_direction"' in block
+
+    def test_handler_passes_experiment_type(self):
+        """Handler must pass --type to CLI."""
+        src = _read_server_source()
+        idx = src.index("async def _experiment_propose(")
+        block = src[idx:idx + 800]
+        assert '"--type"' in block
+
+    def test_handler_passes_ml_options(self):
+        """Handler must pass --model-type, --dataset-uri, --horizon-days."""
+        src = _read_server_source()
+        idx = src.index("async def _experiment_propose(")
+        block = src[idx:idx + 800]
+        assert '"--model-type"' in block
+        assert '"--dataset-uri"' in block
+        assert '"--horizon-days"' in block
+
+    def test_description_mentions_all_types(self):
+        """Tool description should mention it supports multiple experiment types."""
+        src = _read_server_source()
+        idx = src.index('name="experiment_propose"')
+        block = src[idx:idx + 500]
+        assert "hyperparameter" in block or "all experiment types" in block.lower()
+
+
 class TestExperimentCycleStartTool:
     """Test experiment_cycle_start tool definition and handler."""
 
