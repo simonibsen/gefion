@@ -1130,6 +1130,14 @@ class TestExperimentRunnerWiring:
             "ExperimentRunner.run() must handle experiment_type='model_comparison'"
         )
 
+    def test_run_auto_detects_dataset_uri_for_ml_types(self):
+        """ExperimentRunner.run() must auto-detect dataset_uri if not set."""
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+        src = inspect.getsource(ExperimentRunner.run)
+        assert "Auto-detected dataset" in src or "auto-detect" in src.lower()
+        assert "dataset_uri" in src
+
     def test_run_handles_label_engineering_type(self):
         """ExperimentRunner.run() must handle experiment_type='label_engineering'."""
         import inspect

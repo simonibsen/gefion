@@ -436,6 +436,22 @@ class ExperimentRunner:
             early_stop = experiment.get("early_stop_on_goal", False)
             max_trials = config.get("max_trials", 50)
 
+            # For ML experiment types, resolve dataset_uri
+            ml_types = {"hyperparameter", "model_comparison", "feature_engineering",
+                        "feature_selection", "label_engineering", "pipeline"}
+            if experiment["experiment_type"] in ml_types and not config.get("dataset_uri"):
+                # Auto-detect latest dataset manifest
+                from pathlib import Path
+                manifests = sorted(Path("datasets").glob("*/manifest.json")) if Path("datasets").exists() else []
+                if manifests:
+                    config["dataset_uri"] = str(manifests[-1])
+                    logger.info(f"Auto-detected dataset: {config['dataset_uri']}")
+                else:
+                    raise ValueError(
+                        "No dataset_uri specified and no datasets found. "
+                        "Run 'gefion ml dataset-build' first, then pass --dataset-uri."
+                    )
+
             # Create experiment evaluator based on type
             if experiment["experiment_type"] == "strategy_params":
                 evaluator = StrategyParamExperiment(
