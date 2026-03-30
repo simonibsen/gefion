@@ -470,6 +470,21 @@ class ExperimentRunner:
                     horizon_days=config.get("horizon_days", 7),
                     quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
                 )
+            elif experiment["experiment_type"] == "feature_selection":
+                from gefion.experiments.types.feature_selection import FeatureSelectionExperiment
+                evaluator = FeatureSelectionExperiment(
+                    name=experiment["name"],
+                    principle_id=config.get("principle_id", ""),
+                    null_hypothesis=config.get("null_hypothesis", ""),
+                    feature_names=config.get("feature_names", []),
+                    selection_method=config.get("selection_method", "importance"),
+                    objective_metric=objective_metric,
+                    algorithm=config.get("algorithm", "lightgbm"),
+                    cv_config=config.get("cv_config", {"n_splits": 5, "embargo_pct": 0.02}),
+                    dataset_uri=config.get("dataset_uri"),
+                    horizon_days=config.get("horizon_days", 7),
+                    quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                )
             else:
                 raise ValueError(f"Unknown experiment type: {experiment['experiment_type']}")
 

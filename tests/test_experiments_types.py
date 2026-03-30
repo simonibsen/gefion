@@ -782,6 +782,84 @@ class TestModelComparisonExperiment:
 # ---------------------------------------------------------------------------
 
 
+class TestFeatureSelectionEvaluate:
+    """Tests for FeatureSelectionExperiment.evaluate()."""
+
+    def test_evaluate_returns_metrics_dict(self):
+        """evaluate() must return Dict[str, float] with quantile_loss."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.feature_selection import FeatureSelectionExperiment
+
+        exp = FeatureSelectionExperiment(
+            name="select-features",
+            principle_id="p1",
+            null_hypothesis="feature subset doesn't matter",
+            feature_names=["f0", "f1", "f2", "f3", "f4"],
+            cv_config={"n_splits": 3, "embargo_pct": 0.0, "prediction_horizon": 0},
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 5), columns=["f0", "f1", "f2", "f3", "f4"])
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(20), "q50": np.random.randn(20), "q90": np.random.randn(20)})
+
+        with patch("gefion.experiments.types.feature_selection.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.feature_selection.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.feature_selection.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.feature_selection.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05, "avg_iqr": 0.12}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            result = exp.evaluate({"features": ["f0", "f2", "f4"]})
+
+        assert isinstance(result, dict)
+        assert "quantile_loss" in result
+
+    def test_evaluate_uses_feature_subset(self):
+        """evaluate() must train on only the specified feature columns."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.feature_selection import FeatureSelectionExperiment
+
+        exp = FeatureSelectionExperiment(
+            name="select-features",
+            principle_id="p1",
+            null_hypothesis="test",
+            feature_names=["f0", "f1", "f2", "f3", "f4"],
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+        )
+
+        X = pd.DataFrame(np.random.randn(100, 5), columns=["f0", "f1", "f2", "f3", "f4"])
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        with patch("gefion.experiments.types.feature_selection.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.feature_selection.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.feature_selection.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.feature_selection.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            exp.evaluate({"features": ["f1", "f3"]})
+
+        # Check that train was called with only 2 columns
+        for call in mock_train.call_args_list:
+            X_train = call[0][0]  # first positional arg
+            assert X_train.shape[1] == 2
+            assert list(X_train.columns) == ["f1", "f3"]
+
+    def test_evaluate_has_observability_span(self):
+        """evaluate() must create an observability span."""
+        import inspect
+        from gefion.experiments.types.feature_selection import FeatureSelectionExperiment
+        src = inspect.getsource(FeatureSelectionExperiment.evaluate)
+        assert "create_span" in src
+
+
 class TestSearchSpaceBareLists:
     """Search strategies must handle bare lists as categorical values."""
 
@@ -840,4 +918,13 @@ class TestExperimentRunnerWiring:
         src = inspect.getsource(ExperimentRunner.run)
         assert '"model_comparison"' in src or "'model_comparison'" in src, (
             "ExperimentRunner.run() must handle experiment_type='model_comparison'"
+        )
+
+    def test_run_handles_feature_selection_type(self):
+        """ExperimentRunner.run() must handle experiment_type='feature_selection'."""
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+        src = inspect.getsource(ExperimentRunner.run)
+        assert '"feature_selection"' in src or "'feature_selection'" in src, (
+            "ExperimentRunner.run() must handle experiment_type='feature_selection'"
         )
