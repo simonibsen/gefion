@@ -59,6 +59,25 @@ class TestExperimentCLICommands:
         sig = inspect.signature(propose[0].callback)
         assert "cycle" in sig.parameters
 
+    def test_propose_accepts_ml_options(self):
+        """experiment propose should accept ML-specific options for hyperparameter/model_comparison types."""
+        from gefion.cli import experiment_app
+        propose = [cmd for cmd in experiment_app.registered_commands if cmd.name == "propose"]
+        import inspect
+        sig = inspect.signature(propose[0].callback)
+        assert "model_type" in sig.parameters, "propose needs --model-type for ML experiments"
+        assert "dataset_uri" in sig.parameters, "propose needs --dataset-uri for ML experiments"
+        assert "horizon_days" in sig.parameters, "propose needs --horizon-days for ML experiments"
+        assert "objective_direction" in sig.parameters, "propose needs --objective-direction"
+
+    def test_propose_accepts_extra_json_config(self):
+        """experiment propose should accept --config for arbitrary JSON."""
+        from gefion.cli import experiment_app
+        propose = [cmd for cmd in experiment_app.registered_commands if cmd.name == "propose"]
+        import inspect
+        sig = inspect.signature(propose[0].callback)
+        assert "extra_json" in sig.parameters, "propose needs --config for arbitrary JSON config"
+
 
 class TestPrinciplesCLICommands:
     """Verify principles CLI commands are registered."""

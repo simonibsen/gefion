@@ -8709,6 +8709,11 @@ def experiment_propose(
     principle: Optional[str] = typer.Option(None, "--principle", help="Principle ID from catalog (optional)"),
     hypothesis: Optional[str] = typer.Option(None, "--null-hypothesis", help="Null hypothesis statement"),
     cycle: Optional[int] = typer.Option(None, "--cycle", help="Experiment cycle ID to associate with"),
+    model_type: Optional[str] = typer.Option(None, "--model-type", help="ML model type (lightgbm, xgboost, quantile_regression)"),
+    dataset_uri: Optional[str] = typer.Option(None, "--dataset-uri", help="Path to dataset manifest (e.g., datasets/baseline_v2/manifest.json)"),
+    horizon_days: Optional[int] = typer.Option(None, "--horizon-days", help="Prediction horizon in days"),
+    objective_direction: str = typer.Option("maximize", "--objective-direction", help="minimize or maximize"),
+    extra_json: Optional[str] = typer.Option(None, "--config", help="Extra config as JSON (merged into experiment config)"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ) -> None:
     """Propose a new experiment for approval."""
@@ -8719,16 +8724,29 @@ def experiment_propose(
     except json.JSONDecodeError as e:
         emit_error(f"Invalid JSON in search-space: {e}", json_output=json_output)
 
-    # Build extra config
+    # Build extra config from explicit options + arbitrary JSON
     extra_config = {}
     if strategy:
         extra_config["strategy"] = strategy
+    if model_type:
+        extra_config["model_type"] = model_type
+    if dataset_uri:
+        extra_config["dataset_uri"] = dataset_uri
+    if horizon_days is not None:
+        extra_config["horizon_days"] = horizon_days
+    if extra_json:
+        try:
+            extra_config.update(json.loads(extra_json))
+        except json.JSONDecodeError as e:
+            emit_error(f"Invalid JSON in --config: {e}", json_output=json_output)
+            return
 
     config = ExperimentConfig(
         name=name,
         experiment_type=experiment_type,
         search_space=search_space_dict,
         objective_metric=objective,
+        objective_direction=objective_direction,
         max_trials=max_trials,
         search_method=search_method,
         goal_type=goal_type,
