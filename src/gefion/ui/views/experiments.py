@@ -494,7 +494,7 @@ def render_results_section():
 
         if completed:
             exp_options = {
-                f"{e[1]} (ID: {e[0]}, best {e[2]}: {e[3]:.4f if e[3] else 'N/A'})": e[0]
+                f"{e[1]} (ID: {e[0]}, best {e[2]}: {f'{e[3]:.4f}' if e[3] is not None else 'N/A'})": e[0]
                 for e in completed
             }
 
