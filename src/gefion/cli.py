@@ -2236,7 +2236,13 @@ def ml_eval(
                     json_output=json_output,
                 )
             else:
-                emit_error("No predictions found for evaluation period", json_output=json_output)
+                emit_error(
+                    f"No predictions found for model '{model_name}' v{model_version} "
+                    f"in period {start_date} to {end_date}. "
+                    f"Run 'gefion ml predict --model-name {model_name} --model-version {model_version} "
+                    f"--start-date {start_date} --end-date {end_date}' to generate predictions first.",
+                    json_output=json_output,
+                )
             return
 
         emit(f"Found {len(predictions_data)} predictions to evaluate", json_output=json_output)
@@ -2289,7 +2295,17 @@ def ml_eval(
         emit(f"Valid predictions with actual returns: {len(valid_predictions)}", json_output=json_output)
 
         if len(valid_predictions) == 0:
-            emit_error("No valid predictions with actual returns found", json_output=json_output)
+            # Diagnose why
+            total_preds = len(predictions_df)
+            horizons = predictions_df["horizon_days"].unique().tolist()
+            date_range = f"{predictions_df['prediction_date'].min()} to {predictions_df['prediction_date'].max()}"
+            emit_error(
+                f"Found {total_preds} predictions ({date_range}, horizons {horizons}) "
+                f"but none have matching price data for the outcome date. "
+                f"This usually means the outcome dates fall outside your OHLCV data range. "
+                f"Check that price data covers prediction_date + horizon_days.",
+                json_output=json_output,
+            )
             return
 
         # Calculate metrics by horizon
@@ -2525,7 +2541,12 @@ def ml_calibrate(
             valid = predictions_df[predictions_df["actual_return"].notna()].copy()
 
             if len(valid) == 0:
-                emit_error("No valid predictions with actual returns found", json_output=json_output)
+                total_preds = len(predictions_df)
+                emit_error(
+                    f"Found {total_preds} predictions but none have matching price data "
+                    f"for the outcome date. Ensure OHLCV data covers prediction_date + horizon_days.",
+                    json_output=json_output,
+                )
                 return
 
             emit(f"Valid predictions with actuals: {len(valid)}", json_output=json_output)
