@@ -440,8 +440,8 @@ def render_update_section():
     if state.is_running or state.completed:
         render_process_status("data_update", "Data Update")
 
-        # Auto-refresh while running — but check if process actually exited
         if state.is_running:
+            # Auto-refresh while running
             proc = getattr(state, 'process', None)
             if proc and proc.poll() is not None and not state.completed:
                 # Process exited but thread hasn't caught up yet — nudge it
@@ -454,7 +454,13 @@ def render_update_section():
                 st.caption("Auto-refreshing...")
                 time.sleep(1.5)
                 st.rerun()
-        return  # Don't show update form while process is active
+            return  # Don't show update form while process is running
+
+        # Process completed — show clear button, don't block the form
+        if state.completed:
+            if st.button("Clear", key="clear_data_update"):
+                clear_process_state("data_update")
+                st.rerun()
 
     st.info("""
     **Data Update** runs two phases:
