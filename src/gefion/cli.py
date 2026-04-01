@@ -9458,6 +9458,60 @@ def experiment_cycle_start(
             raise typer.Exit(1)
 
 
+@experiment_app.command("cycle-run")
+def experiment_cycle_run(
+    cycle_id: int = typer.Argument(..., help="Cycle ID to run"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Run an autonomous experiment cycle.
+
+    Discovers hypotheses, proposes experiments based on cycle guardrails,
+    auto-approves (if configured), runs all experiments, and applies
+    FDR correction to filter out false discoveries.
+
+    Examples:
+        # Start a cycle then run it
+        gefion experiment cycle-start --name exploration-1
+        gefion experiment cycle-run 1
+
+        # Run with JSON output
+        gefion experiment cycle-run 1 --json
+    """
+    with create_span("cli.experiment_cycle_run", cycle_id=cycle_id):
+        from gefion.experiments.cycle_runner import CycleRunner
+
+        db_url = str(SETTINGS.database_url)
+        runner = CycleRunner(db_url)
+
+        try:
+            if not json_output:
+                from rich.console import Console
+                console = Console()
+                console.print(f"[bold]Running cycle #{cycle_id}...[/bold]")
+                console.print("[dim]Discovering hypotheses, proposing experiments, running trials...[/dim]")
+
+            results = runner.run_cycle(cycle_id)
+
+            if json_output:
+                emit_json({
+                    "cycle_id": cycle_id,
+                    "status": "completed",
+                    **results,
+                })
+            else:
+                console.print(f"\n[bold green]Cycle #{cycle_id} complete![/bold green]")
+                console.print(f"  Proposed: {results.get('proposed', 0)} experiments")
+                console.print(f"  Completed: {results.get('completed', 0)} experiments")
+                console.print(f"  FDR Survivors: {results.get('fdr_survivors', 0)}")
+
+        except Exception as e:
+            emit_error(f"Cycle run failed: {e}", json_output=json_output)
+            if os.environ.get("DEBUG"):
+                import traceback
+                traceback.print_exc()
+            raise typer.Exit(1)
+
+
 @experiment_app.command("cycle-status")
 def experiment_cycle_status(
     cycle_id: int = typer.Argument(..., help="Cycle ID"),

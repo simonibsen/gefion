@@ -825,6 +825,7 @@ def render_discovery_section():
         "false discoveries. Only genuine improvements survive."
     )
 
+    # Basic settings
     col1, col2 = st.columns(2)
     with col1:
         cycle_name = st.text_input("Cycle Name", placeholder="exploration-cycle-1", key="disc_cycle_name")
@@ -832,24 +833,83 @@ def render_discovery_section():
             "Max Experiments", value=5, min_value=1, max_value=50, key="disc_max_exp",
             help="How many experiments to run in this cycle. More = broader search but takes longer.",
         )
-    with col2:
         fdr_rate = st.slider(
             "False Discovery Filter", min_value=0.01, max_value=0.20, value=0.05, step=0.01,
-            help="How strict to be about filtering false positives. "
-                 "At 5%, we accept that up to 5% of 'discoveries' might be due to chance. "
-                 "Lower = stricter (fewer but more reliable results).",
+            help="At 5%, at most 5% of reported discoveries may be due to chance. Lower = stricter.",
         )
+    with col2:
         holdout_weeks = st.number_input(
             "Holdout Weeks", value=4, min_value=1, max_value=12, key="disc_holdout",
-            help="Weeks of recent data reserved for final validation. "
-                 "Experiments train on older data, then are tested on this holdout period.",
+            help="Weeks of recent data reserved for final validation.",
+        )
+        max_trials = st.number_input(
+            "Trials per Experiment", value=10, min_value=1, max_value=100, key="disc_max_trials",
+            help="How many parameter combinations to try per experiment.",
+        )
+        search_method = st.selectbox(
+            "Search Method", ["bayesian", "random", "grid"], key="disc_search_method",
+            help="Bayesian is most efficient (learns from results). Grid is exhaustive.",
         )
 
-    if st.button("Start Cycle", type="secondary", width="stretch", key="disc_start_cycle"):
+    # Guardrails
+    with st.expander("Guardrails — what the agent is allowed to explore"):
+        allowed_types = st.multiselect(
+            "Allowed Experiment Types",
+            ["hyperparameter", "model_comparison", "feature_engineering",
+             "feature_selection", "label_engineering", "strategy_params"],
+            default=["hyperparameter", "model_comparison", "feature_selection"],
+            help="Which experiment types the cycle can propose. Uncheck types you don't want explored.",
+        )
+
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            algorithm = st.selectbox(
+                "Algorithm", ["lightgbm", "xgboost", "quantile_regression"],
+                help="ML algorithm for training in ML experiment types.",
+                key="disc_algorithm",
+            )
+            horizon_days = st.selectbox(
+                "Prediction Horizon", [7, 30],
+                help="How far ahead to predict (days).",
+                key="disc_horizon",
+            )
+        with col_g2:
+            # Auto-detect datasets
+            from pathlib import Path as _Path
+            dataset_dirs = sorted(_Path("datasets").glob("*/manifest.json")) if _Path("datasets").exists() else []
+            dataset_options = [str(d) for d in dataset_dirs]
+            if dataset_options:
+                dataset_uri = st.selectbox("Dataset", dataset_options, key="disc_dataset")
+            else:
+                dataset_uri = st.text_input("Dataset URI", placeholder="datasets/baseline_v2/manifest.json", key="disc_dataset_input")
+
+            max_parallel = st.number_input(
+                "Max Parallel", value=2, min_value=1, max_value=5, key="disc_parallel",
+                help="How many experiments to run simultaneously. Higher = faster but more resource-intensive.",
+            )
+
+    if st.button("Start & Run Cycle", type="primary", width="stretch", key="disc_start_cycle"):
         if not cycle_name:
             st.error("Please enter a cycle name")
             return
-        cmd = [
+        if not allowed_types:
+            st.error("Select at least one allowed experiment type")
+            return
+
+        # Build cycle config (guardrails stored in discovery_snapshot.cycle_config)
+        cycle_config = {
+            "allowed_types": allowed_types,
+            "auto_approve": True,
+            "dataset_uri": str(dataset_uri) if dataset_uri else None,
+            "horizon_days": horizon_days,
+            "algorithm": algorithm,
+            "max_trials_per_experiment": max_trials,
+            "search_method": search_method,
+            "max_parallel": max_parallel,
+        }
+
+        # Step 1: Create cycle
+        create_cmd = [
             sys.executable, "-m", "gefion.cli", "experiment", "cycle-start",
             "--name", cycle_name,
             "--fdr-rate", str(fdr_rate),
@@ -858,19 +918,67 @@ def render_discovery_section():
             "--json",
         ]
         env = os.environ.copy()
-        with st.status("Starting cycle...", expanded=True) as status:
+
+        with st.status("Running autonomous cycle...", expanded=True) as status:
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30)
-                if result.returncode == 0:
-                    status.update(label="Cycle started!", state="complete")
-                    try:
-                        data = json.loads(result.stdout)
-                        st.success(f"Cycle created (ID: {data.get('cycle_id', '?')}). Check the Cycles tab for progress.")
-                    except json.JSONDecodeError:
-                        st.success("Cycle started! Check the Cycles tab for progress.")
-                else:
-                    status.update(label="Failed", state="error")
+                # Create cycle
+                result = subprocess.run(create_cmd, capture_output=True, text=True, env=env, timeout=30)
+                if result.returncode != 0:
+                    status.update(label="Failed to create cycle", state="error")
                     st.error(result.stderr)
+                    return
+
+                data = json.loads(result.stdout)
+                new_cycle_id = data.get("cycle_id")
+                if not new_cycle_id:
+                    status.update(label="Failed", state="error")
+                    st.error("No cycle ID returned")
+                    return
+
+                st.write(f"Cycle #{new_cycle_id} created. Saving guardrails...")
+
+                # Store guardrails in discovery_snapshot
+                from gefion.ui.components.database import get_connection
+                from psycopg.types.json import Json
+                with get_connection() as conn:
+                    conn.autocommit = True
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE experiment_cycles SET discovery_snapshot = %s WHERE id = %s",
+                            (Json({"cycle_config": cycle_config}), new_cycle_id),
+                        )
+
+                st.write("Running cycle (discover → propose → run → evaluate)...")
+
+                # Step 2: Run the cycle
+                run_cmd = [
+                    sys.executable, "-m", "gefion.cli", "experiment", "cycle-run",
+                    str(new_cycle_id), "--json",
+                ]
+                run_result = subprocess.run(
+                    run_cmd, capture_output=True, text=True, env=env,
+                    timeout=cycle_config.get("max_trials_per_experiment", 10) * max_experiments * 120,
+                )
+
+                if run_result.returncode == 0:
+                    status.update(label="Cycle complete!", state="complete")
+                    try:
+                        run_data = json.loads(run_result.stdout)
+                        st.success(
+                            f"Cycle #{new_cycle_id} complete. "
+                            f"Proposed: {run_data.get('proposed', 0)}, "
+                            f"Completed: {run_data.get('completed', 0)}, "
+                            f"FDR Survivors: {run_data.get('fdr_survivors', 0)}"
+                        )
+                    except json.JSONDecodeError:
+                        st.success("Cycle complete! Check the Cycles tab for results.")
+                else:
+                    status.update(label="Cycle failed", state="error")
+                    st.error(f"Cycle run failed: {run_result.stderr}")
+
+            except subprocess.TimeoutExpired:
+                status.update(label="Timeout", state="error")
+                st.error("Cycle timed out. Check the Cycles tab for partial results.")
             except Exception as e:
                 status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
