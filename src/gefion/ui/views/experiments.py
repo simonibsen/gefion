@@ -705,54 +705,106 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
 
 
 def render_discovery_section():
-    """Render data discovery and hypothesis generation."""
-    st.subheader("Data Discovery")
-    st.markdown("Inventory available data, identify gaps, and generate experiment hypotheses.")
+    """Render data discovery — what data do we have, what can we experiment on?"""
+    st.subheader("What Can We Experiment On?")
+    st.markdown(
+        "Discovery scans your database and principles catalog to answer: "
+        "what data is available, what experiments are possible, and what's blocked by missing data."
+    )
 
-    if st.button("Run Discovery", type="primary", width="stretch"):
+    # Quick data summary from DB
+    try:
+        from gefion.ui.components.database import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT
+                        (SELECT COUNT(*) FROM stocks) as stocks,
+                        (SELECT COUNT(*) FROM stock_ohlcv) as prices,
+                        (SELECT COUNT(*) FROM computed_features) as features,
+                        (SELECT COUNT(*) FROM feature_definitions WHERE active = true) as feat_defs,
+                        (SELECT COUNT(*) FROM ml_models) as models,
+                        (SELECT COUNT(*) FROM experiments) as experiments
+                """)
+                row = cur.fetchone()
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Stocks", f"{row[0]:,}")
+            st.metric("Feature Definitions", row[3])
+        with col2:
+            st.metric("Price Records", f"{row[1]:,}")
+            st.metric("Trained Models", row[4])
+        with col3:
+            st.metric("Feature Records", f"{row[2]:,}")
+            st.metric("Experiments Run", row[5])
+    except Exception:
+        st.caption("Could not load data summary.")
+
+    st.markdown("---")
+
+    # Discovery scan
+    st.markdown("### Scan for Experiment Opportunities")
+    st.caption(
+        "Scans your principles catalog (62 principles from quantitative finance literature) "
+        "against available data to find testable hypotheses. Principles that require data you "
+        "don't have are marked as 'blocked'."
+    )
+
+    if st.button("Run Discovery Scan", type="primary", width="stretch"):
         env = os.environ.copy()
         cmd = [sys.executable, "-m", "gefion.cli", "experiment", "discover", "--json"]
 
-        with st.status("Discovering data sources...", expanded=True) as status:
+        with st.status("Scanning data and principles...", expanded=True) as status:
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
                 if result.returncode == 0:
-                    status.update(label="Discovery complete", state="complete")
+                    status.update(label="Scan complete", state="complete")
                     try:
                         data = json.loads(result.stdout)
 
                         # Data sources
                         sources = data.get("data_sources", data.get("sources", []))
                         if sources:
-                            st.markdown("### Data Sources")
+                            st.markdown("#### Available Data")
                             import pandas as pd
                             if isinstance(sources, list):
                                 df = pd.DataFrame(sources)
                                 st.dataframe(df, use_container_width=True)
                             elif isinstance(sources, dict):
                                 for name, info in sources.items():
-                                    with st.expander(f"{name}"):
+                                    with st.expander(name):
                                         st.json(info)
 
                         # Hypotheses
                         hypotheses = data.get("hypotheses", [])
                         if hypotheses:
-                            st.markdown("### Generated Hypotheses")
-                            for i, h in enumerate(hypotheses):
-                                with st.expander(
-                                    f"{h.get('name', f'Hypothesis {i+1}')} "
-                                    f"({'ready' if h.get('status') == 'ready' else h.get('status', '?')})"
-                                ):
-                                    st.markdown(f"**Type:** {h.get('experiment_type', 'N/A')}")
-                                    st.markdown(f"**Principle:** {h.get('principle_id', 'N/A')}")
-                                    if h.get('null_hypothesis'):
-                                        st.markdown(f"**H0:** {h['null_hypothesis']}")
-                                    st.markdown(f"**Status:** {h.get('status', 'N/A')}")
-                                    if h.get('blocked_reason'):
-                                        st.warning(f"Blocked: {h['blocked_reason']}")
+                            ready = [h for h in hypotheses if h.get("feasibility") == "ready"]
+                            blocked = [h for h in hypotheses if h.get("feasibility") == "blocked"]
+
+                            if ready:
+                                st.markdown(f"#### Ready to Test ({len(ready)} hypotheses)")
+                                st.caption("These have all required data. You can create experiments for them from the Propose tab.")
+                                for h in ready:
+                                    principle = h.get("principle_id", "unnamed")
+                                    exp_type = h.get("experiment_type", "")
+                                    label = principle.replace("-", " ").title()
+                                    with st.expander(f"{label} ({exp_type})"):
+                                        st.markdown(f"**Experiment type:** {exp_type}")
+                                        st.markdown(f"**Principle:** `{principle}`")
+                                        if h.get("description"):
+                                            st.markdown(h["description"])
+
+                            if blocked:
+                                with st.expander(f"Blocked ({len(blocked)} — missing data or features)"):
+                                    for h in blocked:
+                                        principle = h.get("principle_id", "?")
+                                        desc = h.get("description", "")
+                                        short = desc[:120] + "..." if len(desc) > 120 else desc
+                                        st.markdown(f"- **{principle}** — {short}")
 
                         if not sources and not hypotheses:
-                            st.info("Discovery returned no results. Ensure data is loaded.")
+                            st.info("No results. Make sure you have price data and computed features loaded.")
 
                     except json.JSONDecodeError:
                         st.code(result.stdout)
@@ -763,22 +815,35 @@ def render_discovery_section():
                 status.update(label="Error", state="error")
                 st.error(f"Error: {e}")
 
-    # Autonomous cycle launcher
     st.markdown("---")
-    st.markdown("### Start Autonomous Cycle")
+
+    # Autonomous cycle launcher
+    st.markdown("### Autonomous Experiment Cycle")
     st.markdown(
-        "Launch an autonomous experiment cycle: discover data, consult principles, "
-        "propose experiments, and run them with FDR-controlled evaluation."
+        "An autonomous cycle does everything in one shot: scans for opportunities, "
+        "proposes experiments, runs them, and uses statistical testing to filter out "
+        "false discoveries. Only genuine improvements survive."
     )
 
     col1, col2 = st.columns(2)
     with col1:
         cycle_name = st.text_input("Cycle Name", placeholder="exploration-cycle-1", key="disc_cycle_name")
-        max_experiments = st.number_input("Max Experiments", value=5, min_value=1, max_value=50, key="disc_max_exp")
+        max_experiments = st.number_input(
+            "Max Experiments", value=5, min_value=1, max_value=50, key="disc_max_exp",
+            help="How many experiments to run in this cycle. More = broader search but takes longer.",
+        )
     with col2:
-        fdr_rate = st.slider("FDR Rate", min_value=0.01, max_value=0.20, value=0.05, step=0.01,
-                             help="Controls how many false positives are acceptable. At 5%, at most 5% of reported discoveries may be spurious. Lower = stricter.")
-        holdout_weeks = st.number_input("Holdout Weeks", value=4, min_value=1, max_value=12, key="disc_holdout")
+        fdr_rate = st.slider(
+            "False Discovery Filter", min_value=0.01, max_value=0.20, value=0.05, step=0.01,
+            help="How strict to be about filtering false positives. "
+                 "At 5%, we accept that up to 5% of 'discoveries' might be due to chance. "
+                 "Lower = stricter (fewer but more reliable results).",
+        )
+        holdout_weeks = st.number_input(
+            "Holdout Weeks", value=4, min_value=1, max_value=12, key="disc_holdout",
+            help="Weeks of recent data reserved for final validation. "
+                 "Experiments train on older data, then are tested on this holdout period.",
+        )
 
     if st.button("Start Cycle", type="secondary", width="stretch", key="disc_start_cycle"):
         if not cycle_name:
@@ -800,9 +865,9 @@ def render_discovery_section():
                     status.update(label="Cycle started!", state="complete")
                     try:
                         data = json.loads(result.stdout)
-                        st.success(f"Cycle created: ID {data.get('cycle_id', '?')}")
+                        st.success(f"Cycle created (ID: {data.get('cycle_id', '?')}). Check the Cycles tab for progress.")
                     except json.JSONDecodeError:
-                        st.success("Cycle started!")
+                        st.success("Cycle started! Check the Cycles tab for progress.")
                 else:
                     status.update(label="Failed", state="error")
                     st.error(result.stderr)
