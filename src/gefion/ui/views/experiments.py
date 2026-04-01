@@ -30,6 +30,10 @@ def render_experiments():
     st.markdown("# :material/science: Experiments")
     render_chat_widget(get_page_context())
     st.markdown("Autonomous experimentation with human approval gates.")
+    st.markdown(
+        "Launch experiments to optimize strategies, tune hyperparameters, compare models, "
+        "and engineer features. Each experiment proposes → gets approved → runs trials → reports results."
+    )
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         ":material/explore: Discovery",
@@ -62,6 +66,8 @@ def render_experiments():
 def render_list_section():
     """Render experiment list with filtering."""
     st.subheader("Experiment List")
+    st.caption("Experiments flow: **proposed** → **approved** → **running** → **completed**. "
+               "Approve or reject proposed experiments below.")
 
     col1, col2, col3 = st.columns(3)
 
@@ -173,6 +179,15 @@ def render_list_section():
 def render_propose_section():
     """Render experiment proposal form supporting all experiment types."""
     st.subheader("Propose New Experiment")
+    st.info("""
+    **Experiment Types:**
+    - **Strategy Params** — optimize trading strategy parameters via backtesting
+    - **Hyperparameter** — tune ML model settings (learning rate, depth, etc.) with cross-validation
+    - **Model Comparison** — compare algorithms (LightGBM vs XGBoost vs Linear) on identical data splits
+    - **Feature Engineering** — test new computed features (rolling z-score, momentum, etc.)
+    - **Feature Selection** — find the best subset of features for model performance
+    - **Label Engineering** — test different prediction targets (raw returns, log returns, winsorized, etc.)
+    """)
 
     experiment_type = st.selectbox(
         "Experiment Type",
@@ -205,10 +220,12 @@ def render_propose_section():
 
     with col2:
         if experiment_type == "strategy_params":
-            objective = st.selectbox("Objective", ["sharpe_ratio", "total_return_pct", "max_drawdown_pct"])
+            objective = st.selectbox("Objective", ["sharpe_ratio", "total_return_pct", "max_drawdown_pct"],
+                                     help="Metric to optimize. Sharpe = risk-adjusted return, Total Return = raw gain, Max Drawdown = worst peak-to-trough loss.")
             direction = st.selectbox("Direction", ["maximize", "minimize"])
         else:
-            objective = st.selectbox("Objective", ["quantile_loss", "q50_calibration", "avg_iqr"])
+            objective = st.selectbox("Objective", ["quantile_loss", "q50_calibration", "avg_iqr"],
+                                     help="quantile_loss = prediction accuracy (lower is better). q50_calibration = how well median predictions match reality. avg_iqr = width of prediction intervals.")
             direction = st.selectbox("Direction", ["minimize", "maximize"])
 
         horizon_days = None
@@ -347,6 +364,8 @@ def _render_hyperparameter_config(search_space, extra_config):
     model_type = st.selectbox("Model Type", ["lightgbm", "xgboost", "quantile_regression"], key="hp_model")
     extra_config["model_type"] = model_type
 
+    st.caption(f"Tuning {model_type} hyperparameters. The search will try different combinations "
+               "within these ranges to minimize prediction error.")
     st.markdown("##### Search Space")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -362,6 +381,8 @@ def _render_hyperparameter_config(search_space, extra_config):
 
 def _render_model_comparison_config(search_space, extra_config):
     """Render model comparison config."""
+    st.caption("Each model is trained on identical data splits for fair comparison. "
+               "The model with the best objective score wins.")
     models = st.multiselect(
         "Models to Compare",
         ["lightgbm", "xgboost", "quantile_regression"],
@@ -376,6 +397,10 @@ def _render_feature_engineering_config(search_space, extra_config):
     function_name = st.selectbox(
         "Feature Function",
         ["rolling_zscore", "rolling_return", "rolling_std", "momentum", "ema", "log_return"],
+        help="rolling_zscore: how far price deviates from its moving average (in std devs). "
+             "rolling_return: % change over window. rolling_std: volatility. "
+             "momentum: price ratio vs N days ago. ema: exponential moving average. "
+             "log_return: natural log of price change.",
     )
     source_column = st.selectbox("Source Column", ["close", "volume", "high", "low", "open"])
     extra_config["feature_config"] = {"function_name": function_name}
@@ -396,7 +421,8 @@ def _render_feature_selection_config(search_space, extra_config):
         "Feature Subsets (JSON)",
         value='[["indicator_rsi_14", "indicator_ema_12", "indicator_psar"], '
               '["indicator_bb_middle", "indicator_bb_upper", "indicator_bb_lower"]]',
-        help="JSON array of arrays — each inner array is a feature subset to test",
+        help="Each inner array is a feature subset to test. The experiment trains a model "
+             "on each subset and compares performance to find the best combination.",
     )
     try:
         subsets = json.loads(subsets_json)
@@ -413,6 +439,11 @@ def _render_label_engineering_config(search_space, extra_config):
         "Label Transforms to Compare",
         ["raw", "log_return", "winsorized", "threshold_return", "sign", "rank"],
         default=["raw", "log_return", "winsorized"],
+        help="raw: unmodified forward returns. log_return: log(1+return), reduces outlier impact. "
+             "winsorized: clips extreme returns to percentile bounds. "
+             "threshold_return: caps returns at a fixed threshold. "
+             "sign: square root of absolute return with sign preserved. "
+             "rank: converts returns to percentile ranks (0-1 scale).",
     )
     search_space["label_type"] = label_types
     extra_config["label_type"] = "raw"
@@ -423,8 +454,9 @@ def render_run_section():
     st.subheader("Run Experiment")
 
     st.info("""
-    Run an approved experiment. The system will execute all trials
-    (or until the goal is achieved with early stopping).
+    Run an approved experiment. Each trial tests a different parameter combination
+    using the configured search method (Bayesian, random, or grid). Progress is shown
+    in real-time. Results are saved to the database when complete.
     """)
 
     # Get approved experiments
@@ -745,7 +777,7 @@ def render_discovery_section():
         max_experiments = st.number_input("Max Experiments", value=5, min_value=1, max_value=50, key="disc_max_exp")
     with col2:
         fdr_rate = st.slider("FDR Rate", min_value=0.01, max_value=0.20, value=0.05, step=0.01,
-                             help="False Discovery Rate threshold for multiple testing correction")
+                             help="Controls how many false positives are acceptable. At 5%, at most 5% of reported discoveries may be spurious. Lower = stricter.")
         holdout_weeks = st.number_input("Holdout Weeks", value=4, min_value=1, max_value=12, key="disc_holdout")
 
     if st.button("Start Cycle", type="secondary", width="stretch", key="disc_start_cycle"):
@@ -782,7 +814,12 @@ def render_discovery_section():
 def render_cycles_section():
     """Render experiment cycles list and status."""
     st.subheader("Experiment Cycles")
-    st.markdown("View and manage experiment cycles with FDR-controlled evaluation.")
+    st.markdown(
+        "An experiment cycle groups multiple experiments and applies "
+        "[False Discovery Rate](https://en.wikipedia.org/wiki/False_discovery_rate) "
+        "correction to filter out discoveries that don't replicate. "
+        "Only experiments that survive FDR testing are considered genuine."
+    )
 
     # List cycles
     try:

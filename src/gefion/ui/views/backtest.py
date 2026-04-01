@@ -540,6 +540,8 @@ def get_strategies():
 def render_run_section():
     """Render backtest execution section."""
     st.subheader("Run Backtest")
+    st.caption("Test a trading strategy on historical data to see how it would have performed. "
+               "Choose a strategy, set parameters, and select symbols to backtest.")
 
     col1, col2 = st.columns(2)
 
@@ -610,18 +612,18 @@ def render_run_section():
     if strategy == "momentum":
         col1, col2, col3 = st.columns(3)
         with col1:
-            lookback = st.number_input("Lookback Days", value=20, min_value=5, max_value=60)
+            lookback = st.number_input("Lookback Days", value=20, min_value=5, max_value=60, help="Number of past trading days to measure price momentum. Shorter = more responsive, longer = smoother signals.")
         with col2:
-            top_n = st.number_input("Top N Stocks", value=10, min_value=1, max_value=50)
+            top_n = st.number_input("Top N Stocks", value=10, min_value=1, max_value=50, help="Number of top-performing stocks to hold. Lower = more concentrated portfolio.")
         with col3:
-            rebalance = st.number_input("Rebalance Days", value=5, min_value=1, max_value=30)
+            rebalance = st.number_input("Rebalance Days", value=5, min_value=1, max_value=30, help="Days between portfolio rebalancing. Lower = more trading (higher costs).")
 
     elif strategy == "mean_reversion":
         col1, col2, col3 = st.columns(3)
         with col1:
-            rsi_oversold = st.number_input("RSI Oversold", value=30, min_value=10, max_value=40)
+            rsi_oversold = st.number_input("RSI Oversold", value=30, min_value=10, max_value=40, help="RSI below this level signals oversold (buy signal). Typical range: 20-35.")
         with col2:
-            rsi_overbought = st.number_input("RSI Overbought", value=70, min_value=60, max_value=90)
+            rsi_overbought = st.number_input("RSI Overbought", value=70, min_value=60, max_value=90, help="RSI above this level signals overbought (sell signal). Typical range: 65-80.")
         with col3:
             rsi_period = st.number_input("RSI Period", value=14, min_value=5, max_value=30, key="mr_rsi_period")
         col4, col5 = st.columns(2)
@@ -629,27 +631,28 @@ def render_run_section():
             position_size = st.slider("Position Size", value=0.2, min_value=0.05, max_value=0.5)
         with col5:
             max_positions = st.number_input("Max Positions", value=5, min_value=1, max_value=20, key="mr_max_pos")
+        st.caption("RSI (Relative Strength Index) measures momentum on a 0-100 scale. Below 30 = oversold, above 70 = overbought.")
 
     elif strategy == "ma_crossover":
         col1, col2, col3 = st.columns(3)
         with col1:
-            fast_period = st.number_input("Fast MA Period", value=50, min_value=5, max_value=100)
+            fast_period = st.number_input("Fast MA Period", value=50, min_value=5, max_value=100, help="Short-term moving average period. When it crosses above the slow MA, it signals a buy.")
         with col2:
-            slow_period = st.number_input("Slow MA Period", value=200, min_value=50, max_value=300)
+            slow_period = st.number_input("Slow MA Period", value=200, min_value=50, max_value=300, help="Long-term moving average period. Acts as the trend baseline.")
         with col3:
             max_positions = st.number_input("Max Positions", value=5, min_value=1, max_value=20, key="mac_max_pos")
 
     elif strategy == "breakout":
         col1, col2 = st.columns(2)
         with col1:
-            lookback = st.number_input("Lookback Days", value=20, min_value=5, max_value=60, key="bo_lookback")
+            lookback = st.number_input("Lookback Days", value=20, min_value=5, max_value=60, key="bo_lookback", help="Days to look back for price highs/lows. A breakout occurs when price exceeds this range.")
         with col2:
-            volume_threshold = st.slider("Volume Threshold", value=1.5, min_value=1.0, max_value=3.0)
+            volume_threshold = st.slider("Volume Threshold", value=1.5, min_value=1.0, max_value=3.0, help="Required volume as a multiple of average. 1.5 = volume must be 50% above average to confirm breakout.")
 
     elif strategy == "pairs_trading":
         col1, col2 = st.columns(2)
         with col1:
-            entry_zscore = st.number_input("Entry Z-Score", value=2.0, min_value=1.0, max_value=4.0, step=0.1)
+            entry_zscore = st.number_input("Entry Z-Score", value=2.0, min_value=1.0, max_value=4.0, step=0.1, help="Standard deviations from mean to trigger entry. 2.0 = enter when pair spread is 2 std devs from its average.")
         with col2:
             exit_zscore = st.number_input("Exit Z-Score", value=0.5, min_value=0.0, max_value=2.0, step=0.1)
 
@@ -663,12 +666,12 @@ def render_run_section():
     elif strategy == "volatility_contraction":
         col1, col2 = st.columns(2)
         with col1:
-            bb_period = st.number_input("Bollinger Period", value=20, min_value=10, max_value=50)
+            bb_period = st.number_input("Bollinger Period", value=20, min_value=10, max_value=50, help="Lookback period for Bollinger Bands (price channel based on moving average +/- standard deviations).")
         with col2:
-            bb_std_dev = st.number_input("Std Dev Multiplier", value=2.0, min_value=1.0, max_value=3.0, step=0.1)
+            bb_std_dev = st.number_input("Std Dev Multiplier", value=2.0, min_value=1.0, max_value=3.0, step=0.1, help="Width of Bollinger Bands in standard deviations. 2.0 is standard.")
         col3, col4 = st.columns(2)
         with col3:
-            squeeze_threshold = st.slider("Squeeze Threshold", value=0.05, min_value=0.01, max_value=0.15, step=0.01)
+            squeeze_threshold = st.slider("Squeeze Threshold", value=0.05, min_value=0.01, max_value=0.15, step=0.01, help="Bandwidth below this level indicates a 'squeeze' (low volatility), signaling a potential breakout.")
         with col4:
             expansion_threshold = st.slider("Expansion Threshold", value=0.1, min_value=0.05, max_value=0.25, step=0.01)
 
@@ -705,7 +708,7 @@ def render_run_section():
                 min_value=0.0,
                 max_value=0.20,
                 step=0.01,
-                help="Min expected return (q50) to buy"
+                help="Min expected return q50 (median predicted return) to buy"
             )
             ml_max_positions = st.number_input("Max Positions", value=10, min_value=1, max_value=50, key="ml_max_pos")
 
@@ -718,7 +721,7 @@ def render_run_section():
             ml_confidence = st.slider("Confidence Threshold", value=0.5, min_value=0.3, max_value=0.9, step=0.05)
         else:
             ml_downside_limit = st.number_input(
-                "Downside Limit (q10)",
+                "Downside Limit q10 (10th percentile, worst-case scenario)",
                 value=-0.05,
                 min_value=-0.20,
                 max_value=0.0,
