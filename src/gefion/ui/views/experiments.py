@@ -626,11 +626,11 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
 
     cmd = [sys.executable, "-m", "gefion.cli", "experiment", "results", "--id", str(exp_id), "--json"]
     if show_trials:
-        cmd.append("--show-trials")
+        cmd.append("--trials")
 
     cli_cmd = f"gefion experiment results --id {exp_id}"
     if show_trials:
-        cli_cmd += " --show-trials"
+        cli_cmd += " --trials"
     st.code(cli_cmd, language="bash")
 
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
