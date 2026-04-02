@@ -514,8 +514,47 @@ def render_run_section():
 
 
 def render_results_section():
-    """Render experiment results section."""
+    """Render experiment results with interpretation guidance."""
     st.subheader("Experiment Results")
+
+    # Interpretation guide
+    with st.expander(":material/help: How to interpret results"):
+        st.markdown("""
+        ### Understanding Experiment Scores
+
+        **Quantile Loss** (ML experiments, lower is better)
+        - Below **0.02** — excellent prediction accuracy
+        - **0.02–0.04** — good, typical for financial data
+        - Above **0.05** — poor, model may not be capturing real patterns
+
+        **Sharpe Ratio** (strategy experiments, higher is better)
+        - Above **2.0** — strong risk-adjusted returns
+        - **1.0–2.0** — decent, worth investigating
+        - **0–1.0** — marginal, probably not worth trading
+        - Below **0** — losing money
+
+        ### From Experiment to Trading
+
+        Once you find a winning experiment:
+        1. **Retrain** a production model using the best parameters:
+           `gefion ml train --dataset-name baseline --dataset-version v2 --model-name prod --model-version $(date +%Y%m%d)`
+           with the best hyperparameters from the experiment
+        2. **Generate predictions** for your stock universe:
+           `gefion ml predict --model-name prod --model-version <ver>`
+        3. **Interpret predictions** for each stock:
+           - **q50 > 0.02** (median return > 2%) → potential buy
+           - **q50 < -0.02** → potential short
+           - **q10 > -0.01** (downside limited) → higher confidence buy
+           - **q90 - q10 narrow** → model is confident
+           - **q90 - q10 wide** → high uncertainty, smaller position or skip
+        4. **Backtest** the strategy using ML signals:
+           Go to Backtesting → select `ml_signal` strategy → use your model
+
+        ### FDR Survivors
+        In a cycle with multiple experiments, FDR filtering keeps only results
+        that are statistically significant. If an experiment **survived FDR**,
+        it's likely a genuine improvement. If it didn't, the result may be due to chance.
+        """)
 
     # Get completed experiments
     try:
@@ -524,7 +563,8 @@ def render_results_section():
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT id, name, objective_metric, best_score, completed_trials, total_trials
+                    SELECT id, name, experiment_type, objective_metric, best_score,
+                           completed_trials, total_trials, fdr_survived, results
                     FROM experiments
                     WHERE status = 'completed'
                     ORDER BY completed_at DESC
@@ -534,7 +574,8 @@ def render_results_section():
 
         if completed:
             exp_options = {
-                f"{e[1]} (ID: {e[0]}, best {e[2]}: {f'{e[3]:.4f}' if e[3] is not None else 'N/A'})": e[0]
+                f"{e[1]} (ID: {e[0]}, {e[3]}: {f'{e[4]:.4f}' if e[4] is not None else 'N/A'}"
+                f"{' ✓ FDR' if e[7] else ''})": e[0]
                 for e in completed
             }
 
@@ -544,29 +585,15 @@ def render_results_section():
             )
             exp_id = exp_options[selected]
 
+            show_trials = st.checkbox("Show all trials", value=False)
+
             if st.button("Load Results", width="stretch"):
-                load_experiment_results(exp_id)
+                load_experiment_results(exp_id, show_trials=show_trials)
         else:
-            st.info("No completed experiments yet.")
+            st.info("No completed experiments yet. Run an experiment from the Discovery tab.")
 
     except Exception as e:
         st.error(f"Error: {e}")
-
-    # Results by ID
-    st.markdown("---")
-    st.markdown("##### View by ID")
-
-    exp_id_input = st.number_input(
-        "Experiment ID",
-        min_value=1,
-        value=1,
-        key="results_exp_id",
-    )
-
-    show_trials = st.checkbox("Show all trials", value=False)
-
-    if st.button("View Results", width="stretch"):
-        load_experiment_results(exp_id_input, show_trials=show_trials)
 
 
 def approve_experiment(exp_id: int):
@@ -678,6 +705,8 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
     if result.returncode == 0:
         try:
             data = json.loads(result.stdout)
+            best_score = data.get("best_score", 0)
+            objective = data.get("results", {}).get("objective_metric", "")
 
             # Summary metrics
             col1, col2, col3, col4 = st.columns(4)
@@ -685,19 +714,60 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
             with col1:
                 st.metric("Status", data.get("status", "N/A"))
             with col2:
-                st.metric("Best Score", f"{data.get('best_score', 0):.4f}")
+                score_str = f"{best_score:.4f}" if best_score is not None else "N/A"
+                st.metric("Best Score", score_str)
             with col3:
                 completed = data.get("completed_trials", 0)
                 total = data.get("total_trials", 0)
                 st.metric("Trials", f"{completed}/{total}")
             with col4:
-                goal = "Yes" if data.get("goal_achieved") else "No"
-                st.metric("Goal Achieved", goal)
+                goal = data.get("goal_achieved")
+                st.metric("Goal Achieved", "Yes" if goal else ("No" if goal is False else "N/A"))
+
+            # Score interpretation
+            if best_score is not None:
+                if "loss" in str(objective).lower() or "loss" in str(data.get("results", {}).get("objective_metric", "")):
+                    if best_score < 0.02:
+                        st.success(f":material/trending_up: Excellent prediction accuracy (quantile loss {best_score:.4f})")
+                    elif best_score < 0.04:
+                        st.info(f":material/check_circle: Good prediction accuracy (quantile loss {best_score:.4f})")
+                    else:
+                        st.warning(f":material/warning: Weak prediction accuracy (quantile loss {best_score:.4f}). Model may not be capturing real patterns.")
+                elif "sharpe" in str(objective).lower():
+                    if best_score > 2.0:
+                        st.success(f":material/trending_up: Strong risk-adjusted returns (Sharpe {best_score:.2f})")
+                    elif best_score > 1.0:
+                        st.info(f":material/check_circle: Decent risk-adjusted returns (Sharpe {best_score:.2f})")
+                    elif best_score > 0:
+                        st.warning(f":material/warning: Marginal returns (Sharpe {best_score:.2f})")
+                    else:
+                        st.error(f":material/error: Negative returns (Sharpe {best_score:.2f})")
 
             # Best parameters
             if "best_params" in data and data["best_params"]:
                 st.markdown("### Best Parameters")
                 st.json(data["best_params"])
+                st.caption(
+                    "These are the parameter values that produced the best score. "
+                    "Use them to retrain a production model or configure a trading strategy."
+                )
+
+            # What to do next
+            best_params = data.get("best_params", {})
+            if best_params:
+                with st.expander(":material/arrow_forward: What to do with these results"):
+                    st.markdown(f"""
+                    **To use these results:**
+
+                    1. **Retrain a model** with the best settings and evaluate on fresh data
+                    2. **Generate predictions** for your stock universe
+                    3. **Review predictions** — stocks with q50 > 2% are potential buys,
+                       q50 < -2% are potential shorts
+                    4. **Check confidence** — narrow q10-to-q90 range means the model is confident
+                    5. **Backtest** using the `ml_signal` strategy to validate before live trading
+
+                    Best parameters found: `{json.dumps(best_params)}`
+                    """)
 
             # Trials table
             if show_trials and "trials" in data:
