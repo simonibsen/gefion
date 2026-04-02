@@ -449,6 +449,16 @@ class CycleRunner:
             _emit("evaluating", "Applying FDR correction to filter false discoveries...")
             fdr_results = self._evaluate_cycle(cycle_id, proposed_ids)
 
+            # 6b. Promote FDR survivors
+            survivor_ids = fdr_results.get("survivor_ids", [])
+            promoted_count = 0
+            if survivor_ids:
+                promoted_count = self._promote_fdr_survivors(cycle_id, survivor_ids)
+                if promoted_count > 0:
+                    _emit("promoted",
+                          f"Promoted {promoted_count} experimental feature(s) to active",
+                          {"promoted": promoted_count})
+
             # 7. Summarize and surface errors clearly
             successful = [r for r in results if r.get("status") == "completed" and "error" not in r]
             failed = [r for r in results if r.get("status") == "failed" or "error" in r]
@@ -474,6 +484,7 @@ class CycleRunner:
                 "completed": len(successful),
                 "failed": len(failed),
                 "fdr_survivors": fdr_results.get("survivors", 0),
+                "promoted": promoted_count,
                 "results": results,
                 "errors": [r.get("error") for r in failed if r.get("error")],
             }
@@ -604,6 +615,52 @@ class CycleRunner:
             pass
 
         return issues
+
+    def _promote_fdr_survivors(self, cycle_id: int, survivor_ids: List[int]) -> int:
+        """Promote FDR-surviving experimental features to active status.
+
+        For each surviving experiment that has a feature_config with function_body,
+        update the corresponding feature_functions row from 'experimental' to 'active'.
+
+        Returns number of functions promoted.
+        """
+        promoted = 0
+        with self._get_conn() as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                for exp_id in survivor_ids:
+                    # Get experiment config
+                    cur.execute(
+                        "SELECT config, name FROM experiments WHERE id = %s", (exp_id,)
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        continue
+                    config = row[0] or {}
+                    exp_name = row[1]
+                    fc = config.get("feature_config", {})
+                    fn_name = fc.get("function_name")
+                    if not fn_name or not fc.get("function_body"):
+                        continue
+
+                    # Promote from experimental to active
+                    cur.execute("""
+                        UPDATE feature_functions
+                        SET status = 'active', updated_at = NOW()
+                        WHERE name = %s AND status = 'experimental'
+                    """, (f"exp_{fn_name}",))
+
+                    if cur.rowcount > 0:
+                        promoted += 1
+                        logger.info(f"Promoted feature function exp_{fn_name} to active (experiment #{exp_id})")
+
+                    # Also mark the experiment as promoted
+                    cur.execute(
+                        "UPDATE experiments SET promoted_at = NOW() WHERE id = %s",
+                        (exp_id,),
+                    )
+
+        return promoted
 
     def _store_experimental_function(
         self, fn_name: str, function_body: str,

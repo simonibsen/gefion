@@ -9559,6 +9559,7 @@ def experiment_cycle_run(
                     "experiment_failed": "[red]  ",
                     "errors": "[red]",
                     "evaluating": "[magenta]",
+                    "promoted": "[bold cyan]",
                     "complete": "[bold green]",
                 }
 
@@ -9584,6 +9585,9 @@ def experiment_cycle_run(
                 if failed:
                     console.print(f"  [red]Failed:        {failed} experiments[/red]")
                 console.print(f"  FDR Survivors: {results.get('fdr_survivors', 0)}")
+                promoted = results.get("promoted", 0)
+                if promoted:
+                    console.print(f"  [bold cyan]Promoted:      {promoted} feature(s) to active[/bold cyan]")
 
                 errors = results.get("errors", [])
                 if errors:

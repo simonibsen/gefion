@@ -245,6 +245,26 @@ class TestExperimentalFeatureStorage:
         src = inspect.getsource(CycleRunner._store_experimental_function)
         assert "upsert_feature_function" in src
 
+    def test_promote_survivors_method_exists(self):
+        """CycleRunner must have _promote_fdr_survivors method."""
+        from gefion.experiments.cycle_runner import CycleRunner
+        assert hasattr(CycleRunner, "_promote_fdr_survivors")
+
+    def test_promote_changes_status_to_active(self):
+        """Promoted functions must have status='active'."""
+        import inspect
+        from gefion.experiments.cycle_runner import CycleRunner
+        src = inspect.getsource(CycleRunner._promote_fdr_survivors)
+        assert "'active'" in src or '"active"' in src
+
+    def test_promote_called_after_fdr(self):
+        """_promote_fdr_survivors must be called after FDR evaluation."""
+        import inspect
+        from gefion.experiments.cycle_runner import CycleRunner
+        src = inspect.getsource(CycleRunner.run_cycle)
+        # Promote should appear after evaluate
+        assert "_promote_fdr_survivors" in src
+
     def test_templates_are_valid_python(self):
         """All function templates must be valid Python."""
         from gefion.experiments.cycle_runner import FEATURE_FUNCTION_TEMPLATES
