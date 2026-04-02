@@ -942,14 +942,21 @@ def _render_cycle_launcher(themes, _is_ready, all_principles, available_prefixes
             "Holdout Weeks", value=4, min_value=1, max_value=12, key="disc_holdout",
             help="Weeks of recent data reserved for final validation.",
         )
-        max_trials = st.number_input(
-            "Trials per Experiment", value=10, min_value=1, max_value=100, key="disc_max_trials",
-            help="How many parameter combinations to try per experiment.",
+        trials_choice = st.selectbox(
+            "Trials per Experiment",
+            [AGENT_DECIDES, "5", "10", "20", "50"],
+            help="How many parameter combinations to try. Agent picks based on search space size.",
+            key="disc_max_trials",
         )
-        search_method = st.selectbox(
-            "Search Method", ["bayesian", "random", "grid"], key="disc_search_method",
-            help="Bayesian is most efficient (learns from results). Grid is exhaustive.",
+        max_trials = None if trials_choice == AGENT_DECIDES else int(trials_choice)
+
+        search_choice = st.selectbox(
+            "Search Method",
+            [AGENT_DECIDES, "bayesian", "random", "grid"],
+            help="Agent defaults to bayesian (most efficient). Override for specific needs.",
+            key="disc_search_method",
         )
+        search_method = None if search_choice == AGENT_DECIDES else search_choice
 
     # Theme selection
     st.markdown("##### Select Research Themes")

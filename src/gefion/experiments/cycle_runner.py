@@ -88,8 +88,8 @@ class CycleRunner:
             auto_approve = config.get("auto_approve", True)
             max_experiments = cycle.get("max_experiments", 20)
             max_parallel = config.get("max_parallel", 3)
-            max_trials = config.get("max_trials_per_experiment", 10)
-            search_method = config.get("search_method", "bayesian")
+            max_trials = config.get("max_trials_per_experiment") or 10
+            search_method = config.get("search_method") or "bayesian"
             dataset_uri = config.get("dataset_uri")
             horizon_days = config.get("horizon_days", 7)
             algorithm = config.get("algorithm", "lightgbm")
