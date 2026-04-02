@@ -999,13 +999,20 @@ def _render_cycle_launcher(themes, _is_ready, all_principles, available_prefixes
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             # Algorithms
-            allowed_algorithms = st.multiselect(
-                "Allowed Algorithms",
-                ["lightgbm", "xgboost", "quantile_regression"],
-                default=["lightgbm", "xgboost", "quantile_regression"],
-                help="Which ML algorithms the agent can use. Multiple = agent can compare them.",
-                key="disc_algorithms",
-            )
+            all_algos = ["lightgbm", "xgboost", "quantile_regression"]
+            agent_picks_algo = st.checkbox("Agent decides algorithms", value=True, key="disc_algo_agent",
+                                           help="Let the agent choose which algorithms to try and compare.")
+            if agent_picks_algo:
+                allowed_algorithms = all_algos
+                st.caption("Agent will choose from: LightGBM, XGBoost, Quantile Regression")
+            else:
+                allowed_algorithms = st.multiselect(
+                    "Allowed Algorithms",
+                    all_algos,
+                    default=all_algos,
+                    help="Which ML algorithms the agent can use.",
+                    key="disc_algorithms",
+                )
 
             # Horizon
             horizon_choice = st.selectbox(
