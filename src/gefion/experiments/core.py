@@ -169,8 +169,14 @@ class ExperimentRunner:
         self.db_url = db_url
 
     def _get_conn(self):
-        """Get database connection."""
-        return psycopg.connect(self.db_url)
+        """Get database connection from shared pool."""
+        from gefion.db import pool as db_pool
+        p = db_pool.get_pool()
+        if p is not None:
+            return p.connection()
+        # Pool not initialized — init it with our URL
+        db_pool.init_pool(self.db_url)
+        return db_pool.get_pool().connection()
 
     def propose(self, config: ExperimentConfig, proposed_by: str = "ai") -> int:
         """

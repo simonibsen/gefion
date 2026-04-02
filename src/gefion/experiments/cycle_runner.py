@@ -56,6 +56,15 @@ class CycleRunner:
         self.db_url = db_url
         self.runner = ExperimentRunner(db_url)
 
+    def _get_conn(self):
+        """Get connection from shared pool."""
+        from gefion.db import pool as db_pool
+        p = db_pool.get_pool()
+        if p is not None:
+            return p.connection()
+        db_pool.init_pool(self.db_url)
+        return db_pool.get_pool().connection()
+
     def run_cycle(self, cycle_id: int, on_progress: Optional[callable] = None) -> Dict[str, Any]:
         """Execute a full autonomous experiment cycle.
 
@@ -381,7 +390,7 @@ class CycleRunner:
         The cycle config (guardrails) is stored in the discovery_snapshot
         JSONB column under the "cycle_config" key.
         """
-        with psycopg.connect(self.db_url) as conn:
+        with self._get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT id, name, holdout_start_date, holdout_end_date,
@@ -411,7 +420,7 @@ class CycleRunner:
 
     def _run_discovery(self, selected_themes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """Run data discovery and return hypotheses, optionally filtered by themes."""
-        with psycopg.connect(self.db_url) as conn:
+        with self._get_conn() as conn:
             principles = load_principles()
 
             # Filter principles by selected themes
@@ -450,7 +459,7 @@ class CycleRunner:
         exp_id = self.runner.propose(config, proposed_by="cycle_runner")
 
         # Link to cycle
-        with psycopg.connect(self.db_url) as conn:
+        with self._get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE experiments SET cycle_id = %s WHERE id = %s",
@@ -462,48 +471,60 @@ class CycleRunner:
 
     def _run_experiments(self, experiment_ids: List[int], max_parallel: int = 3,
                          on_progress: Optional[callable] = None) -> List[Dict[str, Any]]:
-        """Run experiments sequentially with resource checks.
+        """Run experiments with controlled parallelism and resource checks.
 
-        Note: parallel execution via ThreadPoolExecutor was removed because
-        ExperimentRunner.run() opens multiple DB connections per trial, and
-        parallel experiments exhaust the connection pool causing deadlocks.
-        Sequential execution is reliable and still fast enough for typical cycles.
+        Uses a thread pool with connection pooling to avoid DB connection
+        exhaustion. Each experiment gets connections from a shared pool.
         """
         results = []
+        completed_count = [0]  # list for nonlocal in nested function
 
-        for i, exp_id in enumerate(experiment_ids, 1):
+        def _run_one(exp_id: int) -> Dict[str, Any]:
             # Safety check before each experiment
             try:
                 checks = run_preflight_checks()
                 if not checks.get("ok", True):
                     logger.warning(f"Preflight failed for experiment {exp_id}: {checks}")
-                    if on_progress:
-                        on_progress("experiment_failed",
-                                    f"Experiment #{exp_id} skipped: resource check failed",
-                                    {"experiment_id": exp_id})
-                    results.append({"experiment_id": exp_id, "status": "skipped", "reason": "resource_check_failed"})
-                    continue
+                    return {"experiment_id": exp_id, "status": "skipped", "reason": "resource_check_failed"}
             except Exception:
-                pass  # Don't block on safety check failures
+                pass
 
             try:
                 if on_progress:
-                    on_progress("running", f"Running experiment #{exp_id} ({i}/{len(experiment_ids)})...",
-                               {"experiment_id": exp_id, "index": i, "total": len(experiment_ids)})
+                    on_progress("running", f"Running experiment #{exp_id}...",
+                               {"experiment_id": exp_id})
                 result = self.runner.run(exp_id)
+                completed_count[0] += 1
                 score = result.get("best_score", "N/A")
                 if on_progress:
                     on_progress("experiment_done",
-                                f"Experiment #{exp_id} done ({i}/{len(experiment_ids)}), score: {score}",
+                                f"Experiment #{exp_id} done ({completed_count[0]}/{len(experiment_ids)}), score: {score}",
                                 {"experiment_id": exp_id, "score": score})
-                results.append({"experiment_id": exp_id, "status": "completed", **result})
+                return {"experiment_id": exp_id, "status": "completed", **result}
             except Exception as e:
                 logger.error(f"Experiment {exp_id} failed: {e}")
+                completed_count[0] += 1
                 if on_progress:
                     on_progress("experiment_failed",
-                                f"Experiment #{exp_id} failed ({i}/{len(experiment_ids)}): {e}",
+                                f"Experiment #{exp_id} failed ({completed_count[0]}/{len(experiment_ids)}): {e}",
                                 {"experiment_id": exp_id, "error": str(e)})
-                results.append({"experiment_id": exp_id, "status": "failed", "error": str(e)})
+                return {"experiment_id": exp_id, "status": "failed", "error": str(e)}
+
+        # Run with bounded parallelism
+        effective_parallel = min(max_parallel, len(experiment_ids))
+        if effective_parallel <= 1:
+            # Sequential for single experiment
+            for exp_id in experiment_ids:
+                results.append(_run_one(exp_id))
+        else:
+            with ThreadPoolExecutor(max_workers=effective_parallel) as executor:
+                futures = {executor.submit(_run_one, eid): eid for eid in experiment_ids}
+                for future in as_completed(futures):
+                    try:
+                        results.append(future.result())
+                    except Exception as e:
+                        exp_id = futures[future]
+                        results.append({"experiment_id": exp_id, "status": "error", "error": str(e)})
 
         return results
 
@@ -535,7 +556,7 @@ class CycleRunner:
         survivors = sum(survivors_mask)
 
         # Mark survivors in DB
-        with psycopg.connect(self.db_url) as conn:
+        with self._get_conn() as conn:
             with conn.cursor() as cur:
                 for exp_id, survived in zip(valid_ids, survivors_mask):
                     cur.execute(
@@ -554,7 +575,7 @@ class CycleRunner:
     def _update_cycle_status(self, cycle_id: int, status: str, summary: Dict[str, Any]) -> None:
         """Update cycle status and summary in database."""
         from psycopg.types.json import Json
-        with psycopg.connect(self.db_url) as conn:
+        with self._get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     UPDATE experiment_cycles
