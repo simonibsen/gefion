@@ -1048,6 +1048,57 @@ def render_discovery_section():
                 help="How many experiments to run simultaneously.",
             )
 
+    # Build config from current UI state
+    cycle_config = {
+        "selected_themes": selected_themes,
+        "allowed_types": allowed_types,
+        "auto_approve": True,
+        "dataset_uri": str(dataset_uri) if dataset_uri else None,
+        "horizon_days": horizon_days,
+        "allowed_horizons": allowed_horizons,
+        "allowed_algorithms": allowed_algorithms,
+        "algorithm": allowed_algorithms[0] if allowed_algorithms else "lightgbm",
+        "quantiles": quantiles,
+        "cv_folds": cv_folds,
+        "embargo_pct": embargo_pct,
+        "max_trials_per_experiment": max_trials,
+        "search_method": search_method,
+        "max_parallel": max_parallel,
+    }
+
+    # Config import/export
+    with st.expander("Config JSON — view, export, or import"):
+        config_tab1, config_tab2 = st.tabs(["View / Export", "Import"])
+
+        with config_tab1:
+            full_config = {
+                "cycle_name": cycle_name,
+                "max_experiments": max_experiments,
+                "fdr_rate": fdr_rate,
+                "holdout_weeks": holdout_weeks,
+                **cycle_config,
+            }
+            st.json(full_config)
+            st.download_button(
+                "Download Config",
+                data=json.dumps(full_config, indent=2),
+                file_name=f"cycle_config_{cycle_name or 'draft'}.json",
+                mime="application/json",
+            )
+
+        with config_tab2:
+            uploaded = st.file_uploader("Load config JSON", type=["json"], key="disc_config_upload")
+            if uploaded is not None:
+                try:
+                    loaded = json.loads(uploaded.read())
+                    st.json(loaded)
+                    st.info(
+                        "Config loaded. To apply it, copy the values into the form above. "
+                        "Full auto-apply from uploaded configs is coming soon."
+                    )
+                except json.JSONDecodeError:
+                    st.error("Invalid JSON file")
+
     if st.button("Start & Run Cycle", type="primary", width="stretch", key="disc_start_cycle"):
         if not cycle_name:
             st.error("Please enter a cycle name")
@@ -1055,25 +1106,6 @@ def render_discovery_section():
         if not selected_themes:
             st.error("Select at least one research theme")
             return
-
-        # Build cycle config (guardrails stored in discovery_snapshot.cycle_config)
-        cycle_config = {
-            "selected_themes": selected_themes,
-            "allowed_types": allowed_types,
-            "auto_approve": True,
-            # ML settings — None means agent decides
-            "dataset_uri": str(dataset_uri) if dataset_uri else None,
-            "horizon_days": horizon_days,
-            "allowed_horizons": allowed_horizons,
-            "allowed_algorithms": allowed_algorithms,
-            "algorithm": allowed_algorithms[0] if allowed_algorithms else "lightgbm",
-            "quantiles": quantiles,
-            "cv_folds": cv_folds,
-            "embargo_pct": embargo_pct,
-            "max_trials_per_experiment": max_trials,
-            "search_method": search_method,
-            "max_parallel": max_parallel,
-        }
 
         # Step 1: Create cycle
         create_cmd = [
