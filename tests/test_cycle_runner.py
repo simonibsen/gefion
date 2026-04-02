@@ -223,6 +223,28 @@ class TestFeatureFunctionGeneration:
         assert '"claude"' in src
         assert '"-p"' in src
 
+
+class TestExperimentalFeatureStorage:
+    """Test that generated feature functions are stored as experimental."""
+
+    def test_store_experimental_function_exists(self):
+        from gefion.experiments.cycle_runner import CycleRunner
+        assert hasattr(CycleRunner, "_store_experimental_function")
+
+    def test_store_uses_experimental_status(self):
+        """Stored functions must have status='experimental', not 'active'."""
+        import inspect
+        from gefion.experiments.cycle_runner import CycleRunner
+        src = inspect.getsource(CycleRunner._store_experimental_function)
+        assert "'experimental'" in src or '"experimental"' in src
+
+    def test_store_uses_upsert_feature_function(self):
+        """Must use existing upsert_feature_function helper."""
+        import inspect
+        from gefion.experiments.cycle_runner import CycleRunner
+        src = inspect.getsource(CycleRunner._store_experimental_function)
+        assert "upsert_feature_function" in src
+
     def test_templates_are_valid_python(self):
         """All function templates must be valid Python."""
         from gefion.experiments.cycle_runner import FEATURE_FUNCTION_TEMPLATES

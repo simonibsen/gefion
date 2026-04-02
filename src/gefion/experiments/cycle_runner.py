@@ -401,8 +401,12 @@ class CycleRunner:
                             "function_name": fn_name,
                             "function_body": body,
                         }
+                        # Store as experimental so other experiments can use it
+                        self._store_experimental_function(
+                            fn_name, body, principle_id, design, cycle_id,
+                        )
                         _emit("proposed",
-                              f"  Generated feature function: {fn_name}",
+                              f"  Generated feature function: {fn_name} (stored as experimental)",
                               {"function_name": fn_name})
 
                 exp_config = {
@@ -600,6 +604,37 @@ class CycleRunner:
             pass
 
         return issues
+
+    def _store_experimental_function(
+        self, fn_name: str, function_body: str,
+        principle_id: str, description: str, cycle_id: int,
+    ) -> None:
+        """Store a generated feature function as experimental in the DB.
+
+        Stored with status='experimental' so other experiments can use it,
+        but it won't be used in production until promoted to 'active'.
+        """
+        from gefion.cli_helpers import upsert_feature_function
+
+        payload = {
+            "name": f"exp_{fn_name}",
+            "version": f"cycle-{cycle_id}",
+            "language": "python",
+            "status": "experimental",
+            "enabled": True,
+            "description": f"AI-generated from principle: {principle_id}. {description[:200]}",
+            "function_body": function_body,
+            "created_by": "cycle_runner",
+            "tags": ["experimental", "ai-generated", principle_id],
+        }
+
+        try:
+            with self._get_conn() as conn:
+                conn.autocommit = True
+                upsert_feature_function(conn, payload)
+                logger.info(f"Stored experimental function: exp_{fn_name} (cycle {cycle_id})")
+        except Exception as e:
+            logger.warning(f"Failed to store experimental function exp_{fn_name}: {e}")
 
     def _load_cycle(self, cycle_id: int) -> Dict[str, Any]:
         """Load cycle record from database.
