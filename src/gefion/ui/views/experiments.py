@@ -35,11 +35,9 @@ def render_experiments():
         "and engineer features. Each experiment proposes → gets approved → runs trials → reports results."
     )
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         ":material/explore: Discovery",
-        ":material/list: List",
-        ":material/add_circle: Propose",
-        ":material/play_arrow: Run",
+        ":material/list: Experiments",
         ":material/assessment: Results",
         ":material/loop: Cycles",
     ])
@@ -51,15 +49,9 @@ def render_experiments():
         render_list_section()
 
     with tab3:
-        render_propose_section()
-
-    with tab4:
-        render_run_section()
-
-    with tab5:
         render_results_section()
 
-    with tab6:
+    with tab4:
         render_cycles_section()
 
 
@@ -168,6 +160,18 @@ def render_list_section():
                     with col3:
                         if st.button("Reject", key=f"reject_{exp[0]}"):
                             reject_experiment(exp[0])
+
+            # Quick actions for approved experiments (ready to run)
+            approved = [e for e in experiments if e[3] == "approved"]
+            if approved:
+                st.markdown("### Ready to Run")
+                for exp in approved:
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.write(f"**{exp[1]}** (ID: {exp[0]}) - {exp[2]} ({exp[6]} trials)")
+                    with col2:
+                        if st.button("Run", key=f"run_{exp[0]}", type="primary"):
+                            run_experiment(exp[0])
         else:
             st.info("No experiments found matching the filter.")
 
@@ -904,6 +908,14 @@ def render_discovery_section():
             st.markdown(f"- **{req}** — would unlock {info['count']} principle(s). Fix: `{info['action']}`")
     else:
         st.success("All principles have the data they need!")
+
+    # Manual experiment propose
+    st.markdown("---")
+    st.markdown("### Manual Experiment")
+    st.caption("Propose a single experiment with specific parameters. For broad exploration, use the Autonomous Cycle above.")
+
+    with st.expander("Propose a manual experiment"):
+        render_propose_section()
 
 
 def _render_cycle_launcher(themes, _is_ready, all_principles, available_prefixes):

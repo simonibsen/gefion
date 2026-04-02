@@ -1261,6 +1261,20 @@ class TestExperimentsUITabs:
         assert "Cycles" in experiments_content
         assert "render_cycles_section" in experiments_content
 
+    def test_has_four_tabs(self, experiments_content):
+        """Experiments page should have 4 tabs: Discovery, Experiments, Results, Cycles."""
+        assert "tab1, tab2, tab3, tab4" in experiments_content
+
+    def test_propose_in_discovery(self, experiments_content):
+        """Propose form should be inside the Discovery tab, not a separate tab."""
+        assert "Manual Experiment" in experiments_content
+        assert "render_propose_section" in experiments_content
+
+    def test_list_has_run_button_for_approved(self, experiments_content):
+        """List tab should have Run button for approved experiments."""
+        assert "Ready to Run" in experiments_content
+        assert 'run_{exp[0]}' in experiments_content or "run_" in experiments_content
+
     def test_propose_supports_all_experiment_types(self, experiments_content):
         """Propose form must support all experiment types, not just strategy_params."""
         assert "hyperparameter" in experiments_content
