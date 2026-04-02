@@ -56,7 +56,7 @@ class CycleRunner:
         self.db_url = db_url
         self.runner = ExperimentRunner(db_url)
 
-    def run_cycle(self, cycle_id: int) -> Dict[str, Any]:
+    def run_cycle(self, cycle_id: int, on_progress: Optional[callable] = None) -> Dict[str, Any]:
         """Execute a full autonomous experiment cycle.
 
         Steps:
@@ -70,12 +70,18 @@ class CycleRunner:
 
         Args:
             cycle_id: ID of the cycle to run (from experiment_cycles table).
+            on_progress: Optional callback(phase, message, detail) for status updates.
 
         Returns:
             Dict with proposed, completed, fdr_survivors counts and results.
         """
+        def _emit(phase, message, detail=None):
+            if on_progress:
+                on_progress(phase, message, detail)
+
         with create_span("experiments.cycle_runner.run_cycle", cycle_id=cycle_id) as span:
             # 1. Load cycle
+            _emit("loading", "Loading cycle configuration...")
             cycle = self._load_cycle(cycle_id)
             config = cycle.get("config", {})
             allowed_types = config.get("allowed_types", list(DEFAULT_SEARCH_SPACES.keys()))
@@ -101,6 +107,8 @@ class CycleRunner:
                            auto_approve=auto_approve)
 
             # 2. Discovery
+            _emit("discovery", "Running data discovery...",
+                  {"themes": config.get("selected_themes")})
             selected_themes = config.get("selected_themes")
             hypotheses = self._run_discovery(selected_themes=selected_themes)
             ready = [
@@ -109,8 +117,11 @@ class CycleRunner:
                 and h.get("experiment_type") in allowed_types
             ]
             set_attributes(span, total_hypotheses=len(hypotheses), ready_hypotheses=len(ready))
+            _emit("discovery", f"Found {len(hypotheses)} hypotheses, {len(ready)} ready",
+                  {"total": len(hypotheses), "ready": len(ready)})
 
             # 3. Propose experiments (up to max)
+            _emit("proposing", f"Proposing up to {min(len(ready), max_experiments)} experiments...")
             proposed_ids = []
             for h in ready[:max_experiments]:
                 # Build search space: user bounds override defaults
@@ -156,8 +167,12 @@ class CycleRunner:
                 exp_id = self._propose_experiment(exp_config, cycle_id)
                 proposed_ids.append(exp_id)
                 add_event(span, "proposed", experiment_id=exp_id, type=exp_type)
+                _emit("proposed", f"Proposed experiment #{exp_id}: {exp_type}",
+                      {"experiment_id": exp_id, "type": exp_type,
+                       "principle": h.get("principle_id", "")})
 
             # 4. Auto-approve
+            _emit("approving", f"{'Auto-approving' if auto_approve else 'Awaiting approval for'} {len(proposed_ids)} experiments...")
             if auto_approve:
                 for exp_id in proposed_ids:
                     try:
@@ -166,13 +181,17 @@ class CycleRunner:
                         logger.warning(f"Failed to approve experiment {exp_id}: {e}")
 
             # 5. Run experiments (parallel with safety checks)
-            results = self._run_experiments(proposed_ids, max_parallel)
+            _emit("running", f"Running {len(proposed_ids)} experiments (max {max_parallel} parallel)...")
+            results = self._run_experiments(proposed_ids, max_parallel, on_progress=_emit)
             set_attributes(span, completed=len(results))
 
             # 6. Evaluate with FDR
+            _emit("evaluating", "Applying FDR correction to filter false discoveries...")
             fdr_results = self._evaluate_cycle(cycle_id, proposed_ids)
 
             # 7. Update cycle status
+            _emit("complete",
+                  f"Cycle complete: {len(results)} experiments, {fdr_results.get('survivors', 0)} FDR survivors")
             summary = {
                 "proposed": len(proposed_ids),
                 "completed": len(results),
@@ -268,11 +287,14 @@ class CycleRunner:
 
         return exp_id
 
-    def _run_experiments(self, experiment_ids: List[int], max_parallel: int = 3) -> List[Dict[str, Any]]:
+    def _run_experiments(self, experiment_ids: List[int], max_parallel: int = 3,
+                         on_progress: Optional[callable] = None) -> List[Dict[str, Any]]:
         """Run experiments, parallel with resource checks."""
         results = []
+        completed_count = 0
 
         def _run_one(exp_id: int) -> Optional[Dict[str, Any]]:
+            nonlocal completed_count
             # Safety check before each experiment
             try:
                 checks = run_preflight_checks()
@@ -283,10 +305,24 @@ class CycleRunner:
                 pass  # Don't block on safety check failures
 
             try:
+                if on_progress:
+                    on_progress("running", f"Running experiment #{exp_id}...",
+                               {"experiment_id": exp_id})
                 result = self.runner.run(exp_id)
+                completed_count += 1
+                if on_progress:
+                    score = result.get("best_score", "N/A")
+                    on_progress("experiment_done",
+                                f"Experiment #{exp_id} done ({completed_count}/{len(experiment_ids)}), score: {score}",
+                                {"experiment_id": exp_id, "score": score})
                 return {"experiment_id": exp_id, "status": "completed", **result}
             except Exception as e:
                 logger.error(f"Experiment {exp_id} failed: {e}")
+                completed_count += 1
+                if on_progress:
+                    on_progress("experiment_failed",
+                                f"Experiment #{exp_id} failed: {e}",
+                                {"experiment_id": exp_id, "error": str(e)})
                 return {"experiment_id": exp_id, "status": "failed", "error": str(e)}
 
         with ThreadPoolExecutor(max_workers=max_parallel) as executor:

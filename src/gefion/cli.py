@@ -9532,24 +9532,43 @@ def experiment_cycle_run(
         runner = CycleRunner(db_url)
 
         try:
-            if not json_output:
-                from rich.console import Console
-                console = Console()
-                console.print(f"[bold]Running cycle #{cycle_id}...[/bold]")
-                console.print("[dim]Discovering hypotheses, proposing experiments, running trials...[/dim]")
-
-            results = runner.run_cycle(cycle_id)
-
             if json_output:
+                def _on_progress(phase, message, detail=None):
+                    emit(message, data={"phase": phase, **(detail or {})}, json_output=True)
+
+                results = runner.run_cycle(cycle_id, on_progress=_on_progress)
                 emit_json({
                     "cycle_id": cycle_id,
                     "status": "completed",
                     **results,
                 })
             else:
-                console.print(f"\n[bold green]Cycle #{cycle_id} complete![/bold green]")
-                console.print(f"  Proposed: {results.get('proposed', 0)} experiments")
-                console.print(f"  Completed: {results.get('completed', 0)} experiments")
+                from rich.console import Console
+                console = Console()
+
+                phase_icons = {
+                    "loading": ":gear:",
+                    "discovery": ":mag:",
+                    "proposing": ":pencil:",
+                    "proposed": "  :arrow_right:",
+                    "approving": ":white_check_mark:",
+                    "running": ":runner:",
+                    "experiment_done": "  :chart_with_upwards_trend:",
+                    "experiment_failed": "  :x:",
+                    "evaluating": ":bar_chart:",
+                    "complete": ":tada:",
+                }
+
+                def _on_progress(phase, message, detail=None):
+                    icon = phase_icons.get(phase, ":arrow_right:")
+                    console.print(f"  {icon} {message}")
+
+                console.print(f"\n[bold]Cycle #{cycle_id}[/bold]\n")
+                results = runner.run_cycle(cycle_id, on_progress=_on_progress)
+
+                console.print(f"\n[bold green]Complete![/bold green]")
+                console.print(f"  Proposed:      {results.get('proposed', 0)} experiments")
+                console.print(f"  Completed:     {results.get('completed', 0)} experiments")
                 console.print(f"  FDR Survivors: {results.get('fdr_survivors', 0)}")
 
         except Exception as e:
