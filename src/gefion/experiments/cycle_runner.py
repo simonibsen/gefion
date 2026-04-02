@@ -44,6 +44,127 @@ DEFAULT_SEARCH_SPACES = {
 }
 
 
+# Feature function templates for agent-generated code.
+# Each template produces a compute(df, **params) function.
+FEATURE_FUNCTION_TEMPLATES = {
+    "variance_ratio": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=20):
+    """Variance ratio: ratio of long-horizon variance to short-horizon variance."""
+    returns = df['close'].pct_change()
+    var_1 = returns.rolling(1).var()
+    var_q = returns.rolling(window).var() / window
+    ratio = var_q / var_1
+    return ratio.fillna(0)
+''',
+    "autocorrelation_lag": '''import numpy as np
+import pandas as pd
+
+def compute(df, lag=5):
+    """Autocorrelation of returns at a specific lag."""
+    returns = df['close'].pct_change()
+    return returns.rolling(50).apply(lambda x: x.autocorr(lag=lag) if len(x) > lag else 0, raw=False).fillna(0)
+''',
+    "volatility_ratio": '''import numpy as np
+import pandas as pd
+
+def compute(df, short_window=5, long_window=20):
+    """Ratio of short-term to long-term volatility (squeeze detection)."""
+    returns = df['close'].pct_change()
+    short_vol = returns.rolling(short_window).std()
+    long_vol = returns.rolling(long_window).std()
+    return (short_vol / long_vol).fillna(1)
+''',
+    "price_acceleration": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=10):
+    """Second derivative of price — acceleration of momentum."""
+    momentum = df['close'].pct_change(window)
+    acceleration = momentum.diff()
+    return acceleration.fillna(0)
+''',
+    "volume_price_divergence": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=20):
+    """Divergence between volume trend and price trend."""
+    price_trend = df['close'].pct_change(window)
+    volume_trend = df['volume'].pct_change(window) if 'volume' in df.columns else pd.Series(0, index=df.index)
+    return (volume_trend - price_trend).fillna(0)
+''',
+    "mean_reversion_signal": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=20):
+    """Z-score of price relative to rolling mean — mean reversion signal."""
+    mean = df['close'].rolling(window).mean()
+    std = df['close'].rolling(window).std()
+    zscore = (df['close'] - mean) / std
+    return zscore.fillna(0)
+''',
+    "tail_risk_indicator": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=60, percentile=5):
+    """Rolling VaR-like tail risk: percentile of return distribution."""
+    returns = df['close'].pct_change()
+    var = returns.rolling(window).quantile(percentile / 100.0)
+    return var.fillna(0)
+''',
+    "hurst_exponent_proxy": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=100):
+    """Proxy for Hurst exponent using rescaled range."""
+    returns = df['close'].pct_change().fillna(0)
+    def rs_ratio(x):
+        if len(x) < 10:
+            return 0.5
+        mean_r = x.mean()
+        devs = (x - mean_r).cumsum()
+        R = devs.max() - devs.min()
+        S = x.std()
+        if S == 0:
+            return 0.5
+        return np.log(R / S) / np.log(len(x))
+    return returns.rolling(window).apply(rs_ratio, raw=False).fillna(0.5)
+''',
+}
+
+
+def _generate_function_body(principle_id: str, experiment_design: str) -> Optional[str]:
+    """Generate a feature function body from a principle.
+
+    Matches principle IDs to known templates. Falls back to a generic
+    rolling z-score if no specific template matches.
+    """
+    # Direct match by principle keywords
+    pid = principle_id.lower()
+    if "variance-ratio" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["variance_ratio"]
+    if "autocorrelation" in pid or "lag" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["autocorrelation_lag"]
+    if "volatility" in pid or "garch" in pid or "contraction" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["volatility_ratio"]
+    if "momentum" in pid or "acceleration" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["price_acceleration"]
+    if "volume" in pid or "vpin" in pid or "informed-trading" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["volume_price_divergence"]
+    if "mean-reversion" in pid or "cointegration" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["mean_reversion_signal"]
+    if "tail" in pid or "fat-tail" in pid or "kurtosis" in pid or "black-swan" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["tail_risk_indicator"]
+    if "hurst" in pid or "random-walk" in pid or "unit-root" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["hurst_exponent_proxy"]
+    if "bid-ask" in pid or "spread" in pid or "microstructure" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["volume_price_divergence"]
+
+    # Fallback: generic rolling z-score
+    return FEATURE_FUNCTION_TEMPLATES["mean_reversion_signal"]
+
+
 class CycleRunner:
     """Orchestrates a full autonomous experiment cycle.
 
@@ -190,6 +311,22 @@ class CycleRunner:
                 # Pick algorithm — for non-comparison types, use first allowed
                 exp_algorithm = algorithm if algorithm else allowed_algorithms[0]
 
+                # For feature engineering, generate a function body from the principle
+                feature_config = {}
+                if exp_type == "feature_engineering":
+                    principle_id = h.get("principle_id", "")
+                    design = h.get("description", "")
+                    body = _generate_function_body(principle_id, design)
+                    if body:
+                        fn_name = principle_id.replace("-", "_")[:40]
+                        feature_config = {
+                            "function_name": fn_name,
+                            "function_body": body,
+                        }
+                        _emit("proposed",
+                              f"  Generated feature function: {fn_name}",
+                              {"function_name": fn_name})
+
                 exp_config = {
                     "experiment_type": exp_type,
                     "principle_id": h.get("principle_id", ""),
@@ -203,6 +340,8 @@ class CycleRunner:
                     "max_trials": max_trials,
                     "search_method": search_method,
                 }
+                if feature_config:
+                    exp_config["feature_config"] = feature_config
                 exp_id = self._propose_experiment(exp_config, cycle_id)
                 proposed_ids.append(exp_id)
                 add_event(span, "proposed", experiment_id=exp_id, type=exp_type)

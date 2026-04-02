@@ -170,6 +170,55 @@ class TestCycleRunnerCLI:
         assert "cycle_id" in sig.parameters
 
 
+class TestFeatureFunctionGeneration:
+    """Test that CycleRunner generates function bodies for feature engineering."""
+
+    def test_generate_function_body_exists(self):
+        from gefion.experiments.cycle_runner import _generate_function_body
+        assert _generate_function_body is not None
+
+    def test_generates_body_for_variance_ratio(self):
+        from gefion.experiments.cycle_runner import _generate_function_body
+        body = _generate_function_body("variance-ratio-rejects-random-walk", "")
+        assert body is not None
+        assert "def compute(df" in body
+        assert "variance" in body.lower() or "var" in body.lower()
+
+    def test_generates_body_for_volume_principle(self):
+        from gefion.experiments.cycle_runner import _generate_function_body
+        body = _generate_function_body("volume-price-informed-trading", "")
+        assert body is not None
+        assert "def compute(df" in body
+        assert "volume" in body.lower()
+
+    def test_generates_body_for_unknown_principle(self):
+        """Unknown principles should get a fallback function, not None."""
+        from gefion.experiments.cycle_runner import _generate_function_body
+        body = _generate_function_body("totally-unknown-principle", "")
+        assert body is not None
+        assert "def compute(df" in body
+
+    def test_templates_are_valid_python(self):
+        """All function templates must be valid Python."""
+        from gefion.experiments.cycle_runner import FEATURE_FUNCTION_TEMPLATES
+        for name, body in FEATURE_FUNCTION_TEMPLATES.items():
+            try:
+                compile(body, f"<template:{name}>", "exec")
+            except SyntaxError as e:
+                assert False, f"Template '{name}' has invalid Python: {e}"
+
+    def test_templates_define_compute(self):
+        """All function templates must define a compute() function."""
+        from gefion.experiments.cycle_runner import FEATURE_FUNCTION_TEMPLATES
+        import numpy as np
+        import pandas as pd
+        for name, body in FEATURE_FUNCTION_TEMPLATES.items():
+            env = {"np": np, "numpy": np, "pd": pd, "pandas": pd,
+                   "__builtins__": __builtins__}
+            exec(body, env)
+            assert callable(env.get("compute")), f"Template '{name}' must define compute()"
+
+
 class TestCycleStartConfigFile:
     """Test cycle-start accepts --config file."""
 
