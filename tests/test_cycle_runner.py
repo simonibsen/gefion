@@ -156,16 +156,17 @@ class TestCycleRunnerCLI:
 class TestCycleRunnerUI:
     """Test UI has guardrail controls."""
 
-    def test_ui_has_allowed_types(self):
+    def test_ui_has_theme_selection(self):
+        from pathlib import Path
+        content = Path("src/gefion/ui/views/experiments.py").read_text()
+        assert "selected_themes" in content
+        assert "Research Themes" in content
+
+    def test_ui_derives_allowed_types_from_themes(self):
         from pathlib import Path
         content = Path("src/gefion/ui/views/experiments.py").read_text()
         assert "allowed_types" in content
-        assert "Allowed Experiment Types" in content
-
-    def test_ui_has_guardrails_expander(self):
-        from pathlib import Path
-        content = Path("src/gefion/ui/views/experiments.py").read_text()
-        assert "Guardrails" in content
+        assert "experiment_types" in content
 
     def test_ui_stores_cycle_config(self):
         from pathlib import Path

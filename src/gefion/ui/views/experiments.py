@@ -930,21 +930,52 @@ def render_discovery_section():
             help="Bayesian is most efficient (learns from results). Grid is exhaustive.",
         )
 
-    # Guardrails
-    with st.expander("Guardrails — what the agent is allowed to explore"):
-        allowed_types = st.multiselect(
-            "Allowed Experiment Types",
-            ["hyperparameter", "model_comparison", "feature_engineering",
-             "feature_selection", "label_engineering", "strategy_params"],
-            default=["hyperparameter", "model_comparison", "feature_selection"],
-            help="Which experiment types the cycle can propose. Uncheck types you don't want explored.",
-        )
+    # Theme selection
+    st.markdown("##### Select Research Themes")
+    st.caption("Choose which themes the agent can explore. Only ready principles (with available data) will be used.")
 
+    theme_options = list(sorted(themes.keys(), key=lambda t: -len(themes[t]["principles"])))
+    # Show ready counts per theme
+    theme_labels = {}
+    for t in theme_options:
+        ready = sum(1 for p in themes[t]["principles"] if _is_ready(p))
+        total = len(themes[t]["principles"])
+        theme_labels[t] = f"{t} ({ready}/{total} ready)"
+
+    selected_themes = st.multiselect(
+        "Themes",
+        theme_options,
+        default=[t for t in theme_options if sum(1 for p in themes[t]["principles"] if _is_ready(p)) > 0][:3],
+        format_func=lambda t: theme_labels.get(t, t),
+        help="Select research themes to explore. The agent will only use principles from these themes.",
+    )
+
+    # Derive experiment types from selected themes' principles
+    selected_exp_types = set()
+    for t in selected_themes:
+        for p in themes[t]["principles"]:
+            if _is_ready(p):
+                for et in p.get("experiment_types", []):
+                    selected_exp_types.add(et)
+    # Map any non-standard types
+    type_map = {"strategy_optimization": "strategy_params"}
+    allowed_types = [type_map.get(t, t) for t in selected_exp_types]
+
+    if selected_themes:
+        ready_in_selection = sum(
+            1 for t in selected_themes
+            for p in themes[t]["principles"] if _is_ready(p)
+        )
+        st.caption(f"{ready_in_selection} ready principles across {len(selected_themes)} themes. "
+                   f"Experiment types: {', '.join(sorted(selected_exp_types)) or 'none'}.")
+
+    # ML settings
+    with st.expander("ML Settings"):
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             algorithm = st.selectbox(
                 "Algorithm", ["lightgbm", "xgboost", "quantile_regression"],
-                help="ML algorithm for training in ML experiment types.",
+                help="ML algorithm for ML experiment types.",
                 key="disc_algorithm",
             )
             horizon_days = st.selectbox(
@@ -953,7 +984,6 @@ def render_discovery_section():
                 key="disc_horizon",
             )
         with col_g2:
-            # Auto-detect datasets
             from pathlib import Path as _Path
             dataset_dirs = sorted(_Path("datasets").glob("*/manifest.json")) if _Path("datasets").exists() else []
             dataset_options = [str(d) for d in dataset_dirs]
@@ -964,19 +994,20 @@ def render_discovery_section():
 
             max_parallel = st.number_input(
                 "Max Parallel", value=2, min_value=1, max_value=5, key="disc_parallel",
-                help="How many experiments to run simultaneously. Higher = faster but more resource-intensive.",
+                help="How many experiments to run simultaneously.",
             )
 
     if st.button("Start & Run Cycle", type="primary", width="stretch", key="disc_start_cycle"):
         if not cycle_name:
             st.error("Please enter a cycle name")
             return
-        if not allowed_types:
-            st.error("Select at least one allowed experiment type")
+        if not selected_themes:
+            st.error("Select at least one research theme")
             return
 
         # Build cycle config (guardrails stored in discovery_snapshot.cycle_config)
         cycle_config = {
+            "selected_themes": selected_themes,
             "allowed_types": allowed_types,
             "auto_approve": True,
             "dataset_uri": str(dataset_uri) if dataset_uri else None,

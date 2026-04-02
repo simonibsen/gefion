@@ -95,7 +95,8 @@ class CycleRunner:
                            auto_approve=auto_approve)
 
             # 2. Discovery
-            hypotheses = self._run_discovery()
+            selected_themes = config.get("selected_themes")
+            hypotheses = self._run_discovery(selected_themes=selected_themes)
             ready = [
                 h for h in hypotheses
                 if h.get("feasibility") == "ready"
@@ -187,10 +188,23 @@ class CycleRunner:
                     "config": config,
                 }
 
-    def _run_discovery(self) -> List[Dict[str, Any]]:
-        """Run data discovery and return hypotheses."""
+    def _run_discovery(self, selected_themes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Run data discovery and return hypotheses, optionally filtered by themes."""
         with psycopg.connect(self.db_url) as conn:
             principles = load_principles()
+
+            # Filter principles by selected themes
+            if selected_themes:
+                from gefion.ui.views.experiments import _get_theme_map
+                theme_map = _get_theme_map()
+                filtered = []
+                for p in principles:
+                    book = p.get("source", {}).get("title", "Other")
+                    theme = theme_map.get(book, "Other")
+                    if theme in selected_themes:
+                        filtered.append(p)
+                principles = filtered
+
             result = run_discovery(conn, principles)
             return result.get("hypotheses", [])
 
