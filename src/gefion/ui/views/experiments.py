@@ -969,10 +969,15 @@ def render_discovery_section():
         st.caption(f"{ready_in_selection} ready principles across {len(selected_themes)} themes. "
                    f"Experiment types: {', '.join(sorted(selected_exp_types)) or 'none'}.")
 
-    # ML settings
-    with st.expander("ML Settings"):
+    # ML settings — each defaults to "Agent decides" unless user overrides
+    AGENT_DECIDES = "Agent decides"
+
+    with st.expander("ML Settings — override or let the agent decide"):
+        st.caption("Each setting defaults to agent-controlled. Override any to constrain the search.")
+
         col_g1, col_g2 = st.columns(2)
         with col_g1:
+            # Algorithms
             allowed_algorithms = st.multiselect(
                 "Allowed Algorithms",
                 ["lightgbm", "xgboost", "quantile_regression"],
@@ -980,22 +985,66 @@ def render_discovery_section():
                 help="Which ML algorithms the agent can use. Multiple = agent can compare them.",
                 key="disc_algorithms",
             )
-            horizon_days = st.selectbox(
-                "Prediction Horizon", [7, 30],
-                help="How far ahead to predict (days).",
+
+            # Horizon
+            horizon_choice = st.selectbox(
+                "Prediction Horizon",
+                [AGENT_DECIDES, "7 days", "30 days"],
+                help="Agent can try both horizons, or lock to one.",
                 key="disc_horizon",
             )
+            if horizon_choice == AGENT_DECIDES:
+                horizon_days = None  # Agent picks
+                allowed_horizons = [7, 30]
+            else:
+                horizon_days = int(horizon_choice.split()[0])
+                allowed_horizons = [horizon_days]
+
+            # Quantiles
+            quantile_choice = st.selectbox(
+                "Prediction Quantiles",
+                [AGENT_DECIDES, "Standard (10/50/90)", "Wide (5/50/95)", "Tight (25/50/75)"],
+                help="Which quantile levels to predict. Agent can experiment with different widths.",
+                key="disc_quantiles",
+            )
+            quantile_map = {
+                AGENT_DECIDES: None,
+                "Standard (10/50/90)": [0.1, 0.5, 0.9],
+                "Wide (5/50/95)": [0.05, 0.5, 0.95],
+                "Tight (25/50/75)": [0.25, 0.5, 0.75],
+            }
+            quantiles = quantile_map.get(quantile_choice)
+
         with col_g2:
+            # Dataset
             from pathlib import Path as _Path
             dataset_dirs = sorted(_Path("datasets").glob("*/manifest.json")) if _Path("datasets").exists() else []
-            dataset_options = [str(d) for d in dataset_dirs]
-            if dataset_options:
-                dataset_uri = st.selectbox("Dataset", dataset_options, key="disc_dataset")
-            else:
-                dataset_uri = st.text_input("Dataset URI", placeholder="datasets/baseline_v2/manifest.json", key="disc_dataset_input")
+            dataset_options = [AGENT_DECIDES] + [str(d) for d in dataset_dirs]
+            dataset_choice = st.selectbox("Dataset", dataset_options, key="disc_dataset",
+                                          help="Agent can auto-detect the latest dataset, or lock to a specific one.")
+            dataset_uri = None if dataset_choice == AGENT_DECIDES else dataset_choice
 
+            # CV folds
+            cv_choice = st.selectbox(
+                "Cross-Validation Folds",
+                [AGENT_DECIDES, "3 folds", "5 folds", "10 folds"],
+                help="More folds = more reliable but slower. Agent can optimize this.",
+                key="disc_cv_folds",
+            )
+            cv_folds = None if cv_choice == AGENT_DECIDES else int(cv_choice.split()[0])
+
+            # Embargo
+            embargo_choice = st.selectbox(
+                "CV Embargo Period",
+                [AGENT_DECIDES, "1%", "2%", "5%"],
+                help="Gap between train/test folds to prevent data leakage. Higher = stricter.",
+                key="disc_embargo",
+            )
+            embargo_pct = None if embargo_choice == AGENT_DECIDES else float(embargo_choice.strip("%")) / 100
+
+            # Max parallel
             max_parallel = st.number_input(
-                "Max Parallel", value=2, min_value=1, max_value=5, key="disc_parallel",
+                "Max Parallel Experiments", value=2, min_value=1, max_value=5, key="disc_parallel",
                 help="How many experiments to run simultaneously.",
             )
 
@@ -1012,10 +1061,15 @@ def render_discovery_section():
             "selected_themes": selected_themes,
             "allowed_types": allowed_types,
             "auto_approve": True,
+            # ML settings — None means agent decides
             "dataset_uri": str(dataset_uri) if dataset_uri else None,
             "horizon_days": horizon_days,
+            "allowed_horizons": allowed_horizons,
             "allowed_algorithms": allowed_algorithms,
             "algorithm": allowed_algorithms[0] if allowed_algorithms else "lightgbm",
+            "quantiles": quantiles,
+            "cv_folds": cv_folds,
+            "embargo_pct": embargo_pct,
             "max_trials_per_experiment": max_trials,
             "search_method": search_method,
             "max_parallel": max_parallel,

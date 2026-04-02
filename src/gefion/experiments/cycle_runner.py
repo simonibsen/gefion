@@ -90,6 +90,10 @@ class CycleRunner:
             search_bounds = config.get("search_bounds", {})
 
             allowed_algorithms = config.get("allowed_algorithms", ["lightgbm", "xgboost", "quantile_regression"])
+            allowed_horizons = config.get("allowed_horizons", [7, 30])
+            quantiles = config.get("quantiles")  # None = agent decides
+            cv_folds = config.get("cv_folds")  # None = agent decides
+            embargo_pct = config.get("embargo_pct")  # None = agent decides
 
             set_attributes(span,
                            max_experiments=max_experiments,
@@ -119,14 +123,33 @@ class CycleRunner:
                 if exp_type == "model_comparison" and allowed_algorithms:
                     search_space["model_type"] = allowed_algorithms
 
+                # Build CV config with agent-decidable settings
+                cv_config = {}
+                if cv_folds is not None:
+                    cv_config["n_splits"] = cv_folds
+                else:
+                    cv_config["n_splits"] = 5  # agent default
+                if embargo_pct is not None:
+                    cv_config["embargo_pct"] = embargo_pct
+                else:
+                    cv_config["embargo_pct"] = 0.02  # agent default
+
+                # Pick horizon — if agent decides and multiple available, use first
+                exp_horizon = horizon_days if horizon_days else allowed_horizons[0]
+
+                # Pick algorithm — for non-comparison types, use first allowed
+                exp_algorithm = algorithm if algorithm else allowed_algorithms[0]
+
                 exp_config = {
                     "experiment_type": exp_type,
                     "principle_id": h.get("principle_id", ""),
                     "description": h.get("description", ""),
                     "search_space": search_space,
                     "dataset_uri": dataset_uri,
-                    "horizon_days": horizon_days,
-                    "algorithm": algorithm,
+                    "horizon_days": exp_horizon,
+                    "algorithm": exp_algorithm,
+                    "quantiles": quantiles or [0.1, 0.5, 0.9],
+                    "cv_config": cv_config,
                     "max_trials": max_trials,
                     "search_method": search_method,
                 }
