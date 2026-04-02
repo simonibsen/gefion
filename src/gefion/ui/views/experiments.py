@@ -799,11 +799,7 @@ def render_discovery_section():
     except Exception:
         st.caption("Could not load data summary.")
 
-    st.markdown("---")
-
-    # Theme explorer
-    st.markdown("### Research Themes")
-
+    # Load principles (used by both cycle launcher and theme explorer)
     try:
         from gefion.experiments.principles import load_principles
         all_principles = load_principles()
@@ -825,6 +821,21 @@ def render_discovery_section():
             if req_base not in available_prefixes:
                 return False
         return True
+
+    st.markdown("---")
+
+    # =====================================================================
+    # AUTONOMOUS CYCLE LAUNCHER (primary action — shown first)
+    # =====================================================================
+    _render_cycle_launcher(themes, _is_ready, all_principles, available_prefixes)
+
+    st.markdown("---")
+
+    # =====================================================================
+    # RESEARCH THEMES (browse & explore — shown below)
+    # =====================================================================
+    st.markdown("### Explore Research Themes")
+    st.caption("Browse themes to understand what principles are available and what data is needed.")
 
     # Theme cards
     for theme_name in sorted(themes.keys(), key=lambda t: -len(themes[t]["principles"])):
@@ -894,9 +905,9 @@ def render_discovery_section():
     else:
         st.success("All principles have the data they need!")
 
-    st.markdown("---")
 
-    # Autonomous cycle launcher
+def _render_cycle_launcher(themes, _is_ready, all_principles, available_prefixes):
+    """Render the autonomous cycle launcher with theme selection and guardrails."""
     st.markdown("### Autonomous Experiment Cycle")
     st.markdown(
         "An autonomous cycle does everything in one shot: scans for opportunities, "
