@@ -1189,7 +1189,10 @@ async def list_tools() -> List[Tool]:
                 "Propose a new experiment for approval. "
                 "Creates an experiment with 'proposed' status. "
                 "Supports all experiment types: strategy_params, hyperparameter, model_comparison, "
-                "feature_engineering, feature_selection, label_engineering, pipeline."
+                "feature_engineering, feature_selection, label_engineering, pipeline. "
+                "For feature_engineering: write a compute(df, **params) function body and pass via "
+                "extra_config as JSON with feature_config.function_name and feature_config.function_body. "
+                "Functions run in a security sandbox with numpy, pandas, scipy, sklearn, talib."
             ),
             inputSchema={
                 "type": "object",

@@ -43,6 +43,36 @@ Autonomous experiment skill — orchestrates a full experiment cycle using the p
    - Each must have a null hypothesis
    - Prioritize "ready" feasibility over "blocked"
 
+   **For feature_engineering experiments — WRITE THE FEATURE FUNCTION:**
+
+   Read the principle's `experiment_design` field and write a Python `compute(df, **params)` function
+   that implements the described feature. Pass it via `--config`:
+
+   ```bash
+   .venv/bin/python -m gefion.cli experiment propose \
+     --name "variance-ratio-feature" \
+     --type feature_engineering \
+     --search-space '{"window": {"type": "int", "low": 5, "high": 30, "step": 5}}' \
+     --principle variance-ratio-rejects-random-walk \
+     --config '{"feature_config": {"function_name": "variance_ratio", "function_body": "import numpy as np\nimport pandas as pd\n\ndef compute(df, window=20):\n    returns = df[\"close\"].pct_change()\n    var_1 = returns.rolling(1).var()\n    var_q = returns.rolling(window).var() / window\n    return (var_q / var_1).fillna(0)\n"}, "source_column": "close"}' \
+     --json
+   ```
+
+   The function runs in a security sandbox with access to: numpy, pandas, scipy, sklearn, talib.
+   No file I/O, network, or system access. The function MUST:
+   - Define `def compute(df, **params) -> pd.Series`
+   - Accept a DataFrame with OHLCV columns (close, open, high, low, volume)
+   - Return a Series the same length as the input
+   - Handle NaN values (use `.fillna()`)
+   - Use only safe imports (numpy, pandas, scipy, sklearn, talib, math, statistics)
+
+   **For feature_definition creation:**
+
+   Feature definitions can also be created alongside the function. Include in the config:
+   ```json
+   {"feature_config": {"function_name": "my_feature", "function_body": "..."}}
+   ```
+
 5. **Approve and run experiments**:
    ```bash
    .venv/bin/python -m gefion.cli experiment approve --id <id> --json
