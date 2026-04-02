@@ -4,6 +4,7 @@ Chains discovery → propose → approve → run → evaluate into a single
 autonomous workflow with configurable guardrails.
 """
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
@@ -134,13 +135,78 @@ def compute(df, window=100):
 }
 
 
-def _generate_function_body(principle_id: str, experiment_design: str) -> Optional[str]:
-    """Generate a feature function body from a principle.
+def _generate_function_body_claude(principle_id: str, experiment_design: str) -> Optional[str]:
+    """Use Claude Code (claude -p) to generate a feature function.
 
-    Matches principle IDs to known templates. Falls back to a generic
-    rolling z-score if no specific template matches.
+    Invokes the same Claude Code instance the chat widget uses.
+    Returns a compute(df, **params) function body, or None if unavailable.
     """
-    # Direct match by principle keywords
+    import shutil
+    import subprocess
+
+    if not shutil.which("claude"):
+        logger.debug("claude CLI not found, skipping AI code generation")
+        return None
+
+    prompt = f"""Write a Python feature function for a quantitative trading system.
+
+Principle: {principle_id}
+Description: {experiment_design}
+
+Requirements:
+- Define exactly: def compute(df, window=20):
+- df has columns: close, open, high, low, volume (all numeric, time-ordered)
+- Return a pandas Series the same length as df
+- Handle NaN values with .fillna()
+- Use only: numpy, pandas, scipy, sklearn, talib, math, statistics
+- No file I/O, network, or system calls
+- The function should capture the essence of the principle described above
+- Include a docstring explaining what the feature measures
+
+Return ONLY the Python code, no markdown fences or explanations."""
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "text"],
+            capture_output=True, text=True, timeout=60,
+        )
+
+        if result.returncode != 0:
+            logger.warning(f"claude -p failed for {principle_id}: {result.stderr[:200]}")
+            return None
+
+        code = result.stdout.strip()
+
+        # Strip markdown fences if present
+        if code.startswith("```"):
+            lines = code.split("\n")
+            code = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+        # Validate it's valid Python with a compute function
+        try:
+            compiled = compile(code, "<claude_generated>", "exec")
+            env = {}
+            exec(compiled, {"__builtins__": __builtins__}, env)
+            if callable(env.get("compute")):
+                logger.info(f"Claude generated feature function for {principle_id}")
+                return code
+            else:
+                logger.warning(f"Claude code for {principle_id} missing compute() function")
+                return None
+        except SyntaxError as e:
+            logger.warning(f"Claude generated invalid Python for {principle_id}: {e}")
+            return None
+
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Claude code generation timed out for {principle_id}")
+        return None
+    except Exception as e:
+        logger.warning(f"Claude code generation failed for {principle_id}: {e}")
+        return None
+
+
+def _generate_function_body_template(principle_id: str) -> Optional[str]:
+    """Match principle to a pre-built template by keyword."""
     pid = principle_id.lower()
     if "variance-ratio" in pid:
         return FEATURE_FUNCTION_TEMPLATES["variance_ratio"]
@@ -160,9 +226,21 @@ def _generate_function_body(principle_id: str, experiment_design: str) -> Option
         return FEATURE_FUNCTION_TEMPLATES["hurst_exponent_proxy"]
     if "bid-ask" in pid or "spread" in pid or "microstructure" in pid:
         return FEATURE_FUNCTION_TEMPLATES["volume_price_divergence"]
-
-    # Fallback: generic rolling z-score
     return FEATURE_FUNCTION_TEMPLATES["mean_reversion_signal"]
+
+
+def _generate_function_body(principle_id: str, experiment_design: str) -> Optional[str]:
+    """Generate a feature function body from a principle.
+
+    Tries LLM generation first (Claude API), falls back to templates.
+    """
+    # Try Claude Code first — reads the experiment_design and writes custom code
+    body = _generate_function_body_claude(principle_id, experiment_design)
+    if body:
+        return body
+
+    # Fallback: keyword-matched templates
+    return _generate_function_body_template(principle_id)
 
 
 class CycleRunner:

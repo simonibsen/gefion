@@ -198,6 +198,31 @@ class TestFeatureFunctionGeneration:
         assert body is not None
         assert "def compute(df" in body
 
+    def test_claude_generation_tried_first(self):
+        """_generate_function_body should try Claude Code before templates."""
+        import inspect
+        from gefion.experiments.cycle_runner import _generate_function_body
+        src = inspect.getsource(_generate_function_body)
+        claude_pos = src.index("_generate_function_body_claude")
+        template_pos = src.index("_generate_function_body_template")
+        assert claude_pos < template_pos, "Claude generation should be tried before templates"
+
+    def test_claude_function_validates_syntax(self):
+        """Claude-generated code must be validated for syntax and compute() presence."""
+        import inspect
+        from gefion.experiments.cycle_runner import _generate_function_body_claude
+        src = inspect.getsource(_generate_function_body_claude)
+        assert "compile(" in src, "Must validate syntax"
+        assert "compute" in src, "Must check for compute() function"
+
+    def test_claude_generation_uses_claude_cli(self):
+        """Should invoke claude -p for code generation."""
+        import inspect
+        from gefion.experiments.cycle_runner import _generate_function_body_claude
+        src = inspect.getsource(_generate_function_body_claude)
+        assert '"claude"' in src
+        assert '"-p"' in src
+
     def test_templates_are_valid_python(self):
         """All function templates must be valid Python."""
         from gefion.experiments.cycle_runner import FEATURE_FUNCTION_TEMPLATES
