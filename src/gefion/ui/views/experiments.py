@@ -31,10 +31,14 @@ def render_experiments():
     """Render the experiments page."""
     st.markdown("# :material/science: Experiments")
     render_chat_widget(get_page_context())
-    st.markdown("Autonomous experimentation with human approval gates.")
     st.markdown(
-        "Launch experiments to optimize strategies, tune hyperparameters, compare models, "
-        "and engineer features. Each experiment proposes → gets approved → runs trials → reports results."
+        "**Goal:** Find trading strategies, ML models, and features that reliably predict "
+        "stock price movements — and statistically prove they're not just fitting to noise."
+    )
+    st.caption(
+        "Experiments systematically search for improvements across the entire ML pipeline: "
+        "better features, better model settings, better prediction targets, better trading parameters. "
+        "Statistical testing (FDR) filters out false discoveries so only genuine improvements survive."
     )
 
     tab1, tab2, tab3, tab4 = st.tabs([
