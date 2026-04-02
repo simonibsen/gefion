@@ -8,6 +8,8 @@ import json
 import os
 from gefion.observability import create_span, set_attributes
 
+AGENT_DECIDES = "Agent decides"
+
 
 def get_page_context():
     """Return compact context dict for the Experiments page."""
@@ -998,7 +1000,7 @@ def _render_cycle_launcher(themes, _is_ready, all_principles, available_prefixes
                    f"Experiment types: {', '.join(sorted(selected_exp_types)) or 'none'}.")
 
     # ML settings — each defaults to "Agent decides" unless user overrides
-    AGENT_DECIDES = "Agent decides"
+    # AGENT_DECIDES defined at module level
 
     with st.expander("ML Settings — override or let the agent decide"):
         st.caption("Each setting defaults to agent-controlled. Override any to constrain the search.")
