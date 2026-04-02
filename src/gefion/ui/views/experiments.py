@@ -973,10 +973,12 @@ def render_discovery_section():
     with st.expander("ML Settings"):
         col_g1, col_g2 = st.columns(2)
         with col_g1:
-            algorithm = st.selectbox(
-                "Algorithm", ["lightgbm", "xgboost", "quantile_regression"],
-                help="ML algorithm for ML experiment types.",
-                key="disc_algorithm",
+            allowed_algorithms = st.multiselect(
+                "Allowed Algorithms",
+                ["lightgbm", "xgboost", "quantile_regression"],
+                default=["lightgbm", "xgboost", "quantile_regression"],
+                help="Which ML algorithms the agent can use. Multiple = agent can compare them.",
+                key="disc_algorithms",
             )
             horizon_days = st.selectbox(
                 "Prediction Horizon", [7, 30],
@@ -1012,7 +1014,8 @@ def render_discovery_section():
             "auto_approve": True,
             "dataset_uri": str(dataset_uri) if dataset_uri else None,
             "horizon_days": horizon_days,
-            "algorithm": algorithm,
+            "allowed_algorithms": allowed_algorithms,
+            "algorithm": allowed_algorithms[0] if allowed_algorithms else "lightgbm",
             "max_trials_per_experiment": max_trials,
             "search_method": search_method,
             "max_parallel": max_parallel,

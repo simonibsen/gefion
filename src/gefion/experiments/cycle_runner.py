@@ -89,6 +89,8 @@ class CycleRunner:
             algorithm = config.get("algorithm", "lightgbm")
             search_bounds = config.get("search_bounds", {})
 
+            allowed_algorithms = config.get("allowed_algorithms", ["lightgbm", "xgboost", "quantile_regression"])
+
             set_attributes(span,
                            max_experiments=max_experiments,
                            allowed_types=",".join(allowed_types),
@@ -112,6 +114,10 @@ class CycleRunner:
                 search_space = dict(DEFAULT_SEARCH_SPACES.get(exp_type, {}))
                 if exp_type in search_bounds:
                     search_space.update(search_bounds[exp_type])
+
+                # For model_comparison, use allowed_algorithms
+                if exp_type == "model_comparison" and allowed_algorithms:
+                    search_space["model_type"] = allowed_algorithms
 
                 exp_config = {
                     "experiment_type": exp_type,
