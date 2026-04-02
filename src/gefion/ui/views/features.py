@@ -30,20 +30,27 @@ def get_page_context():
                         "SELECT name, function_name, active FROM feature_definitions "
                         "ORDER BY active DESC, name LIMIT 30"
                     )
-                    definitions = [
-                        f"{r[0]} (fn: {r[1]}, {'active' if r[2] else 'inactive'})"
-                        for r in cur.fetchall()
-                    ]
+                    definitions = []
+                    for r in cur.fetchall():
+                        name, fn, is_active = r[0], r[1], r[2]
+                        if name.startswith("exp_"):
+                            label = "experimental" if not is_active else "promoted"
+                            definitions.append(f"{name} (fn: {fn}, {label})")
+                        else:
+                            definitions.append(f"{name} (fn: {fn}, {'active' if is_active else 'inactive'})")
 
                     # Feature functions
                     cur.execute(
-                        "SELECT name, version, enabled FROM feature_functions "
+                        "SELECT name, version, enabled, status FROM feature_functions "
                         "ORDER BY enabled DESC, name"
                     )
-                    functions = [
-                        f"{r[0]} v{r[1]} ({'enabled' if r[2] else 'disabled'})"
-                        for r in cur.fetchall()
-                    ]
+                    functions = []
+                    for r in cur.fetchall():
+                        name, ver, enabled, status = r[0], r[1], r[2], r[3] if len(r) > 3 else "active"
+                        if status == "experimental":
+                            functions.append(f"{name} v{ver} (experimental)")
+                        else:
+                            functions.append(f"{name} v{ver} ({'enabled' if enabled else 'disabled'})")
 
                     cur.execute("SELECT COUNT(*) FROM feature_definitions WHERE active = true")
                     active = cur.fetchone()[0]

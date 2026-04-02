@@ -652,7 +652,13 @@ class CycleRunner:
 
                     if cur.rowcount > 0:
                         promoted += 1
-                        logger.info(f"Promoted feature function exp_{fn_name} to active (experiment #{exp_id})")
+                        # Also activate the feature definition
+                        cur.execute("""
+                            UPDATE feature_definitions
+                            SET active = TRUE
+                            WHERE name = %s AND active = FALSE
+                        """, (f"exp_{fn_name}",))
+                        logger.info(f"Promoted feature function + definition exp_{fn_name} to active (experiment #{exp_id})")
 
                     # Also mark the experiment as promoted
                     cur.execute(
@@ -689,7 +695,31 @@ class CycleRunner:
             with self._get_conn() as conn:
                 conn.autocommit = True
                 upsert_feature_function(conn, payload)
-                logger.info(f"Stored experimental function: exp_{fn_name} (cycle {cycle_id})")
+
+                # Also create a feature_definition so the feature is discoverable
+                # and can be computed by the dispatcher
+                feat_def_name = f"exp_{fn_name}"
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO feature_definitions (name, function_name, params,
+                            source_table, source_column, active, version)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (name) DO UPDATE SET
+                            function_name = EXCLUDED.function_name,
+                            params = EXCLUDED.params,
+                            active = EXCLUDED.active,
+                            version = EXCLUDED.version
+                    """, (
+                        feat_def_name,
+                        feat_def_name,  # function_name matches the feature_functions.name
+                        '{"window": 20}',  # default params
+                        "stock_ohlcv",
+                        "close",
+                        False,  # inactive until promoted
+                        f"cycle-{cycle_id}",
+                    ))
+
+                logger.info(f"Stored experimental function + definition: {feat_def_name} (cycle {cycle_id})")
         except Exception as e:
             logger.warning(f"Failed to store experimental function exp_{fn_name}: {e}")
 
