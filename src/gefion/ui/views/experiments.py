@@ -704,15 +704,73 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
         st.error(f"Failed: {result.stderr}")
 
 
+def _get_theme_map():
+    """Map source books to research themes."""
+    return {
+        "The Econometrics of Financial Markets": "Statistical Methods",
+        "Time Series Analysis": "Statistical Methods",
+        "Advances in Financial Machine Learning": "ML for Finance",
+        "Machine Learning for Algorithmic Trading": "ML for Finance",
+        "Active Portfolio Management": "Portfolio Construction",
+        "Asset Management: A Systematic Approach to Factor Investing": "Factor Investing",
+        "Empirical Asset Pricing: The Cross Section of Stock Returns": "Factor Investing",
+        "Trading and Exchanges": "Market Microstructure",
+        "Algorithmic Trading": "Systematic Trading",
+        "Quantitative Trading": "Systematic Trading",
+        "Risk and Asset Allocation": "Risk Management",
+        "Antifragile": "Tail Risk & Robustness",
+        "The Black Swan": "Tail Risk & Robustness",
+        "Fooled by Randomness": "Tail Risk & Robustness",
+    }
+
+
+def _get_data_action(requirement: str) -> str:
+    """Map a data requirement to an actionable command."""
+    actions = {
+        "market_cap": "gefion fundamentals-update",
+        "book_value": "gefion fundamentals-update",
+        "fundamentals": "gefion fundamentals-update",
+        "beta": "gefion cross-sectional-compute --feature beta",
+        "sector": "gefion fundamentals-update",
+        "ml_predictions": "gefion ml predict (train a model first)",
+        "strategy_configs": "Create configs in Backtesting → Configs tab",
+        "vix": "VIX data not yet supported — external data source needed",
+    }
+    req_lower = requirement.lower()
+    for key, action in actions.items():
+        if key in req_lower:
+            return action
+    if req_lower.startswith("ohlcv") or req_lower in ("close", "volume", "open", "high", "low"):
+        return "Already available (OHLCV data)"
+    if req_lower.startswith("features"):
+        return "gefion data-update (computes features automatically)"
+    return "Check data requirements"
+
+
+def _group_principles_by_theme(principles):
+    """Group principles by research theme, with ready/blocked counts."""
+    theme_map = _get_theme_map()
+    themes = {}
+    for p in principles:
+        source = p.get("source", {})
+        book = source.get("title", "Other")
+        theme = theme_map.get(book, "Other")
+        if theme not in themes:
+            themes[theme] = {"principles": [], "sources": set()}
+        themes[theme]["principles"].append(p)
+        themes[theme]["sources"].add(book)
+    return themes
+
+
 def render_discovery_section():
-    """Render data discovery — what data do we have, what can we experiment on?"""
-    st.subheader("What Can We Experiment On?")
+    """Render theme-based discovery — browse research themes, explore principles."""
+    st.subheader("Discovery")
     st.markdown(
-        "Discovery scans your database and principles catalog to answer: "
-        "what data is available, what experiments are possible, and what's blocked by missing data."
+        "Browse research themes from quantitative finance literature. "
+        "Each theme contains testable principles that can become experiments."
     )
 
-    # Quick data summary from DB
+    # Data summary
     try:
         from gefion.ui.components.database import get_connection
         with get_connection() as conn:
@@ -743,77 +801,98 @@ def render_discovery_section():
 
     st.markdown("---")
 
-    # Discovery scan
-    st.markdown("### Scan for Experiment Opportunities")
-    st.caption(
-        "Scans your principles catalog (62 principles from quantitative finance literature) "
-        "against available data to find testable hypotheses. Principles that require data you "
-        "don't have are marked as 'blocked'."
-    )
+    # Theme explorer
+    st.markdown("### Research Themes")
 
-    if st.button("Run Discovery Scan", type="primary", width="stretch"):
-        env = os.environ.copy()
-        cmd = [sys.executable, "-m", "gefion.cli", "experiment", "discover", "--json"]
+    try:
+        from gefion.experiments.principles import load_principles
+        all_principles = load_principles()
+    except Exception:
+        all_principles = []
 
-        with st.status("Scanning data and principles...", expanded=True) as status:
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
-                if result.returncode == 0:
-                    status.update(label="Scan complete", state="complete")
-                    try:
-                        data = json.loads(result.stdout)
+    if not all_principles:
+        st.info("No principles catalog found. Ensure `data/principles/` directory exists.")
+        return
 
-                        # Data sources
-                        sources = data.get("data_sources", data.get("sources", []))
-                        if sources:
-                            st.markdown("#### Available Data")
-                            import pandas as pd
-                            if isinstance(sources, list):
-                                df = pd.DataFrame(sources)
-                                st.dataframe(df, use_container_width=True)
-                            elif isinstance(sources, dict):
-                                for name, info in sources.items():
-                                    with st.expander(name):
-                                        st.json(info)
+    themes = _group_principles_by_theme(all_principles)
 
-                        # Hypotheses
-                        hypotheses = data.get("hypotheses", [])
-                        if hypotheses:
-                            ready = [h for h in hypotheses if h.get("feasibility") == "ready"]
-                            blocked = [h for h in hypotheses if h.get("feasibility") == "blocked"]
+    # Check which data requirements are satisfiable
+    available_prefixes = {"ohlcv", "close", "volume", "open", "high", "low", "features"}
 
-                            if ready:
-                                st.markdown(f"#### Ready to Test ({len(ready)} hypotheses)")
-                                st.caption("These have all required data. You can create experiments for them from the Propose tab.")
-                                for h in ready:
-                                    principle = h.get("principle_id", "unnamed")
-                                    exp_type = h.get("experiment_type", "")
-                                    label = principle.replace("-", " ").title()
-                                    with st.expander(f"{label} ({exp_type})"):
-                                        st.markdown(f"**Experiment type:** {exp_type}")
-                                        st.markdown(f"**Principle:** `{principle}`")
-                                        if h.get("description"):
-                                            st.markdown(h["description"])
+    def _is_ready(p):
+        for req in p.get("data_requirements", []):
+            req_base = req.split(".")[0].lower()
+            if req_base not in available_prefixes:
+                return False
+        return True
 
-                            if blocked:
-                                with st.expander(f"Blocked ({len(blocked)} — missing data or features)"):
-                                    for h in blocked:
-                                        principle = h.get("principle_id", "?")
-                                        desc = h.get("description", "")
-                                        short = desc[:120] + "..." if len(desc) > 120 else desc
-                                        st.markdown(f"- **{principle}** — {short}")
+    # Theme cards
+    for theme_name in sorted(themes.keys(), key=lambda t: -len(themes[t]["principles"])):
+        theme = themes[theme_name]
+        principles = theme["principles"]
+        ready_count = sum(1 for p in principles if _is_ready(p))
+        blocked_count = len(principles) - ready_count
+        sources = ", ".join(sorted(theme["sources"]))
 
-                        if not sources and not hypotheses:
-                            st.info("No results. Make sure you have price data and computed features loaded.")
+        status_label = f"{ready_count} ready" if ready_count > 0 else "all blocked"
+        if blocked_count > 0 and ready_count > 0:
+            status_label += f", {blocked_count} need data"
 
-                    except json.JSONDecodeError:
-                        st.code(result.stdout)
-                else:
-                    status.update(label="Failed", state="error")
-                    st.error(f"Discovery failed: {result.stderr}")
-            except Exception as e:
-                status.update(label="Error", state="error")
-                st.error(f"Error: {e}")
+        with st.expander(f"**{theme_name}** — {len(principles)} principles ({status_label})"):
+            st.caption(f"Sources: {sources}")
+
+            # Ready principles
+            ready_principles = [p for p in principles if _is_ready(p)]
+            if ready_principles:
+                st.markdown(f"**Ready to test ({len(ready_principles)}):**")
+                for p in ready_principles:
+                    claim = p.get("claim", "")
+                    short_claim = claim[:150] + "..." if len(claim) > 150 else claim
+                    exp_types = ", ".join(p.get("experiment_types", []))
+                    name = p["id"].replace("-", " ").title()
+                    st.markdown(f"- **{name}** — {short_claim}")
+                    st.caption(f"  Experiment types: {exp_types}")
+
+            # Blocked principles
+            blocked_principles = [p for p in principles if not _is_ready(p)]
+            if blocked_principles:
+                st.markdown(f"**Need more data ({len(blocked_principles)}):**")
+                for p in blocked_principles:
+                    name = p["id"].replace("-", " ").title()
+                    missing = [
+                        req for req in p.get("data_requirements", [])
+                        if req.split(".")[0].lower() not in available_prefixes
+                    ]
+                    actions = set(_get_data_action(r) for r in missing)
+                    actions.discard("Already available (OHLCV data)")
+                    st.markdown(f"- **{name}**")
+                    if missing:
+                        st.caption(f"  Needs: {', '.join(missing)}")
+                    if actions:
+                        for action in actions:
+                            st.caption(f"  Fix: `{action}`")
+
+    # Data gaps summary
+    st.markdown("---")
+    st.markdown("### Data Gaps")
+    st.caption("What data would unlock the most new experiments?")
+
+    all_missing = {}
+    for p in all_principles:
+        if not _is_ready(p):
+            for req in p.get("data_requirements", []):
+                req_base = req.split(".")[0].lower()
+                if req_base not in available_prefixes:
+                    if req not in all_missing:
+                        all_missing[req] = {"count": 0, "action": _get_data_action(req)}
+                    all_missing[req]["count"] += 1
+
+    if all_missing:
+        sorted_gaps = sorted(all_missing.items(), key=lambda x: -x[1]["count"])
+        for req, info in sorted_gaps[:8]:
+            st.markdown(f"- **{req}** — would unlock {info['count']} principle(s). Fix: `{info['action']}`")
+    else:
+        st.success("All principles have the data they need!")
 
     st.markdown("---")
 
