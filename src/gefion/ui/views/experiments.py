@@ -1147,33 +1147,70 @@ def render_discovery_section():
                             (Json({"cycle_config": cycle_config}), new_cycle_id),
                         )
 
-                st.write("Running cycle (discover → propose → run → evaluate)...")
-
-                # Step 2: Run the cycle
+                # Step 2: Run the cycle with streaming progress
                 run_cmd = [
                     sys.executable, "-m", "gefion.cli", "experiment", "cycle-run",
                     str(new_cycle_id), "--json",
                 ]
-                run_result = subprocess.run(
-                    run_cmd, capture_output=True, text=True, env=env,
-                    timeout=cycle_config.get("max_trials_per_experiment", 10) * max_experiments * 120,
+
+                phase_icons = {
+                    "loading": ":material/settings:",
+                    "discovery": ":material/search:",
+                    "proposing": ":material/edit_note:",
+                    "proposed": ":material/arrow_forward:",
+                    "approving": ":material/check_circle:",
+                    "running": ":material/play_arrow:",
+                    "experiment_done": ":material/trending_up:",
+                    "experiment_failed": ":material/error:",
+                    "evaluating": ":material/analytics:",
+                    "complete": ":material/celebration:",
+                }
+
+                progress_area = st.empty()
+                progress_lines = []
+
+                process = subprocess.Popen(
+                    run_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, bufsize=1, env=env,
                 )
 
-                if run_result.returncode == 0:
-                    status.update(label="Cycle complete!", state="complete")
+                final_result = None
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
                     try:
-                        run_data = json.loads(run_result.stdout)
+                        data = json.loads(line)
+                        if isinstance(data, dict):
+                            phase = data.get("phase", "")
+                            msg = data.get("message", data.get("msg", ""))
+                            if phase and msg:
+                                icon = phase_icons.get(phase, ":material/arrow_forward:")
+                                indent = "    " if phase.startswith("experiment") or phase == "proposed" else ""
+                                progress_lines.append(f"{indent}{icon} {msg}")
+                                progress_area.markdown("\n\n".join(progress_lines[-10:]))
+                            if "fdr_survivors" in data:
+                                final_result = data
+                    except json.JSONDecodeError:
+                        pass
+
+                returncode = process.wait()
+
+                if returncode == 0:
+                    status.update(label="Cycle complete!", state="complete")
+                    if final_result:
                         st.success(
                             f"Cycle #{new_cycle_id} complete. "
-                            f"Proposed: {run_data.get('proposed', 0)}, "
-                            f"Completed: {run_data.get('completed', 0)}, "
-                            f"FDR Survivors: {run_data.get('fdr_survivors', 0)}"
+                            f"Proposed: {final_result.get('proposed', 0)}, "
+                            f"Completed: {final_result.get('completed', 0)}, "
+                            f"FDR Survivors: {final_result.get('fdr_survivors', 0)}"
                         )
-                    except json.JSONDecodeError:
+                    else:
                         st.success("Cycle complete! Check the Cycles tab for results.")
                 else:
+                    stderr = process.stderr.read()
                     status.update(label="Cycle failed", state="error")
-                    st.error(f"Cycle run failed: {run_result.stderr}")
+                    st.error(f"Cycle run failed: {stderr}")
 
             except subprocess.TimeoutExpired:
                 status.update(label="Timeout", state="error")
