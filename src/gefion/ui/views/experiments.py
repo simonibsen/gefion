@@ -1059,7 +1059,7 @@ def _render_cycle_launcher(themes, _is_ready, all_principles, available_prefixes
         with col_g2:
             # Dataset
             from pathlib import Path as _Path
-            dataset_dirs = sorted(_Path("datasets").glob("*/manifest.json")) if _Path("datasets").exists() else []
+            dataset_dirs = sorted(_Path("datasets").glob("*/manifest.json"), key=lambda p: p.stat().st_mtime, reverse=True) if _Path("datasets").exists() else []
             dataset_options = [AGENT_DECIDES] + [str(d) for d in dataset_dirs]
             dataset_choice = st.selectbox("Dataset", dataset_options, key="disc_dataset",
                                           help="Agent can auto-detect the latest dataset, or lock to a specific one.")

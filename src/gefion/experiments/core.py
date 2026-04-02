@@ -442,8 +442,10 @@ class ExperimentRunner:
             if experiment["experiment_type"] in ml_types and not config.get("dataset_uri"):
                 # Auto-detect latest dataset manifest
                 from pathlib import Path
-                manifests = sorted(Path("datasets").glob("*/manifest.json")) if Path("datasets").exists() else []
+                manifests = list(Path("datasets").glob("*/manifest.json")) if Path("datasets").exists() else []
                 if manifests:
+                    # Pick most recently modified dataset
+                    manifests.sort(key=lambda p: p.stat().st_mtime)
                     config["dataset_uri"] = str(manifests[-1])
                     logger.info(f"Auto-detected dataset: {config['dataset_uri']}")
                 else:
