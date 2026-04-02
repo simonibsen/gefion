@@ -1001,6 +1001,94 @@ class TestFeatureEngineeringEvaluate:
         src = inspect.getsource(FeatureEngineeringExperiment.evaluate)
         assert "create_span" in src
 
+    def test_evaluate_supports_custom_function_body(self):
+        """evaluate() must accept function_body in feature_config and execute it."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.feature_engineering import FeatureEngineeringExperiment
+
+        custom_body = """
+import numpy as np
+import pandas as pd
+
+def compute(df, window=10):
+    return df['close'].rolling(window).mean() / df['close'] - 1
+"""
+        exp = FeatureEngineeringExperiment(
+            name="test-custom-fn",
+            principle_id="p1",
+            null_hypothesis="custom feature doesn't help",
+            feature_config={
+                "function_name": "custom_ratio",
+                "function_body": custom_body,
+            },
+            source_column="close",
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+        )
+
+        X = pd.DataFrame({"f0": np.random.randn(100), "f1": np.random.randn(100)})
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        prices = pd.DataFrame({"close": np.random.randn(100).cumsum() + 100})
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.feature_engineering._load_prices", return_value=prices), \
+             patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.04}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            result = exp.evaluate({"window": 10})
+
+        assert isinstance(result, dict)
+        assert "quantile_loss" in result
+
+        # Verify the custom feature was added (not all NaN)
+        for call in mock_train.call_args_list:
+            X_train = call[0][0]
+            assert "exp_custom_ratio" in X_train.columns
+            assert X_train["exp_custom_ratio"].notna().any()
+
+    def test_evaluate_falls_back_to_builtin(self):
+        """evaluate() still works with builtin _FEATURE_FUNCTIONS when no function_body."""
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+        import pandas as pd
+        from gefion.experiments.types.feature_engineering import FeatureEngineeringExperiment
+
+        exp = FeatureEngineeringExperiment(
+            name="test-builtin",
+            principle_id="p1",
+            null_hypothesis="test",
+            feature_config={"function_name": "momentum"},  # no function_body
+            source_column="close",
+            dataset_uri="datasets/test/manifest.json",
+            horizon_days=7,
+            cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
+        )
+
+        X = pd.DataFrame({"f0": np.random.randn(100)})
+        y = pd.Series(np.random.randn(100), name="forward_return")
+        prices = pd.DataFrame({"close": np.random.randn(100).cumsum() + 100})
+        preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
+
+        with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.feature_engineering._load_prices", return_value=prices), \
+             patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
+             patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
+             patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",
+                   return_value={"quantile_loss": 0.05}):
+            mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
+            result = exp.evaluate({"window": 10})
+
+        assert "quantile_loss" in result
+        for call in mock_train.call_args_list:
+            X_train = call[0][0]
+            assert "exp_momentum" in X_train.columns
+
 
 class TestFeatureSelectionEvaluate:
     """Tests for FeatureSelectionExperiment.evaluate()."""

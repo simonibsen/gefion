@@ -34,6 +34,71 @@ _FEATURE_FUNCTIONS = {
 }
 
 
+def _exec_function_body(function_body: str, function_name: str) -> Optional[callable]:
+    """Execute a function body string in the security sandbox.
+
+    Uses the same safe_import and restricted builtins as the feature
+    dispatcher, ensuring agent-generated code can't access the filesystem,
+    network, or dangerous builtins.
+
+    Args:
+        function_body: Python source code containing a compute() function.
+        function_name: Name for logging/error messages.
+
+    Returns:
+        The compute() callable, or None if execution failed.
+    """
+    # Same whitelist as gefion.features.dispatcher
+    SAFE_MODULES = {
+        'numpy', 'np', 'pandas', 'pd', 'datetime', 'math', 'statistics',
+        'talib', 'scipy', 'sklearn', 'json', 're', 'itertools', 'functools',
+        'operator', 'collections', 'typing',
+    }
+
+    # Build safe execution environment (mirrors dispatcher.py sandbox)
+    real_import = __builtins__['__import__'] if isinstance(__builtins__, dict) else __builtins__.__import__
+
+    def safe_import(name, *args, **kwargs):
+        if name.split('.')[0] not in SAFE_MODULES:
+            raise ImportError(f"Import of '{name}' is not allowed for security reasons")
+        return real_import(name, *args, **kwargs)
+
+    safe_builtins = {
+        '__import__': safe_import,
+        'print': print, 'len': len, 'range': range, 'enumerate': enumerate,
+        'zip': zip, 'map': map, 'filter': filter, 'sorted': sorted, 'reversed': reversed,
+        'sum': sum, 'min': min, 'max': max, 'abs': abs, 'round': round,
+        'int': int, 'float': float, 'str': str, 'bool': bool, 'list': list,
+        'dict': dict, 'tuple': tuple, 'set': set, 'frozenset': frozenset,
+        'any': any, 'all': all, 'isinstance': isinstance, 'type': type,
+        'None': None, 'True': True, 'False': False,
+        'Exception': Exception, 'ValueError': ValueError, 'TypeError': TypeError,
+        'KeyError': KeyError, 'IndexError': IndexError, 'AttributeError': AttributeError,
+        'ZeroDivisionError': ZeroDivisionError,
+    }
+
+    safe_globals = {'__builtins__': safe_builtins}
+
+    # Pre-import safe modules
+    try:
+        safe_globals['np'] = safe_globals['numpy'] = np
+        safe_globals['pd'] = safe_globals['pandas'] = pd
+    except Exception:
+        pass
+
+    local_env = {}
+    try:
+        exec(function_body, safe_globals, local_env)
+        fn = local_env.get("compute")
+        if callable(fn):
+            return fn
+        logger.warning(f"Function body for '{function_name}' did not define a callable 'compute'")
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to execute function body for '{function_name}': {e}")
+        return None
+
+
 def _load_prices(dataset_uri: Optional[str]) -> Optional[pd.DataFrame]:
     """Load price data from the dataset directory.
 
@@ -103,25 +168,43 @@ class FeatureEngineeringExperiment:
                 object.__setattr__(self, "_cached_data", (X, y, prices))
             X_base, y, prices = self._cached_data
 
-            # Compute experimental feature from source column
+            # Compute experimental feature
             X = X_base.copy()
-            feat_fn = _FEATURE_FUNCTIONS.get(function_name)
             feature_col = f"exp_{function_name}"
+            function_body = self.feature_config.get("function_body")
 
-            # Source column comes from prices (close, volume, etc.), not features
-            if feat_fn is not None and prices is not None and self.source_column in prices.columns:
-                source_series = prices[self.source_column].iloc[:len(X)].reset_index(drop=True)
-                X[feature_col] = feat_fn(source_series, **params)
-            elif feat_fn is not None and self.source_column in X.columns:
-                # Fallback: source column already in features
-                X[feature_col] = feat_fn(X[self.source_column], **params)
+            if function_body:
+                # Custom function body — execute in security sandbox
+                feat_fn = _exec_function_body(function_body, function_name)
+                if feat_fn is not None and prices is not None:
+                    # Build a DataFrame with price data for the function
+                    price_df = prices.iloc[:len(X)].reset_index(drop=True)
+                    try:
+                        result = feat_fn(price_df, **params)
+                        X[feature_col] = result.values if hasattr(result, 'values') else result
+                    except Exception as e:
+                        logger.warning(f"Custom function '{function_name}' failed: {e}")
+                        X[feature_col] = np.nan
+                else:
+                    logger.warning(f"Custom function '{function_name}' could not be loaded or no price data")
+                    X[feature_col] = np.nan
             else:
-                logger.warning(
-                    f"Source column '{self.source_column}' not found in prices or features. "
-                    f"Available price columns: {list(prices.columns) if prices is not None else 'none'}. "
-                    f"Feature will be NaN."
-                )
-                X[feature_col] = np.nan
+                # Builtin function from _FEATURE_FUNCTIONS
+                feat_fn = _FEATURE_FUNCTIONS.get(function_name)
+
+                # Source column comes from prices (close, volume, etc.), not features
+                if feat_fn is not None and prices is not None and self.source_column in prices.columns:
+                    source_series = prices[self.source_column].iloc[:len(X)].reset_index(drop=True)
+                    X[feature_col] = feat_fn(source_series, **params)
+                elif feat_fn is not None and self.source_column in X.columns:
+                    X[feature_col] = feat_fn(X[self.source_column], **params)
+                else:
+                    logger.warning(
+                        f"Source column '{self.source_column}' not found in prices or features. "
+                        f"Available price columns: {list(prices.columns) if prices is not None else 'none'}. "
+                        f"Feature will be NaN."
+                    )
+                    X[feature_col] = np.nan
 
             cv = PurgedKFold(
                 n_splits=cv_cfg.get("n_splits", 5),
