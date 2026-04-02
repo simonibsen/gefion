@@ -182,7 +182,7 @@ def render_list_section():
 
 def render_propose_section():
     """Render experiment proposal form supporting all experiment types."""
-    st.subheader("Propose New Experiment")
+    st.subheader("Run a New Experiment")
     st.info("""
     **Experiment Types:**
     - **Strategy Params** — optimize trading strategy parameters via backtesting
@@ -262,10 +262,8 @@ def render_propose_section():
     elif experiment_type == "label_engineering":
         _render_label_engineering_config(search_space, extra_config)
 
-    with st.expander("View Search Space JSON"):
-        st.json(search_space)
 
-    if st.button("Propose Experiment", type="primary", width="stretch"):
+    if st.button("Create & Run Experiment", type="primary", width="stretch"):
         if not name:
             st.error("Please enter an experiment name")
             return
@@ -914,7 +912,7 @@ def render_discovery_section():
     st.markdown("### Manual Experiment")
     st.caption("Propose a single experiment with specific parameters. For broad exploration, use the Autonomous Cycle above.")
 
-    with st.expander("Propose a manual experiment"):
+    with st.expander("Set up a manual experiment"):
         render_propose_section()
 
 
