@@ -197,6 +197,28 @@ class TestExperimentCycleStatusTool:
         assert '"--json"' in handler_block
 
 
+class TestExperimentCycleRunTool:
+    """Test experiment_cycle_run tool definition and handler."""
+
+    def test_tool_definition_exists(self):
+        src = _read_server_source()
+        assert 'name="experiment_cycle_run"' in src
+
+    def test_has_cycle_id_param(self):
+        src = _read_server_source()
+        idx = src.index('name="experiment_cycle_run"')
+        block = src[idx:idx + 800]
+        assert '"cycle_id"' in block
+
+    def test_handler_dispatch(self):
+        src = _read_server_source()
+        assert 'name == "experiment_cycle_run"' in src
+
+    def test_handler_function_exists(self):
+        src = _read_server_source()
+        assert "async def _experiment_cycle_run(" in src
+
+
 class TestPrinciplesListTool:
     """Test principles_list tool definition and handler."""
 

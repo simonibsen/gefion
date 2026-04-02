@@ -489,38 +489,106 @@ def render_experiments_docs():
     st.subheader("AI Experimentation Framework")
 
     st.info("""
-    The experiments module enables **autonomous experimentation** with trading
-    strategy parameters, ML hyperparameters, and feature selection. AI proposes
-    experiments, users approve them.
+    The Experiments page automates what you do manually across Features, ML Pipeline,
+    and Backtesting. An autonomous agent explores parameter combinations, feature sets,
+    model architectures, and trading strategies — then uses statistical testing to keep
+    only genuine improvements.
     """)
 
+    # How Experiments relates to other pages
+    with st.expander("**How Experiments Relates to Other Pages**", expanded=True):
+        st.markdown("""
+        | Manual Page | What Experiments Automates |
+        |---|---|
+        | **Features** | Feature engineering creates and evaluates new features. Feature selection finds optimal subsets. |
+        | **ML Pipeline** | Hyperparameter tuning optimizes model settings. Model comparison tries different algorithms. Label engineering tests different prediction targets. |
+        | **Backtesting** | Strategy param optimization finds the best trading strategy parameters. |
+
+        **The difference:**
+        - **Manual pages** — you make one choice at a time, run it, inspect results, decide what to try next
+        - **Experiments** — the agent explores systematically, tries many combinations, and uses FDR statistical testing to filter out false discoveries
+
+        **When to use each:**
+        - Use manual pages for **initial setup** (loading data, training a first model), **inspecting results** (charts, backtests), and **understanding** what the agent did
+        - Use Experiments for **exploration** (finding better parameters, features, models) and **automation** (autonomous cycles)
+        """)
+
+    # Experiment types explained
+    with st.expander("**Experiment Types**"):
+        st.markdown("""
+        | Type | What It Does | Objective | Example |
+        |---|---|---|---|
+        | **Strategy Params** | Optimizes trading strategy parameters via backtesting | Sharpe ratio | Find best momentum lookback period |
+        | **Hyperparameter** | Tunes ML model settings with cross-validation | Quantile loss | Optimize learning rate, tree depth |
+        | **Model Comparison** | Compares algorithms on identical data splits | Quantile loss | LightGBM vs XGBoost vs Linear |
+        | **Feature Engineering** | Creates and tests new computed features | Quantile loss | Rolling z-score with different windows |
+        | **Feature Selection** | Finds the best subset of features | Quantile loss | RSI + EMA vs Bollinger + MACD |
+        | **Label Engineering** | Tests different prediction targets | Quantile loss | Raw returns vs log returns vs winsorized |
+        | **Pipeline** | Chains feature + label + model stages | Quantile loss | End-to-end pipeline optimization |
+        """)
+
+    # Understanding results
+    with st.expander("**Interpreting Results**"):
+        st.markdown("""
+        ### Key Metrics
+
+        **For ML experiments (quantile models):**
+        - **Quantile Loss** (lower is better) — how accurately the model predicts price ranges. Below 0.03 is good.
+        - **Q50 Calibration** (target: 50%) — how often the actual return is below the median prediction. Closer to 50% = better calibrated.
+        - **Q10/Q90 Calibration** (target: 10%/90%) — tail calibration. If Q10 calibration is 12% instead of 10%, the model slightly underestimates downside risk.
+        - **Avg IQR** — average width of prediction intervals (Q90 - Q10). Narrower = more confident, but may sacrifice calibration.
+
+        **For strategy experiments (backtesting):**
+        - **Sharpe Ratio** (higher is better) — risk-adjusted return. Above 1.0 is decent, above 2.0 is strong.
+        - **Total Return** — raw gain/loss percentage.
+        - **Max Drawdown** (lower is better) — worst peak-to-trough loss. Above -20% is concerning.
+        - **Win Rate** — percentage of profitable trades. Context-dependent (trend-following can be profitable at 40%).
+
+        ### What "Best Score" Means
+        The best score is the best value of the objective metric across all trials. For `quantile_loss` (minimize),
+        lower is better. For `sharpe_ratio` (maximize), higher is better.
+
+        ### FDR Survivors
+        In an autonomous cycle, experiments compete against each other. FDR (False Discovery Rate) correction
+        filters out experiments whose results could be due to chance. If 10 experiments run and 3 survive FDR,
+        those 3 are statistically likely to be genuine improvements, not noise.
+        """)
+
+    # Autonomous cycles
+    with st.expander("**Autonomous Cycles**"):
+        st.markdown("""
+        ### How an Autonomous Cycle Works
+
+        1. **Discovery** — scans your principles catalog (62 principles from quantitative finance literature)
+           against available data to find testable hypotheses
+        2. **Theme Filtering** — only hypotheses from your selected research themes are used
+        3. **Proposal** — creates experiments with appropriate search spaces and guardrails
+        4. **Auto-Approval** — experiments are approved automatically (the guardrails are the safety layer)
+        5. **Parallel Execution** — experiments run concurrently with resource checks before each
+        6. **FDR Evaluation** — results are statistically tested; only genuine discoveries survive
+
+        ### Guardrails
+        You control what the agent explores:
+        - **Research Themes** — which areas of quantitative finance to explore
+        - **Allowed Algorithms** — which ML algorithms the agent can use
+        - **Prediction Horizon** — how far ahead to predict
+        - **Quantiles, CV Folds, Embargo** — each can be agent-decided or locked
+        - **Max Experiments, Max Trials** — resource bounds
+        - **FDR Rate** — statistical strictness
+
+        ### Config Files
+        Save and load cycle configs as JSON. This lets you create reusable experiment profiles
+        (e.g., "conservative exploration", "wide-open search") and share them.
+        """)
+
+    # Spec doc if available
     content = load_doc(".specify/specs/experiments-framework.md")
-
-    if content.startswith("*Document not found"):
-        st.error(content)
-        return
-
-    sections = extract_sections(content)
-
-    # Key experiment sections
-    key_sections = [
-        "Overview",
-        "Core Concepts",
-        "CLI Commands",
-        "Search Space Format",
-        "Experiment Chaining",
-        "MCP Tools",
-        "Database Schema",
-        "Python API",
-        "Example Workflow",
-        "Best Practices",
-    ]
-
-    for section in key_sections:
-        if section in sections:
-            expanded = section == "Overview" or section == "CLI Commands"
-            with st.expander(f"**{section}**", expanded=expanded):
-                st.markdown(sections[section])
+    if not content.startswith("*Document not found"):
+        sections = extract_sections(content)
+        for section in ["CLI Commands", "Search Space Format", "Database Schema", "Python API"]:
+            if section in sections:
+                with st.expander(f"**{section}**"):
+                    st.markdown(sections[section])
 
     # Quick reference
     st.markdown("---")
@@ -530,14 +598,27 @@ def render_experiments_docs():
 
     with col1:
         st.markdown("""
-        **Propose Experiment**
+        **Autonomous Cycle (recommended)**
         ```bash
-        Gefion experiment propose \\
-          --name "momentum_opt" \\
-          --strategy momentum \\
-          --search-space '{"lookback_days": \\
-            {"type": "int", "low": 5, "high": 30}}' \\
-          --symbols AAPL,MSFT \\
+        # Create cycle from config
+        gefion experiment cycle-start \\
+          --config cycle_config.json
+
+        # Run it
+        gefion experiment cycle-run <cycle_id>
+        ```
+
+        **Manual Experiment**
+        ```bash
+        gefion experiment propose \\
+          --name "tune-lgbm" \\
+          --type hyperparameter \\
+          --model-type lightgbm \\
+          --dataset-uri datasets/baseline_v2/manifest.json \\
+          --search-space '{"learning_rate": \\
+            {"type":"float","low":0.01,"high":0.3,"log":true}}' \\
+          --objective quantile_loss \\
+          --objective-direction minimize \\
           --search-method bayesian
         ```
         """)
@@ -546,25 +627,28 @@ def render_experiments_docs():
         st.markdown("""
         **Approve & Run**
         ```bash
-        # List pending
-        Gefion experiment list --status proposed
+        gefion experiment approve --id 1
+        gefion experiment run --id 1
+        gefion experiment results --id 1 --trials
+        ```
 
-        # Approve
-        Gefion experiment approve --id 1
+        **Cycle Management**
+        ```bash
+        gefion experiment cycle-list
+        gefion experiment cycle-status <id>
+        ```
 
-        # Run
-        Gefion experiment run --id 1
-
-        # View results
-        Gefion experiment results --id 1
+        **Discovery**
+        ```bash
+        gefion experiment discover --json
         ```
         """)
 
     st.markdown("### Search Strategies")
     strategies = {
-        "grid": "Exhaustive - all parameter combinations",
-        "random": "Random sampling - quick exploration",
-        "bayesian": "Adaptive optimization (Optuna TPE) - efficient",
+        "bayesian": "Adaptive optimization (Optuna TPE) — most efficient, learns from results",
+        "random": "Random sampling — quick exploration, good for high-dimensional spaces",
+        "grid": "Exhaustive enumeration — tests all combinations, best for small spaces",
     }
     for name, desc in strategies.items():
         st.markdown(f"- **{name}**: {desc}")

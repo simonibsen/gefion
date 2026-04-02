@@ -1359,6 +1359,22 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="experiment_cycle_run",
+            description=(
+                "Run an autonomous experiment cycle. Discovers hypotheses from research themes, "
+                "proposes experiments based on cycle guardrails, auto-approves, runs all experiments "
+                "in parallel with resource checks, and applies FDR correction to filter false discoveries. "
+                "Use experiment_cycle_start first to create the cycle, then this to execute it."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cycle_id": {"type": "integer", "description": "Cycle ID to run (from experiment_cycle_start)"},
+                },
+                "required": ["cycle_id"],
+            },
+        ),
+        Tool(
             name="experiment_cycle_status",
             description=(
                 "Get status of an experiment cycle"
@@ -1687,6 +1703,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _experiment_discover(arguments)
         elif name == "experiment_cycle_start":
             result = await _experiment_cycle_start(arguments)
+        elif name == "experiment_cycle_run":
+            result = await _experiment_cycle_run(arguments)
         elif name == "experiment_cycle_status":
             result = await _experiment_cycle_status(arguments)
         elif name == "principles_list":
@@ -3909,6 +3927,16 @@ async def _experiment_cycle_start(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _start)
+
+
+async def _experiment_cycle_run(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Run an autonomous experiment cycle."""
+    async def _run():
+        cmd = ["experiment", "cycle-run", str(args["cycle_id"])]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _run)
 
 
 async def _experiment_cycle_status(args: Dict[str, Any]) -> Dict[str, Any]:
