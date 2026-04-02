@@ -9546,22 +9546,22 @@ def experiment_cycle_run(
                 from rich.console import Console
                 console = Console()
 
-                phase_icons = {
-                    "loading": ":gear:",
-                    "discovery": ":mag:",
-                    "proposing": ":pencil:",
-                    "proposed": "  :arrow_right:",
-                    "approving": ":white_check_mark:",
-                    "running": ":runner:",
-                    "experiment_done": "  :chart_with_upwards_trend:",
-                    "experiment_failed": "  :x:",
-                    "evaluating": ":bar_chart:",
-                    "complete": ":tada:",
+                phase_styles = {
+                    "loading": "[dim]",
+                    "discovery": "[cyan]",
+                    "proposing": "[blue]",
+                    "proposed": "[dim]  ",
+                    "approving": "[green]",
+                    "running": "[yellow]",
+                    "experiment_done": "[green]  ",
+                    "experiment_failed": "[red]  ",
+                    "evaluating": "[magenta]",
+                    "complete": "[bold green]",
                 }
 
                 def _on_progress(phase, message, detail=None):
-                    icon = phase_icons.get(phase, ":arrow_right:")
-                    console.print(f"  {icon} {message}")
+                    style = phase_styles.get(phase, "[dim]")
+                    console.print(f"  {style}{message}[/]")
 
                 console.print(f"\n[bold]Cycle #{cycle_id}[/bold]\n")
                 results = runner.run_cycle(cycle_id, on_progress=_on_progress)
