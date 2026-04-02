@@ -34,6 +34,27 @@ _FEATURE_FUNCTIONS = {
 }
 
 
+def _load_prices(dataset_uri: Optional[str]) -> Optional[pd.DataFrame]:
+    """Load price data from the dataset directory.
+
+    Returns DataFrame with close, volume, etc. or None if not found.
+    """
+    if not dataset_uri:
+        return None
+    from pathlib import Path
+    dataset_dir = Path(dataset_uri).parent
+    prices_parquet = dataset_dir / "prices.parquet"
+    prices_csv = dataset_dir / "prices.csv"
+    try:
+        if prices_parquet.exists():
+            return pd.read_parquet(prices_parquet)
+        elif prices_csv.exists():
+            return pd.read_csv(prices_csv)
+    except Exception as e:
+        logger.warning(f"Could not load prices: {e}")
+    return None
+
+
 @dataclass
 class FeatureEngineeringExperiment:
     """Experiment that creates and evaluates a new computed feature.
@@ -75,23 +96,32 @@ class FeatureEngineeringExperiment:
             function_name=function_name,
             horizon_days=self.horizon_days,
         ) as span:
-            # Load dataset (cache across trials)
+            # Load dataset + prices (cache across trials)
             if self._cached_data is None:
                 X, y = load_dataset(self.dataset_uri, self.horizon_days)
-                object.__setattr__(self, "_cached_data", (X, y))
-            X_base, y = self._cached_data
+                prices = _load_prices(self.dataset_uri)
+                object.__setattr__(self, "_cached_data", (X, y, prices))
+            X_base, y, prices = self._cached_data
 
             # Compute experimental feature from source column
             X = X_base.copy()
             feat_fn = _FEATURE_FUNCTIONS.get(function_name)
-            if feat_fn is not None and self.source_column in X.columns:
-                feature_col = f"exp_{function_name}"
+            feature_col = f"exp_{function_name}"
+
+            # Source column comes from prices (close, volume, etc.), not features
+            if feat_fn is not None and prices is not None and self.source_column in prices.columns:
+                source_series = prices[self.source_column].iloc[:len(X)].reset_index(drop=True)
+                X[feature_col] = feat_fn(source_series, **params)
+            elif feat_fn is not None and self.source_column in X.columns:
+                # Fallback: source column already in features
                 X[feature_col] = feat_fn(X[self.source_column], **params)
             else:
-                # If source column not in dataset or unknown function,
-                # just add a derived column from first available numeric column
-                feature_col = f"exp_{function_name}"
-                X[feature_col] = np.nan  # placeholder
+                logger.warning(
+                    f"Source column '{self.source_column}' not found in prices or features. "
+                    f"Available price columns: {list(prices.columns) if prices is not None else 'none'}. "
+                    f"Feature will be NaN."
+                )
+                X[feature_col] = np.nan
 
             cv = PurgedKFold(
                 n_splits=cv_cfg.get("n_splits", 5),

@@ -931,9 +931,11 @@ class TestFeatureEngineeringEvaluate:
 
         X = pd.DataFrame(np.random.randn(100, 3), columns=["f0", "f1", "f2"])
         y = pd.Series(np.random.randn(100), name="forward_return")
+        prices = pd.DataFrame({"close": np.random.randn(100).cumsum() + 100})
         preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
 
         with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.feature_engineering._load_prices", return_value=prices), \
              patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",
@@ -945,7 +947,7 @@ class TestFeatureEngineeringEvaluate:
         assert "quantile_loss" in result
 
     def test_evaluate_adds_engineered_feature(self):
-        """evaluate() must add a new feature column to the training data."""
+        """evaluate() must add a new feature column computed from price data."""
         from unittest.mock import patch, MagicMock
         import numpy as np
         import pandas as pd
@@ -962,16 +964,21 @@ class TestFeatureEngineeringEvaluate:
             cv_config={"n_splits": 2, "embargo_pct": 0.0, "prediction_horizon": 0},
         )
 
-        # Include a 'close' column that the feature function uses
+        # Features from load_dataset (no price columns)
         X = pd.DataFrame({
             "f0": np.random.randn(100),
             "f1": np.random.randn(100),
-            "close": np.random.randn(100).cumsum() + 100,
         })
         y = pd.Series(np.random.randn(100), name="forward_return")
+        # Price data loaded separately
+        prices = pd.DataFrame({
+            "close": np.random.randn(100).cumsum() + 100,
+            "volume": np.random.randint(100000, 1000000, 100),
+        })
         preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
 
         with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
+             patch("gefion.experiments.types.feature_engineering._load_prices", return_value=prices), \
              patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",
@@ -979,10 +986,13 @@ class TestFeatureEngineeringEvaluate:
             mock_train.return_value = {"models": {}, "imputer": MagicMock(), "feature_names": []}
             exp.evaluate({"window": 10})
 
-        # The training data should have more columns than the original
+        # The training data should have the engineered feature (not all NaN)
         for call in mock_train.call_args_list:
             X_train = call[0][0]
-            assert X_train.shape[1] > 3, "Should have added the engineered feature column"
+            assert X_train.shape[1] > 2, "Should have added the engineered feature column"
+            assert "exp_rolling_zscore" in X_train.columns, "Engineered feature column should exist"
+            # Should NOT be all NaN (the source column was available from prices)
+            assert X_train["exp_rolling_zscore"].notna().any(), "Engineered feature should have non-NaN values"
 
     def test_evaluate_has_observability_span(self):
         """evaluate() must create an observability span."""
