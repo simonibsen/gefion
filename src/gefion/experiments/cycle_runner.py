@@ -462,52 +462,48 @@ class CycleRunner:
 
     def _run_experiments(self, experiment_ids: List[int], max_parallel: int = 3,
                          on_progress: Optional[callable] = None) -> List[Dict[str, Any]]:
-        """Run experiments, parallel with resource checks."""
-        results = []
-        completed_count = 0
+        """Run experiments sequentially with resource checks.
 
-        def _run_one(exp_id: int) -> Optional[Dict[str, Any]]:
-            nonlocal completed_count
+        Note: parallel execution via ThreadPoolExecutor was removed because
+        ExperimentRunner.run() opens multiple DB connections per trial, and
+        parallel experiments exhaust the connection pool causing deadlocks.
+        Sequential execution is reliable and still fast enough for typical cycles.
+        """
+        results = []
+
+        for i, exp_id in enumerate(experiment_ids, 1):
             # Safety check before each experiment
             try:
                 checks = run_preflight_checks()
                 if not checks.get("ok", True):
                     logger.warning(f"Preflight failed for experiment {exp_id}: {checks}")
-                    return {"experiment_id": exp_id, "status": "skipped", "reason": "resource_check_failed"}
+                    if on_progress:
+                        on_progress("experiment_failed",
+                                    f"Experiment #{exp_id} skipped: resource check failed",
+                                    {"experiment_id": exp_id})
+                    results.append({"experiment_id": exp_id, "status": "skipped", "reason": "resource_check_failed"})
+                    continue
             except Exception:
                 pass  # Don't block on safety check failures
 
             try:
                 if on_progress:
-                    on_progress("running", f"Running experiment #{exp_id}...",
-                               {"experiment_id": exp_id})
+                    on_progress("running", f"Running experiment #{exp_id} ({i}/{len(experiment_ids)})...",
+                               {"experiment_id": exp_id, "index": i, "total": len(experiment_ids)})
                 result = self.runner.run(exp_id)
-                completed_count += 1
+                score = result.get("best_score", "N/A")
                 if on_progress:
-                    score = result.get("best_score", "N/A")
                     on_progress("experiment_done",
-                                f"Experiment #{exp_id} done ({completed_count}/{len(experiment_ids)}), score: {score}",
+                                f"Experiment #{exp_id} done ({i}/{len(experiment_ids)}), score: {score}",
                                 {"experiment_id": exp_id, "score": score})
-                return {"experiment_id": exp_id, "status": "completed", **result}
+                results.append({"experiment_id": exp_id, "status": "completed", **result})
             except Exception as e:
                 logger.error(f"Experiment {exp_id} failed: {e}")
-                completed_count += 1
                 if on_progress:
                     on_progress("experiment_failed",
-                                f"Experiment #{exp_id} failed: {e}",
+                                f"Experiment #{exp_id} failed ({i}/{len(experiment_ids)}): {e}",
                                 {"experiment_id": exp_id, "error": str(e)})
-                return {"experiment_id": exp_id, "status": "failed", "error": str(e)}
-
-        with ThreadPoolExecutor(max_workers=max_parallel) as executor:
-            futures = {executor.submit(_run_one, eid): eid for eid in experiment_ids}
-            for future in as_completed(futures):
-                try:
-                    result = future.result()
-                    if result:
-                        results.append(result)
-                except Exception as e:
-                    exp_id = futures[future]
-                    results.append({"experiment_id": exp_id, "status": "error", "error": str(e)})
+                results.append({"experiment_id": exp_id, "status": "failed", "error": str(e)})
 
         return results
 
