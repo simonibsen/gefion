@@ -9566,10 +9566,27 @@ def experiment_cycle_run(
                 console.print(f"\n[bold]Cycle #{cycle_id}[/bold]\n")
                 results = runner.run_cycle(cycle_id, on_progress=_on_progress)
 
-                console.print(f"\n[bold green]Complete![/bold green]")
+                failed = results.get("failed", 0)
+                completed = results.get("completed", 0)
+
+                if failed and not completed:
+                    console.print(f"\n[bold red]All experiments failed![/bold red]")
+                elif failed:
+                    console.print(f"\n[bold yellow]Complete with errors[/bold yellow]")
+                else:
+                    console.print(f"\n[bold green]Complete![/bold green]")
+
                 console.print(f"  Proposed:      {results.get('proposed', 0)} experiments")
-                console.print(f"  Completed:     {results.get('completed', 0)} experiments")
+                console.print(f"  Completed:     {completed} experiments")
+                if failed:
+                    console.print(f"  [red]Failed:        {failed} experiments[/red]")
                 console.print(f"  FDR Survivors: {results.get('fdr_survivors', 0)}")
+
+                errors = results.get("errors", [])
+                if errors:
+                    console.print(f"\n[bold red]Errors:[/bold red]")
+                    for err in set(errors):
+                        console.print(f"  [red]- {err}[/red]")
 
         except Exception as e:
             emit_error(f"Cycle run failed: {e}", json_output=json_output)

@@ -189,14 +189,33 @@ class CycleRunner:
             _emit("evaluating", "Applying FDR correction to filter false discoveries...")
             fdr_results = self._evaluate_cycle(cycle_id, proposed_ids)
 
-            # 7. Update cycle status
-            _emit("complete",
-                  f"Cycle complete: {len(results)} experiments, {fdr_results.get('survivors', 0)} FDR survivors")
+            # 7. Summarize and surface errors clearly
+            successful = [r for r in results if r.get("status") == "completed" and "error" not in r]
+            failed = [r for r in results if r.get("status") == "failed" or "error" in r]
+
+            if failed:
+                error_msgs = set(r.get("error", "unknown") for r in failed)
+                _emit("errors",
+                      f"{len(failed)} experiment(s) failed: {'; '.join(error_msgs)}",
+                      {"failed_count": len(failed), "errors": list(error_msgs)})
+
+            if not successful and failed:
+                _emit("complete",
+                      f"Cycle finished but all {len(failed)} experiments failed. "
+                      f"Check dataset and data availability.",
+                      {"all_failed": True})
+            else:
+                _emit("complete",
+                      f"Cycle complete: {len(successful)} succeeded, {len(failed)} failed, "
+                      f"{fdr_results.get('survivors', 0)} FDR survivors")
+
             summary = {
                 "proposed": len(proposed_ids),
-                "completed": len(results),
+                "completed": len(successful),
+                "failed": len(failed),
                 "fdr_survivors": fdr_results.get("survivors", 0),
                 "results": results,
+                "errors": [r.get("error") for r in failed if r.get("error")],
             }
             self._update_cycle_status(cycle_id, "completed", summary)
 

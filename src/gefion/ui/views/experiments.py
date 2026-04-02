@@ -1238,15 +1238,40 @@ def _render_cycle_launcher(themes, _is_ready, all_principles, available_prefixes
                 returncode = process.wait()
 
                 if returncode == 0:
-                    status.update(label="Cycle complete!", state="complete")
                     if final_result:
-                        st.success(
-                            f"Cycle #{new_cycle_id} complete. "
-                            f"Proposed: {final_result.get('proposed', 0)}, "
-                            f"Completed: {final_result.get('completed', 0)}, "
-                            f"FDR Survivors: {final_result.get('fdr_survivors', 0)}"
-                        )
+                        failed = final_result.get("failed", 0)
+                        completed = final_result.get("completed", 0)
+                        errors = final_result.get("errors", [])
+
+                        if failed and not completed:
+                            status.update(label="All experiments failed", state="error")
+                            st.error(
+                                f"Cycle #{new_cycle_id}: all {failed} experiments failed. "
+                                f"No results to evaluate."
+                            )
+                            if errors:
+                                for err in set(errors):
+                                    st.warning(f":material/error: {err}")
+                        elif failed:
+                            status.update(label="Complete with errors", state="complete")
+                            st.warning(
+                                f"Cycle #{new_cycle_id}: {completed} succeeded, {failed} failed, "
+                                f"{final_result.get('fdr_survivors', 0)} FDR survivors."
+                            )
+                            if errors:
+                                with st.expander(f"{len(set(errors))} error(s)"):
+                                    for err in set(errors):
+                                        st.markdown(f"- {err}")
+                        else:
+                            status.update(label="Cycle complete!", state="complete")
+                            st.success(
+                                f"Cycle #{new_cycle_id} complete. "
+                                f"Proposed: {final_result.get('proposed', 0)}, "
+                                f"Completed: {completed}, "
+                                f"FDR Survivors: {final_result.get('fdr_survivors', 0)}"
+                            )
                     else:
+                        status.update(label="Cycle complete!", state="complete")
                         st.success("Cycle complete! Check the Cycles tab for results.")
                 else:
                     stderr = process.stderr.read()
