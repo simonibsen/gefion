@@ -401,24 +401,87 @@ def _render_model_comparison_config(search_space, extra_config):
 
 
 def _render_feature_engineering_config(search_space, extra_config):
-    """Render feature engineering config."""
-    function_name = st.selectbox(
-        "Feature Function",
-        ["rolling_zscore", "rolling_return", "rolling_std", "momentum", "ema", "log_return"],
-        help="rolling_zscore: how far price deviates from its moving average (in std devs). "
-             "rolling_return: % change over window. rolling_std: volatility. "
-             "momentum: price ratio vs N days ago. ema: exponential moving average. "
-             "log_return: natural log of price change.",
+    """Render feature engineering config — builtin functions or custom code."""
+    mode = st.radio(
+        "Feature Source",
+        ["Built-in function", "Custom code"],
+        help="Built-in: choose from pre-built functions. Custom: write your own Python code.",
+        horizontal=True,
+        key="fe_mode",
     )
-    source_column = st.selectbox("Source Column", ["close", "volume", "high", "low", "open"])
-    extra_config["feature_config"] = {"function_name": function_name}
-    extra_config["source_column"] = source_column
 
-    st.markdown("##### Parameter Search")
-    if function_name in ("rolling_zscore", "rolling_return", "rolling_std", "momentum", "ema"):
-        low = st.number_input("Window Min", value=5, min_value=2, key="fe_w_lo")
-        high = st.number_input("Window Max", value=30, min_value=3, key="fe_w_hi")
-        step = st.number_input("Window Step", value=5, min_value=1, key="fe_w_step")
+    if mode == "Built-in function":
+        function_name = st.selectbox(
+            "Feature Function",
+            ["rolling_zscore", "rolling_return", "rolling_std", "momentum", "ema", "log_return"],
+            help="rolling_zscore: how far price deviates from its moving average (in std devs). "
+                 "rolling_return: % change over window. rolling_std: volatility. "
+                 "momentum: price ratio vs N days ago. ema: exponential moving average. "
+                 "log_return: natural log of price change.",
+        )
+        source_column = st.selectbox("Source Column", ["close", "volume", "high", "low", "open"],
+                                     key="fe_source_col")
+        extra_config["feature_config"] = {"function_name": function_name}
+        extra_config["source_column"] = source_column
+
+        st.markdown("##### Parameter Search")
+        if function_name in ("rolling_zscore", "rolling_return", "rolling_std", "momentum", "ema"):
+            low = st.number_input("Window Min", value=5, min_value=2, key="fe_w_lo")
+            high = st.number_input("Window Max", value=30, min_value=3, key="fe_w_hi")
+            step = st.number_input("Window Step", value=5, min_value=1, key="fe_w_step")
+            search_space["window"] = {"type": "int", "low": low, "high": high, "step": step}
+
+    else:  # Custom code
+        st.markdown("##### Write a Feature Function")
+        st.caption(
+            "Write a `compute(df, **params)` function. The DataFrame has OHLCV columns "
+            "(close, open, high, low, volume). Return a Series the same length as the input. "
+            "Available libraries: numpy, pandas, scipy, sklearn, talib."
+        )
+
+        function_name = st.text_input("Function Name", value="custom_feature",
+                                      help="Name for this feature (alphanumeric + underscore).",
+                                      key="fe_custom_name")
+
+        default_code = '''import numpy as np
+import pandas as pd
+
+def compute(df, window=20):
+    """Example: rolling z-score of close price."""
+    mean = df['close'].rolling(window).mean()
+    std = df['close'].rolling(window).std()
+    zscore = (df['close'] - mean) / std
+    return zscore.fillna(0)
+'''
+        function_body = st.text_area(
+            "Python Code",
+            value=default_code,
+            height=250,
+            help="Must define compute(df, **params) → pd.Series. "
+                 "Runs in a security sandbox — no file I/O, network, or system access.",
+            key="fe_custom_code",
+        )
+
+        # Validate syntax
+        try:
+            compile(function_body, "<custom_feature>", "exec")
+            st.caption(":material/check_circle: Valid Python syntax")
+        except SyntaxError as e:
+            st.error(f":material/error: Syntax error: {e}")
+
+        source_column = st.selectbox("Source Column", ["close", "volume", "high", "low", "open"],
+                                     key="fe_custom_source_col")
+        extra_config["feature_config"] = {
+            "function_name": function_name,
+            "function_body": function_body,
+        }
+        extra_config["source_column"] = source_column
+
+        st.markdown("##### Parameter Search")
+        st.caption("Define parameters that your compute() function accepts. The experiment will try different values.")
+        low = st.number_input("Window Min", value=5, min_value=1, key="fe_cw_lo")
+        high = st.number_input("Window Max", value=30, min_value=2, key="fe_cw_hi")
+        step = st.number_input("Window Step", value=5, min_value=1, key="fe_cw_step")
         search_space["window"] = {"type": "int", "low": low, "high": high, "step": step}
 
 
