@@ -153,6 +153,20 @@ class TestCycleRunnerCLI:
         assert "cycle_id" in sig.parameters
 
 
+class TestCycleStartConfigFile:
+    """Test cycle-start accepts --config file."""
+
+    def test_cycle_start_accepts_config_file(self):
+        import inspect
+        from gefion.cli import experiment_cycle_start
+        sig = inspect.signature(experiment_cycle_start)
+        assert "config_file" in sig.parameters
+
+    def test_cycle_start_help_mentions_config(self):
+        from gefion.cli import experiment_cycle_start
+        assert "config" in experiment_cycle_start.__doc__.lower()
+
+
 class TestCycleRunnerUI:
     """Test UI has guardrail controls."""
 

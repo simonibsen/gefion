@@ -9400,14 +9400,50 @@ def experiment_cycle_start(
     fdr_rate: float = typer.Option(0.10, "--fdr-rate", help="FDR control rate"),
     max_experiments: int = typer.Option(20, "--max-experiments", help="Max experiments per cycle"),
     budget_seconds: int = typer.Option(7200, "--budget", help="Compute budget in seconds"),
+    config_file: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to cycle config JSON file with guardrails"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ) -> None:
-    """Start a new experiment cycle with holdout and FDR configuration."""
+    """Start a new experiment cycle with holdout and FDR configuration.
+
+    Optionally pass --config to load a full config JSON with themes,
+    ML settings, and guardrails. Without --config, creates a minimal
+    cycle that can be configured later or run with defaults.
+
+    Examples:
+        # Minimal cycle
+        gefion experiment cycle-start --name exploration-1
+
+        # Full config from file
+        gefion experiment cycle-start --config cycle_config.json
+
+        # Create and immediately run
+        gefion experiment cycle-start --config cycle_config.json
+        gefion experiment cycle-run <cycle_id>
+    """
     from gefion.experiments.holdout import HoldoutManager
     from gefion.cli_helpers import db_connection
 
     with create_span("cli.experiment.cycle_start"):
         try:
+            # Load config file if provided
+            cycle_config = {}
+            if config_file:
+                try:
+                    cycle_config = json.loads(config_file.read_text())
+                except (json.JSONDecodeError, OSError) as e:
+                    emit_error(f"Failed to load config file: {e}", json_output=json_output)
+                    raise typer.Exit(1)
+
+                # Config can override CLI options
+                if "cycle_name" in cycle_config and not name:
+                    name = cycle_config["cycle_name"]
+                if "holdout_weeks" in cycle_config:
+                    holdout_weeks = cycle_config["holdout_weeks"]
+                if "fdr_rate" in cycle_config:
+                    fdr_rate = cycle_config["fdr_rate"]
+                if "max_experiments" in cycle_config:
+                    max_experiments = cycle_config["max_experiments"]
+
             # Get max date from data
             with db_connection(None) as conn:
                 with conn.cursor() as cur:
@@ -9421,16 +9457,22 @@ def experiment_cycle_start(
             holdout = HoldoutManager(max_date=max_date, holdout_weeks=holdout_weeks)
             cycle_name = name or f"cycle-{max_date}"
 
+            # Store config in discovery_snapshot.cycle_config
+            from psycopg.types.json import Json
+            snapshot = {"cycle_config": cycle_config} if cycle_config else None
+
             # Insert cycle into database
             with db_connection(None) as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
                         INSERT INTO experiment_cycles (name, holdout_start_date, holdout_end_date,
-                            fdr_rate, compute_budget_seconds, max_experiments, status)
-                        VALUES (%s, %s, %s, %s, %s, %s, 'proposed')
+                            fdr_rate, compute_budget_seconds, max_experiments, status,
+                            discovery_snapshot)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'proposed', %s)
                         RETURNING id
                     """, (cycle_name, holdout.holdout_start_date, holdout.holdout_end_date,
-                          fdr_rate, budget_seconds, max_experiments))
+                          fdr_rate, budget_seconds, max_experiments,
+                          Json(snapshot) if snapshot else None))
                     cycle_id = cur.fetchone()[0]
                     conn.commit()
 
@@ -9442,6 +9484,7 @@ def experiment_cycle_start(
                     "holdout_end": str(holdout.holdout_end_date),
                     "max_training_date": str(holdout.get_max_training_date()),
                     "fdr_rate": fdr_rate,
+                    "has_config": bool(cycle_config),
                 }, json_output=True)
             else:
                 from rich.console import Console
@@ -9452,6 +9495,11 @@ def experiment_cycle_start(
                 console.print(f"  Max training date: {holdout.get_max_training_date()}")
                 console.print(f"  FDR rate: {fdr_rate}")
                 console.print(f"  Budget: {budget_seconds}s, Max experiments: {max_experiments}")
+                if cycle_config:
+                    themes = cycle_config.get("selected_themes", [])
+                    if themes:
+                        console.print(f"  Themes: {', '.join(themes)}")
+                    console.print(f"  Config loaded from file")
 
         except Exception as e:
             emit_error(f"Failed to create cycle: {e}", json_output=json_output)
