@@ -9548,6 +9548,8 @@ def experiment_cycle_run(
 
                 phase_styles = {
                     "loading": "[dim]",
+                    "preflight": "[cyan]",
+                    "preflight_warning": "[yellow]  ",
                     "discovery": "[cyan]",
                     "proposing": "[blue]",
                     "proposed": "[dim]  ",
@@ -9555,6 +9557,7 @@ def experiment_cycle_run(
                     "running": "[yellow]",
                     "experiment_done": "[green]  ",
                     "experiment_failed": "[red]  ",
+                    "errors": "[red]",
                     "evaluating": "[magenta]",
                     "complete": "[bold green]",
                 }

@@ -101,6 +101,36 @@ class CycleRunner:
             cv_folds = config.get("cv_folds")  # None = agent decides
             embargo_pct = config.get("embargo_pct")  # None = agent decides
 
+            # Preflight: validate dataset before proposing experiments
+            _emit("preflight", "Validating dataset and data availability...")
+            preflight_issues = self._preflight_check(
+                dataset_uri=dataset_uri,
+                allowed_horizons=allowed_horizons,
+                allowed_types=allowed_types,
+            )
+            if preflight_issues:
+                for issue in preflight_issues:
+                    _emit("preflight_warning", issue["message"], issue)
+
+                # Filter out experiment types that can't run
+                blocked_types = {i["blocks_type"] for i in preflight_issues if i.get("blocks_type")}
+                if blocked_types:
+                    before = len(allowed_types)
+                    allowed_types = [t for t in allowed_types if t not in blocked_types]
+                    _emit("preflight",
+                          f"Removed {before - len(allowed_types)} experiment type(s) that can't run with available data")
+
+                if not allowed_types:
+                    _emit("preflight", "No experiment types can run with available data. Fix the issues above first.")
+                    self._update_cycle_status(cycle_id, "failed", {
+                        "proposed": 0, "completed": 0, "failed": 0, "fdr_survivors": 0,
+                        "errors": [i["message"] for i in preflight_issues],
+                    })
+                    return {
+                        "proposed": 0, "completed": 0, "failed": 0, "fdr_survivors": 0,
+                        "errors": [i["message"] for i in preflight_issues],
+                    }
+
             set_attributes(span,
                            max_experiments=max_experiments,
                            allowed_types=",".join(allowed_types),
@@ -220,6 +250,130 @@ class CycleRunner:
             self._update_cycle_status(cycle_id, "completed", summary)
 
             return summary
+
+    def _preflight_check(
+        self,
+        dataset_uri: Optional[str],
+        allowed_horizons: List[int],
+        allowed_types: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Validate that experiments can actually run with available data.
+
+        Returns list of issues, each with 'message' and optional 'blocks_type'.
+        Empty list = all clear.
+        """
+        issues = []
+
+        # Check dataset exists and has required files
+        ml_types = {"hyperparameter", "model_comparison", "feature_engineering",
+                    "feature_selection", "label_engineering", "pipeline"}
+        needs_dataset = bool(ml_types & set(allowed_types))
+
+        if needs_dataset:
+            from pathlib import Path
+
+            if not dataset_uri:
+                # Try auto-detect
+                manifests = list(Path("datasets").glob("*/manifest.json")) if Path("datasets").exists() else []
+                if manifests:
+                    manifests.sort(key=lambda p: p.stat().st_mtime)
+                    dataset_uri = str(manifests[-1])
+                else:
+                    issues.append({
+                        "message": "No dataset found. Run 'gefion ml dataset-build' first.",
+                        "severity": "critical",
+                    })
+                    for t in ml_types:
+                        if t in allowed_types:
+                            issues.append({"message": f"Cannot run {t} experiments without a dataset", "blocks_type": t})
+                    return issues
+
+            manifest_path = Path(dataset_uri)
+            if not manifest_path.exists():
+                issues.append({
+                    "message": f"Dataset not found: {dataset_uri}",
+                    "severity": "critical",
+                })
+                for t in ml_types:
+                    if t in allowed_types:
+                        issues.append({"message": f"Cannot run {t} without dataset", "blocks_type": t})
+                return issues
+
+            # Check for features and labels files
+            dataset_dir = manifest_path.parent
+            has_features = (dataset_dir / "features.parquet").exists() or (dataset_dir / "features.csv").exists()
+            has_labels = (dataset_dir / "labels.parquet").exists() or (dataset_dir / "labels.csv").exists()
+
+            if not has_features:
+                issues.append({
+                    "message": f"Dataset {dataset_dir.name} has no features file. Rebuild with 'gefion ml dataset-build'.",
+                    "severity": "critical",
+                })
+            if not has_labels:
+                issues.append({
+                    "message": f"Dataset {dataset_dir.name} has no labels file. Rebuild with 'gefion ml dataset-build'.",
+                    "severity": "critical",
+                })
+
+            # Check that requested horizons exist in the dataset
+            if has_labels:
+                try:
+                    import json as _json
+                    manifest = _json.loads(manifest_path.read_text())
+                    available_horizons = manifest.get("horizons_days", [])
+                    for h in allowed_horizons:
+                        if available_horizons and h not in available_horizons:
+                            issues.append({
+                                "message": f"Horizon {h} days not in dataset (available: {available_horizons}). "
+                                           f"Rebuild dataset with '--horizons {','.join(str(x) for x in allowed_horizons)}'.",
+                                "severity": "warning",
+                            })
+                except Exception:
+                    pass
+
+            # Validate labels actually have data for the horizons
+            if has_labels:
+                try:
+                    import pandas as pd
+                    labels_file = dataset_dir / "labels.parquet"
+                    if not labels_file.exists():
+                        labels_file = dataset_dir / "labels.csv"
+                    if labels_file.suffix == ".parquet":
+                        labels_df = pd.read_parquet(labels_file)
+                    else:
+                        labels_df = pd.read_csv(labels_file)
+
+                    for h in allowed_horizons:
+                        horizon_labels = labels_df[labels_df["horizon_days"] == h]
+                        if len(horizon_labels) == 0:
+                            issues.append({
+                                "message": f"No labels for horizon {h} days in dataset. "
+                                           f"Rebuild with 'gefion ml dataset-build --horizons {h}'.",
+                                "severity": "critical",
+                            })
+                            for t in ml_types:
+                                if t in allowed_types:
+                                    issues.append({"message": f"{t} blocked: no labels for horizon {h}", "blocks_type": t})
+                except Exception as e:
+                    issues.append({
+                        "message": f"Could not validate labels: {e}",
+                        "severity": "warning",
+                    })
+
+        # Check system resources
+        try:
+            checks = run_preflight_checks()
+            if not checks.get("ok", True):
+                for check in checks.get("checks", []):
+                    if not check.get("ok", True):
+                        issues.append({
+                            "message": f"Resource warning: {check.get('message', 'unknown')}",
+                            "severity": "warning",
+                        })
+        except Exception:
+            pass
+
+        return issues
 
     def _load_cycle(self, cycle_id: int) -> Dict[str, Any]:
         """Load cycle record from database.

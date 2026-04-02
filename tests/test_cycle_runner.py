@@ -137,6 +137,23 @@ class TestCycleRunnerOrchestration:
         src = inspect.getsource(CycleRunner)
         assert "preflight" in src.lower() or "safety" in src.lower()
 
+    def test_preflight_check_exists(self):
+        """CycleRunner must have _preflight_check method."""
+        from gefion.experiments.cycle_runner import CycleRunner
+        assert hasattr(CycleRunner, "_preflight_check")
+
+    def test_preflight_validates_dataset(self):
+        """_preflight_check should catch missing datasets."""
+        from gefion.experiments.cycle_runner import CycleRunner
+        runner = CycleRunner("postgresql://test:test@localhost/test")
+        issues = runner._preflight_check(
+            dataset_uri="nonexistent/manifest.json",
+            allowed_horizons=[7],
+            allowed_types=["hyperparameter"],
+        )
+        assert len(issues) > 0
+        assert any("not found" in i["message"].lower() for i in issues)
+
 
 class TestCycleRunnerCLI:
     """Test CLI command for cycle-run."""
