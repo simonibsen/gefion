@@ -424,10 +424,28 @@ gefion feat-fx-import --dir feature-functions/""", language="bash")
             regular = [f for f in functions if f.get("status") != "experimental"]
             experimental = [f for f in functions if f.get("status") == "experimental"]
 
-            # Regular functions
+            # Regular functions — group by prefix
             if regular:
+                groups = {}
                 for func in regular:
-                    render_function_row(func)
+                    name = func.get("name", "")
+                    prefix = name.split("_")[0] if "_" in name else "other"
+                    group_labels = {
+                        "indicator": "Technical Indicators",
+                        "price": "Price Features",
+                        "cross": "Cross-Sectional",
+                        "derivative": "Derivative Features",
+                    }
+                    group = group_labels.get(prefix, prefix.title())
+                    if group not in groups:
+                        groups[group] = []
+                    groups[group].append(func)
+
+                for group_name in sorted(groups.keys()):
+                    group_funcs = groups[group_name]
+                    with st.expander(f"**{group_name}** ({len(group_funcs)})", expanded=True):
+                        for func in group_funcs:
+                            render_function_row(func)
 
             # Experimental functions — grouped
             if experimental:
