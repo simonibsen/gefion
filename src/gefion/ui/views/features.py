@@ -463,14 +463,20 @@ def render_function_row(func: dict):
     name = func.get("name", "unknown")
     func_key = f"{name}_v{version}"
 
-    enabled_icon = "●" if enabled else "○"
-    status_color = "green" if status == "active" else "yellow"
+    if status == "experimental":
+        enabled_icon = ":material/science:"
+    elif enabled:
+        enabled_icon = "●"
+    else:
+        enabled_icon = "○"
 
     # Row with name and edit button (visible without expanding)
     col1, col2, col3 = st.columns([4, 1, 1])
 
     with col1:
-        st.markdown(f"{enabled_icon} **{name}** (v{version})")
+        display_name = name.replace("exp_", "").replace("_", " ").title() if name.startswith("exp_") else name
+        version_label = f"v{version}" if not version.startswith("cycle") else version
+        st.markdown(f"{enabled_icon} **{display_name}** ({version_label})")
 
     with col2:
         if st.button("", key=f"edit_func_{func_key}",  icon=":material/edit:", help="Edit function"):

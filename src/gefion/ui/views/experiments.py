@@ -178,6 +178,13 @@ def render_list_section():
                     with col2:
                         if st.button("Run", key=f"run_{exp[0]}", type="primary"):
                             run_experiment(exp[0])
+            # Delete section
+            st.markdown("---")
+            with st.expander(":material/delete: Delete Experiment"):
+                st.caption("Permanently removes an experiment and all associated data (trials, experimental features).")
+                del_id = st.number_input("Experiment ID to delete", min_value=1, value=1, key="del_exp_id")
+                if st.button("Delete", key="delete_exp", type="secondary"):
+                    delete_experiment(del_id)
         else:
             st.info("No experiments found matching the filter.")
 
@@ -694,6 +701,63 @@ def reject_experiment(exp_id: int):
         st.rerun()
     else:
         st.error(f"Failed: {result.stderr}")
+
+
+def delete_experiment(exp_id: int):
+    """Delete an experiment and all associated data."""
+    try:
+        from gefion.ui.components.database import get_connection
+
+        with get_connection() as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                # Get experiment info first
+                cur.execute("SELECT name, config FROM experiments WHERE id = %s", (exp_id,))
+                row = cur.fetchone()
+                if not row:
+                    st.error(f"Experiment #{exp_id} not found")
+                    return
+
+                exp_name = row[0]
+                config = row[1] or {}
+                fc = config.get("feature_config", {})
+                fn_name = fc.get("function_name")
+
+                # Delete trials
+                cur.execute("DELETE FROM experiment_trials WHERE experiment_id = %s", (exp_id,))
+                trials_deleted = cur.rowcount
+
+                # Delete experimental feature data if it exists
+                features_deleted = 0
+                if fn_name:
+                    full_fn_name = f"exp_{fn_name}" if not fn_name.startswith("exp_") else fn_name
+                    # Delete computed features
+                    cur.execute(
+                        "SELECT id FROM feature_definitions WHERE name = %s", (full_fn_name,)
+                    )
+                    feat_row = cur.fetchone()
+                    if feat_row:
+                        cur.execute(
+                            "DELETE FROM computed_features WHERE feature_id = %s", (feat_row[0],)
+                        )
+                        features_deleted = cur.rowcount
+                    # Delete feature definition
+                    cur.execute("DELETE FROM feature_definitions WHERE name = %s", (full_fn_name,))
+                    # Delete feature function
+                    cur.execute("DELETE FROM feature_functions WHERE name = %s", (full_fn_name,))
+
+                # Delete the experiment
+                cur.execute("DELETE FROM experiments WHERE id = %s", (exp_id,))
+
+                st.success(
+                    f"Deleted experiment #{exp_id} ({exp_name}): "
+                    f"{trials_deleted} trials"
+                    + (f", {features_deleted} feature records, function {fn_name}" if fn_name else "")
+                )
+                st.rerun()
+
+    except Exception as e:
+        st.error(f"Delete failed: {e}")
 
 
 def run_experiment(exp_id: int):
