@@ -186,6 +186,7 @@ def start_background_process(key: str, cmd: list, env: dict):
         return False
 
     state.is_running = True
+    state.started_at = time.time()
     state.completed = False
     state.success = False
     state.error_message = ""
@@ -450,6 +451,20 @@ def render_update_section():
                 state.completed_at = time.time()
                 state.success = proc.returncode == 0
                 st.rerun()
+            elif not proc:
+                # No process reference — can't monitor. Force complete after timeout.
+                started = getattr(state, 'started_at', None)
+                if started and (time.time() - started) > 300:
+                    state.is_running = False
+                    state.completed = True
+                    state.completed_at = time.time()
+                    state.success = False
+                    state.error_message = "Process lost — no status available"
+                    st.rerun()
+                else:
+                    st.caption("Auto-refreshing...")
+                    time.sleep(1.5)
+                    st.rerun()
             else:
                 st.caption("Auto-refreshing...")
                 time.sleep(1.5)
