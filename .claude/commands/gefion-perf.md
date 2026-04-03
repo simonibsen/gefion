@@ -83,6 +83,22 @@ Performance inspection skill — uses the Tempo MCP server to query traces direc
 | `experiments.*` | 10000ms | Experiments are expected to be slow |
 | default | 1000ms | General operations |
 
+### Trace Analysis Helper
+
+For large traces (thousands of spans), save the trace and use the analyzer:
+
+```bash
+# After getting a trace via mcp__tempo__get-trace, the output is saved to a file
+# Analyze it:
+python scripts/analyze_trace.py <trace_file.json>
+python scripts/analyze_trace.py <trace_file.json> --errors
+python scripts/analyze_trace.py <trace_file.json> --slow 500
+
+# Output shows: slowest spans, N+1 patterns, error details
+```
+
+Use this when `mcp__tempo__get-trace` returns a large trace that's hard to parse inline.
+
 ### Development Workflow Integration
 
 Use `/gefion-perf` during development to:
