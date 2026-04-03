@@ -1543,34 +1543,69 @@ def render_cycles_section():
             cycle_id = cycle_options[selected]
 
             if st.button("Load Cycle Status", width="stretch"):
-                env = os.environ.copy()
-                cmd = [
-                    sys.executable, "-m", "gefion.cli", "experiment",
-                    "cycle-status", str(cycle_id), "--json"
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30)
-                if result.returncode == 0:
-                    try:
-                        data = json.loads(result.stdout)
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Status", data.get("status", "N/A"))
-                        with col2:
-                            st.metric("Experiments", data.get("experiment_count", 0))
-                        with col3:
-                            st.metric("FDR Survivors", data.get("fdr_survivors", "N/A"))
+                try:
+                    with get_connection() as conn:
+                        with conn.cursor() as cur:
+                            # Get cycle info
+                            cur.execute("""
+                                SELECT status, summary, fdr_rate
+                                FROM experiment_cycles WHERE id = %s
+                            """, (cycle_id,))
+                            cycle_row = cur.fetchone()
 
-                        if data.get("experiments"):
-                            st.markdown("### Cycle Experiments")
-                            exp_df = pd.DataFrame(data["experiments"])
-                            st.dataframe(exp_df, use_container_width=True)
-                    except json.JSONDecodeError:
-                        st.code(result.stdout)
-                else:
-                    st.error(result.stderr)
+                            # Count experiments
+                            cur.execute("""
+                                SELECT
+                                    COUNT(*) as total,
+                                    COUNT(*) FILTER (WHERE status = 'completed') as completed,
+                                    COUNT(*) FILTER (WHERE fdr_survived = TRUE) as fdr_survived
+                                FROM experiments WHERE cycle_id = %s
+                            """, (cycle_id,))
+                            counts = cur.fetchone()
+
+                            # Get experiment details
+                            cur.execute("""
+                                SELECT id, name, experiment_type, status,
+                                       best_score, completed_trials, total_trials,
+                                       fdr_survived
+                                FROM experiments WHERE cycle_id = %s
+                                ORDER BY id
+                            """, (cycle_id,))
+                            cycle_experiments = cur.fetchall()
+
+                    if cycle_row:
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Status", cycle_row[0] or "N/A")
+                        with col2:
+                            st.metric("Experiments", counts[0])
+                        with col3:
+                            st.metric("Completed", counts[1])
+                        with col4:
+                            st.metric("FDR Survivors", counts[2])
+
+                        # Summary from cycle
+                        summary = cycle_row[1] or {}
+                        errors = summary.get("errors", [])
+                        if errors:
+                            with st.expander(f":material/error: Errors ({len(errors)})"):
+                                for err in set(errors):
+                                    st.markdown(f"- {err}")
+
+                    if cycle_experiments:
+                        st.markdown("### Cycle Experiments")
+                        exp_df = pd.DataFrame(
+                            cycle_experiments,
+                            columns=["ID", "Name", "Type", "Status",
+                                     "Best Score", "Trials Done", "Trials Total",
+                                     "FDR Survived"]
+                        )
+                        st.dataframe(exp_df, use_container_width=True)
+
+                except Exception as e:
+                    st.error(f"Error loading cycle details: {e}")
         else:
             st.info("No experiment cycles yet. Start one from the Discovery tab.")
 
     except Exception as e:
         st.error(f"Error loading cycles: {e}")
-        st.info("The experiment_cycles table may not exist. Run `gefion db-migrate` to create it.")
