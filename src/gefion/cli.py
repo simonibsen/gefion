@@ -7128,63 +7128,81 @@ def _update_all_impl(
                 if client:
                     from gefion.alphavantage.catalog import parse_overview
                     from datetime import date as date_cls
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                    init_schema_tables_conn = db_connection(url)
-                    with init_schema_tables_conn as conn:
+                    with db_connection(url) as conn:
                         init_schema_tables(conn, ["stocks_fundamentals"])
 
                     with create_span("data_update.fundamentals_fetch",
                                      stock_count=len(stale_stocks)) as fetch_span:
-                      for stock_id, symbol in stale_stocks:
-                        try:
-                            overview = client.fetch_overview(symbol)
-                            if "Error Message" in overview or "Note" in overview:
-                                continue
-                            parsed = parse_overview(overview)
 
-                            with db_connection(url) as conn:
-                                with conn.cursor() as cur:
-                                    # Update stocks table (snapshot)
-                                    cur.execute("""
-                                        UPDATE stocks
-                                        SET name = COALESCE(%s, name),
-                                            sector = COALESCE(%s, sector),
-                                            industry = COALESCE(%s, industry),
-                                            updated_at = NOW()
-                                        WHERE id = %s
-                                    """, (parsed["name"], parsed["sector"],
-                                          parsed["industry"], stock_id))
+                      # Fetch from API in parallel (respecting rate limits via client)
+                      def _fetch_one(stock_id, symbol):
+                          try:
+                              overview = client.fetch_overview(symbol)
+                              if "Error Message" in overview or "Note" in overview:
+                                  return None
+                              parsed = parse_overview(overview)
+                              return (stock_id, symbol, parsed)
+                          except Exception:
+                              return None
 
-                                    # Insert into stocks_fundamentals (time-series)
-                                    cur.execute("""
-                                        INSERT INTO stocks_fundamentals
-                                            (data_id, date, market_cap, pe_ratio, forward_pe,
-                                             peg_ratio, book_value, dividend_yield, eps,
-                                             revenue_per_share, profit_margin, operating_margin,
-                                             return_on_equity, beta, ev_to_ebitda, shares_outstanding)
-                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                        ON CONFLICT (data_id, date) DO UPDATE SET
-                                            market_cap = EXCLUDED.market_cap,
-                                            pe_ratio = EXCLUDED.pe_ratio,
-                                            updated_at = NOW()
-                                    """, (
-                                        stock_id, date_cls.today(),
-                                        parsed["market_cap"], parsed["pe_ratio"],
-                                        parsed["forward_pe"], parsed["peg_ratio"],
-                                        parsed["book_value"], parsed["dividend_yield"],
-                                        parsed["eps"], parsed["revenue_per_share"],
-                                        parsed["profit_margin"], parsed["operating_margin"],
-                                        parsed["return_on_equity"], parsed["beta"],
-                                        parsed["ev_to_ebitda"], parsed["shares_outstanding"],
-                                    ))
-                                conn.commit()
+                      # Use thread pool for API calls (client handles rate limiting)
+                      results = []
+                      max_workers = min(4, len(stale_stocks))
+                      with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                          futures = {
+                              executor.submit(_fetch_one, sid, sym): sym
+                              for sid, sym in stale_stocks
+                          }
+                          for future in as_completed(futures):
+                              result = future.result()
+                              if result:
+                                  results.append(result)
 
-                            fundamentals_updated += 1
-                            if not json_output:
-                                sector = parsed.get("sector") or "N/A"
-                                emit(f"  {symbol}: {sector[:20]}")
-                        except Exception:
-                            pass
+                      # Batch DB writes in a single connection
+                      if results:
+                          with db_connection(url) as conn:
+                              with conn.cursor() as cur:
+                                  for stock_id, symbol, parsed in results:
+                                      cur.execute("""
+                                          UPDATE stocks
+                                          SET name = COALESCE(%s, name),
+                                              sector = COALESCE(%s, sector),
+                                              industry = COALESCE(%s, industry),
+                                              updated_at = NOW()
+                                          WHERE id = %s
+                                      """, (parsed["name"], parsed["sector"],
+                                            parsed["industry"], stock_id))
+
+                                      cur.execute("""
+                                          INSERT INTO stocks_fundamentals
+                                              (data_id, date, market_cap, pe_ratio, forward_pe,
+                                               peg_ratio, book_value, dividend_yield, eps,
+                                               revenue_per_share, profit_margin, operating_margin,
+                                               return_on_equity, beta, ev_to_ebitda, shares_outstanding)
+                                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                          ON CONFLICT (data_id, date) DO UPDATE SET
+                                              market_cap = EXCLUDED.market_cap,
+                                              pe_ratio = EXCLUDED.pe_ratio,
+                                              updated_at = NOW()
+                                      """, (
+                                          stock_id, date_cls.today(),
+                                          parsed["market_cap"], parsed["pe_ratio"],
+                                          parsed["forward_pe"], parsed["peg_ratio"],
+                                          parsed["book_value"], parsed["dividend_yield"],
+                                          parsed["eps"], parsed["revenue_per_share"],
+                                          parsed["profit_margin"], parsed["operating_margin"],
+                                          parsed["return_on_equity"], parsed["beta"],
+                                          parsed["ev_to_ebitda"], parsed["shares_outstanding"],
+                                      ))
+
+                                      fundamentals_updated += 1
+                                      if not json_output:
+                                          sector = parsed.get("sector") or "N/A"
+                                          emit(f"  {symbol}: {sector[:20]}")
+
+                              conn.commit()
 
                       set_attributes(fetch_span, updated=fundamentals_updated)
 
