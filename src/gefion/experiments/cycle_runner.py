@@ -401,10 +401,11 @@ class CycleRunner:
                             "function_name": fn_name,
                             "function_body": body,
                         }
-                        # Store as experimental so other experiments can use it
+                        # Store as experimental and compute the feature
                         self._store_experimental_function(
                             fn_name, body, principle_id, design, cycle_id,
                         )
+                        self._compute_experimental_feature(f"exp_{fn_name}")
                         _emit("proposed",
                               f"  Generated feature function: {fn_name} (stored as experimental)",
                               {"function_name": fn_name})
@@ -667,6 +668,50 @@ class CycleRunner:
                     )
 
         return promoted
+
+    def _compute_experimental_feature(self, feature_name: str) -> None:
+        """Compute an experimental feature for all stocks.
+
+        Temporarily activates the feature definition, runs the dispatcher,
+        then deactivates it again (unless it's been promoted).
+        """
+        try:
+            with self._get_conn() as conn:
+                conn.autocommit = True
+                with conn.cursor() as cur:
+                    # Temporarily activate
+                    cur.execute(
+                        "UPDATE feature_definitions SET active = TRUE WHERE name = %s",
+                        (feature_name,),
+                    )
+
+                    # Get stock IDs to compute for
+                    cur.execute("SELECT id FROM stocks WHERE status = 'Active' LIMIT 100")
+                    stock_ids = [r[0] for r in cur.fetchall()]
+
+                # Compute using the dispatcher
+                from gefion.features.dispatcher import compute_features
+                for data_id in stock_ids:
+                    try:
+                        compute_features(
+                            conn, data_id,
+                            feature_names=[feature_name],
+                            incremental=True,
+                        )
+                    except Exception as e:
+                        logger.debug(f"Feature compute failed for stock {data_id}: {e}")
+                        break  # Stop on first error — function likely has a bug
+
+                # Deactivate again (experimental stays inactive)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE feature_definitions SET active = FALSE WHERE name = %s AND active = TRUE",
+                        (feature_name,),
+                    )
+
+                logger.info(f"Computed experimental feature {feature_name} for {len(stock_ids)} stocks")
+        except Exception as e:
+            logger.warning(f"Failed to compute experimental feature {feature_name}: {e}")
 
     def _store_experimental_function(
         self, fn_name: str, function_body: str,
