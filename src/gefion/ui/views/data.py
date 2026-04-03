@@ -442,29 +442,32 @@ def render_update_section():
         render_process_status("data_update", "Data Update")
 
         if state.is_running:
-            # Auto-refresh while running
+            # Check if process actually finished (thread state may not sync)
             proc = getattr(state, 'process', None)
-            if proc and proc.poll() is not None and not state.completed:
-                # Process exited but thread hasn't caught up yet — nudge it
-                state.is_running = False
-                state.completed = True
-                state.completed_at = time.time()
-                state.success = proc.returncode == 0
-                st.rerun()
-            elif not proc:
-                # No process reference — can't monitor. Force complete after timeout.
+            actually_done = False
+
+            if proc is not None:
+                poll = proc.poll()
+                if poll is not None:
+                    # Process has exited — force update state
+                    state.is_running = False
+                    state.completed = True
+                    state.completed_at = time.time()
+                    state.success = poll == 0
+                    actually_done = True
+            else:
+                # No process ref — check timeout
                 started = getattr(state, 'started_at', None)
                 if started and (time.time() - started) > 300:
                     state.is_running = False
                     state.completed = True
                     state.completed_at = time.time()
                     state.success = False
-                    state.error_message = "Process lost — no status available"
-                    st.rerun()
-                else:
-                    st.caption("Auto-refreshing...")
-                    time.sleep(1.5)
-                    st.rerun()
+                    state.error_message = "Process timed out"
+                    actually_done = True
+
+            if actually_done:
+                st.rerun()
             else:
                 st.caption("Auto-refreshing...")
                 time.sleep(1.5)
