@@ -729,31 +729,51 @@ def delete_experiment(exp_id: int):
 
                 # Delete experimental feature data if it exists
                 features_deleted = 0
+                feature_kept = False
                 if fn_name:
                     full_fn_name = f"exp_{fn_name}" if not fn_name.startswith("exp_") else fn_name
-                    # Delete computed features
-                    cur.execute(
-                        "SELECT id FROM feature_definitions WHERE name = %s", (full_fn_name,)
-                    )
-                    feat_row = cur.fetchone()
-                    if feat_row:
-                        cur.execute(
-                            "DELETE FROM computed_features WHERE feature_id = %s", (feat_row[0],)
+
+                    # Check if other experiments depend on this feature
+                    cur.execute("""
+                        SELECT id, name FROM experiments
+                        WHERE id != %s
+                          AND (config::text LIKE %s OR config::text LIKE %s)
+                          AND status NOT IN ('failed', 'rejected')
+                    """, (exp_id, f"%{fn_name}%", f"%{full_fn_name}%"))
+                    dependents = cur.fetchall()
+
+                    if dependents:
+                        dep_names = ", ".join(f"#{d[0]} ({d[1][:30]})" for d in dependents[:5])
+                        st.warning(
+                            f"Feature `{full_fn_name}` is referenced by other experiments: {dep_names}. "
+                            f"Feature function and definition kept. Only experiment record and trials deleted."
                         )
-                        features_deleted = cur.rowcount
-                    # Delete feature definition
-                    cur.execute("DELETE FROM feature_definitions WHERE name = %s", (full_fn_name,))
-                    # Delete feature function
-                    cur.execute("DELETE FROM feature_functions WHERE name = %s", (full_fn_name,))
+                        feature_kept = True
+                    else:
+                        # Safe to delete feature data
+                        cur.execute(
+                            "SELECT id FROM feature_definitions WHERE name = %s", (full_fn_name,)
+                        )
+                        feat_row = cur.fetchone()
+                        if feat_row:
+                            cur.execute(
+                                "DELETE FROM computed_features WHERE feature_id = %s", (feat_row[0],)
+                            )
+                            features_deleted = cur.rowcount
+                        # Delete feature definition
+                        cur.execute("DELETE FROM feature_definitions WHERE name = %s", (full_fn_name,))
+                        # Delete feature function
+                        cur.execute("DELETE FROM feature_functions WHERE name = %s", (full_fn_name,))
 
                 # Delete the experiment
                 cur.execute("DELETE FROM experiments WHERE id = %s", (exp_id,))
 
-                st.success(
-                    f"Deleted experiment #{exp_id} ({exp_name}): "
-                    f"{trials_deleted} trials"
-                    + (f", {features_deleted} feature records, function {fn_name}" if fn_name else "")
-                )
+                msg = f"Deleted experiment #{exp_id} ({exp_name}): {trials_deleted} trials"
+                if fn_name and not feature_kept:
+                    msg += f", {features_deleted} feature records, function {fn_name}"
+                elif fn_name and feature_kept:
+                    msg += f" (feature {fn_name} kept — used by other experiments)"
+                st.success(msg)
                 st.rerun()
 
     except Exception as e:
