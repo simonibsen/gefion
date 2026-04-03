@@ -39,23 +39,21 @@ try:
         if not name or name == 'SELECT':
             continue
 
-        # Skip expected slow operations
-        if any(skip in name for skip in [
-            'cli.data-update', 'cli.experiment', 'cli.universe-ingest',
-            'cli.feat-compute', 'cli.ml', 'cycle_runner',
-            'data_update.', 'prices-ingest',
-        ]):
-            continue
-
-        # Span-specific thresholds
+        # Span-specific thresholds — every operation has one
         if name.startswith('ui.'):
             threshold = 500
         elif name.startswith('charts.'):
             threshold = 2000
         elif name.startswith('db.'):
             threshold = 500
-        elif name.startswith('experiments.'):
-            threshold = 10000
+        elif name.startswith('cli.data-update') or name.startswith('data_update'):
+            threshold = 30000   # 30s — data updates should finish in under 30s per batch
+        elif name.startswith('cli.experiment') or name.startswith('experiments.') or 'cycle_runner' in name:
+            threshold = 60000   # 60s — individual experiment operations
+        elif name.startswith('cli.ml') or name.startswith('cli.feat'):
+            threshold = 30000   # 30s — ML training and feature computation
+        elif name.startswith('cli.'):
+            threshold = 5000
         else:
             threshold = 1000
 
