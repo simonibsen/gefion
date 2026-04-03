@@ -139,11 +139,11 @@ def get_process_state(key: str) -> ProcessState:
         # Migrate old ProcessState objects that don't have new fields
         if not hasattr(old_state, 'rate_per_sec') or not hasattr(old_state, 'completed_at'):
             new_state = ProcessState()
-            for f in ['process', 'is_running', 'phase', 'progress', 'done', 'total',
-                      'inserted', 'errors', 'last_ok', 'workers', 'writer_workers',
-                      'mode', 'error_message', 'completed', 'success', 'completed_at',
-                      'rate_per_sec', 'eta_seconds', 'successes', 'last_ok_inserted',
-                      'output_lines', 'work_events']:
+            for f in ['process', 'pid', 'started_at', 'is_running', 'phase', 'progress',
+                      'done', 'total', 'inserted', 'errors', 'last_ok', 'workers',
+                      'writer_workers', 'mode', 'error_message', 'completed', 'success',
+                      'completed_at', 'rate_per_sec', 'eta_seconds', 'successes',
+                      'last_ok_inserted', 'output_lines', 'work_events', 'status_message']:
                 if hasattr(old_state, f):
                     setattr(new_state, f, getattr(old_state, f))
             st.session_state[state_key] = new_state
