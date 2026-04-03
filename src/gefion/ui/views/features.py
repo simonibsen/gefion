@@ -175,15 +175,7 @@ gefion feat-def-import --dir feature-definitions/""", language="bash")
                         "They are inactive until promoted after surviving FDR statistical testing."
                     )
                     for defn in experimental:
-                        name = defn.get("name", "")
-                        label = name.replace("exp_", "").replace("_", " ").title()
-                        is_active = defn.get("active", False)
-                        status = ":material/check_circle: promoted" if is_active else ":material/science: experimental"
-                        params = defn.get("params", {})
-                        param_str = ", ".join(f"{k}={v}" for k, v in params.items()) if params else ""
-                        st.markdown(f"- **{label}** {status}")
-                        if param_str:
-                            st.caption(f"  Params: {param_str}")
+                        render_definition_row(defn)
 
             st.caption(f"Total: {len(definitions)} definitions ({len(regular)} active, {len(experimental)} experimental)")
         else:
