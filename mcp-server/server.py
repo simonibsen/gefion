@@ -1601,6 +1601,21 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
         )]
 
     try:
+        import time as _time
+        _tool_start = _time.monotonic()
+        _span = None
+
+        # Initialize OTEL tracing for MCP server
+        try:
+            from gefion.observability import create_span, set_attributes, OTEL_ENABLED
+            if OTEL_ENABLED:
+                from opentelemetry import trace as _trace
+                _tracer = _trace.get_tracer("mcp-server")
+                _span = _tracer.start_span(f"mcp.{name}")
+                _span.set_attribute("mcp.tool", name)
+        except Exception:
+            pass
+
         # RBAC: Handle get_role_info tool
         if name == "get_role_info":
             result = await _get_role_info(arguments)
@@ -1737,12 +1752,29 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
+        # Close span with success attributes
+        duration_ms = int((_time.monotonic() - _tool_start) * 1000)
+        if _span:
+            success = result.get("success", True) if isinstance(result, dict) else True
+            _span.set_attribute("duration_ms", duration_ms)
+            _span.set_attribute("success", success)
+            _span.end()
+
         return [TextContent(
             type="text",
             text=json.dumps(result, indent=2)
         )]
 
     except Exception as e:
+        # Close span with error
+        if _span:
+            duration_ms = int((_time.monotonic() - _tool_start) * 1000)
+            _span.set_attribute("duration_ms", duration_ms)
+            _span.set_attribute("success", False)
+            _span.set_attribute("error", str(e))
+            _span.record_exception(e)
+            _span.end()
+
         return [TextContent(
             type="text",
             text=json.dumps({
