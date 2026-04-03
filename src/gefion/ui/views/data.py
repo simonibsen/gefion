@@ -254,6 +254,8 @@ def start_background_process(key: str, cmd: list, env: dict):
                         continue
                     # Update state from progress data
                     state.phase = data.get("phase", state.phase)
+                    if data.get("message"):
+                        state.status_message = data["message"]
                     state.progress = data.get("percent", state.progress)
                     state.done = data.get("done", state.done)
                     state.total = data.get("total", state.total)
@@ -340,10 +342,12 @@ def render_process_status(key: str, title: str):
         status_state = "error"
 
     with st.status(status_label, expanded=True, state=status_state):
-        # Phase and progress bar
+        # Phase and status message
         if state.phase:
-            phase_emoji = "▸" if state.phase == "prices" else "▸" if state.phase == "features" else "▸"
-            st.write(f"{phase_emoji} Phase: **{state.phase.title()}**")
+            st.write(f"▸ Phase: **{state.phase.title()}**")
+        status_msg = getattr(state, 'status_message', None)
+        if status_msg:
+            st.caption(status_msg)
 
         if state.progress > 0:
             st.progress(min(1.0, state.progress / 100.0))

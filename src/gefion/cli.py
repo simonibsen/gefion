@@ -7113,13 +7113,15 @@ def _update_all_impl(
                     set_attributes(fund_span, stale_count=len(stale_stocks))
 
             if not stale_stocks:
-                if not json_output:
-                    emit("Fundamentals: all up to date (refreshed within 30 days)")
+                emit("Fundamentals: all up to date (refreshed within 30 days)",
+                     data={"phase": "fundamentals", "status": "up_to_date"},
+                     json_output=json_output)
 
             elif stale_stocks and len(stale_stocks) <= 200:
-                if not json_output:
-                    emit(f"Fundamentals: {len(stale_stocks)} stocks need refresh (>30 days old or missing). "
-                         f"This may take a few minutes due to API rate limits...")
+                emit(f"Fundamentals: {len(stale_stocks)} stocks need refresh (>30 days old or missing). "
+                     f"This may take a few minutes due to API rate limits...",
+                     data={"phase": "fundamentals", "status": "refreshing", "count": len(stale_stocks)},
+                     json_output=json_output)
 
                 if client is None:
                     try:
@@ -7211,13 +7213,16 @@ def _update_all_impl(
 
                       set_attributes(fetch_span, updated=fundamentals_updated)
 
-                    if not json_output and fundamentals_updated:
-                        emit(f"Fundamentals: {fundamentals_updated} updated")
+                    if fundamentals_updated:
+                        emit(f"Fundamentals: {fundamentals_updated} updated",
+                             data={"phase": "fundamentals", "status": "complete", "updated": fundamentals_updated},
+                             json_output=json_output)
 
             elif stale_stocks and len(stale_stocks) > 200:
-                if not json_output:
-                    emit(f"Fundamentals: {len(stale_stocks)} stocks need refresh (skipping — too many for auto-update). "
-                         f"Run 'gefion fundamentals-update --limit 200' to update in batches.")
+                emit(f"Fundamentals: {len(stale_stocks)} stocks need refresh (skipping — too many for auto-update). "
+                     f"Run 'gefion fundamentals-update --limit 200' to update in batches.",
+                     data={"phase": "fundamentals", "status": "skipped", "count": len(stale_stocks)},
+                     json_output=json_output)
     except Exception:
         pass  # Fundamentals are optional — don't fail data-update
 
