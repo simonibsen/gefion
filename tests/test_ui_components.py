@@ -690,6 +690,23 @@ class TestCLICommandDisplay:
         assert 'Advanced' in content
         assert 'full re-download' in content.lower() or 'full history' in content.lower()
 
+    def test_data_update_no_orphaned_caption_above_expander(self, views_dir):
+        """The update form must not have a floating caption next to an expander.
+
+        A bare st.caption beside an st.expander creates ambiguous ? icons and
+        chevrons that look like they belong together. The caption text should
+        be inside the info block or removed.
+        """
+        content = (views_dir / "data.py").read_text()
+        # The caption about "topped up" should not exist as a standalone element
+        # — it creates visual clutter next to the expander
+        import re
+        pattern = r'st\.caption\([^)]*topped up[^)]*\)'
+        assert not re.search(pattern, content, re.DOTALL), (
+            "Floating st.caption about 'topped up' creates ambiguous UI — "
+            "merge the text into the existing st.info block"
+        )
+
     def test_data_view_shows_cli_command(self, views_dir):
         """Data view should display equivalent CLI commands."""
         content = (views_dir / "data.py").read_text()
@@ -697,6 +714,22 @@ class TestCLICommandDisplay:
         assert 'st.code(' in content
         assert 'language="bash"' in content
         assert 'gefion data-update' in content or 'gefion", "data-update' in content
+
+    def test_cli_data_update_has_since_param(self):
+        """CLI data-update must accept a --since option for date lower bound."""
+        import inspect
+        from gefion.cli import update_all
+        sig = inspect.signature(update_all)
+        assert "since" in sig.parameters, (
+            "data-update CLI must have --since parameter for date lower bound"
+        )
+
+    def test_ui_data_update_passes_since_to_cli(self, views_dir):
+        """UI data update must pass --since to CLI command when set."""
+        content = (views_dir / "data.py").read_text()
+        assert "--since" in content, (
+            "UI data update must pass --since to CLI command"
+        )
 
     def test_ml_view_shows_cli_commands(self, views_dir):
         """ML view should display equivalent CLI commands for all operations."""
@@ -880,6 +913,29 @@ class TestCullStatusRenderer:
         """Cull status should show vacuum phase."""
         content = (views_dir / "data.py").read_text()
         assert 'vacuum' in content.lower() or 'Vacuum' in content
+
+    def test_cull_status_shows_summary_when_no_events(self, views_dir):
+        """Cull complete must show a fallback when no structured progress events are available.
+
+        The renderer must handle the case where output_lines exist but none
+        match the expected JSON structure (no 'phase' keys), showing raw output
+        or a 'no data found' message instead of an empty expander.
+        """
+        content = (views_dir / "data.py").read_text()
+        import re
+        # After the progress_events/final_result parsing, there must be a
+        # fallback path that shows something when both are empty
+        # Look for: handles case where no progress_events AND no final_result
+        assert re.search(
+            r'not\s+progress_events.*not\s+final_result|'
+            r'not\s+final_result.*not\s+progress_events|'
+            r'No data|no rows deleted',
+            content,
+            re.DOTALL,
+        ), (
+            "_render_cull_status must have a fallback for when no structured "
+            "events or results are captured (empty expander body)"
+        )
 
 
 class TestFeaturesView:
@@ -1186,6 +1242,52 @@ class TestExperimentsUIQuery:
         """Experiments view should have render_list_section function."""
         content = (ui_dir / "views" / "experiments.py").read_text()
         assert "def render_list_section(" in content
+
+
+class TestExperimentsUITabs:
+    """Test experiments page has Discovery and Cycles tabs."""
+
+    @pytest.fixture
+    def experiments_content(self):
+        return (Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views" / "experiments.py").read_text()
+
+    def test_has_discovery_tab(self, experiments_content):
+        """Experiments page must have a Discovery tab."""
+        assert "Discovery" in experiments_content
+        assert "render_discovery_section" in experiments_content
+
+    def test_has_cycles_tab(self, experiments_content):
+        """Experiments page must have a Cycles tab."""
+        assert "Cycles" in experiments_content
+        assert "render_cycles_section" in experiments_content
+
+    def test_has_four_tabs(self, experiments_content):
+        """Experiments page should have 4 tabs: Discovery, Experiments, Results, Cycles."""
+        assert "tab1, tab2, tab3, tab4" in experiments_content
+
+    def test_propose_in_discovery(self, experiments_content):
+        """Propose form should be inside the Discovery tab, not a separate tab."""
+        assert "Manual Experiment" in experiments_content
+        assert "render_propose_section" in experiments_content
+
+    def test_list_has_run_button_for_approved(self, experiments_content):
+        """List tab should have Run button for approved experiments."""
+        assert "Ready to Run" in experiments_content
+        assert 'run_{exp[0]}' in experiments_content or "run_" in experiments_content
+
+    def test_propose_supports_all_experiment_types(self, experiments_content):
+        """Propose form must support all experiment types, not just strategy_params."""
+        assert "hyperparameter" in experiments_content
+        assert "model_comparison" in experiments_content
+        assert "feature_engineering" in experiments_content
+        assert "feature_selection" in experiments_content
+        assert "label_engineering" in experiments_content
+
+    def test_type_filter_includes_all_types(self, experiments_content):
+        """List type filter must include all experiment types."""
+        assert "model_comparison" in experiments_content
+        assert "feature_engineering" in experiments_content
+        assert "label_engineering" in experiments_content
 
 
 class TestActionDashboard:

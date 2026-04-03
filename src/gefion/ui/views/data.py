@@ -440,8 +440,8 @@ def render_update_section():
     if state.is_running or state.completed:
         render_process_status("data_update", "Data Update")
 
-        # Auto-refresh while running — but check if process actually exited
         if state.is_running:
+            # Auto-refresh while running
             proc = getattr(state, 'process', None)
             if proc and proc.poll() is not None and not state.completed:
                 # Process exited but thread hasn't caught up yet — nudge it
@@ -454,12 +454,18 @@ def render_update_section():
                 st.caption("Auto-refreshing...")
                 time.sleep(1.5)
                 st.rerun()
-        return  # Don't show update form while process is active
+            return  # Don't show update form while process is running
+
+        # Process completed — show clear button, don't block the form
+        if state.completed:
+            if st.button("Clear", key="clear_data_update"):
+                clear_process_state("data_update")
+                st.rerun()
 
     st.info("""
     **Data Update** runs two phases:
-    1. **Prices** - Fetches OHLCV data from AlphaVantage
-    2. **Features** - Computes all active feature definitions (technical indicators,
+    1. **Prices** — fetches OHLCV data from AlphaVantage (full history for new stocks, incremental for existing)
+    2. **Features** — computes all active feature definitions (technical indicators,
        cross-sectional rankings, sector comparisons, etc.)
     """)
 
@@ -491,12 +497,13 @@ def render_update_section():
             limit = int(symbol_count)
 
     with col2:
-        st.caption(
-            "New stocks get full history. "
-            "Stocks with recent data get topped up with the latest prices."
-        )
-
         with st.expander("Advanced options"):
+            since_date = st.date_input(
+                "Load data since",
+                value=None,
+                help="Only load price data from this date onwards. "
+                     "Leave empty for default behavior (full history for new stocks, incremental for existing).",
+            )
             force_full = st.checkbox(
                 "Force full re-download",
                 help="Re-download complete history (~20 years) for every stock, "
@@ -513,6 +520,8 @@ def render_update_section():
     cli_parts = ["gefion", "data-update", "--exchange", exchange]
     if limit:
         cli_parts.extend(["--limit", str(limit)])
+    if since_date:
+        cli_parts.extend(["--since", str(since_date)])
     if force_full:
         cli_parts.extend(["--timeframe", "full"])
     if refresh:
@@ -525,6 +534,8 @@ def render_update_section():
         cmd.extend(["--exchange", exchange])
         if limit:
             cmd.extend(["--limit", str(limit)])
+        if since_date:
+            cmd.extend(["--since", str(since_date)])
         cmd.extend(["--timeframe", timeframe])
         if refresh:
             cmd.append("--refresh")
@@ -792,10 +803,29 @@ def _render_cull_status(state):
             if "deleted" in final_result:
                 deleted = final_result["deleted"]
                 total = final_result.get("total_rows", sum(deleted.values()) if isinstance(deleted, dict) else 0)
+                if isinstance(deleted, dict) and deleted:
+                    for table, count in deleted.items():
+                        if count > 0:
+                            st.markdown(f"- **{table}**: {count:,} rows deleted")
                 st.markdown(f"**Total: {total:,} rows deleted**")
             elif "tables" in final_result:
                 for table, count in final_result["tables"].items():
                     st.markdown(f"- **{table}**: {count:,} rows (dry run)")
+        elif not progress_events and not state.is_running:
+            # No structured events captured — show raw output or fallback
+            if output_lines:
+                for line in output_lines:
+                    line = line.strip()
+                    if line:
+                        try:
+                            data = json.loads(line)
+                            msg = data.get("message", data.get("msg", ""))
+                            if msg:
+                                st.markdown(f"- {msg}")
+                        except json.JSONDecodeError:
+                            st.text(line)
+            else:
+                st.info("No data found to delete.")
 
         if state.error_message:
             st.error(state.error_message)

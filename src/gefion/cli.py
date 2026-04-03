@@ -2236,7 +2236,13 @@ def ml_eval(
                     json_output=json_output,
                 )
             else:
-                emit_error("No predictions found for evaluation period", json_output=json_output)
+                emit_error(
+                    f"No predictions found for model '{model_name}' v{model_version} "
+                    f"in period {start_date} to {end_date}. "
+                    f"Run 'gefion ml predict --model-name {model_name} --model-version {model_version} "
+                    f"--start-date {start_date} --end-date {end_date}' to generate predictions first.",
+                    json_output=json_output,
+                )
             return
 
         emit(f"Found {len(predictions_data)} predictions to evaluate", json_output=json_output)
@@ -2289,7 +2295,17 @@ def ml_eval(
         emit(f"Valid predictions with actual returns: {len(valid_predictions)}", json_output=json_output)
 
         if len(valid_predictions) == 0:
-            emit_error("No valid predictions with actual returns found", json_output=json_output)
+            # Diagnose why
+            total_preds = len(predictions_df)
+            horizons = predictions_df["horizon_days"].unique().tolist()
+            date_range = f"{predictions_df['prediction_date'].min()} to {predictions_df['prediction_date'].max()}"
+            emit_error(
+                f"Found {total_preds} predictions ({date_range}, horizons {horizons}) "
+                f"but none have matching price data for the outcome date. "
+                f"This usually means the outcome dates fall outside your OHLCV data range. "
+                f"Check that price data covers prediction_date + horizon_days.",
+                json_output=json_output,
+            )
             return
 
         # Calculate metrics by horizon
@@ -2525,7 +2541,12 @@ def ml_calibrate(
             valid = predictions_df[predictions_df["actual_return"].notna()].copy()
 
             if len(valid) == 0:
-                emit_error("No valid predictions with actual returns found", json_output=json_output)
+                total_preds = len(predictions_df)
+                emit_error(
+                    f"Found {total_preds} predictions but none have matching price data "
+                    f"for the outcome date. Ensure OHLCV data covers prediction_date + horizon_days.",
+                    json_output=json_output,
+                )
                 return
 
             emit(f"Valid predictions with actuals: {len(valid)}", json_output=json_output)
@@ -6672,6 +6693,7 @@ def update_all(
     writer_workers: Optional[int] = typer.Option(None, help="Parallel writers to DB"),
     calls_per_minute: int = typer.Option(75, help="AlphaVantage rate limit (premium default)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    since: Optional[str] = typer.Option(None, "--since", help="Only load data since this date (YYYY-MM-DD). Rows before this date are discarded."),
     listings_file: Optional[Path] = typer.Option(None, help="Optional path to listings CSV/JSON (bypass network fetch)"),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress updates"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
@@ -6695,6 +6717,9 @@ def update_all(
         # Update NASDAQ stocks (limited to 20 for testing)
         gefion data-update --exchange NASDAQ --limit 20
 
+        # Only load data from 2025 onwards
+        gefion data-update --exchange NASDAQ --since 2025-01-01
+
         # Full refresh of all features
         gefion data-update --exchange NYSE --refresh
 
@@ -6707,18 +6732,19 @@ def update_all(
         timeframe=timeframe,
         refresh=refresh,
         limit=limit or 0,
+        since=since or "none",
     ):
         _update_all_impl(
             exchange, status, timeframe, feature_batch_size, refresh_existing,
             refresh, limit, max_workers, writer_workers, calls_per_minute,
-            db_url, listings_file, progress, json_output
+            db_url, listings_file, progress, json_output, since
         )
 
 
 def _update_all_impl(
     exchange, status, timeframe, feature_batch_size, refresh_existing,
     refresh, limit, max_workers, writer_workers, calls_per_minute,
-    db_url, listings_file, progress, json_output
+    db_url, listings_file, progress, json_output, since=None
 ):
     """Implementation of data-update (separated for tracing)."""
     url = _db_url(db_url)
@@ -6841,6 +6867,16 @@ def _update_all_impl(
     target_date = _expected_market_date()
     set_attributes(main_span, target_date=str(target_date))
 
+    # Parse --since lower bound
+    since_date = None
+    if since:
+        since_date = _parse_date_or_error(since, json_output)
+        if since_date is None:
+            return
+        set_attributes(main_span, since_date=str(since_date))
+        if not json_output:
+            emit(f"Filtering data to only include rows since {since_date}")
+
     # Bulk filter symbols that don't need price updates (skip API calls for up-to-date symbols)
     price_symbols = symbols
     price_skipped = 0
@@ -6902,6 +6938,7 @@ def _update_all_impl(
                     update_existing=refresh_existing,
                     progress=price_reporter,
                     target_date=target_date,
+                    since_date=since_date,
                 )
                 add_event(
                     price_span,
@@ -8690,6 +8727,14 @@ def experiment_propose(
     goal_target: Optional[float] = typer.Option(None, "--goal-target", help="Target value for goal"),
     baseline: Optional[float] = typer.Option(None, "--baseline", help="Baseline value for improvement goals"),
     early_stop: bool = typer.Option(False, "--early-stop", help="Stop when goal achieved"),
+    principle: Optional[str] = typer.Option(None, "--principle", help="Principle ID from catalog (optional)"),
+    hypothesis: Optional[str] = typer.Option(None, "--null-hypothesis", help="Null hypothesis statement"),
+    cycle: Optional[int] = typer.Option(None, "--cycle", help="Experiment cycle ID to associate with"),
+    model_type: Optional[str] = typer.Option(None, "--model-type", help="ML model type (lightgbm, xgboost, quantile_regression)"),
+    dataset_uri: Optional[str] = typer.Option(None, "--dataset-uri", help="Path to dataset manifest (e.g., datasets/baseline_v2/manifest.json)"),
+    horizon_days: Optional[int] = typer.Option(None, "--horizon-days", help="Prediction horizon in days"),
+    objective_direction: str = typer.Option("maximize", "--objective-direction", help="minimize or maximize"),
+    extra_json: Optional[str] = typer.Option(None, "--config", help="Extra config as JSON (merged into experiment config)"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ) -> None:
     """Propose a new experiment for approval."""
@@ -8700,16 +8745,29 @@ def experiment_propose(
     except json.JSONDecodeError as e:
         emit_error(f"Invalid JSON in search-space: {e}", json_output=json_output)
 
-    # Build extra config
+    # Build extra config from explicit options + arbitrary JSON
     extra_config = {}
     if strategy:
         extra_config["strategy"] = strategy
+    if model_type:
+        extra_config["model_type"] = model_type
+    if dataset_uri:
+        extra_config["dataset_uri"] = dataset_uri
+    if horizon_days is not None:
+        extra_config["horizon_days"] = horizon_days
+    if extra_json:
+        try:
+            extra_config.update(json.loads(extra_json))
+        except json.JSONDecodeError as e:
+            emit_error(f"Invalid JSON in --config: {e}", json_output=json_output)
+            return
 
     config = ExperimentConfig(
         name=name,
         experiment_type=experiment_type,
         search_space=search_space_dict,
         objective_metric=objective,
+        objective_direction=objective_direction,
         max_trials=max_trials,
         search_method=search_method,
         goal_type=goal_type,
@@ -8721,6 +8779,8 @@ def experiment_propose(
         start_date=start_date,
         end_date=end_date,
         extra_config=extra_config,
+        principle_id=principle,
+        null_hypothesis=hypothesis,
     )
 
     db_url = str(SETTINGS.database_url)
@@ -9261,6 +9321,532 @@ def experiment_parent(
 
     except Exception as e:
         emit_error(f"Failed to get parent: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("discover")
+def experiment_discover(
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Discover available data sources, features, and experiment opportunities."""
+    from gefion.experiments.discovery import run_discovery, load_registry
+    from gefion.experiments.principles import load_principles
+    from gefion.cli_helpers import db_connection
+
+    with create_span("cli.experiment.discover"):
+        try:
+            principles = load_principles()
+            with db_connection(None) as conn:
+                result = run_discovery(conn, principles)
+
+            if json_output:
+                emit("Data Discovery", data={
+                    "data_sources": [{
+                        "table": s["table"],
+                        "description": s.get("description", ""),
+                        "row_count": s["row_count"],
+                        "date_range": s["date_range"],
+                        "freshness_days": s["freshness_days"],
+                        "columns": s["columns"],
+                    } for s in result["data_sources"]],
+                    "features_count": len(result["features"]),
+                    "gaps_count": len(result["gaps"]),
+                    "hypotheses": result["hypotheses"],
+                }, json_output=True)
+            else:
+                from rich.console import Console
+                from rich.table import Table
+                console = Console()
+
+                # Data sources
+                table = Table(title="Data Sources")
+                table.add_column("Table", style="cyan")
+                table.add_column("Description")
+                table.add_column("Rows", justify="right")
+                table.add_column("Date Range")
+                table.add_column("Fresh", justify="right")
+
+                for s in result["data_sources"]:
+                    dr = s["date_range"]
+                    date_str = f"{dr[0]} → {dr[1]}" if dr[0] else "No data"
+                    fresh = f"{s['freshness_days']}d" if s["freshness_days"] else "—"
+                    table.add_row(s["table"], s.get("description", "")[:40], f"{s['row_count']:,}", date_str, fresh)
+                console.print(table)
+
+                # Features
+                console.print(f"\n[bold]Features:[/bold] {len(result['features'])} defined")
+
+                # Gaps and hypotheses
+                if result["gaps"]:
+                    console.print(f"\n[bold yellow]Gaps found:[/bold yellow] {len(result['gaps'])}")
+                    for gap in result["gaps"][:5]:
+                        console.print(f"  • {gap['principle_id']}: missing {', '.join(gap['missing'])}")
+
+                if result["hypotheses"]:
+                    console.print(f"\n[bold green]Experiment hypotheses:[/bold green]")
+                    for h in result["hypotheses"][:5]:
+                        feasibility = "[green]ready[/green]" if h["feasibility"] == "ready" else "[red]blocked[/red]"
+                        console.print(f"  • [{h['experiment_type']}] {h['description'][:60]}... ({feasibility})")
+
+        except Exception as e:
+            emit_error(f"Discovery failed: {e}", json_output=json_output)
+            raise typer.Exit(1)
+
+
+@experiment_app.command("cycle-start")
+def experiment_cycle_start(
+    name: Optional[str] = typer.Option(None, "--name", help="Cycle name"),
+    holdout_weeks: int = typer.Option(6, "--holdout-weeks", help="Holdout window in weeks"),
+    fdr_rate: float = typer.Option(0.10, "--fdr-rate", help="FDR control rate"),
+    max_experiments: int = typer.Option(20, "--max-experiments", help="Max experiments per cycle"),
+    budget_seconds: int = typer.Option(7200, "--budget", help="Compute budget in seconds"),
+    config_file: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to cycle config JSON file with guardrails"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Start a new experiment cycle with holdout and FDR configuration.
+
+    Optionally pass --config to load a full config JSON with themes,
+    ML settings, and guardrails. Without --config, creates a minimal
+    cycle that can be configured later or run with defaults.
+
+    Examples:
+        # Minimal cycle
+        gefion experiment cycle-start --name exploration-1
+
+        # Full config from file
+        gefion experiment cycle-start --config cycle_config.json
+
+        # Create and immediately run
+        gefion experiment cycle-start --config cycle_config.json
+        gefion experiment cycle-run <cycle_id>
+    """
+    from gefion.experiments.holdout import HoldoutManager
+    from gefion.cli_helpers import db_connection
+
+    with create_span("cli.experiment.cycle_start"):
+        try:
+            # Load config file if provided
+            cycle_config = {}
+            if config_file:
+                try:
+                    cycle_config = json.loads(config_file.read_text())
+                except (json.JSONDecodeError, OSError) as e:
+                    emit_error(f"Failed to load config file: {e}", json_output=json_output)
+                    raise typer.Exit(1)
+
+                # Config can override CLI options
+                if "cycle_name" in cycle_config and not name:
+                    name = cycle_config["cycle_name"]
+                if "holdout_weeks" in cycle_config:
+                    holdout_weeks = cycle_config["holdout_weeks"]
+                if "fdr_rate" in cycle_config:
+                    fdr_rate = cycle_config["fdr_rate"]
+                if "max_experiments" in cycle_config:
+                    max_experiments = cycle_config["max_experiments"]
+
+            # Get max date from data
+            with db_connection(None) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT date FROM stock_ohlcv ORDER BY date DESC LIMIT 1")
+                    row = cur.fetchone()
+                    if not row:
+                        emit_error("No data in stock_ohlcv — cannot create holdout window", json_output=json_output)
+                        raise typer.Exit(1)
+                    max_date = row[0]
+
+            holdout = HoldoutManager(max_date=max_date, holdout_weeks=holdout_weeks)
+            cycle_name = name or f"cycle-{max_date}"
+
+            # Store config in discovery_snapshot.cycle_config
+            from psycopg.types.json import Json
+            snapshot = {"cycle_config": cycle_config} if cycle_config else None
+
+            # Insert cycle into database
+            with db_connection(None) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO experiment_cycles (name, holdout_start_date, holdout_end_date,
+                            fdr_rate, compute_budget_seconds, max_experiments, status,
+                            discovery_snapshot)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'proposed', %s)
+                        RETURNING id
+                    """, (cycle_name, holdout.holdout_start_date, holdout.holdout_end_date,
+                          fdr_rate, budget_seconds, max_experiments,
+                          Json(snapshot) if snapshot else None))
+                    cycle_id = cur.fetchone()[0]
+                    conn.commit()
+
+            if json_output:
+                emit("Cycle Created", data={
+                    "cycle_id": cycle_id,
+                    "name": cycle_name,
+                    "holdout_start": str(holdout.holdout_start_date),
+                    "holdout_end": str(holdout.holdout_end_date),
+                    "max_training_date": str(holdout.get_max_training_date()),
+                    "fdr_rate": fdr_rate,
+                    "has_config": bool(cycle_config),
+                }, json_output=True)
+            else:
+                from rich.console import Console
+                console = Console()
+                console.print(f"[bold green]Cycle #{cycle_id} created[/bold green]")
+                console.print(f"  Name: {cycle_name}")
+                console.print(f"  Holdout: {holdout.holdout_start_date} → {holdout.holdout_end_date}")
+                console.print(f"  Max training date: {holdout.get_max_training_date()}")
+                console.print(f"  FDR rate: {fdr_rate}")
+                console.print(f"  Budget: {budget_seconds}s, Max experiments: {max_experiments}")
+                if cycle_config:
+                    themes = cycle_config.get("selected_themes", [])
+                    if themes:
+                        console.print(f"  Themes: {', '.join(themes)}")
+                    console.print(f"  Config loaded from file")
+
+        except Exception as e:
+            emit_error(f"Failed to create cycle: {e}", json_output=json_output)
+            raise typer.Exit(1)
+
+
+@experiment_app.command("cycle-run")
+def experiment_cycle_run(
+    cycle_id: int = typer.Argument(..., help="Cycle ID to run"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Run an autonomous experiment cycle.
+
+    Discovers hypotheses, proposes experiments based on cycle guardrails,
+    auto-approves (if configured), runs all experiments, and applies
+    FDR correction to filter out false discoveries.
+
+    Examples:
+        # Start a cycle then run it
+        gefion experiment cycle-start --name exploration-1
+        gefion experiment cycle-run 1
+
+        # Run with JSON output
+        gefion experiment cycle-run 1 --json
+    """
+    with create_span("cli.experiment_cycle_run", cycle_id=cycle_id):
+        from gefion.experiments.cycle_runner import CycleRunner
+
+        db_url = str(SETTINGS.database_url)
+        runner = CycleRunner(db_url)
+
+        try:
+            if json_output:
+                def _on_progress(phase, message, detail=None):
+                    emit(message, data={"phase": phase, **(detail or {})}, json_output=True)
+
+                results = runner.run_cycle(cycle_id, on_progress=_on_progress)
+                emit_json({
+                    "cycle_id": cycle_id,
+                    "status": "completed",
+                    **results,
+                })
+            else:
+                from rich.console import Console
+                console = Console()
+
+                phase_styles = {
+                    "loading": "[dim]",
+                    "preflight": "[cyan]",
+                    "preflight_warning": "[yellow]  ",
+                    "dataset": "[blue]",
+                    "discovery": "[cyan]",
+                    "proposing": "[blue]",
+                    "proposed": "[dim]  ",
+                    "approving": "[green]",
+                    "running": "[yellow]",
+                    "experiment_done": "[green]  ",
+                    "experiment_failed": "[red]  ",
+                    "errors": "[red]",
+                    "evaluating": "[magenta]",
+                    "promoted": "[bold cyan]",
+                    "complete": "[bold green]",
+                }
+
+                def _on_progress(phase, message, detail=None):
+                    style = phase_styles.get(phase, "[dim]")
+                    console.print(f"  {style}{message}[/]")
+
+                console.print(f"\n[bold]Cycle #{cycle_id}[/bold]\n")
+                results = runner.run_cycle(cycle_id, on_progress=_on_progress)
+
+                failed = results.get("failed", 0)
+                completed = results.get("completed", 0)
+
+                if failed and not completed:
+                    console.print(f"\n[bold red]All experiments failed![/bold red]")
+                elif failed:
+                    console.print(f"\n[bold yellow]Complete with errors[/bold yellow]")
+                else:
+                    console.print(f"\n[bold green]Complete![/bold green]")
+
+                console.print(f"  Proposed:      {results.get('proposed', 0)} experiments")
+                console.print(f"  Completed:     {completed} experiments")
+                if failed:
+                    console.print(f"  [red]Failed:        {failed} experiments[/red]")
+                console.print(f"  FDR Survivors: {results.get('fdr_survivors', 0)}")
+                promoted = results.get("promoted", 0)
+                if promoted:
+                    console.print(f"  [bold cyan]Promoted:      {promoted} feature(s) to active[/bold cyan]")
+
+                errors = results.get("errors", [])
+                if errors:
+                    console.print(f"\n[bold red]Errors:[/bold red]")
+                    for err in set(errors):
+                        console.print(f"  [red]- {err}[/red]")
+
+        except Exception as e:
+            emit_error(f"Cycle run failed: {e}", json_output=json_output)
+            if os.environ.get("DEBUG"):
+                import traceback
+                traceback.print_exc()
+            raise typer.Exit(1)
+
+
+@experiment_app.command("cycle-status")
+def experiment_cycle_status(
+    cycle_id: int = typer.Argument(..., help="Cycle ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Get status of an experiment cycle."""
+    from gefion.cli_helpers import db_connection
+
+    try:
+        with db_connection(None) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, name, holdout_start_date, holdout_end_date,
+                           fdr_rate, status, compute_budget_seconds, max_experiments,
+                           created_at, completed_at, summary
+                    FROM experiment_cycles WHERE id = %s
+                """, (cycle_id,))
+                row = cur.fetchone()
+                if not row:
+                    emit_error(f"Cycle {cycle_id} not found", json_output=json_output)
+                    raise typer.Exit(1)
+
+                # Count experiments in this cycle
+                cur.execute("""
+                    SELECT status, COUNT(*) FROM experiments
+                    WHERE cycle_id = %s GROUP BY status
+                """, (cycle_id,))
+                exp_counts = dict(cur.fetchall())
+
+        cycle = {
+            "cycle_id": row[0], "name": row[1],
+            "holdout_start": str(row[2]), "holdout_end": str(row[3]),
+            "fdr_rate": float(row[4]), "status": row[5],
+            "budget_seconds": row[6], "max_experiments": row[7],
+            "created_at": str(row[8]),
+            "completed_at": str(row[9]) if row[9] else None,
+            "summary": row[10],
+            "experiments": exp_counts,
+        }
+
+        if json_output:
+            emit("Cycle Status", data=cycle, json_output=True)
+        else:
+            from rich.console import Console
+            console = Console()
+            console.print(f"[bold]Cycle #{cycle['cycle_id']}: {cycle['name']}[/bold]")
+            console.print(f"  Status: {cycle['status']}")
+            console.print(f"  Holdout: {cycle['holdout_start']} → {cycle['holdout_end']}")
+            console.print(f"  FDR rate: {cycle['fdr_rate']}")
+            if exp_counts:
+                console.print(f"  Experiments: {exp_counts}")
+
+    except Exception as e:
+        emit_error(f"Failed to get cycle status: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+@experiment_app.command("cycle-list")
+def experiment_cycle_list(
+    status: Optional[str] = typer.Option(None, "--status", help="Filter by status"),
+    limit: int = typer.Option(10, "--limit", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """List experiment cycles."""
+    from gefion.cli_helpers import db_connection
+
+    try:
+        with db_connection(None) as conn:
+            with conn.cursor() as cur:
+                query = "SELECT id, name, status, holdout_start_date, holdout_end_date, fdr_rate, created_at FROM experiment_cycles"
+                params = []
+                if status:
+                    query += " WHERE status = %s"
+                    params.append(status)
+                query += " ORDER BY created_at DESC LIMIT %s"
+                params.append(limit)
+                cur.execute(query, params)
+                rows = cur.fetchall()
+
+        cycles = [{
+            "id": r[0], "name": r[1], "status": r[2],
+            "holdout_start": str(r[3]), "holdout_end": str(r[4]),
+            "fdr_rate": float(r[5]), "created_at": str(r[6]),
+        } for r in rows]
+
+        if json_output:
+            emit("Experiment Cycles", data={"cycles": cycles, "count": len(cycles)}, json_output=True)
+        else:
+            from rich.console import Console
+            from rich.table import Table
+            console = Console()
+            table = Table(title="Experiment Cycles")
+            table.add_column("ID", justify="right")
+            table.add_column("Name")
+            table.add_column("Status")
+            table.add_column("Holdout")
+            table.add_column("FDR")
+            table.add_column("Created")
+            for c in cycles:
+                table.add_row(str(c["id"]), c["name"], c["status"],
+                              f"{c['holdout_start']} → {c['holdout_end']}",
+                              str(c["fdr_rate"]), c["created_at"][:10])
+            console.print(table)
+
+    except Exception as e:
+        emit_error(f"Failed to list cycles: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
+# ==============================================================================
+# Principles Commands
+# ==============================================================================
+
+principles_app = typer.Typer(help="Quantitative finance principles catalog")
+app.add_typer(principles_app, name="principles", cls=SortedGroup)
+
+
+@principles_app.command("list")
+def principles_list_cmd(
+    domain: Optional[str] = typer.Option(None, "--domain", "-d", help="Filter by domain (statistical, ml_finance, factor, risk_portfolio, microstructure)"),
+    experiment_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by experiment type"),
+    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by empirical status"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """List principles from the catalog."""
+    from gefion.experiments.principles import load_principles, query_principles
+
+    try:
+        principles = load_principles(domain=domain)
+        if experiment_type or status:
+            principles = query_principles(principles, experiment_type=experiment_type, status=status)
+
+        if json_output:
+            emit("Principles", data={
+                "count": len(principles),
+                "principles": [{
+                    "id": p["id"],
+                    "claim": p["claim"],
+                    "source": f"{p['source']['author']} ({p['source']['year']})",
+                    "experiment_types": p["experiment_types"],
+                    "empirical_status": p["empirical_status"],
+                } for p in principles],
+            }, json_output=True)
+        else:
+            from rich.console import Console
+            from rich.table import Table
+            console = Console()
+            table = Table(title=f"Principles ({len(principles)})")
+            table.add_column("ID", style="cyan")
+            table.add_column("Source")
+            table.add_column("Claim", max_width=50)
+            table.add_column("Types")
+            table.add_column("Status")
+            for p in principles:
+                table.add_row(
+                    p["id"],
+                    f"{p['source']['author']} ({p['source']['year']})",
+                    p["claim"][:50],
+                    ", ".join(p["experiment_types"][:2]),
+                    p["empirical_status"],
+                )
+            console.print(table)
+
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        raise typer.Exit(1)
+
+
+@principles_app.command("show")
+def principles_show_cmd(
+    principle_id: str = typer.Argument(..., help="Principle ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Show details of a specific principle."""
+    from gefion.experiments.principles import load_principles
+
+    principles = load_principles()
+    match = [p for p in principles if p["id"] == principle_id]
+
+    if not match:
+        emit_error(f"Principle '{principle_id}' not found", json_output=json_output)
+        raise typer.Exit(1)
+
+    p = match[0]
+    if json_output:
+        emit("Principle", data=p, json_output=True)
+    else:
+        from rich.console import Console
+        console = Console()
+        console.print(f"[bold cyan]{p['id']}[/bold cyan]")
+        console.print(f"  Source: {p['source']['author']}, {p['source']['title']} ({p['source']['year']})")
+        console.print(f"  Claim: {p['claim']}")
+        console.print(f"  Mechanism: {p['mechanism']}")
+        console.print(f"  Testable: {p['testable_prediction']}")
+        console.print(f"  Design: {p['experiment_design']}")
+        console.print(f"  Limitations: {p.get('known_limitations', 'None listed')}")
+        console.print(f"  Data: {', '.join(p.get('data_requirements', []))}")
+        console.print(f"  Types: {', '.join(p['experiment_types'])}")
+        console.print(f"  Status: {p['empirical_status']}")
+        if p.get("experiments"):
+            console.print(f"  Experiments: {p['experiments']}")
+
+
+@principles_app.command("suggest")
+def principles_suggest_cmd(
+    experiment_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by experiment type"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Suggest experiments based on principles and current data."""
+    from gefion.experiments.principles import load_principles, query_principles
+    from gefion.experiments.discovery import run_discovery
+    from gefion.cli_helpers import db_connection
+
+    try:
+        principles = load_principles()
+        if experiment_type:
+            principles = query_principles(principles, experiment_type=experiment_type)
+
+        with db_connection(None) as conn:
+            result = run_discovery(conn, principles)
+
+        hypotheses = result["hypotheses"]
+
+        if json_output:
+            emit("Suggested Experiments", data={
+                "count": len(hypotheses),
+                "hypotheses": hypotheses,
+            }, json_output=True)
+        else:
+            from rich.console import Console
+            console = Console()
+            if not hypotheses:
+                console.print("[green]No gaps found — all principle data requirements are met.[/green]")
+                return
+            console.print(f"[bold]Suggested Experiments ({len(hypotheses)}):[/bold]\n")
+            for h in hypotheses:
+                feasibility = "[green]ready[/green]" if h["feasibility"] == "ready" else "[red]blocked[/red]"
+                console.print(f"  [{h['experiment_type']}] {h['principle_id']}")
+                console.print(f"    {h['description'][:80]}")
+                console.print(f"    Feasibility: {feasibility}\n")
+
+    except Exception as e:
+        emit_error(f"Failed to suggest experiments: {e}", json_output=json_output)
         raise typer.Exit(1)
 
 
@@ -10095,7 +10681,7 @@ def data_cull(
     Pass --confirm to actually execute the deletion.
     """
     from datetime import date as date_type, datetime
-    from gefion.db.cull import plan_cull, execute_cull
+    from gefion.db.cull import plan_cull, execute_cull, vacuum_after_cull
     from gefion.cli_helpers import db_connection
 
     try:
@@ -10228,18 +10814,15 @@ def data_cull(
                     table.add_row("[bold]Total[/bold]", f"[bold]{sum(result.values()):,}[/bold]")
                     console.print(table)
 
-                # Auto-vacuum after cull to reclaim disk space
+                # Auto-vacuum affected tables to update pg_stat row counts
                 if result and sum(result.values()) > 0:
-                    with create_span("cli.data_cull.vacuum"):
-                        if json_output:
-                            emit("Vacuuming database", data={"phase": "vacuum"}, json_output=True)
-                        else:
-                            console.print("\n[dim]Vacuuming to reclaim disk space...[/dim]")
-                        conn.autocommit = True
-                        with conn.cursor() as cur:
-                            cur.execute("VACUUM ANALYZE")
-                        if not json_output:
-                            console.print("[green]Vacuum complete.[/green]")
+                    if json_output:
+                        emit("Vacuuming database", data={"phase": "vacuum"}, json_output=True)
+                    else:
+                        console.print("\n[dim]Vacuuming to reclaim disk space...[/dim]")
+                    vacuum_after_cull(conn, affected_tables=result)
+                    if not json_output:
+                        console.print("[green]Vacuum complete.[/green]")
 
     except Exception as exc:
         import traceback

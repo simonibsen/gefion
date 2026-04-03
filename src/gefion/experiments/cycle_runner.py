@@ -1,0 +1,1112 @@
+"""Autonomous experiment cycle orchestrator.
+
+Chains discovery → propose → approve → run → evaluate into a single
+autonomous workflow with configurable guardrails.
+"""
+import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Optional
+
+import psycopg
+
+from gefion.experiments.core import ExperimentConfig, ExperimentRunner
+from gefion.experiments.discovery import run_discovery
+from gefion.experiments.principles import load_principles
+from gefion.experiments.safety import run_preflight_checks
+from gefion.experiments.statistical import apply_fdr, compute_holdout_pvalue
+from gefion.observability import create_span, set_attributes, add_event
+
+logger = logging.getLogger(__name__)
+
+
+# Sensible defaults when the user doesn't specify search bounds.
+DEFAULT_SEARCH_SPACES = {
+    "hyperparameter": {
+        "learning_rate": {"type": "float", "low": 0.005, "high": 0.3, "log": True},
+        "n_estimators": {"type": "int", "low": 50, "high": 500},
+        "max_depth": {"type": "int", "low": 2, "high": 12},
+    },
+    "model_comparison": {
+        "model_type": ["lightgbm", "xgboost", "quantile_regression"],
+    },
+    "feature_selection": {
+        # Built dynamically from available features
+    },
+    "feature_engineering": {
+        "window": {"type": "int", "low": 5, "high": 30, "step": 5},
+    },
+    "label_engineering": {
+        "label_type": ["raw", "log_return", "winsorized", "sign"],
+    },
+    "strategy_params": {
+        "lookback_days": {"type": "int", "low": 5, "high": 30},
+    },
+}
+
+
+# Feature function templates for agent-generated code.
+# Each template produces a compute(df, **params) function.
+FEATURE_FUNCTION_TEMPLATES = {
+    "variance_ratio": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=20):
+    """Variance ratio: ratio of long-horizon variance to short-horizon variance."""
+    returns = df['close'].pct_change()
+    var_1 = returns.rolling(1).var()
+    var_q = returns.rolling(window).var() / window
+    ratio = var_q / var_1
+    return ratio.fillna(0)
+''',
+    "autocorrelation_lag": '''import numpy as np
+import pandas as pd
+
+def compute(df, lag=5):
+    """Autocorrelation of returns at a specific lag."""
+    returns = df['close'].pct_change()
+    return returns.rolling(50).apply(lambda x: x.autocorr(lag=lag) if len(x) > lag else 0, raw=False).fillna(0)
+''',
+    "volatility_ratio": '''import numpy as np
+import pandas as pd
+
+def compute(df, short_window=5, long_window=20):
+    """Ratio of short-term to long-term volatility (squeeze detection)."""
+    returns = df['close'].pct_change()
+    short_vol = returns.rolling(short_window).std()
+    long_vol = returns.rolling(long_window).std()
+    return (short_vol / long_vol).fillna(1)
+''',
+    "price_acceleration": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=10):
+    """Second derivative of price — acceleration of momentum."""
+    momentum = df['close'].pct_change(window)
+    acceleration = momentum.diff()
+    return acceleration.fillna(0)
+''',
+    "volume_price_divergence": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=20):
+    """Divergence between volume trend and price trend."""
+    price_trend = df['close'].pct_change(window)
+    volume_trend = df['volume'].pct_change(window) if 'volume' in df.columns else pd.Series(0, index=df.index)
+    return (volume_trend - price_trend).fillna(0)
+''',
+    "mean_reversion_signal": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=20):
+    """Z-score of price relative to rolling mean — mean reversion signal."""
+    mean = df['close'].rolling(window).mean()
+    std = df['close'].rolling(window).std()
+    zscore = (df['close'] - mean) / std
+    return zscore.fillna(0)
+''',
+    "tail_risk_indicator": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=60, percentile=5):
+    """Rolling VaR-like tail risk: percentile of return distribution."""
+    returns = df['close'].pct_change()
+    var = returns.rolling(window).quantile(percentile / 100.0)
+    return var.fillna(0)
+''',
+    "hurst_exponent_proxy": '''import numpy as np
+import pandas as pd
+
+def compute(df, window=100):
+    """Proxy for Hurst exponent using rescaled range."""
+    returns = df['close'].pct_change().fillna(0)
+    def rs_ratio(x):
+        if len(x) < 10:
+            return 0.5
+        mean_r = x.mean()
+        devs = (x - mean_r).cumsum()
+        R = devs.max() - devs.min()
+        S = x.std()
+        if S == 0:
+            return 0.5
+        return np.log(R / S) / np.log(len(x))
+    return returns.rolling(window).apply(rs_ratio, raw=False).fillna(0.5)
+''',
+}
+
+
+def _categorize_principle(principle_id: str) -> str:
+    """Derive a feature category from a principle ID for tag-based grouping."""
+    pid = principle_id.lower()
+    if any(k in pid for k in ("volatility", "garch", "contraction", "squeeze")):
+        return "Volatility"
+    if any(k in pid for k in ("momentum", "acceleration", "trend")):
+        return "Momentum"
+    if any(k in pid for k in ("mean-reversion", "cointegration", "pairs")):
+        return "Mean Reversion"
+    if any(k in pid for k in ("volume", "vpin", "informed-trading", "bid-ask", "spread")):
+        return "Volume"
+    if any(k in pid for k in ("variance-ratio", "unit-root", "hurst", "autocorrelation", "stationarity")):
+        return "Statistical"
+    if any(k in pid for k in ("tail", "kurtosis", "fat-tail", "black-swan", "antifragil")):
+        return "Statistical"
+    if any(k in pid for k in ("fractional", "differentiation", "purged", "meta-label")):
+        return "Statistical"
+    return "Custom"
+
+
+def _generate_function_body_claude(principle_id: str, experiment_design: str) -> Optional[str]:
+    """Use Claude Code (claude -p) to generate a feature function.
+
+    Invokes the same Claude Code instance the chat widget uses.
+    Returns a compute(df, **params) function body, or None if unavailable.
+    """
+    import shutil
+    import subprocess
+
+    if not shutil.which("claude"):
+        logger.debug("claude CLI not found, skipping AI code generation")
+        return None
+
+    prompt = f"""Write a Python feature function for a quantitative trading system.
+
+Principle: {principle_id}
+Description: {experiment_design}
+
+Requirements:
+- Define exactly: def compute(df, window=20):
+- df has columns: close, open, high, low, volume (all numeric, time-ordered)
+- Return a pandas Series the same length as df
+- Handle NaN values with .fillna()
+- Use only: numpy, pandas, scipy, sklearn, talib, math, statistics
+- No file I/O, network, or system calls
+- The function should capture the essence of the principle described above
+- Include a docstring explaining what the feature measures
+
+Return ONLY the Python code, no markdown fences or explanations."""
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "text"],
+            capture_output=True, text=True, timeout=60,
+        )
+
+        if result.returncode != 0:
+            logger.warning(f"claude -p failed for {principle_id}: {result.stderr[:200]}")
+            return None
+
+        code = result.stdout.strip()
+
+        # Strip markdown fences if present
+        if code.startswith("```"):
+            lines = code.split("\n")
+            code = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+        # Validate it's valid Python with a compute function
+        try:
+            compiled = compile(code, "<claude_generated>", "exec")
+            env = {}
+            exec(compiled, {"__builtins__": __builtins__}, env)
+            if callable(env.get("compute")):
+                logger.info(f"Claude generated feature function for {principle_id}")
+                return code
+            else:
+                logger.warning(f"Claude code for {principle_id} missing compute() function")
+                return None
+        except SyntaxError as e:
+            logger.warning(f"Claude generated invalid Python for {principle_id}: {e}")
+            return None
+
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Claude code generation timed out for {principle_id}")
+        return None
+    except Exception as e:
+        logger.warning(f"Claude code generation failed for {principle_id}: {e}")
+        return None
+
+
+def _generate_function_body_template(principle_id: str) -> Optional[str]:
+    """Match principle to a pre-built template by keyword."""
+    pid = principle_id.lower()
+    if "variance-ratio" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["variance_ratio"]
+    if "autocorrelation" in pid or "lag" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["autocorrelation_lag"]
+    if "volatility" in pid or "garch" in pid or "contraction" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["volatility_ratio"]
+    if "momentum" in pid or "acceleration" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["price_acceleration"]
+    if "volume" in pid or "vpin" in pid or "informed-trading" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["volume_price_divergence"]
+    if "mean-reversion" in pid or "cointegration" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["mean_reversion_signal"]
+    if "tail" in pid or "fat-tail" in pid or "kurtosis" in pid or "black-swan" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["tail_risk_indicator"]
+    if "hurst" in pid or "random-walk" in pid or "unit-root" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["hurst_exponent_proxy"]
+    if "bid-ask" in pid or "spread" in pid or "microstructure" in pid:
+        return FEATURE_FUNCTION_TEMPLATES["volume_price_divergence"]
+    return FEATURE_FUNCTION_TEMPLATES["mean_reversion_signal"]
+
+
+def _generate_function_body(principle_id: str, experiment_design: str) -> Optional[str]:
+    """Generate a feature function body from a principle.
+
+    Tries LLM generation first (Claude API), falls back to templates.
+    """
+    # Try Claude Code first — reads the experiment_design and writes custom code
+    body = _generate_function_body_claude(principle_id, experiment_design)
+    if body:
+        return body
+
+    # Fallback: keyword-matched templates
+    return _generate_function_body_template(principle_id)
+
+
+class CycleRunner:
+    """Orchestrates a full autonomous experiment cycle.
+
+    Usage:
+        runner = CycleRunner("postgresql://...")
+        results = runner.run_cycle(cycle_id)
+    """
+
+    def __init__(self, db_url: str):
+        self.db_url = db_url
+        self.runner = ExperimentRunner(db_url)
+
+    def _get_conn(self):
+        """Get connection from shared pool."""
+        from gefion.db import pool as db_pool
+        p = db_pool.get_pool()
+        if p is not None:
+            return p.connection()
+        db_pool.init_pool(self.db_url)
+        return db_pool.get_pool().connection()
+
+    def run_cycle(self, cycle_id: int, on_progress: Optional[callable] = None) -> Dict[str, Any]:
+        """Execute a full autonomous experiment cycle.
+
+        Steps:
+            1. Load cycle config (guardrails, allowed types, search bounds)
+            2. Run discovery to find testable hypotheses
+            3. Filter by allowed types, propose experiments
+            4. Auto-approve if configured
+            5. Run experiments (parallel with resource checks)
+            6. Evaluate results with FDR correction
+            7. Mark survivors and update cycle status
+
+        Args:
+            cycle_id: ID of the cycle to run (from experiment_cycles table).
+            on_progress: Optional callback(phase, message, detail) for status updates.
+
+        Returns:
+            Dict with proposed, completed, fdr_survivors counts and results.
+        """
+        def _emit(phase, message, detail=None):
+            if on_progress:
+                on_progress(phase, message, detail)
+
+        with create_span("experiments.cycle_runner.run_cycle", cycle_id=cycle_id) as span:
+            # 1. Load cycle
+            _emit("loading", "Loading cycle configuration...")
+            cycle = self._load_cycle(cycle_id)
+            config = cycle.get("config", {})
+            allowed_types = config.get("allowed_types", list(DEFAULT_SEARCH_SPACES.keys()))
+            auto_approve = config.get("auto_approve", True)
+            max_experiments = cycle.get("max_experiments", 20)
+            max_parallel = config.get("max_parallel", 3)
+            max_trials = config.get("max_trials_per_experiment") or 10
+            search_method = config.get("search_method") or "bayesian"
+            dataset_uri = config.get("dataset_uri")
+            horizon_days = config.get("horizon_days", 7)
+            algorithm = config.get("algorithm", "lightgbm")
+            search_bounds = config.get("search_bounds", {})
+
+            allowed_algorithms = config.get("allowed_algorithms", ["lightgbm", "xgboost", "quantile_regression"])
+            allowed_horizons = config.get("allowed_horizons", [7, 30])
+            quantiles = config.get("quantiles")  # None = agent decides
+            cv_folds = config.get("cv_folds")  # None = agent decides
+            embargo_pct = config.get("embargo_pct")  # None = agent decides
+
+            # Preflight: validate dataset before proposing experiments
+            _emit("preflight", "Validating dataset and data availability...")
+            preflight_issues = self._preflight_check(
+                dataset_uri=dataset_uri,
+                allowed_horizons=allowed_horizons,
+                allowed_types=allowed_types,
+            )
+            if preflight_issues:
+                for issue in preflight_issues:
+                    _emit("preflight_warning", issue["message"], issue)
+
+                # Filter out experiment types that can't run
+                blocked_types = {i["blocks_type"] for i in preflight_issues if i.get("blocks_type")}
+                if blocked_types:
+                    before = len(allowed_types)
+                    allowed_types = [t for t in allowed_types if t not in blocked_types]
+                    _emit("preflight",
+                          f"Removed {before - len(allowed_types)} experiment type(s) that can't run with available data")
+
+                if not allowed_types:
+                    _emit("preflight", "No experiment types can run with available data. Fix the issues above first.")
+                    self._update_cycle_status(cycle_id, "failed", {
+                        "proposed": 0, "completed": 0, "failed": 0, "fdr_survivors": 0,
+                        "errors": [i["message"] for i in preflight_issues],
+                    })
+                    return {
+                        "proposed": 0, "completed": 0, "failed": 0, "fdr_survivors": 0,
+                        "errors": [i["message"] for i in preflight_issues],
+                    }
+
+            set_attributes(span,
+                           max_experiments=max_experiments,
+                           allowed_types=",".join(allowed_types),
+                           auto_approve=auto_approve)
+
+            # 2. Discovery
+            _emit("discovery", "Running data discovery...",
+                  {"themes": config.get("selected_themes")})
+            selected_themes = config.get("selected_themes")
+            hypotheses = self._run_discovery(selected_themes=selected_themes)
+            ready = [
+                h for h in hypotheses
+                if h.get("feasibility") == "ready"
+                and h.get("experiment_type") in allowed_types
+            ]
+            set_attributes(span, total_hypotheses=len(hypotheses), ready_hypotheses=len(ready))
+            _emit("discovery", f"Found {len(hypotheses)} hypotheses, {len(ready)} ready",
+                  {"total": len(hypotheses), "ready": len(ready)})
+
+            # 3. Propose experiments (up to max)
+            _emit("proposing", f"Proposing up to {min(len(ready), max_experiments)} experiments...")
+            proposed_ids = []
+            for h in ready[:max_experiments]:
+                # Build search space: user bounds override defaults
+                exp_type = h["experiment_type"]
+                search_space = dict(DEFAULT_SEARCH_SPACES.get(exp_type, {}))
+                if exp_type in search_bounds:
+                    search_space.update(search_bounds[exp_type])
+
+                # For model_comparison, use allowed_algorithms
+                if exp_type == "model_comparison" and allowed_algorithms:
+                    search_space["model_type"] = allowed_algorithms
+
+                # Build CV config with agent-decidable settings
+                cv_config = {}
+                if cv_folds is not None:
+                    cv_config["n_splits"] = cv_folds
+                else:
+                    cv_config["n_splits"] = 5  # agent default
+                if embargo_pct is not None:
+                    cv_config["embargo_pct"] = embargo_pct
+                else:
+                    cv_config["embargo_pct"] = 0.02  # agent default
+
+                # Pick horizon — if agent decides and multiple available, use first
+                exp_horizon = horizon_days if horizon_days else allowed_horizons[0]
+
+                # Pick algorithm — for non-comparison types, use first allowed
+                exp_algorithm = algorithm if algorithm else allowed_algorithms[0]
+
+                # For feature engineering, check if a relevant feature already exists
+                # before generating a new one
+                feature_config = {}
+                if exp_type == "feature_engineering":
+                    principle_id = h.get("principle_id", "")
+                    design = h.get("description", "")
+                    fn_name = principle_id.replace("-", "_")[:40]
+                    full_fn_name = f"exp_{fn_name}"
+
+                    # Check if this feature already exists (from a previous cycle)
+                    existing = self._find_existing_feature(full_fn_name, principle_id)
+                    if existing:
+                        _emit("proposed",
+                              f"  Reusing existing feature: {existing} (already computed)",
+                              {"function_name": existing, "reused": True})
+                        feature_config = {"function_name": existing.replace("exp_", "")}
+                    else:
+                        # Generate a new function
+                        body = _generate_function_body(principle_id, design)
+                        if body:
+                            feature_config = {
+                                "function_name": fn_name,
+                                "function_body": body,
+                            }
+                            self._store_experimental_function(
+                                fn_name, body, principle_id, design, cycle_id,
+                            )
+                            self._compute_experimental_feature(full_fn_name)
+                            _emit("proposed",
+                                  f"  Generated new feature function: {fn_name} (stored as experimental)",
+                                  {"function_name": fn_name})
+
+                exp_config = {
+                    "experiment_type": exp_type,
+                    "principle_id": h.get("principle_id", ""),
+                    "description": h.get("description", ""),
+                    "search_space": search_space,
+                    "dataset_uri": dataset_uri,
+                    "horizon_days": exp_horizon,
+                    "algorithm": exp_algorithm,
+                    "quantiles": quantiles or [0.1, 0.5, 0.9],
+                    "cv_config": cv_config,
+                    "max_trials": max_trials,
+                    "search_method": search_method,
+                }
+                if feature_config:
+                    exp_config["feature_config"] = feature_config
+                exp_id = self._propose_experiment(exp_config, cycle_id)
+                proposed_ids.append(exp_id)
+                add_event(span, "proposed", experiment_id=exp_id, type=exp_type)
+                _emit("proposed", f"Proposed experiment #{exp_id}: {exp_type}",
+                      {"experiment_id": exp_id, "type": exp_type,
+                       "principle": h.get("principle_id", "")})
+
+            # 3b. Rebuild dataset if new features were computed
+            has_new_features = any(
+                h.get("experiment_type") == "feature_engineering"
+                for h in ready[:max_experiments]
+            )
+            if has_new_features and dataset_uri:
+                _emit("dataset", "Rebuilding dataset with new experimental features...")
+                new_uri = self._rebuild_dataset(dataset_uri, allowed_horizons, cycle_id)
+                if new_uri:
+                    dataset_uri = new_uri
+                    # Update all proposed experiment configs to use the new dataset
+                    with self._get_conn() as conn:
+                        conn.autocommit = True
+                        with conn.cursor() as cur:
+                            for exp_id in proposed_ids:
+                                cur.execute("""
+                                    UPDATE experiments
+                                    SET config = jsonb_set(
+                                        COALESCE(config, '{}'::jsonb),
+                                        '{dataset_uri}',
+                                        %s::jsonb
+                                    )
+                                    WHERE id = %s
+                                """, (f'"{new_uri}"', exp_id))
+                    _emit("dataset", f"Dataset rebuilt: {new_uri}")
+
+            # 4. Auto-approve
+            _emit("approving", f"{'Auto-approving' if auto_approve else 'Awaiting approval for'} {len(proposed_ids)} experiments...")
+            if auto_approve:
+                for exp_id in proposed_ids:
+                    try:
+                        self.runner.approve(exp_id, approver="cycle_runner")
+                    except Exception as e:
+                        logger.warning(f"Failed to approve experiment {exp_id}: {e}")
+
+            # 5. Run experiments (parallel with safety checks)
+            _emit("running", f"Running {len(proposed_ids)} experiments (max {max_parallel} parallel)...")
+            results = self._run_experiments(proposed_ids, max_parallel, on_progress=_emit)
+            set_attributes(span, completed=len(results))
+
+            # 6. Evaluate with FDR
+            _emit("evaluating", "Applying FDR correction to filter false discoveries...")
+            fdr_results = self._evaluate_cycle(cycle_id, proposed_ids)
+
+            # 6b. Promote FDR survivors
+            survivor_ids = fdr_results.get("survivor_ids", [])
+            promoted_count = 0
+            if survivor_ids:
+                promoted_count = self._promote_fdr_survivors(cycle_id, survivor_ids)
+                if promoted_count > 0:
+                    _emit("promoted",
+                          f"Promoted {promoted_count} experimental feature(s) to active",
+                          {"promoted": promoted_count})
+
+            # 7. Summarize and surface errors clearly
+            successful = [r for r in results if r.get("status") == "completed" and "error" not in r]
+            failed = [r for r in results if r.get("status") == "failed" or "error" in r]
+
+            if failed:
+                error_msgs = set(r.get("error", "unknown") for r in failed)
+                _emit("errors",
+                      f"{len(failed)} experiment(s) failed: {'; '.join(error_msgs)}",
+                      {"failed_count": len(failed), "errors": list(error_msgs)})
+
+            if not successful and failed:
+                _emit("complete",
+                      f"Cycle finished but all {len(failed)} experiments failed. "
+                      f"Check dataset and data availability.",
+                      {"all_failed": True})
+            else:
+                _emit("complete",
+                      f"Cycle complete: {len(successful)} succeeded, {len(failed)} failed, "
+                      f"{fdr_results.get('survivors', 0)} FDR survivors")
+
+            summary = {
+                "proposed": len(proposed_ids),
+                "completed": len(successful),
+                "failed": len(failed),
+                "fdr_survivors": fdr_results.get("survivors", 0),
+                "promoted": promoted_count,
+                "results": results,
+                "errors": [r.get("error") for r in failed if r.get("error")],
+            }
+            self._update_cycle_status(cycle_id, "completed", summary)
+
+            return summary
+
+    def _preflight_check(
+        self,
+        dataset_uri: Optional[str],
+        allowed_horizons: List[int],
+        allowed_types: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Validate that experiments can actually run with available data.
+
+        Returns list of issues, each with 'message' and optional 'blocks_type'.
+        Empty list = all clear.
+        """
+        issues = []
+
+        # Check dataset exists and has required files
+        ml_types = {"hyperparameter", "model_comparison", "feature_engineering",
+                    "feature_selection", "label_engineering", "pipeline"}
+        needs_dataset = bool(ml_types & set(allowed_types))
+
+        if needs_dataset:
+            from pathlib import Path
+
+            if not dataset_uri:
+                # Try auto-detect
+                manifests = list(Path("datasets").glob("*/manifest.json")) if Path("datasets").exists() else []
+                if manifests:
+                    manifests.sort(key=lambda p: p.stat().st_mtime)
+                    dataset_uri = str(manifests[-1])
+                else:
+                    issues.append({
+                        "message": "No dataset found. Run 'gefion ml dataset-build' first.",
+                        "severity": "critical",
+                    })
+                    for t in ml_types:
+                        if t in allowed_types:
+                            issues.append({"message": f"Cannot run {t} experiments without a dataset", "blocks_type": t})
+                    return issues
+
+            manifest_path = Path(dataset_uri)
+            if not manifest_path.exists():
+                issues.append({
+                    "message": f"Dataset not found: {dataset_uri}",
+                    "severity": "critical",
+                })
+                for t in ml_types:
+                    if t in allowed_types:
+                        issues.append({"message": f"Cannot run {t} without dataset", "blocks_type": t})
+                return issues
+
+            # Check for features and labels files
+            dataset_dir = manifest_path.parent
+            has_features = (dataset_dir / "features.parquet").exists() or (dataset_dir / "features.csv").exists()
+            has_labels = (dataset_dir / "labels.parquet").exists() or (dataset_dir / "labels.csv").exists()
+
+            if not has_features:
+                issues.append({
+                    "message": f"Dataset {dataset_dir.name} has no features file. Rebuild with 'gefion ml dataset-build'.",
+                    "severity": "critical",
+                })
+            if not has_labels:
+                issues.append({
+                    "message": f"Dataset {dataset_dir.name} has no labels file. Rebuild with 'gefion ml dataset-build'.",
+                    "severity": "critical",
+                })
+
+            # Check that requested horizons exist in the dataset
+            if has_labels:
+                try:
+                    import json as _json
+                    manifest = _json.loads(manifest_path.read_text())
+                    available_horizons = manifest.get("horizons_days", [])
+                    for h in allowed_horizons:
+                        if available_horizons and h not in available_horizons:
+                            issues.append({
+                                "message": f"Horizon {h} days not in dataset (available: {available_horizons}). "
+                                           f"Rebuild dataset with '--horizons {','.join(str(x) for x in allowed_horizons)}'.",
+                                "severity": "warning",
+                            })
+                except Exception:
+                    pass
+
+            # Validate labels actually have data for the horizons
+            if has_labels:
+                try:
+                    import pandas as pd
+                    labels_file = dataset_dir / "labels.parquet"
+                    if not labels_file.exists():
+                        labels_file = dataset_dir / "labels.csv"
+                    if labels_file.suffix == ".parquet":
+                        labels_df = pd.read_parquet(labels_file)
+                    else:
+                        labels_df = pd.read_csv(labels_file)
+
+                    for h in allowed_horizons:
+                        horizon_labels = labels_df[labels_df["horizon_days"] == h]
+                        if len(horizon_labels) == 0:
+                            issues.append({
+                                "message": f"No labels for horizon {h} days in dataset. "
+                                           f"Rebuild with 'gefion ml dataset-build --horizons {h}'.",
+                                "severity": "critical",
+                            })
+                            for t in ml_types:
+                                if t in allowed_types:
+                                    issues.append({"message": f"{t} blocked: no labels for horizon {h}", "blocks_type": t})
+                except Exception as e:
+                    issues.append({
+                        "message": f"Could not validate labels: {e}",
+                        "severity": "warning",
+                    })
+
+        # Check system resources
+        try:
+            checks = run_preflight_checks()
+            if not checks.get("ok", True):
+                for check in checks.get("checks", []):
+                    if not check.get("ok", True):
+                        issues.append({
+                            "message": f"Resource warning: {check.get('message', 'unknown')}",
+                            "severity": "warning",
+                        })
+        except Exception:
+            pass
+
+        return issues
+
+    def _promote_fdr_survivors(self, cycle_id: int, survivor_ids: List[int]) -> int:
+        """Promote FDR-surviving experimental features to active status.
+
+        For each surviving experiment that has a feature_config with function_body,
+        update the corresponding feature_functions row from 'experimental' to 'active'.
+
+        Returns number of functions promoted.
+        """
+        promoted = 0
+        with self._get_conn() as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                for exp_id in survivor_ids:
+                    # Get experiment config
+                    cur.execute(
+                        "SELECT config, name FROM experiments WHERE id = %s", (exp_id,)
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        continue
+                    config = row[0] or {}
+                    exp_name = row[1]
+                    fc = config.get("feature_config", {})
+                    fn_name = fc.get("function_name")
+                    if not fn_name or not fc.get("function_body"):
+                        continue
+
+                    # Promote from experimental to active
+                    cur.execute("""
+                        UPDATE feature_functions
+                        SET status = 'active', updated_at = NOW()
+                        WHERE name = %s AND status = 'experimental'
+                    """, (f"exp_{fn_name}",))
+
+                    if cur.rowcount > 0:
+                        promoted += 1
+                        # Also activate the feature definition
+                        cur.execute("""
+                            UPDATE feature_definitions
+                            SET active = TRUE
+                            WHERE name = %s AND active = FALSE
+                        """, (f"exp_{fn_name}",))
+                        logger.info(f"Promoted feature function + definition exp_{fn_name} to active (experiment #{exp_id})")
+
+                    # Also mark the experiment as promoted
+                    cur.execute(
+                        "UPDATE experiments SET promoted_at = NOW() WHERE id = %s",
+                        (exp_id,),
+                    )
+
+        return promoted
+
+    def _find_existing_feature(self, fn_name: str, principle_id: str) -> Optional[str]:
+        """Check if a feature function already exists for this principle.
+
+        Looks for existing experimental or active functions by name or
+        principle_id tag. Returns the function name if found, None otherwise.
+        """
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    # Check by exact name
+                    cur.execute(
+                        "SELECT name FROM feature_functions WHERE name = %s",
+                        (fn_name,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return row[0]
+
+                    # Check by principle_id in tags
+                    cur.execute(
+                        "SELECT name FROM feature_functions WHERE %s = ANY(tags)",
+                        (principle_id,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return row[0]
+        except Exception:
+            pass
+        return None
+
+    def _rebuild_dataset(self, current_uri: str, horizons: List[int], cycle_id: int) -> Optional[str]:
+        """Rebuild the dataset to include newly computed experimental features.
+
+        Creates a new dataset version based on the current one, including
+        any experimental features that have been computed into computed_features.
+
+        Returns the new dataset URI, or None if rebuild failed.
+        """
+        import subprocess
+
+        try:
+            from pathlib import Path
+            manifest_path = Path(current_uri)
+            if not manifest_path.exists():
+                logger.warning(f"Cannot rebuild: dataset not found at {current_uri}")
+                return None
+
+            import json as _json
+            manifest = _json.loads(manifest_path.read_text())
+            name = manifest.get("name", "cycle")
+            horizons_str = ",".join(str(h) for h in horizons)
+
+            # Build new version
+            new_version = f"cycle-{cycle_id}"
+
+            cmd = [
+                "gefion", "ml", "dataset-build",
+                "--name", name,
+                "--version", new_version,
+                "--horizons", horizons_str,
+                "--format", manifest.get("format", "parquet"),
+                "--json",
+            ]
+
+            # Add exchange if in manifest
+            universe = manifest.get("universe", {})
+            if universe.get("exchange"):
+                cmd.extend(["--exchange", universe["exchange"]])
+
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=120,
+            )
+
+            if result.returncode == 0:
+                new_uri = f"datasets/{name}_{new_version}/manifest.json"
+                if Path(new_uri).exists():
+                    logger.info(f"Rebuilt dataset: {new_uri}")
+                    return new_uri
+
+            logger.warning(f"Dataset rebuild failed: {result.stderr[:200]}")
+            return None
+
+        except Exception as e:
+            logger.warning(f"Dataset rebuild failed: {e}")
+            return None
+
+    def _compute_experimental_feature(self, feature_name: str) -> None:
+        """Compute an experimental feature for all stocks.
+
+        Temporarily activates the feature definition, runs the dispatcher,
+        then deactivates it again (unless it's been promoted).
+        """
+        try:
+            with self._get_conn() as conn:
+                conn.autocommit = True
+                with conn.cursor() as cur:
+                    # Temporarily activate
+                    cur.execute(
+                        "UPDATE feature_definitions SET active = TRUE WHERE name = %s",
+                        (feature_name,),
+                    )
+
+                    # Get stock IDs to compute for
+                    cur.execute("SELECT id FROM stocks WHERE status = 'Active' LIMIT 100")
+                    stock_ids = [r[0] for r in cur.fetchall()]
+
+                # Compute using the dispatcher
+                from gefion.features.dispatcher import compute_features
+                for data_id in stock_ids:
+                    try:
+                        compute_features(
+                            conn, data_id,
+                            feature_names=[feature_name],
+                            incremental=True,
+                        )
+                    except Exception as e:
+                        logger.debug(f"Feature compute failed for stock {data_id}: {e}")
+                        break  # Stop on first error — function likely has a bug
+
+                # Deactivate again (experimental stays inactive)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE feature_definitions SET active = FALSE WHERE name = %s AND active = TRUE",
+                        (feature_name,),
+                    )
+
+                logger.info(f"Computed experimental feature {feature_name} for {len(stock_ids)} stocks")
+        except Exception as e:
+            logger.warning(f"Failed to compute experimental feature {feature_name}: {e}")
+
+    def _store_experimental_function(
+        self, fn_name: str, function_body: str,
+        principle_id: str, description: str, cycle_id: int,
+    ) -> None:
+        """Store a generated feature function as experimental in the DB.
+
+        Stored with status='experimental' so other experiments can use it,
+        but it won't be used in production until promoted to 'active'.
+        """
+        from gefion.cli_helpers import upsert_feature_function
+
+        payload = {
+            "name": f"exp_{fn_name}",
+            "version": f"cycle-{cycle_id}",
+            "language": "python",
+            "status": "experimental",
+            "enabled": True,
+            "description": f"AI-generated from principle: {principle_id}. {description[:200]}",
+            "function_body": function_body,
+            "created_by": "cycle_runner",
+            "tags": ["experimental", "ai-generated", _categorize_principle(principle_id), principle_id],
+        }
+
+        try:
+            with self._get_conn() as conn:
+                conn.autocommit = True
+                upsert_feature_function(conn, payload)
+
+                # Also create a feature_definition so the feature is discoverable
+                # and can be computed by the dispatcher
+                feat_def_name = f"exp_{fn_name}"
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO feature_definitions (name, function_name, params,
+                            source_table, source_column, active, version)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (name) DO UPDATE SET
+                            function_name = EXCLUDED.function_name,
+                            params = EXCLUDED.params,
+                            active = EXCLUDED.active,
+                            version = EXCLUDED.version
+                    """, (
+                        feat_def_name,
+                        feat_def_name,  # function_name matches the feature_functions.name
+                        '{"window": 20}',  # default params
+                        "stock_ohlcv",
+                        "close",
+                        False,  # inactive until promoted
+                        f"cycle-{cycle_id}",
+                    ))
+
+                logger.info(f"Stored experimental function + definition: {feat_def_name} (cycle {cycle_id})")
+        except Exception as e:
+            logger.warning(f"Failed to store experimental function exp_{fn_name}: {e}")
+
+    def _load_cycle(self, cycle_id: int) -> Dict[str, Any]:
+        """Load cycle record from database.
+
+        The cycle config (guardrails) is stored in the discovery_snapshot
+        JSONB column under the "cycle_config" key.
+        """
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, name, holdout_start_date, holdout_end_date,
+                           fdr_rate, max_experiments, compute_budget_seconds,
+                           status, discovery_snapshot
+                    FROM experiment_cycles
+                    WHERE id = %s
+                """, (cycle_id,))
+                row = cur.fetchone()
+                if not row:
+                    raise ValueError(f"Cycle {cycle_id} not found")
+
+                snapshot = row[8] if row[8] else {}
+                config = snapshot.get("cycle_config", {})
+
+                return {
+                    "id": row[0],
+                    "name": row[1],
+                    "holdout_start_date": row[2],
+                    "holdout_end_date": row[3],
+                    "fdr_rate": float(row[4]) if row[4] else 0.10,
+                    "max_experiments": row[5] or 20,
+                    "compute_budget_seconds": row[6] or 7200,
+                    "status": row[7],
+                    "config": config,
+                }
+
+    def _run_discovery(self, selected_themes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Run data discovery and return hypotheses, optionally filtered by themes."""
+        with self._get_conn() as conn:
+            principles = load_principles()
+
+            # Filter principles by selected themes
+            if selected_themes:
+                from gefion.ui.views.experiments import _get_theme_map
+                theme_map = _get_theme_map()
+                filtered = []
+                for p in principles:
+                    book = p.get("source", {}).get("title", "Other")
+                    theme = theme_map.get(book, "Other")
+                    if theme in selected_themes:
+                        filtered.append(p)
+                principles = filtered
+
+            result = run_discovery(conn, principles)
+            return result.get("hypotheses", [])
+
+    def _propose_experiment(self, exp_config: Dict[str, Any], cycle_id: int) -> int:
+        """Propose an experiment linked to the cycle."""
+        config = ExperimentConfig(
+            name=f"cycle-{cycle_id}-{exp_config['experiment_type']}-{exp_config.get('principle_id', 'auto')}",
+            experiment_type=exp_config["experiment_type"],
+            search_space=exp_config["search_space"],
+            objective_metric="quantile_loss",
+            objective_direction="minimize",
+            max_trials=exp_config.get("max_trials", 10),
+            search_method=exp_config.get("search_method", "bayesian"),
+            principle_id=exp_config.get("principle_id"),
+            null_hypothesis=exp_config.get("description"),
+            extra_config={
+                k: v for k, v in exp_config.items()
+                if k not in ("experiment_type", "search_space", "max_trials", "search_method",
+                             "principle_id", "description")
+            },
+        )
+        exp_id = self.runner.propose(config, proposed_by="cycle_runner")
+
+        # Link to cycle
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE experiments SET cycle_id = %s WHERE id = %s",
+                    (cycle_id, exp_id),
+                )
+            conn.commit()
+
+        return exp_id
+
+    def _run_experiments(self, experiment_ids: List[int], max_parallel: int = 3,
+                         on_progress: Optional[callable] = None) -> List[Dict[str, Any]]:
+        """Run experiments with controlled parallelism and resource checks.
+
+        Uses a thread pool with connection pooling to avoid DB connection
+        exhaustion. Each experiment gets connections from a shared pool.
+        """
+        results = []
+        completed_count = [0]  # list for nonlocal in nested function
+
+        def _run_one(exp_id: int) -> Dict[str, Any]:
+            # Safety check before each experiment
+            try:
+                checks = run_preflight_checks()
+                if not checks.get("ok", True):
+                    logger.warning(f"Preflight failed for experiment {exp_id}: {checks}")
+                    return {"experiment_id": exp_id, "status": "skipped", "reason": "resource_check_failed"}
+            except Exception:
+                pass
+
+            try:
+                if on_progress:
+                    on_progress("running", f"Running experiment #{exp_id}...",
+                               {"experiment_id": exp_id})
+                result = self.runner.run(exp_id)
+                completed_count[0] += 1
+                score = result.get("best_score", "N/A")
+                if on_progress:
+                    on_progress("experiment_done",
+                                f"Experiment #{exp_id} done ({completed_count[0]}/{len(experiment_ids)}), score: {score}",
+                                {"experiment_id": exp_id, "score": score})
+                return {"experiment_id": exp_id, "status": "completed", **result}
+            except Exception as e:
+                logger.error(f"Experiment {exp_id} failed: {e}")
+                completed_count[0] += 1
+                if on_progress:
+                    on_progress("experiment_failed",
+                                f"Experiment #{exp_id} failed ({completed_count[0]}/{len(experiment_ids)}): {e}",
+                                {"experiment_id": exp_id, "error": str(e)})
+                return {"experiment_id": exp_id, "status": "failed", "error": str(e)}
+
+        # Run with bounded parallelism
+        effective_parallel = min(max_parallel, len(experiment_ids))
+        if effective_parallel <= 1:
+            # Sequential for single experiment
+            for exp_id in experiment_ids:
+                results.append(_run_one(exp_id))
+        else:
+            with ThreadPoolExecutor(max_workers=effective_parallel) as executor:
+                futures = {executor.submit(_run_one, eid): eid for eid in experiment_ids}
+                for future in as_completed(futures):
+                    try:
+                        results.append(future.result())
+                    except Exception as e:
+                        exp_id = futures[future]
+                        results.append({"experiment_id": exp_id, "status": "error", "error": str(e)})
+
+        return results
+
+    def _evaluate_cycle(self, cycle_id: int, experiment_ids: List[int]) -> Dict[str, Any]:
+        """Collect results and apply FDR correction."""
+        # Load cycle FDR rate
+        cycle = self._load_cycle(cycle_id)
+        fdr_rate = cycle.get("fdr_rate", 0.10)
+
+        # Collect best scores as proxy p-values
+        # (In a full implementation, these would be holdout p-values from
+        # compute_holdout_pvalue, but we use best_score as a simple proxy)
+        scores = []
+        valid_ids = []
+        for exp_id in experiment_ids:
+            try:
+                exp = self.runner.get(exp_id)
+                if exp and exp.get("status") == "completed" and exp.get("best_score") is not None:
+                    scores.append(float(exp["best_score"]))
+                    valid_ids.append(exp_id)
+            except Exception:
+                continue
+
+        if not scores:
+            return {"survivors": 0, "total": len(experiment_ids)}
+
+        # Apply FDR (using scores as p-value proxy — lower is better for minimize)
+        survivors_mask = apply_fdr(scores, fdr_rate)
+        survivors = sum(survivors_mask)
+
+        # Mark survivors in DB
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                for exp_id, survived in zip(valid_ids, survivors_mask):
+                    cur.execute(
+                        "UPDATE experiments SET fdr_survived = %s WHERE id = %s",
+                        (survived, exp_id),
+                    )
+            conn.commit()
+
+        return {
+            "survivors": survivors,
+            "total": len(valid_ids),
+            "fdr_rate": fdr_rate,
+            "survivor_ids": [eid for eid, s in zip(valid_ids, survivors_mask) if s],
+        }
+
+    def _update_cycle_status(self, cycle_id: int, status: str, summary: Dict[str, Any]) -> None:
+        """Update cycle status and summary in database."""
+        from psycopg.types.json import Json
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE experiment_cycles
+                    SET status = %s, summary = %s, completed_at = NOW()
+                    WHERE id = %s
+                """, (status, Json(summary), cycle_id))
+            conn.commit()

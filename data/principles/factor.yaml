@@ -1,0 +1,196 @@
+# Principles: Factor Models & Asset Pricing
+# Sources: Ang (2014), Bali/Engle/Murray (2016)
+# Domain: factor
+# Extracted: 2026-03-29
+
+- id: value-premium-mean-reversion
+  source:
+    author: "Andrew Ang"
+    title: "Asset Management: A Systematic Approach to Factor Investing"
+    year: 2014
+    chapter: "Chapter 7: Factor Theory"
+  claim: "The value premium arises because value stocks are fundamentally riskier, bearing higher exposure to aggregate economic distress, and this premium is time-varying and larger after periods of wide value spreads."
+  mechanism: "High book-to-market stocks load on a distress factor; in bad times their cashflows covary more with the stochastic discount factor. When the spread between cheap and expensive stocks widens, expected returns for value strategies increase because risk compensation is higher."
+  experiment_types: [feature_engineering, model_comparison, strategy_optimization]
+  testable_prediction: "A long-short portfolio sorted on book_value/market_cap should earn positive returns over 3-12 month horizons, and the magnitude should increase when the cross-sectional dispersion of book-to-market ratios is above its historical median."
+  experiment_design: "Compute book_value/market_cap for the universe. Each month, sort stocks into quintiles. Build a long-short portfolio (Q5 minus Q1). Measure annualized return and Sharpe ratio over a 10-year backtest. Then split the sample by whether the cross-sectional spread of B/M is above or below median and compare Sharpe ratios across regimes."
+  known_limitations: "Value has experienced prolonged drawdowns (2017-2020 especially). The premium may be weaker in mega-cap tech-heavy universes. Book value is a noisy proxy for intrinsic value in asset-light industries."
+  data_requirements: ["book_value", "market_cap", "close", "sector"]
+  empirical_status: untested
+  experiments: []
+
+- id: momentum-cross-sectional
+  source:
+    author: "Andrew Ang"
+    title: "Asset Management: A Systematic Approach to Factor Investing"
+    year: 2014
+    chapter: "Chapter 8: Factor Investing"
+  claim: "Cross-sectional momentum (buying recent winners, selling recent losers over 2-12 month formation periods) earns a significant premium, but is subject to occasional severe crashes that coincide with market reversals."
+  mechanism: "Momentum profits arise from slow information diffusion and investor underreaction to firm-specific news. The strategy implicitly takes on crash risk because past losers have high betas in recoveries and past winners have low betas, creating a concave payoff profile."
+  experiment_types: [feature_engineering, strategy_optimization, pipeline]
+  testable_prediction: "A 12-1 month momentum signal (cumulative return months t-12 to t-2, skipping t-1) should produce a positive long-short quintile spread on average, but should exhibit large negative returns in the 1st and 2nd months following a bear-market trough."
+  experiment_design: "Compute 12-1 momentum for all stocks. Each month, rank into quintiles. Backtest the Q5-Q1 spread. Separately identify months within 60 days of a 20%+ drawdown trough. Compare average monthly Q5-Q1 return in normal vs crash-adjacent months. Also test whether adding a 1-month reversal skip improves or degrades results."
+  known_limitations: "Transaction costs erode momentum profits significantly for small-caps. The signal decays quickly and requires monthly rebalancing. Momentum may be weaker in highly liquid large-cap segments where information is priced faster."
+  data_requirements: ["close", "market_cap", "volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: low-volatility-anomaly
+  source:
+    author: "Andrew Ang"
+    title: "Asset Management: A Systematic Approach to Factor Investing"
+    year: 2014
+    chapter: "Chapter 10: Volatility"
+  claim: "Low-volatility and low-beta stocks earn higher risk-adjusted returns than the CAPM predicts, producing a flatter (or inverted) security market line; this anomaly persists because of leverage constraints and benchmarking incentives."
+  mechanism: "Investors who cannot lever up instead tilt toward high-beta stocks, bidding up their prices and depressing their future returns. Institutional benchmarking against cap-weighted indices further amplifies demand for volatile stocks. The result is that low-volatility portfolios deliver comparable or higher returns with substantially lower drawdowns."
+  experiment_types: [feature_engineering, model_comparison, strategy_optimization]
+  testable_prediction: "Sorting stocks into quintiles by trailing 60-day realized volatility, the lowest-volatility quintile should have a higher Sharpe ratio than the highest-volatility quintile, and the relationship between beta-rank and subsequent returns should be flat or downward-sloping."
+  experiment_design: "Compute 60-day rolling realized volatility and CAPM beta for each stock. Sort into quintiles monthly. Backtest each quintile portfolio (equal-weighted). Compare Sharpe ratios, max drawdowns, and raw returns across quintiles. Regress next-month returns on beta rank cross-sectionally (Fama-MacBeth) and test whether the slope is significantly less than the market excess return."
+  known_limitations: "Low-vol strategies have significant sector concentration (utilities, consumer staples). They underperform in strong bull markets. The anomaly may partly reflect omitted risk factors rather than true alpha."
+  data_requirements: ["close", "beta", "sector", "volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: factor-timing-predictability
+  source:
+    author: "Andrew Ang"
+    title: "Asset Management: A Systematic Approach to Factor Investing"
+    year: 2014
+    chapter: "Chapter 14: Factor Timing"
+  claim: "Factor premia exhibit time-variation linked to macroeconomic state variables (term spread, credit spread, volatility), but exploiting this in real time is extremely difficult — most factor timing strategies fail out-of-sample after accounting for estimation error and transaction costs."
+  mechanism: "Factor risk premia are compensation for bearing systematic risk that varies over the business cycle. In theory, conditioning on macro variables should improve factor allocation. In practice, the signal-to-noise ratio is too low, estimation windows are short, and regime changes are identified only with hindsight."
+  experiment_types: [model_comparison, hyperparameter, strategy_optimization]
+  testable_prediction: "A model that dynamically weights value/momentum/low-vol factors based on trailing volatility regime (VIX-proxy or realized vol) should NOT significantly outperform a static equal-weight factor combination after transaction costs, measured by out-of-sample Sharpe ratio difference being statistically indistinguishable from zero."
+  experiment_design: "Build three factor portfolios (value, momentum, low-vol). Train a simple regime-switching model using 60-day realized market vol as the state variable, fitting on 70% of history. Compare the dynamic allocation Sharpe ratio vs a static 1/3-1/3-1/3 allocation on the 30% holdout, including 10bps round-trip transaction costs per rebalance. Bootstrap confidence intervals on the Sharpe difference."
+  known_limitations: "This tests only a simple timing signal; more sophisticated ML-based timing may succeed. The principle applies most strongly to monthly-frequency factor timing; intraday momentum timing may behave differently."
+  data_requirements: ["close", "market_cap", "book_value", "beta", "volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: quality-factor-profitability
+  source:
+    author: "Andrew Ang"
+    title: "Asset Management: A Systematic Approach to Factor Investing"
+    year: 2014
+    chapter: "Chapter 7: Factor Theory"
+  claim: "High-quality stocks (high profitability, stable earnings, low leverage) earn a premium that is distinct from value and momentum, and this quality premium is more robust during market downturns."
+  mechanism: "Quality stocks have more predictable cashflows and lower bankruptcy risk. The market systematically underprices the persistence of high profitability. During downturns, flight-to-quality amplifies the return spread as investors sell low-quality names first."
+  experiment_types: [feature_engineering, feature_selection, model_comparison]
+  testable_prediction: "A composite quality score based on operating_margin rank and earnings stability should predict next-quarter cross-sectional returns with a positive and significant Fama-MacBeth coefficient, even after controlling for value (B/M) and momentum (12-1)."
+  experiment_design: "Construct a quality score as the average percentile rank of operating_margin and inverse-volatility of trailing 8-quarter operating_margin. Run monthly Fama-MacBeth regressions of next-month returns on quality, B/M, and 12-1 momentum. Report the time-series average coefficient on quality, its Newey-West t-statistic, and the incremental R-squared from adding quality to a value+momentum specification."
+  known_limitations: "Quality definitions vary widely and results are sensitive to the specific metrics used. Operating margin alone may not capture quality in financial or real-estate sectors. Quality may overlap with low-volatility, making it hard to disentangle."
+  data_requirements: ["operating_margin", "book_value", "market_cap", "close", "sector"]
+  empirical_status: untested
+  experiments: []
+
+- id: fama-macbeth-cross-sectional-test
+  source:
+    author: "Bali, Engle, Murray"
+    title: "Empirical Asset Pricing: The Cross Section of Stock Returns"
+    year: 2016
+    chapter: "Chapter 8: Fama-MacBeth Regressions"
+  claim: "Fama-MacBeth two-pass regressions provide the standard methodology for testing whether a proposed factor is priced in the cross-section. A factor is priced only if its cross-sectional risk premium is statistically significant with Newey-West corrected standard errors."
+  mechanism: "In the first pass, time-series regressions estimate each stock's loading (beta) on candidate factors. In the second pass, each month's cross-section of returns is regressed on the estimated betas. The time-series average of the second-pass slope estimates the risk premium. Newey-West corrections account for the fact that estimated betas contain measurement error and returns are serially correlated."
+  experiment_types: [model_comparison, feature_selection, pipeline]
+  testable_prediction: "Running Fama-MacBeth on Gefion's feature set, the majority of technical indicators (RSI, MACD, Bollinger width) should have insignificant risk premia (|t| < 2.0), while fundamental factors (B/M, operating margin, momentum) should have significant premia (|t| > 2.0)."
+  experiment_design: "For each candidate feature (RSI, MACD, Bollinger band width, B/M, operating_margin, 12-1 momentum, beta, market_cap), run monthly cross-sectional regressions of next-month stock returns on that feature. Collect the monthly slope coefficients. Report the mean slope, Newey-West t-stat (4 lags), and percentage of months with positive slope. Flag features with |t| > 2.0 as candidate priced factors."
+  known_limitations: "Fama-MacBeth assumes betas are stable over the estimation window. Errors-in-variables bias attenuates slope estimates toward zero. The method tests linear factor pricing and will miss nonlinear return patterns that ML models may capture."
+  data_requirements: ["close", "market_cap", "book_value", "operating_margin", "beta", "rsi", "macd", "bollinger_upper", "bollinger_lower"]
+  empirical_status: untested
+  experiments: []
+
+- id: multiple-testing-factor-zoo
+  source:
+    author: "Bali, Engle, Murray"
+    title: "Empirical Asset Pricing: The Cross Section of Stock Returns"
+    year: 2016
+    chapter: "Chapter 13: Multiple Testing and the Factor Zoo"
+  claim: "The proliferation of published factors (300+) means that many reported premia are false discoveries. A t-statistic threshold of 3.0 (rather than the traditional 1.96) is needed to account for multiple hypothesis testing across the factor zoo."
+  mechanism: "When researchers test hundreds of candidate factors, some will appear significant by chance. Harvey, Liu, and Zhu (2016) show that adjusting for the number of tests conducted historically requires a t-stat of ~3.0 for 5% significance. Benjamini-Hochberg FDR control provides a less conservative alternative that controls the false discovery rate rather than the family-wise error rate."
+  experiment_types: [feature_selection, pipeline]
+  testable_prediction: "When screening Gefion's full computed feature library for cross-sectional return predictability, at least 30% of features with t-stats between 2.0 and 3.0 should fail to replicate (become insignificant) in an out-of-sample period, while features above 3.0 should show a higher replication rate."
+  experiment_design: "Split the sample at the midpoint. In the first half, run Fama-MacBeth regressions for every computed feature in Gefion. Record the t-statistic for each. In the second half, re-run the same regressions. Compute the replication rate (fraction with same-sign significant coefficient) for features binned by first-half t-stat: [2.0-2.5], [2.5-3.0], [3.0+]. Apply Benjamini-Hochberg FDR correction at q=0.05 to the first-half p-values and compare the selected set with features that actually replicate."
+  known_limitations: "Requires enough history to split into two meaningful sub-periods. The correction assumes tests are independent, but factors are correlated. A high t-stat threshold also increases the risk of discarding genuine weak factors."
+  data_requirements: ["close", "market_cap", "rsi", "macd", "momentum", "book_value", "operating_margin", "beta", "pe_ratio"]
+  empirical_status: untested
+  experiments: []
+
+- id: risk-factors-vs-alpha-factors
+  source:
+    author: "Bali, Engle, Murray"
+    title: "Empirical Asset Pricing: The Cross Section of Stock Returns"
+    year: 2016
+    chapter: "Chapter 3: Return Predictability"
+  claim: "Risk factors (systematic exposures compensated by a premium) and alpha factors (mispricing signals that decay as markets correct) require fundamentally different portfolio construction approaches: risk factors warrant long-term strategic tilts, while alpha factors require dynamic trading that captures the signal before it is arbitraged away."
+  mechanism: "Risk factor premia persist because they compensate for undiversifiable risk; bearing them through drawdowns is the cost of earning the premium. Alpha signals arise from behavioral biases or institutional frictions and weaken as capital flows in. Treating an alpha signal as a risk factor leads to holding through its decay; treating a risk factor as alpha leads to unnecessary turnover."
+  experiment_types: [feature_selection, model_comparison, strategy_optimization]
+  testable_prediction: "Features identified as risk factors (value B/M, market beta) should show stable cross-sectional predictive power across 5-year sub-periods, while alpha-like signals (short-term reversal, earnings surprise proxies) should show degrading predictive power in more recent sub-periods as markets become more efficient."
+  experiment_design: "Divide history into 5-year windows. For each window, run Fama-MacBeth regressions on: B/M, beta, operating_margin (risk candidates) and RSI, 5-day momentum, MACD crossover (alpha candidates). Plot the rolling 5-year t-statistic for each feature. Test whether risk-candidate t-stats have a flat time trend while alpha-candidate t-stats have a negative time trend using OLS on the rolling t-stat series."
+  known_limitations: "The boundary between risk and alpha is debated; some factors may be both. Short history makes regime identification unreliable. Alpha decay is confounded by changes in data coverage and market microstructure."
+  data_requirements: ["close", "book_value", "market_cap", "beta", "operating_margin", "rsi", "macd", "momentum"]
+  empirical_status: untested
+  experiments: []
+
+- id: conditional-beta-time-variation
+  source:
+    author: "Bali, Engle, Murray"
+    title: "Empirical Asset Pricing: The Cross Section of Stock Returns"
+    year: 2016
+    chapter: "Chapter 5: Conditional CAPM"
+  claim: "Stock betas are not constant but vary with market conditions; using conditional (time-varying) betas estimated via rolling windows or GARCH models substantially improves the cross-sectional fit of asset pricing models compared to unconditional full-sample betas."
+  mechanism: "Firm-level systematic risk changes as leverage, operating conditions, and macro environment evolve. A stock that is defensive in calm markets may become high-beta in crises as its financial constraints bind. Full-sample OLS betas average across these regimes, diluting the signal and producing the well-known failure of the unconditional CAPM."
+  experiment_types: [feature_engineering, model_comparison, hyperparameter]
+  testable_prediction: "Replacing Gefion's static beta with a 120-day rolling beta should improve the cross-sectional R-squared in monthly Fama-MacBeth regressions of returns on beta by at least 20% relative, and the slope coefficient on conditional beta should be closer to the realized market excess return."
+  experiment_design: "Compute two beta measures: (a) full-sample OLS beta from 3 years of daily returns, (b) 120-day rolling beta updated monthly. Run Fama-MacBeth each month using each beta measure. Compare the average cross-sectional R-squared and the mean slope coefficient. Test whether the conditional beta slope is statistically closer to the realized monthly market excess return using a paired t-test on the monthly slope differences."
+  known_limitations: "Rolling betas are noisy for illiquid or low-volume stocks. The optimal window length is an empirical question. DCC-GARCH provides a better conditional beta but is computationally expensive for 5000 stocks."
+  data_requirements: ["close", "beta", "market_cap", "volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: factor-exposure-measurement
+  source:
+    author: "Andrew Ang"
+    title: "Asset Management: A Systematic Approach to Factor Investing"
+    year: 2014
+    chapter: "Chapter 9: Implementation"
+  claim: "Sector neutralization and z-score standardization of factor exposures within sectors are essential for isolating stock-specific factor signals from sector-level effects, and failing to neutralize leads to unintended sector bets that dominate portfolio returns."
+  mechanism: "Raw factor scores (e.g., B/M) vary systematically across sectors: financials naturally have high B/M while tech has low B/M. Without sector neutralization, a value strategy becomes a sector rotation strategy. Ranking or z-scoring within sectors removes this confound and isolates the within-sector value effect, which is the actual stock-selection signal."
+  experiment_types: [feature_engineering, feature_selection, pipeline]
+  testable_prediction: "A value-sorted long-short portfolio using sector-neutralized B/M should have lower sector concentration (measured by sector Herfindahl index) and a higher information ratio than the same strategy using raw B/M, while maintaining comparable or higher raw returns."
+  experiment_design: "Compute raw B/M and sector-neutralized B/M (z-score within each sector). Each month, sort on each version into quintiles and build Q5-Q1 long-short portfolios. Compare: (a) average monthly return, (b) information ratio, (c) sector Herfindahl index of the long and short legs. Also compare the correlation of the long-short return with a sector-rotation benchmark to confirm reduced sector betting."
+  known_limitations: "Sector neutralization removes the between-sector component of the factor, which may itself be a source of returns. Sectors with few stocks produce noisy within-sector rankings. The approach assumes sectors are the correct grouping variable; industry-level neutralization may be more appropriate."
+  data_requirements: ["book_value", "market_cap", "sector", "close", "industry"]
+  empirical_status: untested
+  experiments: []
+
+- id: factor-crowding-reversal
+  source:
+    author: "Andrew Ang"
+    title: "Asset Management: A Systematic Approach to Factor Investing"
+    year: 2014
+    chapter: "Chapter 15: How to Use Factors"
+  claim: "When too many investors crowd into the same factor strategy, the factor's expected return compresses and the risk of sudden reversal increases; factor valuation spreads and short-interest concentration serve as ex-ante crowding indicators."
+  mechanism: "As capital flows into a factor, the long leg becomes expensive and the short leg becomes cheap relative to fundamentals, compressing the expected premium. When a shock forces some investors to unwind, correlated liquidation causes a sudden, violent reversal (as in the quant meltdown of August 2007). Monitoring the factor's valuation spread relative to its historical distribution signals how crowded the trade has become."
+  experiment_types: [feature_engineering, strategy_optimization, pipeline]
+  testable_prediction: "Momentum and low-volatility factor returns should be significantly lower (or negative) in months following periods where the factor's valuation spread (median P/E of long leg minus median P/E of short leg) is in the top quartile of its historical distribution."
+  experiment_design: "For momentum and low-vol factor portfolios, compute the monthly P/E spread between the long and short quintile legs. Flag months where this spread exceeds its 75th percentile (crowding signal). Compare average next-month factor returns conditional on crowding vs non-crowding. Test statistical significance with a Welch t-test. Also measure the skewness of factor returns in crowded vs uncrowded regimes to test for increased crash risk."
+  known_limitations: "P/E-based crowding proxies are noisy and may reflect genuine quality differences rather than crowding. Short-interest data would improve the signal but is not always available. The August 2007 event is a single data point for extreme crowding reversals."
+  data_requirements: ["close", "pe_ratio", "market_cap", "momentum", "beta", "sector"]
+  empirical_status: untested
+  experiments: []
+
+- id: idiosyncratic-volatility-puzzle
+  source:
+    author: "Bali, Engle, Murray"
+    title: "Empirical Asset Pricing: The Cross Section of Stock Returns"
+    year: 2016
+    chapter: "Chapter 6: Idiosyncratic Risk"
+  claim: "Stocks with high idiosyncratic volatility (IVOL) earn lower subsequent returns than low-IVOL stocks, contradicting the intuition that bearing undiversifiable firm-specific risk should be compensated with higher returns."
+  mechanism: "The IVOL puzzle likely arises from a combination of: (a) lottery-seeking behavior by retail investors who overpay for high-IVOL stocks with positively skewed returns, (b) short-sale constraints that prevent arbitrageurs from correcting the overpricing, and (c) IVOL proxying for maximum daily return (MAX effect). After controlling for the MAX effect, the IVOL puzzle is significantly attenuated."
+  experiment_types: [feature_engineering, feature_selection, model_comparison]
+  testable_prediction: "Sorting stocks by trailing 30-day idiosyncratic volatility (residual vol after removing market beta), the low-IVOL quintile should outperform the high-IVOL quintile by 30-80 bps per month. This spread should shrink by at least half after additionally controlling for the maximum daily return (MAX) over the same period."
+  experiment_design: "Compute IVOL as the standard deviation of daily residuals from a market-model regression over the trailing 30 days. Also compute MAX as the maximum single-day return in the trailing 30 days. Sort stocks into quintiles by IVOL and build long-short (Q1-Q5) portfolios. Measure the monthly return spread. Then run Fama-MacBeth regressions with IVOL alone, MAX alone, and both together. Compare the IVOL coefficient with and without MAX to quantify attenuation."
+  known_limitations: "IVOL is estimated with error over short windows. The puzzle is weaker in international markets and may have attenuated post-publication. The mechanism is debated: some attribute it to earnings surprises rather than lottery preference."
+  data_requirements: ["close", "beta", "market_cap", "volume"]
+  empirical_status: untested
+  experiments: []

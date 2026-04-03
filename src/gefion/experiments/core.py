@@ -4,16 +4,94 @@ Core experiment abstractions.
 Provides ExperimentConfig for defining experiments and ExperimentRunner
 for managing experiment lifecycle (propose, approve, reject, run).
 """
+import hashlib
 import logging
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Dict, Any, Optional, List
 import json
 import psycopg
-from datetime import datetime
 
 from gefion.observability import create_span, set_attributes
 
 logger = logging.getLogger(__name__)
+
+# Risk classification by experiment type
+_RISK_LEVELS = {
+    "feature_engineering": "medium",
+    "feature_selection": "low",
+    "hyperparameter": "low",
+    "model_comparison": "low",
+    "label_engineering": "high",
+    "strategy_params": "low",
+    "pipeline": "high",
+}
+
+
+def classify_risk_level(experiment_type: str) -> str:
+    """Classify experiment risk level based on type.
+
+    Returns 'low', 'medium', or 'high'.
+    """
+    return _RISK_LEVELS.get(experiment_type, "medium")
+
+
+def is_duplicate_experiment(
+    experiment_type: str,
+    search_space: Dict[str, Any],
+    principle_id: Optional[str],
+    existing_experiments: List[Dict[str, Any]],
+) -> bool:
+    """Detect if an experiment duplicates an existing one.
+
+    Compares experiment type + search space + principle_id hash.
+    """
+    def _config_hash(etype, space, pid):
+        key = json.dumps({"type": etype, "space": space, "principle": pid}, sort_keys=True)
+        return hashlib.md5(key.encode()).hexdigest()
+
+    new_hash = _config_hash(experiment_type, search_space, principle_id)
+
+    for exp in existing_experiments:
+        existing_hash = _config_hash(
+            exp.get("experiment_type", ""),
+            exp.get("search_space", {}),
+            exp.get("principle_id"),
+        )
+        if new_hash == existing_hash:
+            return True
+
+    return False
+
+
+@dataclass
+class ExperimentCycle:
+    """A batch of experiments evaluated together with shared holdout and FDR."""
+    name: str
+    holdout_start_date: date
+    holdout_end_date: date
+    fdr_rate: float = 0.10
+    compute_budget_seconds: int = 7200
+    max_experiments: int = 20
+    status: str = "proposed"
+    discovery_snapshot: Optional[Dict[str, Any]] = None
+    principles_consulted: Optional[List[str]] = None
+    summary: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a JSON-friendly dictionary."""
+        return {
+            "name": self.name,
+            "holdout_start_date": str(self.holdout_start_date),
+            "holdout_end_date": str(self.holdout_end_date),
+            "fdr_rate": self.fdr_rate,
+            "compute_budget_seconds": self.compute_budget_seconds,
+            "max_experiments": self.max_experiments,
+            "status": self.status,
+            "discovery_snapshot": self.discovery_snapshot,
+            "principles_consulted": self.principles_consulted,
+            "summary": self.summary,
+        }
 
 
 @dataclass
@@ -44,6 +122,35 @@ class ExperimentConfig:
     # Additional config stored as JSON
     extra_config: Dict[str, Any] = field(default_factory=dict)
 
+    # Autonomous experimentation fields
+    holdout_config: Optional[Dict[str, Any]] = None   # {holdout_weeks, holdout_start_date, holdout_end_date}
+    data_split: Optional[Dict[str, Any]] = None       # {train_start, train_end, validation_start, validation_end}
+    principle_id: Optional[str] = None                 # slug referencing YAML principle
+    null_hypothesis: Optional[str] = None
+    cv_config: Optional[Dict[str, Any]] = None         # {n_splits, embargo_pct, prediction_horizon}
+    resource_limits: Optional[Dict[str, Any]] = None   # {max_wall_seconds, max_disk_mb, max_memory_mb}
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a JSON-friendly dictionary."""
+        d: Dict[str, Any] = {}
+        for f in self.__dataclass_fields__:
+            val = getattr(self, f)
+            if isinstance(val, dict):
+                d[f] = dict(val)  # shallow copy
+            elif isinstance(val, list):
+                d[f] = list(val)
+            else:
+                d[f] = val
+        return d
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ExperimentConfig":
+        """Reconstruct an ExperimentConfig from a dictionary."""
+        # Only pass keys that are valid dataclass fields
+        valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered = {k: v for k, v in d.items() if k in valid_keys}
+        return cls(**filtered)
+
 
 class ExperimentRunner:
     """
@@ -62,8 +169,14 @@ class ExperimentRunner:
         self.db_url = db_url
 
     def _get_conn(self):
-        """Get database connection."""
-        return psycopg.connect(self.db_url)
+        """Get database connection from shared pool."""
+        from gefion.db import pool as db_pool
+        p = db_pool.get_pool()
+        if p is not None:
+            return p.connection()
+        # Pool not initialized — init it with our URL
+        db_pool.init_pool(self.db_url)
+        return db_pool.get_pool().connection()
 
     def propose(self, config: ExperimentConfig, proposed_by: str = "ai") -> int:
         """
@@ -329,6 +442,24 @@ class ExperimentRunner:
             early_stop = experiment.get("early_stop_on_goal", False)
             max_trials = config.get("max_trials", 50)
 
+            # For ML experiment types, resolve dataset_uri
+            ml_types = {"hyperparameter", "model_comparison", "feature_engineering",
+                        "feature_selection", "label_engineering", "pipeline"}
+            if experiment["experiment_type"] in ml_types and not config.get("dataset_uri"):
+                # Auto-detect latest dataset manifest
+                from pathlib import Path
+                manifests = list(Path("datasets").glob("*/manifest.json")) if Path("datasets").exists() else []
+                if manifests:
+                    # Pick most recently modified dataset
+                    manifests.sort(key=lambda p: p.stat().st_mtime)
+                    config["dataset_uri"] = str(manifests[-1])
+                    logger.info(f"Auto-detected dataset: {config['dataset_uri']}")
+                else:
+                    raise ValueError(
+                        "No dataset_uri specified and no datasets found. "
+                        "Run 'gefion ml dataset-build' first, then pass --dataset-uri."
+                    )
+
             # Create experiment evaluator based on type
             if experiment["experiment_type"] == "strategy_params":
                 evaluator = StrategyParamExperiment(
@@ -339,6 +470,88 @@ class ExperimentRunner:
                     end_date=config.get("end_date", "2024-06-01"),
                     objective=objective_metric,
                     db_url=self.db_url,
+                )
+            elif experiment["experiment_type"] == "hyperparameter":
+                from gefion.experiments.types.hyperparameter import HyperparameterExperiment
+                evaluator = HyperparameterExperiment(
+                    name=experiment["name"],
+                    model_type=config.get("model_type", "lightgbm"),
+                    search_space=search_space,
+                    cv_config=config.get("cv_config", {"n_splits": 5, "embargo_pct": 0.02}),
+                    objective_metric=objective_metric,
+                    dataset_uri=config.get("dataset_uri"),
+                    horizon_days=config.get("horizon_days", 7),
+                    quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                )
+            elif experiment["experiment_type"] == "model_comparison":
+                from gefion.experiments.types.model_comparison import ModelComparisonExperiment
+                evaluator = ModelComparisonExperiment(
+                    name=experiment["name"],
+                    model_types=config.get("model_types", []),
+                    cv_config=config.get("cv_config", {"n_splits": 5, "embargo_pct": 0.02}),
+                    objective_metric=objective_metric,
+                    dataset_uri=config.get("dataset_uri"),
+                    horizon_days=config.get("horizon_days", 7),
+                    quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                )
+            elif experiment["experiment_type"] == "label_engineering":
+                from gefion.experiments.types.label_engineering import LabelEngineeringExperiment
+                evaluator = LabelEngineeringExperiment(
+                    name=experiment["name"],
+                    principle_id=config.get("principle_id", ""),
+                    null_hypothesis=config.get("null_hypothesis", ""),
+                    label_type=config.get("label_type", "raw"),
+                    label_config=config.get("label_config"),
+                    evaluation_metric=objective_metric,
+                    algorithm=config.get("algorithm", "lightgbm"),
+                    cv_config=config.get("cv_config", {"n_splits": 5, "embargo_pct": 0.02}),
+                    dataset_uri=config.get("dataset_uri"),
+                    horizon_days=config.get("horizon_days", 7),
+                    quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                )
+            elif experiment["experiment_type"] == "feature_engineering":
+                from gefion.experiments.types.feature_engineering import FeatureEngineeringExperiment
+                evaluator = FeatureEngineeringExperiment(
+                    name=experiment["name"],
+                    principle_id=config.get("principle_id", ""),
+                    null_hypothesis=config.get("null_hypothesis", ""),
+                    feature_config=config.get("feature_config", {}),
+                    source_column=config.get("source_column", "close"),
+                    objective_metric=objective_metric,
+                    algorithm=config.get("algorithm", "lightgbm"),
+                    cv_config=config.get("cv_config", {"n_splits": 5, "embargo_pct": 0.02}),
+                    dataset_uri=config.get("dataset_uri"),
+                    horizon_days=config.get("horizon_days", 7),
+                    quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                )
+            elif experiment["experiment_type"] == "feature_selection":
+                from gefion.experiments.types.feature_selection import FeatureSelectionExperiment
+                evaluator = FeatureSelectionExperiment(
+                    name=experiment["name"],
+                    principle_id=config.get("principle_id", ""),
+                    null_hypothesis=config.get("null_hypothesis", ""),
+                    feature_names=config.get("feature_names", []),
+                    selection_method=config.get("selection_method", "importance"),
+                    objective_metric=objective_metric,
+                    algorithm=config.get("algorithm", "lightgbm"),
+                    cv_config=config.get("cv_config", {"n_splits": 5, "embargo_pct": 0.02}),
+                    dataset_uri=config.get("dataset_uri"),
+                    horizon_days=config.get("horizon_days", 7),
+                    quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                )
+            elif experiment["experiment_type"] == "pipeline":
+                from gefion.experiments.types.pipeline import PipelineExperiment
+                evaluator = PipelineExperiment(
+                    name=experiment["name"],
+                    stages=config.get("stages", []),
+                    principle_id=config.get("principle_id"),
+                    null_hypothesis=config.get("null_hypothesis"),
+                    objective_metric=objective_metric,
+                    algorithm=config.get("algorithm", "lightgbm"),
+                    cv_config=config.get("cv_config", {"n_splits": 5, "embargo_pct": 0.02}),
+                    dataset_uri=config.get("dataset_uri"),
+                    horizon_days=config.get("horizon_days", 7),
+                    quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
                 )
             else:
                 raise ValueError(f"Unknown experiment type: {experiment['experiment_type']}")

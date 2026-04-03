@@ -5,8 +5,51 @@ Following TDD: Write tests first, then implement.
 This is a comprehensive meta-tool that includes infrastructure health,
 data analysis, gap identification, and actionable suggestions.
 """
+import inspect
 import pytest
 from datetime import date, timedelta
+
+
+class TestSystemStatusDataQuery:
+    """Tests that system_status queries data correctly."""
+
+    def test_system_status_does_not_shell_out_to_gefion_query_database(self):
+        """system_status must NOT call 'gefion query-database' — that CLI command doesn't exist.
+
+        It must use _query_database() directly or use psql/psycopg.
+        """
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("server", "mcp-server/server.py")
+        # Read source directly to avoid import side effects
+        from pathlib import Path
+        src = Path("mcp-server/server.py").read_text()
+
+        # Find the _system_status function body
+        start = src.index("async def _system_status(")
+        # Find next top-level async def
+        next_fn = src.index("\nasync def ", start + 1)
+        fn_body = src[start:next_fn]
+
+        assert "gefion', 'query-database" not in fn_body, (
+            "_system_status must not shell out to 'gefion query-database' — "
+            "that CLI command does not exist. Use _query_database() directly."
+        )
+        assert "'gefion', 'query-database'" not in fn_body
+        assert '"gefion", "query-database"' not in fn_body
+
+    def test_query_database_default_port_matches_dev_env(self):
+        """_query_database default DB URL must use port 6432 (dev config), not 5432."""
+        from pathlib import Path
+        src = Path("mcp-server/server.py").read_text()
+
+        # Find _query_database function
+        start = src.index("async def _query_database(")
+        next_fn = src.index("\nasync def ", start + 1)
+        fn_body = src[start:next_fn]
+
+        assert "localhost:6432" in fn_body, (
+            "_query_database default DATABASE_URL must use port 6432 (dev postgres port)"
+        )
 
 
 class TestSystemStatusComprehensive:

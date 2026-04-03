@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block chart_script %}
+const margin = {top: 50, right: 30, bottom: 50, left: 60};
+const w = WIDTH - margin.left - margin.right;
+const h = HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tip = createTooltip(container);
+
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(chartConfig.title || "Experiment Trials");
+
+const svg = container.append("svg")
+    .attr("width", WIDTH).attr("height", HEIGHT);
+const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+const x = d3.scaleLinear()
+    .domain([0, chartData.length - 1])
+    .range([0, w]);
+const y = d3.scaleLinear()
+    .domain([
+        d3.min(chartData, d => d.score) * 0.95,
+        d3.max(chartData, d => d.score) * 1.05
+    ]).nice()
+    .range([h, 0]);
+
+// Grid
+g.append("g").attr("class", "grid")
+    .call(d3.axisLeft(y).tickSize(-w).tickFormat(""))
+    .select(".domain").remove();
+
+// Axes
+g.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${h})`)
+    .call(d3.axisBottom(x).ticks(Math.min(chartData.length, 10)).tickFormat(d3.format("d")));
+g.append("g").attr("class", "axis").call(d3.axisLeft(y));
+
+// Axis labels
+g.append("text").attr("x", w / 2).attr("y", h + 38)
+    .attr("text-anchor", "middle").attr("fill", "var(--color-text)")
+    .attr("font-size", "12px").text("Trial");
+g.append("text").attr("transform", "rotate(-90)")
+    .attr("x", -h / 2).attr("y", -45)
+    .attr("text-anchor", "middle").attr("fill", "var(--color-text)")
+    .attr("font-size", "12px").text("Score");
+
+// Find best trial
+const best = chartData.reduce((a, b) => b.score > a.score ? b : a, chartData[0]);
+
+// Dots
+const dots = g.selectAll(".dot").data(chartData).join("circle")
+    .attr("class", "dot")
+    .attr("cx", (d, i) => x(i))
+    .attr("cy", d => y(d.score))
+    .attr("r", d => d === best ? 8 : 4)
+    .attr("fill", d => d.promoted ? "#4caf50" : "#f44336")
+    .attr("stroke", d => d === best ? "#fff" : "none")
+    .attr("stroke-width", d => d === best ? 2 : 0)
+    .on("mousemove", function(event, d) {
+        const params = d.parameters || {};
+        const paramHtml = Object.entries(params)
+            .map(([k, v]) => `${k}: ${v}`).join("<br>");
+        tip.show(
+            `<b>Trial ${chartData.indexOf(d)}</b><br>` +
+            `Score: ${d.score.toFixed(4)}<br>` +
+            `Promoted: ${d.promoted}<br>` +
+            (paramHtml ? `<br>${paramHtml}` : ""),
+            event.pageX, event.pageY
+        );
+    })
+    .on("mouseleave", () => tip.hide());
+
+staggeredEntry(dots);
+
+// Best trial label
+const bestIdx = chartData.indexOf(best);
+g.append("text")
+    .attr("x", x(bestIdx)).attr("y", y(best.score) - 14)
+    .attr("text-anchor", "middle").attr("fill", "#4caf50")
+    .attr("font-size", "11px").attr("font-weight", "600")
+    .text(`Best: ${best.score.toFixed(4)}`);
+{% endblock %}

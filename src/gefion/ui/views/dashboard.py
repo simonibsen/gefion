@@ -235,33 +235,20 @@ def render_dashboard():
 
     col1, col2, col3, col4 = st.columns(4)
 
-    with col1:
-        st.markdown("### :material/bar_chart: Charts")
-        st.markdown("Analyze price movements with interactive charts.")
-        if st.button("Open Charts", key="quick_charts", width="stretch"):
-            st.session_state.current_page = "Charts"
-            st.rerun()
+    quick_actions = [
+        (col1, "Charts", ":material/bar_chart:", "Price charts and analysis", "Open Charts", "quick_charts", "Charts"),
+        (col2, "System", ":material/bolt:", "Health, actions, and history", "System Ops", "quick_ai", "System Operations"),
+        (col3, "Backtest", ":material/history:", "Test strategies on history", "Run Backtest", "quick_backtest", "Backtesting"),
+        (col4, "ML Predict", ":material/model_training:", "Generate price predictions", "Get Predictions", "quick_ml", "ML Pipeline"),
+    ]
 
-    with col2:
-        st.markdown("### :material/bolt: System Operations")
-        st.markdown("System health, actions, and history.")
-        if st.button("System Operations", key="quick_ai", width="stretch"):
-            st.session_state.current_page = "System Operations"
-            st.rerun()
-
-    with col3:
-        st.markdown("### :material/history: Backtest")
-        st.markdown("Test trading strategies on historical data.")
-        if st.button("Run Backtest", key="quick_backtest", width="stretch"):
-            st.session_state.current_page = "Backtesting"
-            st.rerun()
-
-    with col4:
-        st.markdown("### :material/model_training: ML Predict")
-        st.markdown("Generate price predictions using trained models.")
-        if st.button("Get Predictions", key="quick_ml", width="stretch"):
-            st.session_state.current_page = "ML Pipeline"
-            st.rerun()
+    for col, title, icon, desc, btn_label, btn_key, page in quick_actions:
+        with col:
+            st.markdown(f"#### {icon} {title}")
+            st.caption(desc)
+            if st.button(btn_label, key=btn_key):
+                st.session_state.current_page = page
+                st.rerun()
 
     st.markdown("---")
 

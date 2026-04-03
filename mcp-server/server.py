@@ -25,6 +25,15 @@ from pathlib import Path
 # Add parent directory to path to import gefion modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+# Load .env from project root so DATABASE_URL is available
+_env_file = Path(__file__).parent.parent / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
@@ -1179,20 +1188,31 @@ async def list_tools() -> List[Tool]:
             description=(
                 "Propose a new experiment for approval. "
                 "Creates an experiment with 'proposed' status. "
-                "Supports strategy parameter optimization with grid, random, or bayesian search."
+                "Supports all experiment types: strategy_params, hyperparameter, model_comparison, "
+                "feature_engineering, feature_selection, label_engineering, pipeline. "
+                "For feature_engineering: write a compute(df, **params) function body and pass via "
+                "extra_config as JSON with feature_config.function_name and feature_config.function_body. "
+                "Functions run in a security sandbox with numpy, pandas, scipy, sklearn, talib."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Experiment name"},
-                    "strategy": {"type": "string", "description": "Strategy name (momentum, mean_reversion, ma_crossover, breakout)"},
+                    "experiment_type": {"type": "string", "default": "strategy_params",
+                                        "description": "Experiment type: strategy_params, hyperparameter, model_comparison, feature_engineering, feature_selection, label_engineering, pipeline"},
                     "search_space": {"type": "string", "description": "JSON search space definition"},
-                    "symbols": {"type": "string", "description": "Comma-separated symbols"},
+                    "objective": {"type": "string", "default": "sharpe_ratio", "description": "Metric to optimize (sharpe_ratio, quantile_loss, etc.)"},
+                    "objective_direction": {"type": "string", "default": "maximize", "description": "minimize or maximize"},
+                    "max_trials": {"type": "integer", "default": 10, "description": "Maximum trials"},
+                    "search_method": {"type": "string", "default": "bayesian", "description": "Search method: grid, random, or bayesian"},
+                    "model_type": {"type": "string", "description": "ML model type (lightgbm, xgboost, quantile_regression) — for hyperparameter type"},
+                    "dataset_uri": {"type": "string", "description": "Path to dataset manifest (e.g., datasets/baseline_v2/manifest.json)"},
+                    "horizon_days": {"type": "integer", "description": "Prediction horizon in days (7, 30)"},
+                    "strategy": {"type": "string", "description": "Strategy name — for strategy_params type"},
+                    "symbols": {"type": "string", "description": "Comma-separated symbols — for strategy_params type"},
                     "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
                     "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
-                    "objective": {"type": "string", "default": "sharpe_ratio", "description": "Metric to optimize"},
-                    "max_trials": {"type": "integer", "default": 50, "description": "Maximum trials"},
-                    "search_method": {"type": "string", "default": "grid", "description": "Search method: grid, random, or bayesian"},
+                    "extra_config": {"type": "string", "description": "Extra config as JSON (merged into experiment config)"},
                     "goal_type": {"type": "string", "description": "Goal type: achieve, improve"},
                     "goal_target": {"type": "number", "description": "Target value for goal"},
                     "baseline": {"type": "number", "description": "Baseline for improvement goals"},
@@ -1211,7 +1231,7 @@ async def list_tools() -> List[Tool]:
                 "type": "object",
                 "properties": {
                     "status": {"type": "string", "description": "Filter by status (proposed, approved, running, completed, failed)"},
-                    "experiment_type": {"type": "string", "description": "Filter by type (strategy_params)"},
+                    "experiment_type": {"type": "string", "description": "Filter by type (strategy_params, hyperparameter, model_comparison, feature_engineering, feature_selection, label_engineering, pipeline)"},
                     "limit": {"type": "integer", "default": 20, "description": "Max results"},
                 },
             },
@@ -1310,6 +1330,90 @@ async def list_tools() -> List[Tool]:
                     "experiment_id": {"type": "integer", "description": "Experiment ID"},
                 },
                 "required": ["experiment_id"],
+            },
+        ),
+
+        # ============================================================
+        # Autonomous Experiment Framework Tools
+        # ============================================================
+        Tool(
+            name="experiment_discover",
+            description=(
+                "Discover available data sources and experiment opportunities"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        Tool(
+            name="experiment_cycle_start",
+            description=(
+                "Start a new experiment cycle with holdout and FDR configuration"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Cycle name"},
+                    "fdr_rate": {"type": "number", "default": 0.10, "description": "False discovery rate threshold"},
+                    "holdout_weeks": {"type": "integer", "default": 6, "description": "Holdout period in weeks"},
+                    "max_experiments": {"type": "integer", "default": 20, "description": "Maximum experiments per cycle"},
+                },
+            },
+        ),
+        Tool(
+            name="experiment_cycle_run",
+            description=(
+                "Run an autonomous experiment cycle. Discovers hypotheses from research themes, "
+                "proposes experiments based on cycle guardrails, auto-approves, runs all experiments "
+                "in parallel with resource checks, and applies FDR correction to filter false discoveries. "
+                "Use experiment_cycle_start first to create the cycle, then this to execute it."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cycle_id": {"type": "integer", "description": "Cycle ID to run (from experiment_cycle_start)"},
+                },
+                "required": ["cycle_id"],
+            },
+        ),
+        Tool(
+            name="experiment_cycle_status",
+            description=(
+                "Get status of an experiment cycle"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cycle_id": {"type": "integer", "description": "Cycle ID"},
+                },
+                "required": ["cycle_id"],
+            },
+        ),
+        Tool(
+            name="principles_list",
+            description=(
+                "List principles from the quantitative finance catalog"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "domain": {"type": "string", "description": "Filter by domain"},
+                    "experiment_type": {"type": "string", "description": "Filter by experiment type"},
+                    "status": {"type": "string", "description": "Filter by status"},
+                },
+            },
+        ),
+        Tool(
+            name="principles_suggest",
+            description=(
+                "Suggest experiments based on principles and current data"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_type": {"type": "string", "description": "Filter suggestions by experiment type"},
+                },
             },
         ),
 
@@ -1597,6 +1701,19 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _experiment_children(arguments)
         elif name == "experiment_status":
             result = await _experiment_status(arguments)
+        # Autonomous experiment framework tools
+        elif name == "experiment_discover":
+            result = await _experiment_discover(arguments)
+        elif name == "experiment_cycle_start":
+            result = await _experiment_cycle_start(arguments)
+        elif name == "experiment_cycle_run":
+            result = await _experiment_cycle_run(arguments)
+        elif name == "experiment_cycle_status":
+            result = await _experiment_cycle_status(arguments)
+        elif name == "principles_list":
+            result = await _principles_list(arguments)
+        elif name == "principles_suggest":
+            result = await _principles_suggest(arguments)
         # Chart tools
         elif name == "chart_price":
             result = await _chart_price(arguments)
@@ -2130,7 +2247,7 @@ async def _query_predictions(args: Dict[str, Any]) -> Dict[str, Any]:
 
     # Execute via psql (gefion doesn't have a direct SQL query command)
     import os
-    db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:5432/gefion')
+    db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:6432/gefion')
 
     try:
         result = subprocess.run(
@@ -2214,7 +2331,7 @@ async def _query_model_performance(args: Dict[str, Any]) -> Dict[str, Any]:
     """
 
     import os
-    db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:5432/gefion')
+    db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:6432/gefion')
 
     try:
         result = subprocess.run(
@@ -2461,7 +2578,7 @@ async def _query_database(args: Dict[str, Any]) -> Dict[str, Any]:
 
     # Execute query
     import os
-    db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:5432/gefion')
+    db_url = os.environ.get('DATABASE_URL', 'postgresql://gefion:gefionpass@localhost:6432/gefion')
 
     try:
         result = subprocess.run(
@@ -2915,86 +3032,78 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
 
     # 2. Analyze Data State (if PostgreSQL is up)
     if infra_health.get("postgres", {}).get("running", False):
-        try:
-            # Get data metrics via gefion CLI
-            db_check = await executor.run('db-health')
+        # Helper to run a query via _query_database and extract rows
+        async def _run_query(sql: str):
+            result = await _query_database({"sql": sql})
+            if result.get("success") and result.get("rows"):
+                return result["rows"]
+            return None
 
+        try:
             # Query for data freshness
-            query_result = subprocess.run(
-                ['gefion', 'query-database', '--sql',
-                 "SELECT "
-                 "(SELECT COUNT(*) FROM stocks) as total_stocks, "
-                 "(SELECT COUNT(*) FROM stock_ohlcv) as ohlcv_rows, "
-                 "(SELECT MAX(date) FROM stock_ohlcv) as latest_date, "
-                 "(SELECT COUNT(*) FROM computed_features) as feature_rows, "
-                 "(SELECT COUNT(DISTINCT feature_id) FROM computed_features) as unique_features",
-                 '--json'],
-                capture_output=True,
-                text=True,
-                env={**os.environ, **executor.env},
-                timeout=10
+            rows = await _run_query(
+                "SELECT "
+                "(SELECT COUNT(*) FROM stocks) as total_stocks, "
+                "(SELECT COUNT(*) FROM stock_ohlcv) as ohlcv_rows, "
+                "(SELECT MAX(date) FROM stock_ohlcv) as latest_date, "
+                "(SELECT COUNT(*) FROM computed_features) as feature_rows, "
+                "(SELECT COUNT(DISTINCT feature_id) FROM computed_features) as unique_features"
             )
 
-            if query_result.returncode == 0:
-                try:
-                    query_data = json.loads(query_result.stdout)
-                    if query_data.get('success') and query_data.get('rows'):
-                        row = query_data['rows'][0]
-                        stocks = int(row[0]) if row[0] else 0
-                        ohlcv_rows = int(row[1]) if row[1] else 0
-                        latest_date_str = row[2]
-                        feature_rows = int(row[3]) if row[3] else 0
-                        unique_features = int(row[4]) if row[4] else 0
+            if rows:
+                row = rows[0]
+                stocks = int(row[0]) if row[0] else 0
+                ohlcv_rows = int(row[1]) if row[1] else 0
+                latest_date_str = row[2] if row[2] else None
+                feature_rows = int(row[3]) if row[3] else 0
+                unique_features = int(row[4]) if row[4] else 0
 
-                        status_result["data"] = {
-                            "stocks": stocks,
-                            "ohlcv_rows": ohlcv_rows,
-                            "latest_date": latest_date_str,
-                            "feature_rows": feature_rows,
-                            "unique_features": unique_features
-                        }
+                status_result["data"] = {
+                    "stocks": stocks,
+                    "ohlcv_rows": ohlcv_rows,
+                    "latest_date": latest_date_str,
+                    "feature_rows": feature_rows,
+                    "unique_features": unique_features
+                }
 
-                        # Analyze data freshness
-                        if latest_date_str:
-                            latest_date = datetime.strptime(latest_date_str, '%Y-%m-%d').date()
-                            days_old = (date.today() - latest_date).days
-                            status_result["data"]["days_since_update"] = days_old
+                # Analyze data freshness
+                if latest_date_str:
+                    latest_date = datetime.strptime(latest_date_str, '%Y-%m-%d').date()
+                    days_old = (date.today() - latest_date).days
+                    status_result["data"]["days_since_update"] = days_old
 
-                            if days_old > 1:
-                                status_result["issues"].append({
-                                    "type": "stale_data",
-                                    "description": f"Price data is {days_old} days old (last: {latest_date_str})",
-                                    "priority": "high" if days_old > 7 else "medium",
-                                    "command": "gefion data-update --exchange NASDAQ --limit 10"
-                                })
+                    if days_old > 1:
+                        status_result["issues"].append({
+                            "type": "stale_data",
+                            "description": f"Price data is {days_old} days old (last: {latest_date_str})",
+                            "priority": "high" if days_old > 7 else "medium",
+                            "command": "gefion data-update --exchange NASDAQ --limit 10"
+                        })
 
-                        # Check for missing data
-                        if stocks == 0:
-                            status_result["issues"].append({
-                                "type": "no_data",
-                                "description": "No stocks in database",
-                                "priority": "critical",
-                                "command": "gefion data-update --exchange NASDAQ --limit 10"
-                            })
-                        elif ohlcv_rows == 0:
-                            status_result["issues"].append({
-                                "type": "no_prices",
-                                "description": "No price data ingested",
-                                "priority": "high",
-                                "command": "gefion data-update --exchange NASDAQ --limit 10"
-                            })
+                # Check for missing data
+                if stocks == 0:
+                    status_result["issues"].append({
+                        "type": "no_data",
+                        "description": "No stocks in database",
+                        "priority": "critical",
+                        "command": "gefion data-update --exchange NASDAQ --limit 10"
+                    })
+                elif ohlcv_rows == 0:
+                    status_result["issues"].append({
+                        "type": "no_prices",
+                        "description": "No price data ingested",
+                        "priority": "high",
+                        "command": "gefion data-update --exchange NASDAQ --limit 10"
+                    })
 
-                        # Check for missing features
-                        if feature_rows == 0 and ohlcv_rows > 0:
-                            status_result["issues"].append({
-                                "type": "no_features",
-                                "description": "Features not computed (0 rows)",
-                                "priority": "medium",
-                                "command": "gefion feat-compute --symbols AAPL,MSFT --all-features"
-                            })
-
-                except (json.JSONDecodeError, IndexError, ValueError) as e:
-                    status_result["data"]["error"] = f"Failed to parse data metrics: {str(e)}"
+                # Check for missing features
+                if feature_rows == 0 and ohlcv_rows > 0:
+                    status_result["issues"].append({
+                        "type": "no_features",
+                        "description": "Features not computed (0 rows)",
+                        "priority": "medium",
+                        "command": "gefion feat-compute --symbols AAPL,MSFT --all-features"
+                    })
 
         except Exception as e:
             status_result["data"]["error"] = f"Failed to query database: {str(e)}"
@@ -3008,36 +3117,20 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
                 feat_def_files_count = len(list(feature_def_dir.glob("*.json")))
 
             # Count feature definitions in DB
-            feat_def_db_result = subprocess.run(
-                ['gefion', 'query-database', '--sql',
-                 "SELECT COUNT(*) FROM feature_definitions",
-                 '--json'],
-                capture_output=True,
-                text=True,
-                env={**os.environ, **executor.env},
-                timeout=10
-            )
+            rows = await _run_query("SELECT COUNT(*) FROM feature_definitions")
+            if rows:
+                feat_def_db_count = int(rows[0][0]) if rows[0][0] else 0
+                status_result["data"]["feature_definitions_on_disk"] = feat_def_files_count
+                status_result["data"]["feature_definitions_in_db"] = feat_def_db_count
 
-            if feat_def_db_result.returncode == 0:
-                try:
-                    feat_def_data = json.loads(feat_def_db_result.stdout)
-                    if feat_def_data.get('success') and feat_def_data.get('rows'):
-                        feat_def_db_count = int(feat_def_data['rows'][0][0]) if feat_def_data['rows'][0][0] else 0
-
-                        status_result["data"]["feature_definitions_on_disk"] = feat_def_files_count
-                        status_result["data"]["feature_definitions_in_db"] = feat_def_db_count
-
-                        if feat_def_files_count > feat_def_db_count:
-                            unregistered = feat_def_files_count - feat_def_db_count
-                            status_result["issues"].append({
-                                "type": "unregistered_feature_definitions",
-                                "description": f"{unregistered} feature definition(s) on disk not imported to database",
-                                "priority": "medium",
-                                "command": "gefion feat-def-import --directory feature-definitions"
-                            })
-
-                except (json.JSONDecodeError, IndexError, ValueError) as e:
-                    pass  # Silently skip if query fails
+                if feat_def_files_count > feat_def_db_count:
+                    unregistered = feat_def_files_count - feat_def_db_count
+                    status_result["issues"].append({
+                        "type": "unregistered_feature_definitions",
+                        "description": f"{unregistered} feature definition(s) on disk not imported to database",
+                        "priority": "medium",
+                        "command": "gefion feat-def-import --directory feature-definitions"
+                    })
 
             # Count feature functions on disk
             feature_fx_dir = Path("feature-functions")
@@ -3046,36 +3139,20 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
                 feat_fx_files_count = len(list(feature_fx_dir.glob("*.json")))
 
             # Count feature functions in DB
-            feat_fx_db_result = subprocess.run(
-                ['gefion', 'query-database', '--sql',
-                 "SELECT COUNT(*) FROM feature_functions",
-                 '--json'],
-                capture_output=True,
-                text=True,
-                env={**os.environ, **executor.env},
-                timeout=10
-            )
+            rows = await _run_query("SELECT COUNT(*) FROM feature_functions")
+            if rows:
+                feat_fx_db_count = int(rows[0][0]) if rows[0][0] else 0
+                status_result["data"]["feature_functions_on_disk"] = feat_fx_files_count
+                status_result["data"]["feature_functions_in_db"] = feat_fx_db_count
 
-            if feat_fx_db_result.returncode == 0:
-                try:
-                    feat_fx_data = json.loads(feat_fx_db_result.stdout)
-                    if feat_fx_data.get('success') and feat_fx_data.get('rows'):
-                        feat_fx_db_count = int(feat_fx_data['rows'][0][0]) if feat_fx_data['rows'][0][0] else 0
-
-                        status_result["data"]["feature_functions_on_disk"] = feat_fx_files_count
-                        status_result["data"]["feature_functions_in_db"] = feat_fx_db_count
-
-                        if feat_fx_files_count > feat_fx_db_count:
-                            unregistered = feat_fx_files_count - feat_fx_db_count
-                            status_result["issues"].append({
-                                "type": "unregistered_feature_functions",
-                                "description": f"{unregistered} feature function(s) on disk not imported to database",
-                                "priority": "medium",
-                                "command": "gefion feat-fx-import --directory feature-functions"
-                            })
-
-                except (json.JSONDecodeError, IndexError, ValueError) as e:
-                    pass  # Silently skip if query fails
+                if feat_fx_files_count > feat_fx_db_count:
+                    unregistered = feat_fx_files_count - feat_fx_db_count
+                    status_result["issues"].append({
+                        "type": "unregistered_feature_functions",
+                        "description": f"{unregistered} feature function(s) on disk not imported to database",
+                        "priority": "medium",
+                        "command": "gefion feat-fx-import --directory feature-functions"
+                    })
 
         except Exception as e:
             # Don't fail system_status if feature checking fails
@@ -3083,68 +3160,56 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
 
         # Check for stale/missing fundamentals data (sector, industry)
         try:
-            fundamentals_result = subprocess.run(
-                ['gefion', 'query-database', '--sql',
-                 "SELECT "
-                 "(SELECT COUNT(*) FROM stocks WHERE sector IS NULL) as missing_sector, "
-                 "(SELECT COUNT(*) FROM stocks) as total_stocks, "
-                 "(SELECT MAX(updated_at) FROM stocks) as latest_updated, "
-                 "(SELECT COUNT(*) FROM stocks WHERE updated_at IS NOT NULL) as has_fundamentals",
-                 '--json'],
-                capture_output=True,
-                text=True,
-                env={**os.environ, **executor.env},
-                timeout=10
+            rows = await _run_query(
+                "SELECT "
+                "(SELECT COUNT(*) FROM stocks WHERE sector IS NULL) as missing_sector, "
+                "(SELECT COUNT(*) FROM stocks) as total_stocks, "
+                "(SELECT MAX(updated_at) FROM stocks) as latest_updated, "
+                "(SELECT COUNT(*) FROM stocks WHERE updated_at IS NOT NULL) as has_fundamentals"
             )
 
-            if fundamentals_result.returncode == 0:
-                try:
-                    fund_data = json.loads(fundamentals_result.stdout)
-                    if fund_data.get('success') and fund_data.get('rows'):
-                        row = fund_data['rows'][0]
-                        missing_sector = int(row[0]) if row[0] else 0
-                        total_stocks = int(row[1]) if row[1] else 0
-                        latest_updated_str = row[2]
-                        has_fundamentals = int(row[3]) if row[3] else 0
+            if rows:
+                row = rows[0]
+                missing_sector = int(row[0]) if row[0] else 0
+                total_stocks = int(row[1]) if row[1] else 0
+                latest_updated_str = row[2] if row[2] else None
+                has_fundamentals = int(row[3]) if row[3] else 0
 
-                        status_result["data"]["stocks_missing_sector"] = missing_sector
-                        status_result["data"]["stocks_with_fundamentals"] = has_fundamentals
+                status_result["data"]["stocks_missing_sector"] = missing_sector
+                status_result["data"]["stocks_with_fundamentals"] = has_fundamentals
 
-                        # Check for missing fundamentals
-                        if total_stocks > 0 and has_fundamentals == 0:
+                # Check for missing fundamentals
+                if total_stocks > 0 and has_fundamentals == 0:
+                    status_result["issues"].append({
+                        "type": "missing_fundamentals",
+                        "description": f"No stocks have fundamentals data (sector/industry)",
+                        "priority": "low",
+                        "command": "gefion fundamentals-update"
+                    })
+                elif missing_sector > 0 and has_fundamentals > 0:
+                    status_result["issues"].append({
+                        "type": "incomplete_fundamentals",
+                        "description": f"{missing_sector} stocks missing sector/industry data",
+                        "priority": "low",
+                        "command": "gefion fundamentals-update"
+                    })
+
+                # Check for stale fundamentals (>30 days old)
+                if latest_updated_str:
+                    try:
+                        latest_updated = datetime.fromisoformat(latest_updated_str.replace(' ', 'T'))
+                        days_old = (datetime.now() - latest_updated).days
+                        status_result["data"]["fundamentals_days_old"] = days_old
+
+                        if days_old > 30:
                             status_result["issues"].append({
-                                "type": "missing_fundamentals",
-                                "description": f"No stocks have fundamentals data (sector/industry)",
+                                "type": "stale_fundamentals",
+                                "description": f"Fundamentals data is {days_old} days old",
                                 "priority": "low",
                                 "command": "gefion fundamentals-update"
                             })
-                        elif missing_sector > 0 and has_fundamentals > 0:
-                            status_result["issues"].append({
-                                "type": "incomplete_fundamentals",
-                                "description": f"{missing_sector} stocks missing sector/industry data",
-                                "priority": "low",
-                                "command": "gefion fundamentals-update"
-                            })
-
-                        # Check for stale fundamentals (>30 days old)
-                        if latest_updated_str:
-                            try:
-                                latest_updated = datetime.fromisoformat(latest_updated_str.replace(' ', 'T'))
-                                days_old = (datetime.now() - latest_updated).days
-                                status_result["data"]["fundamentals_days_old"] = days_old
-
-                                if days_old > 30:
-                                    status_result["issues"].append({
-                                        "type": "stale_fundamentals",
-                                        "description": f"Fundamentals data is {days_old} days old",
-                                        "priority": "low",
-                                        "command": "gefion fundamentals-update"
-                                    })
-                            except (ValueError, TypeError):
-                                pass
-
-                except (json.JSONDecodeError, IndexError, ValueError) as e:
-                    pass  # Silently skip if query fails
+                    except (ValueError, TypeError):
+                        pass
 
         except Exception as e:
             # Don't fail system_status if fundamentals checking fails
@@ -3672,7 +3737,7 @@ async def _backtest_compare(args: Dict[str, Any]) -> Dict[str, Any]:
 # ============================================================================
 
 async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Propose a new experiment for approval."""
+    """Propose a new experiment for approval. Supports all experiment types."""
     async def _propose():
         cmd = ["experiment", "propose"]
 
@@ -3680,7 +3745,21 @@ async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd.extend(["--name", args["name"]])
         cmd.extend(["--search-space", args["search_space"]])
 
-        # Optional arguments
+        # Experiment type
+        if args.get("experiment_type"):
+            cmd.extend(["--type", args["experiment_type"]])
+
+        # ML-specific options
+        if args.get("model_type"):
+            cmd.extend(["--model-type", args["model_type"]])
+        if args.get("dataset_uri"):
+            cmd.extend(["--dataset-uri", args["dataset_uri"]])
+        if args.get("horizon_days"):
+            cmd.extend(["--horizon-days", str(args["horizon_days"])])
+        if args.get("objective_direction"):
+            cmd.extend(["--objective-direction", args["objective_direction"]])
+
+        # Strategy options
         if args.get("strategy"):
             cmd.extend(["--strategy", args["strategy"]])
         if args.get("symbols"):
@@ -3689,12 +3768,18 @@ async def _experiment_propose(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--start-date", args["start_date"]])
         if args.get("end_date"):
             cmd.extend(["--end-date", args["end_date"]])
+
+        # General options
         if args.get("objective"):
             cmd.extend(["--objective", args["objective"]])
         if args.get("max_trials"):
             cmd.extend(["--max-trials", str(args["max_trials"])])
         if args.get("search_method"):
             cmd.extend(["--search-method", args["search_method"]])
+        if args.get("extra_config"):
+            cmd.extend(["--config", args["extra_config"]])
+
+        # Goal options
         if args.get("goal_type"):
             cmd.extend(["--goal-type", args["goal_type"]])
         if args.get("goal_target") is not None:
@@ -3811,6 +3896,92 @@ async def _experiment_status(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _status)
+
+
+# ============================================================================
+# Autonomous Experiment Framework Tools
+# ============================================================================
+
+async def _experiment_discover(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Discover available data sources and experiment opportunities."""
+    async def _discover():
+        cmd = ["experiment", "discover", "--json"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _discover)
+
+
+async def _experiment_cycle_start(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Start a new experiment cycle with holdout and FDR configuration."""
+    async def _start():
+        cmd = ["experiment", "cycle-start", "--json"]
+
+        if args.get("name"):
+            cmd.extend(["--name", args["name"]])
+        if args.get("fdr_rate") is not None:
+            cmd.extend(["--fdr-rate", str(args["fdr_rate"])])
+        if args.get("holdout_weeks") is not None:
+            cmd.extend(["--holdout-weeks", str(args["holdout_weeks"])])
+        if args.get("max_experiments") is not None:
+            cmd.extend(["--max-experiments", str(args["max_experiments"])])
+
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _start)
+
+
+async def _experiment_cycle_run(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Run an autonomous experiment cycle."""
+    async def _run():
+        cmd = ["experiment", "cycle-run", str(args["cycle_id"])]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _experiment_cycle_status(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Get status of an experiment cycle."""
+    async def _status():
+        cmd = ["experiment", "cycle-status", str(args["cycle_id"]), "--json"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _status)
+
+
+async def _principles_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List principles from the quantitative finance catalog."""
+    async def _list():
+        cmd = ["principles", "list", "--json"]
+
+        if args.get("domain"):
+            cmd.extend(["--domain", args["domain"]])
+        if args.get("experiment_type"):
+            cmd.extend(["--experiment-type", args["experiment_type"]])
+        if args.get("status"):
+            cmd.extend(["--status", args["status"]])
+
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _list)
+
+
+async def _principles_suggest(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Suggest experiments based on principles and current data."""
+    async def _suggest():
+        cmd = ["principles", "suggest", "--json"]
+
+        if args.get("experiment_type"):
+            cmd.extend(["--experiment-type", args["experiment_type"]])
+
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _suggest)
 
 
 # ============================================================================

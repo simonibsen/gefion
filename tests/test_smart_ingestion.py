@@ -217,3 +217,59 @@ def test_filter_new_rows_no_existing_data():
     # All 100 rows should be new
     assert len(new_rows) == 100
     conn.close()
+
+
+def test_filter_new_rows_since_date():
+    """filter_new_rows with since_date discards rows before the cutoff."""
+    from gefion.db.ingest import filter_new_rows
+    conn = require_db()
+    schema.create_stocks_table(conn)
+    schema.create_stock_ohlcv_table(conn)
+
+    aapl_id = upsert_stock(conn, "AAPL")
+
+    # API returns rows spanning 2025-01-01 to 2025-01-10
+    api_response = [
+        {"date": date(2025, 1, i), "close": 150.0, "open": 149.0,
+         "high": 151.0, "low": 148.0, "volume": 1000000}
+        for i in range(1, 11)
+    ]
+
+    # Only keep rows since 2025-01-06
+    new_rows = filter_new_rows(conn, aapl_id, api_response, since_date=date(2025, 1, 6))
+
+    # Should only include Jan 6-10 = 5 rows
+    assert len(new_rows) == 5
+    dates = [r["date"] for r in new_rows]
+    assert all(d >= date(2025, 1, 6) for d in dates)
+    conn.close()
+
+
+def test_filter_new_rows_since_and_target_date():
+    """filter_new_rows respects both since_date and target_date bounds."""
+    from gefion.db.ingest import filter_new_rows
+    conn = require_db()
+    schema.create_stocks_table(conn)
+    schema.create_stock_ohlcv_table(conn)
+
+    aapl_id = upsert_stock(conn, "AAPL")
+
+    api_response = [
+        {"date": date(2025, 1, i), "close": 150.0, "open": 149.0,
+         "high": 151.0, "low": 148.0, "volume": 1000000}
+        for i in range(1, 11)
+    ]
+
+    # Keep rows between Jan 4 and Jan 7 inclusive
+    new_rows = filter_new_rows(
+        conn, aapl_id, api_response,
+        since_date=date(2025, 1, 4), target_date=date(2025, 1, 7)
+    )
+
+    assert len(new_rows) == 4  # Jan 4, 5, 6, 7
+    dates = [r["date"] for r in new_rows]
+    assert min(dates) == date(2025, 1, 4)
+    assert max(dates) == date(2025, 1, 7)
+    conn.close()
+
+

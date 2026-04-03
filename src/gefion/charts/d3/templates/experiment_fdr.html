@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block chart_script %}
+const margin = {top: 50, right: 30, bottom: 90, left: 70};
+const w = WIDTH - margin.left - margin.right;
+const h = HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tip = createTooltip(container);
+
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(chartConfig.title || "FDR Analysis");
+
+const svg = container.append("svg")
+    .attr("width", WIDTH).attr("height", HEIGHT);
+const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+const fdrRate = chartConfig.fdr_rate || 0.05;
+
+// Scales
+const x = d3.scaleBand()
+    .domain(chartData.map(d => d.name))
+    .range([0, w])
+    .padding(0.5);
+
+const pMin = d3.min(chartData, d => d.p_value) || 1e-6;
+const y = d3.scaleLog()
+    .domain([Math.min(pMin * 0.5, fdrRate * 0.1), 1])
+    .range([h, 0])
+    .clamp(true);
+
+// Grid
+g.append("g").attr("class", "grid")
+    .call(d3.axisLeft(y).tickSize(-w).tickFormat(""))
+    .select(".domain").remove();
+
+// Axes
+g.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${h})`)
+    .call(d3.axisBottom(x))
+    .selectAll("text")
+    .attr("transform", "rotate(-45)")
+    .attr("text-anchor", "end")
+    .attr("dx", "-0.5em").attr("dy", "0.3em")
+    .attr("font-size", "10px");
+
+g.append("g").attr("class", "axis")
+    .call(d3.axisLeft(y).ticks(5, ".1e"));
+
+// Axis label
+g.append("text").attr("transform", "rotate(-90)")
+    .attr("x", -h / 2).attr("y", -55)
+    .attr("text-anchor", "middle").attr("fill", "var(--color-text)")
+    .attr("font-size", "12px").text("p-value (log scale)");
+
+// FDR threshold line
+g.append("line")
+    .attr("x1", 0).attr("x2", w)
+    .attr("y1", y(fdrRate)).attr("y2", y(fdrRate))
+    .attr("stroke", "#ff9800").attr("stroke-width", 1.5)
+    .attr("stroke-dasharray", "6,4");
+g.append("text")
+    .attr("x", w - 4).attr("y", y(fdrRate) - 6)
+    .attr("text-anchor", "end").attr("fill", "#ff9800")
+    .attr("font-size", "11px").attr("font-weight", "600")
+    .text(`FDR = ${fdrRate}`);
+
+// Dots
+const dots = g.selectAll(".dot").data(chartData).join("circle")
+    .attr("class", "dot")
+    .attr("cx", d => x(d.name) + x.bandwidth() / 2)
+    .attr("cy", d => y(d.p_value))
+    .attr("r", 6)
+    .attr("fill", d => d.promoted ? "#4caf50" : "#f44336")
+    .on("mousemove", function(event, d) {
+        tip.show(
+            `<b>${d.name}</b><br>` +
+            `p-value: ${d.p_value.toExponential(3)}<br>` +
+            `Promoted: ${d.promoted}`,
+            event.pageX, event.pageY
+        );
+    })
+    .on("mouseleave", () => tip.hide());
+
+staggeredEntry(dots);
+{% endblock %}

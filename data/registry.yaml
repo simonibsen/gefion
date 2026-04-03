@@ -1,0 +1,169 @@
+# Data Source Registry
+# Describes available data sources, their columns, and how they can be used.
+# The experiment agent consults this to understand what data exists and
+# what experiments are possible.
+#
+# When adding a new data source (e.g., sentiment, macro indicators),
+# register it here so the agent knows what it is and how to use it.
+#
+# Updated: 2026-03-29
+
+- id: stock_ohlcv
+  description: "Daily OHLCV price data per stock"
+  table: stock_ohlcv
+  time_series: true
+  key: [data_id, date]
+  update_frequency: daily
+  columns:
+    open:
+      type: float
+      description: "Opening price"
+      usable_as: [feature_input]
+    high:
+      type: float
+      description: "Daily high price"
+      usable_as: [feature_input]
+    low:
+      type: float
+      description: "Daily low price"
+      usable_as: [feature_input]
+    close:
+      type: float
+      description: "Closing price (adjusted)"
+      usable_as: [feature_input, label_input]
+    volume:
+      type: int
+      description: "Trading volume"
+      usable_as: [feature_input]
+
+- id: stocks
+  description: "Stock metadata — symbol, sector, industry, exchange"
+  table: stocks
+  time_series: false
+  key: [id]
+  columns:
+    symbol:
+      type: text
+      description: "Ticker symbol"
+      usable_as: [identifier]
+    sector:
+      type: text
+      description: "GICS sector classification"
+      usable_as: [cross_sectional, grouping]
+    industry:
+      type: text
+      description: "GICS industry classification"
+      usable_as: [cross_sectional, grouping]
+    exchange:
+      type: text
+      description: "Exchange (NYSE, NASDAQ, etc.)"
+      usable_as: [filter, grouping]
+    asset_type:
+      type: text
+      description: "Asset type (Stock, ETF, etc.)"
+      usable_as: [filter]
+
+- id: stocks_fundamentals
+  description: "Point-in-time fundamental data from AlphaVantage OVERVIEW endpoint"
+  table: stocks_fundamentals
+  time_series: true
+  sparse: true  # not all stocks have fundamentals
+  key: [data_id, date]
+  update_frequency: quarterly
+  columns:
+    market_cap:
+      type: float
+      description: "Market capitalization in dollars"
+      usable_as: [feature_input, cross_sectional]
+    pe_ratio:
+      type: float
+      description: "Price/earnings ratio (trailing)"
+      usable_as: [feature_input, cross_sectional]
+    forward_pe:
+      type: float
+      description: "Forward price/earnings ratio"
+      usable_as: [feature_input]
+    peg_ratio:
+      type: float
+      description: "Price/earnings-to-growth ratio"
+      usable_as: [feature_input]
+    book_value:
+      type: float
+      description: "Book value per share"
+      usable_as: [feature_input]
+    dividend_yield:
+      type: float
+      description: "Dividend yield (decimal)"
+      usable_as: [feature_input]
+    eps:
+      type: float
+      description: "Earnings per share (trailing)"
+      usable_as: [feature_input]
+    revenue_per_share:
+      type: float
+      description: "Revenue per share (trailing)"
+      usable_as: [feature_input]
+    profit_margin:
+      type: float
+      description: "Net profit margin (decimal)"
+      usable_as: [feature_input, cross_sectional]
+    operating_margin:
+      type: float
+      description: "Operating profit margin (decimal)"
+      usable_as: [feature_input, cross_sectional]
+    return_on_equity:
+      type: float
+      description: "Return on equity (decimal)"
+      usable_as: [feature_input, cross_sectional]
+    beta:
+      type: float
+      description: "Beta relative to market"
+      usable_as: [feature_input]
+    ev_to_ebitda:
+      type: float
+      description: "Enterprise value / EBITDA"
+      usable_as: [feature_input, cross_sectional]
+    shares_outstanding:
+      type: float
+      description: "Shares outstanding"
+      usable_as: [feature_input]
+
+- id: computed_features
+  description: "Pre-computed features from feature definitions (RSI, MACD, Bollinger Bands, etc.)"
+  table: computed_features
+  time_series: true
+  key: [feature_id, data_id, date]
+  update_frequency: daily
+  note: "Individual features defined in feature_definitions table. Use 'gefion features list' to see available features."
+  columns:
+    value:
+      type: float
+      description: "Computed feature value"
+      usable_as: [model_input]
+
+- id: cross_sectional_features
+  description: "Market-relative rankings and z-scores (sector, industry, market percentiles)"
+  table: cross_sectional_features
+  time_series: true
+  key: [feature_id, data_id, date]
+  update_frequency: daily
+  columns:
+    value:
+      type: float
+      description: "Cross-sectional rank or z-score"
+      usable_as: [model_input, cross_sectional]
+
+- id: predictions
+  description: "ML model predictions (quantile returns, trend classification)"
+  table: predictions
+  time_series: true
+  key: [model_id, data_id, prediction_date]
+  columns:
+    values:
+      type: jsonb
+      description: "Prediction values (q10, q50, q90 for quantile; probabilities for trend_class)"
+      usable_as: [signal_input, label_input]
+    prediction_type:
+      type: text
+      description: "Type of prediction: quantile or trend_class"
+      usable_as: [filter]

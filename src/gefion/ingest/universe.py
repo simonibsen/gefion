@@ -184,6 +184,7 @@ def ingest_prices_for_symbols(
     progress: Optional[ProgressReporter] = None,
     status: Optional[str] = "Active",
     target_date: Optional[date] = None,
+    since_date: Optional[date] = None,
 ) -> int:
     """
     Fetch and ingest prices for symbols in parallel.
@@ -252,7 +253,7 @@ def ingest_prices_for_symbols(
             # Filter to only new rows unless we are explicitly refreshing/upserting
             if not update_existing:
                 with psycopg.connect(db_url) as filter_conn:
-                    rows = filter_new_rows(filter_conn, data_id, rows, target_date=target_date)
+                    rows = filter_new_rows(filter_conn, data_id, rows, target_date=target_date, since_date=since_date)
 
             if not rows:
                 if progress:

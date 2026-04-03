@@ -493,3 +493,55 @@ def create_portfolio_chart(
     """Enhanced equity curve with risk metrics panel."""
     config = {"title": title or f"Portfolio — {strategy_name}", "strategy_name": strategy_name}
     return render_d3_chart("portfolio.html", data, config, width, height)
+
+
+# ---------------------------------------------------------------------------
+# Experiment charts
+# ---------------------------------------------------------------------------
+
+
+def create_experiment_trials(
+    trials: List[Dict],
+    title: Optional[str] = None,
+    width: int = 700,
+    height: int = 400,
+) -> str:
+    """Trial performance scatter: trial number vs score, colored by promoted/rejected."""
+    config = {"title": title or "Experiment Trials"}
+    return render_d3_chart("experiment_trials.html", trials, config, width, height)
+
+
+def create_experiment_fdr(
+    experiments: List[Dict],
+    fdr_rate: float = 0.10,
+    title: Optional[str] = None,
+    width: int = 700,
+    height: int = 400,
+) -> str:
+    """FDR cycle summary: p-values with threshold line, promoted/rejected markers."""
+    config = {"title": title or "FDR Cycle Summary", "fdr_rate": fdr_rate}
+    return render_d3_chart("experiment_fdr.html", experiments, config, width, height)
+
+
+def create_experiment_heatmap(
+    data: List[Dict],
+    x_label: str = "Parameter 1",
+    y_label: str = "Parameter 2",
+    title: Optional[str] = None,
+    width: int = 600,
+    height: int = 500,
+) -> str:
+    """Parameter sensitivity heatmap for 2-parameter experiments."""
+    config = {"title": title or "Parameter Sensitivity", "x_label": x_label, "y_label": y_label}
+    return render_d3_chart("experiment_heatmap.html", data, config, width, height)
+
+
+def create_experiment_features(
+    features: List[Dict],
+    title: Optional[str] = None,
+    width: int = 700,
+    height: int = 400,
+) -> str:
+    """Feature importance before/after: grouped bar chart."""
+    config = {"title": title or "Feature Importance: Before vs After"}
+    return render_d3_chart("experiment_features.html", features, config, width, height)

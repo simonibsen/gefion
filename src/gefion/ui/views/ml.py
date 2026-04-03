@@ -440,7 +440,8 @@ def render_ml():
     """Render the ML pipeline page."""
     st.markdown("# :material/model_training: ML Pipeline")
     render_chat_widget(get_page_context())
-    st.markdown("Train models, generate predictions, and evaluate performance.")
+    st.caption("Build datasets from price data and features, train prediction models, "
+               "generate forecasts, and evaluate accuracy. Workflow: Dataset → Train → Predict → Evaluate.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
         ":material/dataset: Dataset",
@@ -533,7 +534,7 @@ def render_dataset_section():
             "Prediction Horizons (days)",
             [7, 14, 30, 60, 90],
             default=[7, 30, 90],
-            help="Forward-looking periods for labels",
+            help="How far into the future to predict. 7 = one week ahead, 30 = one month ahead.",
         )
 
         lookback_days = st.number_input(
@@ -541,7 +542,7 @@ def render_dataset_section():
             min_value=50,
             max_value=500,
             value=200,
-            help="Rolling window for feature computation. Longer = more history but fewer samples.",
+            help="How many days of historical data each sample needs. A 200-day lookback means features like 200-day moving average can be computed. Longer lookback = richer features but fewer usable samples (early dates get dropped).",
         )
 
         export_format = st.selectbox(
@@ -881,8 +882,8 @@ def render_train_section():
 
     st.info("""
     💡 **Training** builds ML models from your dataset:
-    - **Quantile Regression**: Predicts price ranges (q10=downside, q50=median, q90=upside)
-    - **Trend Classifier**: Predicts direction (strong_down → strong_up)
+    - **Quantile Regression**: Predicts price ranges: a pessimistic (q10), median (q50), and optimistic (q90) forecast for each stock.
+    - **Trend Classifier**: Predicts trend direction: strong_down, weak_down, neutral, weak_up, strong_up.
     - **Ensemble**: Combines multiple algorithms for better accuracy
     """)
 
@@ -900,8 +901,8 @@ def render_train_section():
             "Model Type",
             ["Quantile Regression", "Trend Classifier", "Ensemble"],
             help=(
-                "**Quantile Regression**: Predicts q10/q50/q90 return ranges. Best for risk assessment. "
-                "**Trend Classifier**: Predicts 5 categories (strong_down to strong_up). Good for signals. "
+                "**Quantile Regression**: Predicts price ranges: a pessimistic (q10), median (q50), and optimistic (q90) forecast for each stock. Best for risk assessment. "
+                "**Trend Classifier**: Predicts trend direction: strong_down, weak_down, neutral, weak_up, strong_up. Good for signals. "
                 "**Ensemble**: Combines multiple algorithms. More robust but slower to train."
             ),
         )
@@ -1054,7 +1055,7 @@ def render_train_section():
                 "Enable warm-start",
                 value=False,
                 key="train_warm_start",
-                help="Continue training from a base model for faster incremental updates",
+                help="Continue training from an existing model instead of starting fresh. Use when you have new data but want to preserve what the model already learned. Much faster than full retraining.",
             )
 
             if warm_start:
@@ -1899,8 +1900,8 @@ def render_predict_section():
     st.subheader("Generate Predictions")
 
     st.info("""
-    💡 **Predictions** use trained models to forecast price ranges (quantiles)
-    or trend directions for specified symbols.
+    Generate predictions for stocks using a trained model. **Quantile models** predict three price scenarios: pessimistic (q10 = 10th percentile), median (q50), and optimistic (q90). This gives you a range, not just a single number.
+    **Classifier models** predict trend direction. **Ensemble models** combine multiple algorithms.
     """)
 
     # Get available models

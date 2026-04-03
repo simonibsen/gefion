@@ -189,6 +189,28 @@ def _delete_orphaned(cur, table: str) -> int:
     return cur.rowcount
 
 
+def vacuum_after_cull(
+    conn: Connection,
+    affected_tables: Dict[str, int],
+) -> None:
+    """VACUUM ANALYZE each table that had rows deleted.
+
+    A global ``VACUUM ANALYZE`` does not reliably update
+    ``pg_stat_user_tables.n_live_tup`` for TimescaleDB hypertable chunks.
+    Targeting each table individually ensures the stats are refreshed so
+    approximate row-count queries return correct values.
+    """
+    if not affected_tables:
+        return
+
+    with create_span("db.cull.vacuum", table_count=len(affected_tables)) as span:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            for table_name in affected_tables:
+                cur.execute(f"VACUUM ANALYZE {table_name}")
+                add_event(span, f"vacuumed_{table_name}")
+
+
 def execute_cull(
     conn: Connection,
     before_date: date,

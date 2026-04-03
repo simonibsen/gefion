@@ -546,6 +546,48 @@ CREATE INDEX IF NOT EXISTS idx_experiments_status ON experiments(status);
 CREATE INDEX IF NOT EXISTS idx_experiments_type ON experiments(experiment_type);
 CREATE INDEX IF NOT EXISTS idx_experiments_parent ON experiments(parent_experiment_id);
 
+-- =============================================================================
+-- EXPERIMENT CYCLES (autonomous experimentation framework)
+-- =============================================================================
+
+-- Cycles group experiments for FDR evaluation with a shared holdout window
+CREATE TABLE IF NOT EXISTS experiment_cycles (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    holdout_start_date DATE NOT NULL,
+    holdout_end_date DATE NOT NULL,
+    fdr_rate NUMERIC DEFAULT 0.10,
+    discovery_snapshot JSONB,
+    principles_consulted JSONB,
+    status TEXT DEFAULT 'proposed',
+    compute_budget_seconds INTEGER DEFAULT 7200,
+    max_experiments INTEGER DEFAULT 20,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    summary JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_experiment_cycles_status ON experiment_cycles(status);
+
+-- Extend experiments: cycle linkage, principle reference, statistical evaluation
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS cycle_id INTEGER REFERENCES experiment_cycles(id);
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS principle_id TEXT;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS null_hypothesis TEXT;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS holdout_p_value NUMERIC;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS fdr_survived BOOLEAN;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS discovery_context JSONB;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS risk_level TEXT DEFAULT 'medium';
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS resource_usage JSONB;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMPTZ;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS demoted_at TIMESTAMPTZ;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS probation_until TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_experiments_cycle_id ON experiments(cycle_id);
+
+-- Extend feature_definitions: experimental vs production tracking
+ALTER TABLE feature_definitions ADD COLUMN IF NOT EXISTS is_experimental BOOLEAN DEFAULT false;
+ALTER TABLE feature_definitions ADD COLUMN IF NOT EXISTS source_experiment_id INTEGER REFERENCES experiments(id);
+ALTER TABLE feature_definitions ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMPTZ;
+
 -- Experiment trials table - individual trial results
 CREATE TABLE IF NOT EXISTS experiment_trials (
     id SERIAL PRIMARY KEY,

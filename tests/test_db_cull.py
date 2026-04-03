@@ -260,6 +260,45 @@ def test_execute_cull_accepts_on_progress_callback():
     )
 
 
+def test_vacuum_after_cull_targets_affected_tables():
+    """vacuum_after_cull must VACUUM ANALYZE each affected table individually,
+    not a global VACUUM ANALYZE (which doesn't reliably update hypertable chunk stats)."""
+    from gefion.db.cull import vacuum_after_cull
+    import inspect
+
+    src = inspect.getsource(vacuum_after_cull)
+    # Must iterate over affected tables and vacuum each one
+    assert "VACUUM ANALYZE" in src, "vacuum_after_cull must run VACUUM ANALYZE"
+    # Must accept a dict of affected tables (the result from execute_cull)
+    sig = inspect.signature(vacuum_after_cull)
+    assert "affected_tables" in sig.parameters, (
+        "vacuum_after_cull must accept affected_tables parameter (dict from execute_cull)"
+    )
+
+
+def test_vacuum_after_cull_skips_when_no_tables():
+    """vacuum_after_cull should be a no-op when no tables were affected."""
+    from gefion.db.cull import vacuum_after_cull
+    from unittest.mock import MagicMock
+
+    conn = MagicMock()
+    # Empty dict = nothing deleted
+    vacuum_after_cull(conn, affected_tables={})
+    # Should not have executed any SQL
+    conn.cursor.return_value.__enter__.return_value.execute.assert_not_called()
+
+
+def test_cli_cull_uses_per_table_vacuum():
+    """CLI data cull must call vacuum_after_cull with per-table targeting."""
+    import inspect
+    from gefion import cli
+    src = inspect.getsource(cli.data_cull)
+    assert "vacuum_after_cull" in src, (
+        "CLI data_cull must use vacuum_after_cull for per-table vacuum "
+        "(not a global VACUUM ANALYZE)"
+    )
+
+
 def test_orphan_detection_respects_train_run_id():
     """ml_runs must not be considered orphaned if ml_models.train_run_id references them."""
     from gefion.db.cull import _count_orphaned, _delete_orphaned

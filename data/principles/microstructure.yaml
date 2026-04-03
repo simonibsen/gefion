@@ -1,0 +1,184 @@
+# Principles: Market Microstructure & Risk Awareness
+# Sources: Harris (2003), Taleb (2001, 2007, 2012)
+# Domain: microstructure
+# Extracted: 2026-03-29
+
+# === Larry Harris — Trading and Exchanges (2003) ===
+
+- id: bid-ask-spread-as-alpha-feature
+  source:
+    author: "Larry Harris"
+    title: "Trading and Exchanges"
+    year: 2003
+    chapter: "Ch. 4–6: The Bid-Ask Spread"
+  claim: "The bid-ask spread encodes adverse selection, inventory, and order-processing costs; wider spreads signal higher information asymmetry and predict short-term return reversals."
+  mechanism: "Market makers widen spreads when they suspect informed trading. Stocks with abnormally wide spreads relative to their norm are experiencing elevated adverse selection, which precedes price discovery events. Mean-reversion in spread predicts mean-reversion in returns."
+  experiment_types: [feature_engineering, model_comparison]
+  testable_prediction: "Adding a normalised bid-ask spread proxy (high-low / close, Corwin-Schultz estimator) as an ML feature improves out-of-sample prediction accuracy for 1–5 day returns."
+  experiment_design: "Compute daily spread_proxy = (high - low) / close and its 20-day z-score for the universe. Train two identical quantile-regression models — one with spread features, one without. Compare via backtest Sharpe and IC on a held-out year."
+  known_limitations: "OHLCV-derived spread proxies are noisy estimates of true quoted spread; breaks down for illiquid micro-caps where high-low reflects gap risk, not spread."
+  data_requirements: ["ohlcv.high", "ohlcv.low", "ohlcv.close", "fundamentals.market_cap"]
+  empirical_status: untested
+  experiments: []
+
+- id: volume-price-informed-trading
+  source:
+    author: "Larry Harris"
+    title: "Trading and Exchanges"
+    year: 2003
+    chapter: "Ch. 11–12: Informed Traders and Liquidity"
+  claim: "Unusual volume relative to price movement signals informed trading; high volume with small price change indicates balanced informed flow, while high volume with large price change indicates directional information."
+  mechanism: "Informed traders trade when they possess material non-public information. The ratio of absolute return to volume (Amihud illiquidity) and its inverse capture the information content of trading activity. Sudden shifts in this ratio precede trend continuations or reversals."
+  experiment_types: [feature_engineering, feature_selection]
+  testable_prediction: "Features derived from volume-price ratios (Amihud illiquidity, volume-weighted price change) rank in the top quartile of feature importance for trend classification models."
+  experiment_design: "Compute amihud = abs(close_return) / (volume * close) daily. Add amihud, its 20-day rolling mean, and the ratio of current to rolling mean as features. Train trend classifier with and without these features. Measure feature importance via SHAP and compare classification accuracy."
+  known_limitations: "Amihud measure is noisy for stocks with very low volume; corporate actions (splits, dividends) cause spurious spikes without adjustments."
+  data_requirements: ["ohlcv.close", "ohlcv.volume", "ohlcv.high", "ohlcv.low"]
+  empirical_status: untested
+  experiments: []
+
+- id: implementation-shortfall-cost
+  source:
+    author: "Larry Harris"
+    title: "Trading and Exchanges"
+    year: 2003
+    chapter: "Ch. 21: Execution Costs and Implementation Shortfall"
+  claim: "The gap between theoretical backtest returns and live returns is dominated by implementation shortfall — market impact, timing cost, and opportunity cost — which scales non-linearly with order size relative to volume."
+  mechanism: "Backtests assume frictionless execution at close prices. Real execution moves prices, especially for less liquid names. Implementation shortfall = (execution price − decision price) × shares. It grows roughly as the square root of participation rate (order size / ADV)."
+  experiment_types: [strategy_optimization, pipeline]
+  testable_prediction: "Applying a market-impact cost model (e.g., square-root model proportional to trade_size / ADV) to backtest trades reduces reported Sharpe by 15–40% and changes optimal portfolio construction toward more liquid names."
+  experiment_design: "Run the same strategy backtest twice: once with zero transaction costs, once with estimated impact = 0.1 * sigma_daily * sqrt(trade_value / ADV_20). Compare Sharpe, turnover, and the liquidity profile (median ADV) of selected stocks. Assess whether the cost-aware version shifts weight toward large-caps."
+  known_limitations: "Square-root impact models are approximations calibrated to institutional equity flow; actual impact depends on execution algorithm, venue, and market regime."
+  data_requirements: ["ohlcv.close", "ohlcv.volume", "fundamentals.market_cap"]
+  empirical_status: untested
+  experiments: []
+
+- id: order-flow-toxicity-vpin
+  source:
+    author: "Larry Harris"
+    title: "Trading and Exchanges"
+    year: 2003
+    chapter: "Ch. 13: Informed Trading and Information"
+  claim: "Order flow toxicity — the probability that a trade comes from an informed participant — can be estimated from volume imbalance (VPIN) and predicts short-term volatility spikes and adverse price moves."
+  mechanism: "VPIN partitions volume into equal-sized buckets and classifies each trade as buy or sell (using bulk volume classification on OHLCV: buy_volume = volume * (close - low) / (high - low)). High VPIN means one side dominates, signalling informed flow and predicting near-term volatility."
+  experiment_types: [feature_engineering, label_engineering]
+  testable_prediction: "A VPIN feature computed from OHLCV data has significant rank correlation (IC > 0.03) with next-5-day realised volatility and improves volatility-timing strategies."
+  experiment_design: "Compute daily buy_volume = volume * (close - low) / (high - low), sell_volume = volume - buy_volume. VPIN = abs(buy_volume - sell_volume) / volume, smoothed over 20 days. Add as feature to quantile regression targeting 5-day forward volatility. Measure IC and compare model RMSE with and without VPIN."
+  known_limitations: "OHLCV-based bulk volume classification is a coarse proxy for true trade direction; accuracy degrades in low-volatility, range-bound markets where high ≈ low."
+  data_requirements: ["ohlcv.open", "ohlcv.high", "ohlcv.low", "ohlcv.close", "ohlcv.volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: liquidity-premium-cross-section
+  source:
+    author: "Larry Harris"
+    title: "Trading and Exchanges"
+    year: 2003
+    chapter: "Ch. 19–20: Liquidity and Asset Pricing"
+  claim: "Less liquid stocks earn a return premium to compensate holders for higher transaction costs; sorting on liquidity measures produces a monotonic spread in forward returns."
+  mechanism: "Investors demand compensation for bearing liquidity risk. Illiquidity proxies (Amihud ratio, turnover inverse, spread proxy) are priced in the cross-section. A long-illiquid / short-liquid portfolio earns positive excess returns, but with higher volatility and drawdowns."
+  experiment_types: [feature_engineering, strategy_optimization, model_comparison]
+  testable_prediction: "Quintile-sorting the universe by 60-day average Amihud illiquidity produces a monotonically increasing pattern in next-month median returns across quintiles."
+  experiment_design: "Each month, compute 60-day Amihud illiquidity per stock. Sort into quintiles. Measure median 21-day forward return per quintile. Run backtest of a long-Q5 / short-Q1 portfolio with and without market-impact costs. Report gross and net Sharpe and max drawdown."
+  known_limitations: "The illiquidity premium may be captured by size/value factors; it weakens in high-volatility regimes when liquidity dries up across the board (liquidity risk is systematic)."
+  data_requirements: ["ohlcv.close", "ohlcv.volume", "fundamentals.market_cap", "fundamentals.sector"]
+  empirical_status: untested
+  experiments: []
+
+# === Nassim Nicholas Taleb — Fooled by Randomness (2001), The Black Swan (2007), Antifragile (2012) ===
+
+- id: fat-tail-kurtosis-feature
+  source:
+    author: "Nassim Nicholas Taleb"
+    title: "The Black Swan"
+    year: 2007
+    chapter: "Ch. 15–17: The Bell Curve and Extremistan"
+  claim: "Financial return distributions have fat tails (excess kurtosis >> 0); the rolling kurtosis of a stock's returns signals regime changes and predicts periods of elevated tail risk."
+  mechanism: "Returns are drawn from power-law-like distributions, not Gaussians. When rolling kurtosis rises, the probability of extreme moves increases faster than volatility alone would suggest. Stocks transitioning from Mediocristan to Extremistan behaviour become riskier than their recent standard deviation implies."
+  experiment_types: [feature_engineering, feature_selection, label_engineering]
+  testable_prediction: "Rolling 60-day kurtosis of daily returns, when added as a feature, improves prediction of 5-day maximum drawdown and ranks in the top third of feature importance."
+  experiment_design: "Compute 60-day rolling kurtosis of daily log returns for each stock. Add as feature alongside existing features. Train quantile regression targeting 5-day max drawdown (worst intra-period return). Compare RMSE and tail-hit-rate (fraction of true tail events captured) with and without kurtosis feature."
+  known_limitations: "Sample kurtosis from 60 observations has very high estimation error; it is itself a fat-tailed estimator. Kurtosis can appear low just before a regime break because the tail event hasn't occurred yet in the window."
+  data_requirements: ["ohlcv.close"]
+  empirical_status: untested
+  experiments: []
+
+- id: strategy-robustness-tail-stress
+  source:
+    author: "Nassim Nicholas Taleb"
+    title: "The Black Swan"
+    year: 2007
+    chapter: "Ch. 4: The Ludic Fallacy; Ch. 10: The Scandal of Prediction"
+  claim: "A strategy's true risk is revealed only by its behaviour during tail events; strategies that appear profitable in normal markets but blow up in crises have hidden fragility."
+  mechanism: "Most backtest periods are dominated by normal-regime returns. Strategies optimised on these periods silently accumulate exposure to rare events. Testing against historical tail episodes (2008, 2020-03, 2022-06) and synthetic shocks reveals whether the strategy's edge persists or inverts under stress."
+  experiment_types: [strategy_optimization, model_comparison, pipeline]
+  testable_prediction: "Strategies that maintain positive or flat returns during the worst 5% of market days have higher realised Sharpe over the full sample than strategies that maximise in-sample Sharpe without tail constraints."
+  experiment_design: "Identify the worst 5% of SPY daily returns in the backtest window. For each candidate strategy, compute conditional returns on those days versus all other days. Rank strategies by (full-period Sharpe, tail-day mean return). Test whether tail-robust strategies (tail-day mean return > −2x average daily return) outperform over the full period and the next out-of-sample year."
+  known_limitations: "Historical tail events may not represent future tail events (the next crisis is always different). Conditioning on past tails creates survivorship bias — strategies that survived may have been lucky."
+  data_requirements: ["ohlcv.close", "ohlcv.volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: antifragility-volatility-benefit
+  source:
+    author: "Nassim Nicholas Taleb"
+    title: "Antifragile"
+    year: 2012
+    chapter: "Ch. 2–3: Overcompensation; Ch. 18: On the Difference Between a Large Stone and a Thousand Pebbles"
+  claim: "Antifragile strategies have convex payoff profiles — they benefit from increased volatility and disorder rather than merely surviving it."
+  mechanism: "A strategy with positive convexity gains more from large moves than it loses. This can be detected by regressing strategy returns against market return and its square: a positive coefficient on the squared term indicates convexity (antifragility). Strategies can be engineered toward antifragility by incorporating asymmetric position sizing or optionality."
+  experiment_types: [strategy_optimization, model_comparison, hyperparameter]
+  testable_prediction: "Strategies with a statistically significant positive coefficient on market_return^2 in a quadratic regression have higher realised Sharpe in high-VIX regimes than strategies with negative or zero convexity."
+  experiment_design: "For each strategy, regress daily strategy_return on market_return and market_return^2. Record the convexity coefficient (beta_2). Split the backtest into high-VIX tercile and low-VIX tercile days. Compare the Sharpe ratio differential (high-VIX Sharpe minus low-VIX Sharpe) across strategies sorted by beta_2. Test whether beta_2 > 0 strategies outperform in the high-VIX tercile."
+  known_limitations: "Convexity is often purchased at the cost of persistent negative carry (like buying options). Quadratic regression may miss higher-order non-linearities. True antifragility requires benefiting from disorder, not just surviving it."
+  data_requirements: ["ohlcv.close", "ohlcv.volume"]
+  empirical_status: untested
+  experiments: []
+
+- id: narrative-fallacy-overfit-detection
+  source:
+    author: "Nassim Nicholas Taleb"
+    title: "Fooled by Randomness"
+    year: 2001
+    chapter: "Ch. 6: Skewness and Asymmetry; Ch. 11: Randomness and Our Mind"
+  claim: "Backtests are prone to the narrative fallacy — pattern-fitting to noise produces strategies that look compelling in-sample but have no out-of-sample edge; the more complex the strategy, the greater the overfitting risk."
+  mechanism: "Given enough parameters and data-mining, any random series can be fit with high R-squared. The number of degrees of freedom (features, hyperparameters, lookback variations) relative to independent observations determines overfitting risk. Strategies with high in-sample Sharpe but many tuned parameters contain mostly noise."
+  experiment_types: [hyperparameter, model_comparison, pipeline]
+  testable_prediction: "Strategies with fewer features and hyperparameters show smaller degradation between in-sample and out-of-sample Sharpe (IS/OOS Sharpe ratio closer to 1.0) compared to complex strategies."
+  experiment_design: "Train multiple model variants with increasing feature counts (5, 10, 20, 50 features). For each, compute in-sample Sharpe (train period) and out-of-sample Sharpe (next year). Plot IS Sharpe, OOS Sharpe, and the IS/OOS ratio against feature count. Apply the deflated Sharpe ratio (Bailey & Lopez de Prado) adjusting for the number of trials. Flag models where IS/OOS ratio < 0.5 as likely overfit."
+  known_limitations: "Even parsimonious models can overfit if the researcher has tried many variations; the deflated Sharpe ratio requires knowing the total number of trials, which is hard to track across iterative research."
+  data_requirements: ["ohlcv.close", "ohlcv.volume", "ohlcv.high", "ohlcv.low"]
+  empirical_status: untested
+  experiments: []
+
+- id: barbell-strategy-construction
+  source:
+    author: "Nassim Nicholas Taleb"
+    title: "Antifragile"
+    year: 2012
+    chapter: "Ch. 11: The Barbell Strategy; Ch. 23: Skin in the Game"
+  claim: "A barbell allocation — combining a large safe allocation with a small speculative allocation — outperforms a moderate-risk portfolio on a risk-adjusted basis over long horizons because it caps downside while preserving unlimited upside."
+  mechanism: "Medium-risk assets carry hidden tail risk that is underpriced. A barbell avoids this by holding only extremes: a safe component (low-vol, high-quality stocks) limits drawdowns, while a speculative component (high-vol, high-convexity stocks) captures outsized gains. The combination has a more favourable return distribution than the midpoint."
+  experiment_types: [strategy_optimization, model_comparison]
+  testable_prediction: "A portfolio that allocates 85% to the lowest-volatility quintile and 15% to the highest-volatility quintile achieves a higher Sortino ratio than a portfolio fully invested in the middle-volatility quintile."
+  experiment_design: "Monthly, sort the universe into volatility quintiles using 60-day realised vol. Construct three portfolios: (A) barbell — 85% equal-weight Q1, 15% equal-weight Q5; (B) middle — 100% equal-weight Q3; (C) naive equal-weight. Backtest all three over 5+ years. Compare Sharpe, Sortino, max drawdown, and skewness of return distributions."
+  known_limitations: "The speculative leg can experience prolonged drawdowns that test investor patience. Volatility quintile sorting is a crude proxy — ideally the speculative leg would have positive skew (call-like payoff), not just high vol."
+  data_requirements: ["ohlcv.close", "ohlcv.volume", "fundamentals.market_cap", "fundamentals.sector"]
+  empirical_status: untested
+  experiments: []
+
+- id: nonlinear-payoff-detection
+  source:
+    author: "Nassim Nicholas Taleb"
+    title: "Antifragile"
+    year: 2012
+    chapter: "Ch. 18–19: Convexity and Fragility Detection"
+  claim: "Strategies and features with non-linear (convex) relationships to market variables are more valuable than linear ones because they capture optionality that linear models miss."
+  mechanism: "Linear models assume symmetric, proportional relationships. Many market phenomena — momentum crashes, volatility clustering, liquidity spirals — are inherently non-linear. Detecting and exploiting non-linearity (via interaction terms, polynomial features, or tree-based models) captures alpha that linear models leave on the table."
+  experiment_types: [feature_engineering, model_comparison, hyperparameter]
+  testable_prediction: "A gradient-boosted tree model (which captures non-linearity natively) outperforms a linear quantile regression on the same feature set, with the gap widening during high-volatility regimes."
+  experiment_design: "Train both a linear quantile regression and a LightGBM quantile regression on identical features and target. Compare out-of-sample IC, Sharpe, and hit rate overall and conditional on VIX tercile. Compute SHAP interaction values from the tree model to identify the strongest non-linear feature pairs. Test whether adding those interactions as explicit features improves the linear model."
+  known_limitations: "Non-linear models are more prone to overfitting, especially with small training sets. The added complexity must be justified by robust OOS improvement, not just in-sample fit. Tree models can also be fragile to distribution shift."
+  data_requirements: ["ohlcv.open", "ohlcv.high", "ohlcv.low", "ohlcv.close", "ohlcv.volume", "fundamentals.market_cap", "fundamentals.sector"]
+  empirical_status: untested
+  experiments: []
