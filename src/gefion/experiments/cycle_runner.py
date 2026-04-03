@@ -452,6 +452,32 @@ class CycleRunner:
                       {"experiment_id": exp_id, "type": exp_type,
                        "principle": h.get("principle_id", "")})
 
+            # 3b. Rebuild dataset if new features were computed
+            has_new_features = any(
+                h.get("experiment_type") == "feature_engineering"
+                for h in ready[:max_experiments]
+            )
+            if has_new_features and dataset_uri:
+                _emit("dataset", "Rebuilding dataset with new experimental features...")
+                new_uri = self._rebuild_dataset(dataset_uri, allowed_horizons, cycle_id)
+                if new_uri:
+                    dataset_uri = new_uri
+                    # Update all proposed experiment configs to use the new dataset
+                    with self._get_conn() as conn:
+                        conn.autocommit = True
+                        with conn.cursor() as cur:
+                            for exp_id in proposed_ids:
+                                cur.execute("""
+                                    UPDATE experiments
+                                    SET config = jsonb_set(
+                                        COALESCE(config, '{}'::jsonb),
+                                        '{dataset_uri}',
+                                        %s::jsonb
+                                    )
+                                    WHERE id = %s
+                                """, (f'"{new_uri}"', exp_id))
+                    _emit("dataset", f"Dataset rebuilt: {new_uri}")
+
             # 4. Auto-approve
             _emit("approving", f"{'Auto-approving' if auto_approve else 'Awaiting approval for'} {len(proposed_ids)} experiments...")
             if auto_approve:
@@ -688,6 +714,62 @@ class CycleRunner:
                     )
 
         return promoted
+
+    def _rebuild_dataset(self, current_uri: str, horizons: List[int], cycle_id: int) -> Optional[str]:
+        """Rebuild the dataset to include newly computed experimental features.
+
+        Creates a new dataset version based on the current one, including
+        any experimental features that have been computed into computed_features.
+
+        Returns the new dataset URI, or None if rebuild failed.
+        """
+        import subprocess
+
+        try:
+            from pathlib import Path
+            manifest_path = Path(current_uri)
+            if not manifest_path.exists():
+                logger.warning(f"Cannot rebuild: dataset not found at {current_uri}")
+                return None
+
+            import json as _json
+            manifest = _json.loads(manifest_path.read_text())
+            name = manifest.get("name", "cycle")
+            horizons_str = ",".join(str(h) for h in horizons)
+
+            # Build new version
+            new_version = f"cycle-{cycle_id}"
+
+            cmd = [
+                "gefion", "ml", "dataset-build",
+                "--name", name,
+                "--version", new_version,
+                "--horizons", horizons_str,
+                "--format", manifest.get("format", "parquet"),
+                "--json",
+            ]
+
+            # Add exchange if in manifest
+            universe = manifest.get("universe", {})
+            if universe.get("exchange"):
+                cmd.extend(["--exchange", universe["exchange"]])
+
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=120,
+            )
+
+            if result.returncode == 0:
+                new_uri = f"datasets/{name}_{new_version}/manifest.json"
+                if Path(new_uri).exists():
+                    logger.info(f"Rebuilt dataset: {new_uri}")
+                    return new_uri
+
+            logger.warning(f"Dataset rebuild failed: {result.stderr[:200]}")
+            return None
+
+        except Exception as e:
+            logger.warning(f"Dataset rebuild failed: {e}")
+            return None
 
     def _compute_experimental_feature(self, feature_name: str) -> None:
         """Compute an experimental feature for all stocks.

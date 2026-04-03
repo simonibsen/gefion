@@ -9550,6 +9550,7 @@ def experiment_cycle_run(
                     "loading": "[dim]",
                     "preflight": "[cyan]",
                     "preflight_warning": "[yellow]  ",
+                    "dataset": "[blue]",
                     "discovery": "[cyan]",
                     "proposing": "[blue]",
                     "proposed": "[dim]  ",

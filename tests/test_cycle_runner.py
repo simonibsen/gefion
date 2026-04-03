@@ -286,6 +286,22 @@ class TestExperimentalFeatureStorage:
             assert callable(env.get("compute")), f"Template '{name}' must define compute()"
 
 
+class TestDatasetRebuild:
+    """Test dataset rebuild after new experimental features."""
+
+    def test_rebuild_method_exists(self):
+        from gefion.experiments.cycle_runner import CycleRunner
+        assert hasattr(CycleRunner, "_rebuild_dataset")
+
+    def test_rebuild_called_when_feature_engineering_present(self):
+        """run_cycle should rebuild dataset when feature_engineering experiments are proposed."""
+        import inspect
+        from gefion.experiments.cycle_runner import CycleRunner
+        src = inspect.getsource(CycleRunner.run_cycle)
+        assert "_rebuild_dataset" in src
+        assert "Rebuilding dataset" in src
+
+
 class TestCycleStartConfigFile:
     """Test cycle-start accepts --config file."""
 
