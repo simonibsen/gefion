@@ -7107,7 +7107,7 @@ def _update_all_impl(
                         SELECT s.id, s.symbol FROM stocks s
                         WHERE s.symbol = ANY(%s)
                           AND (s.sector IS NULL OR s.updated_at IS NULL
-                               OR s.updated_at < NOW() - INTERVAL '7 days')
+                               OR s.updated_at < NOW() - INTERVAL '30 days')
                     """, (symbols,))
                     stale_stocks = cur.fetchall()
                     set_attributes(fund_span, stale_count=len(stale_stocks))
