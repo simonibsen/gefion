@@ -7112,9 +7112,14 @@ def _update_all_impl(
                     stale_stocks = cur.fetchall()
                     set_attributes(fund_span, stale_count=len(stale_stocks))
 
-            if stale_stocks and len(stale_stocks) <= 200:
+            if not stale_stocks:
                 if not json_output:
-                    emit(f"Updating fundamentals for {len(stale_stocks)} stocks...")
+                    emit("Fundamentals: all up to date (refreshed within 30 days)")
+
+            elif stale_stocks and len(stale_stocks) <= 200:
+                if not json_output:
+                    emit(f"Fundamentals: {len(stale_stocks)} stocks need refresh (>30 days old or missing). "
+                         f"This may take a few minutes due to API rate limits...")
 
                 if client is None:
                     try:
@@ -7211,8 +7216,8 @@ def _update_all_impl(
 
             elif stale_stocks and len(stale_stocks) > 200:
                 if not json_output:
-                    emit(f"[yellow]{len(stale_stocks)} stocks need fundamentals. "
-                         f"Run 'gefion fundamentals-update --limit 200' to update in batches.[/yellow]")
+                    emit(f"Fundamentals: {len(stale_stocks)} stocks need refresh (skipping — too many for auto-update). "
+                         f"Run 'gefion fundamentals-update --limit 200' to update in batches.")
     except Exception:
         pass  # Fundamentals are optional — don't fail data-update
 
