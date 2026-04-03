@@ -135,6 +135,26 @@ def compute(df, window=100):
 }
 
 
+def _categorize_principle(principle_id: str) -> str:
+    """Derive a feature category from a principle ID for tag-based grouping."""
+    pid = principle_id.lower()
+    if any(k in pid for k in ("volatility", "garch", "contraction", "squeeze")):
+        return "Volatility"
+    if any(k in pid for k in ("momentum", "acceleration", "trend")):
+        return "Momentum"
+    if any(k in pid for k in ("mean-reversion", "cointegration", "pairs")):
+        return "Mean Reversion"
+    if any(k in pid for k in ("volume", "vpin", "informed-trading", "bid-ask", "spread")):
+        return "Volume"
+    if any(k in pid for k in ("variance-ratio", "unit-root", "hurst", "autocorrelation", "stationarity")):
+        return "Statistical"
+    if any(k in pid for k in ("tail", "kurtosis", "fat-tail", "black-swan", "antifragil")):
+        return "Statistical"
+    if any(k in pid for k in ("fractional", "differentiation", "purged", "meta-label")):
+        return "Statistical"
+    return "Custom"
+
+
 def _generate_function_body_claude(principle_id: str, experiment_design: str) -> Optional[str]:
     """Use Claude Code (claude -p) to generate a feature function.
 
@@ -733,7 +753,7 @@ class CycleRunner:
             "description": f"AI-generated from principle: {principle_id}. {description[:200]}",
             "function_body": function_body,
             "created_by": "cycle_runner",
-            "tags": ["experimental", "ai-generated", principle_id],
+            "tags": ["experimental", "ai-generated", _categorize_principle(principle_id), principle_id],
         }
 
         try:

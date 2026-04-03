@@ -424,19 +424,11 @@ gefion feat-fx-import --dir feature-functions/""", language="bash")
             regular = [f for f in functions if f.get("status") != "experimental"]
             experimental = [f for f in functions if f.get("status") == "experimental"]
 
-            # Regular functions — group by prefix
+            # Regular functions — group by category
             if regular:
                 groups = {}
                 for func in regular:
-                    name = func.get("name", "")
-                    prefix = name.split("_")[0] if "_" in name else "other"
-                    group_labels = {
-                        "indicator": "Technical Indicators",
-                        "price": "Price Features",
-                        "cross": "Cross-Sectional",
-                        "derivative": "Derivative Features",
-                    }
-                    group = group_labels.get(prefix, prefix.title())
+                    group = _get_function_category(func)
                     if group not in groups:
                         groups[group] = []
                     groups[group].append(func)
@@ -471,6 +463,46 @@ gefion feat-fx-import --dir feature-functions/""", language="bash")
     # Add new function section
     st.markdown("---")
     render_add_function_form()
+
+
+FUNCTION_CATEGORIES = [
+    "Technical Indicators", "Volatility", "Momentum", "Mean Reversion",
+    "Volume", "Cross-Sectional", "Statistical", "Price", "Custom",
+]
+
+# Map name prefixes and tags to categories
+_CATEGORY_MAP = {
+    "indicator": "Technical Indicators",
+    "price": "Price",
+    "cross": "Cross-Sectional",
+    "derivative": "Price",
+    "volatility": "Volatility",
+    "momentum": "Momentum",
+    "mean_reversion": "Mean Reversion",
+    "volume": "Volume",
+    "statistical": "Statistical",
+}
+
+
+def _get_function_category(func: dict) -> str:
+    """Determine the display category for a function.
+
+    Checks tags first (explicit category), then falls back to name prefix.
+    """
+    tags = func.get("tags") or []
+
+    # Check tags for explicit category
+    for tag in tags:
+        if tag in FUNCTION_CATEGORIES:
+            return tag
+        tag_lower = tag.lower()
+        if tag_lower in _CATEGORY_MAP:
+            return _CATEGORY_MAP[tag_lower]
+
+    # Fall back to name prefix
+    name = func.get("name", "")
+    prefix = name.split("_")[0] if "_" in name else ""
+    return _CATEGORY_MAP.get(prefix, "Custom")
 
 
 def render_function_row(func: dict):
@@ -568,7 +600,9 @@ def render_add_function_form():
 
         with col2:
             description = st.text_area("Description", placeholder="What does this function compute?", height=80, key="new_func_desc")
-            tags_str = st.text_input("Tags (comma-separated)", placeholder="indicator, momentum", key="new_func_tags")
+            category = st.selectbox("Category", FUNCTION_CATEGORIES, key="new_func_category",
+                                    help="How this function is grouped on the Functions tab.")
+            tags_str = st.text_input("Tags (comma-separated)", placeholder="momentum, rolling", key="new_func_tags")
             enabled = st.checkbox("Enabled", value=True, key="new_func_enabled")
 
         # Function body template
@@ -611,6 +645,9 @@ def compute(rows, specs):
             else:
                 try:
                     tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
+                    # Add category as a tag for grouping
+                    if category and category not in tags:
+                        tags.insert(0, category)
 
                     new_func = {
                         "name": name,
