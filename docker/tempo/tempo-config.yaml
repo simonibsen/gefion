@@ -53,4 +53,4 @@ query_frontend:
     enabled: true
 
 overrides:
-  metrics_generator_processors: [service-graphs, span-metrics, local-blocks]
+  metrics_generator_processors: [service-graphs, span-metrics]
