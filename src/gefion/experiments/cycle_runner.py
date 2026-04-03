@@ -409,26 +409,37 @@ class CycleRunner:
                 # Pick algorithm — for non-comparison types, use first allowed
                 exp_algorithm = algorithm if algorithm else allowed_algorithms[0]
 
-                # For feature engineering, generate a function body from the principle
+                # For feature engineering, check if a relevant feature already exists
+                # before generating a new one
                 feature_config = {}
                 if exp_type == "feature_engineering":
                     principle_id = h.get("principle_id", "")
                     design = h.get("description", "")
-                    body = _generate_function_body(principle_id, design)
-                    if body:
-                        fn_name = principle_id.replace("-", "_")[:40]
-                        feature_config = {
-                            "function_name": fn_name,
-                            "function_body": body,
-                        }
-                        # Store as experimental and compute the feature
-                        self._store_experimental_function(
-                            fn_name, body, principle_id, design, cycle_id,
-                        )
-                        self._compute_experimental_feature(f"exp_{fn_name}")
+                    fn_name = principle_id.replace("-", "_")[:40]
+                    full_fn_name = f"exp_{fn_name}"
+
+                    # Check if this feature already exists (from a previous cycle)
+                    existing = self._find_existing_feature(full_fn_name, principle_id)
+                    if existing:
                         _emit("proposed",
-                              f"  Generated feature function: {fn_name} (stored as experimental)",
-                              {"function_name": fn_name})
+                              f"  Reusing existing feature: {existing} (already computed)",
+                              {"function_name": existing, "reused": True})
+                        feature_config = {"function_name": existing.replace("exp_", "")}
+                    else:
+                        # Generate a new function
+                        body = _generate_function_body(principle_id, design)
+                        if body:
+                            feature_config = {
+                                "function_name": fn_name,
+                                "function_body": body,
+                            }
+                            self._store_experimental_function(
+                                fn_name, body, principle_id, design, cycle_id,
+                            )
+                            self._compute_experimental_feature(full_fn_name)
+                            _emit("proposed",
+                                  f"  Generated new feature function: {fn_name} (stored as experimental)",
+                                  {"function_name": fn_name})
 
                 exp_config = {
                     "experiment_type": exp_type,
@@ -714,6 +725,36 @@ class CycleRunner:
                     )
 
         return promoted
+
+    def _find_existing_feature(self, fn_name: str, principle_id: str) -> Optional[str]:
+        """Check if a feature function already exists for this principle.
+
+        Looks for existing experimental or active functions by name or
+        principle_id tag. Returns the function name if found, None otherwise.
+        """
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    # Check by exact name
+                    cur.execute(
+                        "SELECT name FROM feature_functions WHERE name = %s",
+                        (fn_name,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return row[0]
+
+                    # Check by principle_id in tags
+                    cur.execute(
+                        "SELECT name FROM feature_functions WHERE %s = ANY(tags)",
+                        (principle_id,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return row[0]
+        except Exception:
+            pass
+        return None
 
     def _rebuild_dataset(self, current_uri: str, horizons: List[int], cycle_id: int) -> Optional[str]:
         """Rebuild the dataset to include newly computed experimental features.
