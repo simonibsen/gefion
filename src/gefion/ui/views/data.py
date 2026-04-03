@@ -222,6 +222,7 @@ def start_background_process(key: str, cmd: list, env: dict):
                 env=env,
             )
             state.process = process
+            state.pid = process.pid
 
             # Start stderr reader thread
             stderr_thread = threading.Thread(
@@ -442,35 +443,55 @@ def render_update_section():
         render_process_status("data_update", "Data Update")
 
         if state.is_running:
-            # Check if process actually finished (thread state may not sync)
-            proc = getattr(state, 'process', None)
             actually_done = False
 
+            # Method 1: Check process object directly
+            proc = getattr(state, 'process', None)
             if proc is not None:
-                poll = proc.poll()
-                if poll is not None:
-                    # Process has exited — force update state
-                    state.is_running = False
-                    state.completed = True
-                    state.completed_at = time.time()
-                    state.success = poll == 0
-                    actually_done = True
-            else:
-                # No process ref — check timeout
+                try:
+                    poll = proc.poll()
+                    if poll is not None:
+                        state.is_running = False
+                        state.completed = True
+                        state.completed_at = time.time()
+                        state.success = poll == 0
+                        actually_done = True
+                except (OSError, ValueError):
+                    # Popen object lost its handle (Streamlit serialization)
+                    pass
+
+            # Method 2: Check PID if process object failed
+            if not actually_done:
+                pid = getattr(state, 'pid', None)
+                if pid:
+                    try:
+                        os.kill(pid, 0)  # Check if process exists
+                    except ProcessLookupError:
+                        # Process is gone — it finished
+                        state.is_running = False
+                        state.completed = True
+                        state.completed_at = time.time()
+                        state.success = True  # Assume success if no other info
+                        actually_done = True
+                    except PermissionError:
+                        pass  # Process exists but we can't signal it — still running
+
+            # Method 3: Timeout fallback
+            if not actually_done:
                 started = getattr(state, 'started_at', None)
-                if started and (time.time() - started) > 300:
+                if started and (time.time() - started) > 600:
                     state.is_running = False
                     state.completed = True
                     state.completed_at = time.time()
                     state.success = False
-                    state.error_message = "Process timed out"
+                    state.error_message = "Process timed out (10 min)"
                     actually_done = True
 
             if actually_done:
                 st.rerun()
             else:
                 st.caption("Auto-refreshing...")
-                time.sleep(1.5)
+                time.sleep(2)
                 st.rerun()
             return  # Don't show update form while process is running
 
