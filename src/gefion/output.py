@@ -215,7 +215,8 @@ class Output:
             }
 
         output = {"_meta": meta, **payload}
-        print(json.dumps(output, default=str, indent=2), flush=True)
+        # Single-line JSON so line-by-line readers (UI background process) can parse it
+        print(json.dumps(output, default=str), flush=True)
 
     def _print_data(self, data: Optional[Dict]) -> None:
         """Print supplementary data in rich mode."""
