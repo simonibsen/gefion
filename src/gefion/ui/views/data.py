@@ -417,8 +417,11 @@ def render_process_status(key: str, title: str):
                 for line in output_lines:
                     try:
                         data = json.loads(line)
-                        if not isinstance(data, dict) or "_meta" in data:
+                        if not isinstance(data, dict):
                             continue
+                        # Strip _meta wrapper to get the actual payload
+                        if "_meta" in data:
+                            data = {k: v for k, v in data.items() if k != "_meta"}
                         msg = data.get("message", "")
                         # Only show lines with a real human-readable message
                         if msg and len(msg) > 10:
