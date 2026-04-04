@@ -448,61 +448,55 @@ def render_update_section():
 
         if state.is_running:
             actually_done = False
-            debug_info = []
 
             # Method 1: Check process object directly
             proc = getattr(state, 'process', None)
-            debug_info.append(f"proc={type(proc).__name__ if proc else 'None'}")
             if proc is not None:
                 try:
                     poll = proc.poll()
-                    debug_info.append(f"poll={poll}")
                     if poll is not None:
                         state.is_running = False
                         state.completed = True
                         state.completed_at = time.time()
                         state.success = poll == 0
                         actually_done = True
-                        debug_info.append("DONE via poll")
-                except (OSError, ValueError) as e:
-                    debug_info.append(f"poll error: {e}")
+                except (OSError, ValueError):
+                    pass
 
             # Method 2: Check PID if process object failed
             if not actually_done:
                 pid = getattr(state, 'pid', None)
-                debug_info.append(f"pid={pid}")
                 if pid:
                     try:
                         os.kill(pid, 0)
-                        debug_info.append("pid ALIVE")
                     except ProcessLookupError:
                         state.is_running = False
                         state.completed = True
                         state.completed_at = time.time()
                         state.success = True
                         actually_done = True
-                        debug_info.append("DONE via pid (gone)")
                     except PermissionError:
-                        debug_info.append("pid exists (perm)")
+                        pass
 
             # Method 3: Timeout fallback
             if not actually_done:
                 started = getattr(state, 'started_at', None)
-                elapsed = int(time.time() - started) if started else 0
-                debug_info.append(f"elapsed={elapsed}s")
-                if started and elapsed > 600:
+                if started and (time.time() - started) > 600:
                     state.is_running = False
                     state.completed = True
                     state.completed_at = time.time()
                     state.success = False
                     state.error_message = "Process timed out (10 min)"
                     actually_done = True
-                    debug_info.append("DONE via timeout")
 
             if actually_done:
                 st.rerun()
             else:
-                st.caption(f"Auto-refreshing... ({' | '.join(debug_info)})")
+                elapsed = int(time.time() - getattr(state, 'started_at', time.time()))
+                if elapsed < 60:
+                    st.caption(f"Running... ({elapsed}s)")
+                else:
+                    st.caption(f"Running... ({elapsed // 60}m {elapsed % 60}s)")
                 time.sleep(2)
                 st.rerun()
             return  # Don't show update form while process is running
