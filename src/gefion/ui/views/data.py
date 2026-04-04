@@ -518,11 +518,7 @@ def render_update_section():
                 st.rerun()
             return  # Don't show update form while process is running
 
-        # Process completed — show clear button, don't block the form
-        if state.completed:
-            if st.button("Clear", key="clear_data_update"):
-                clear_process_state("data_update")
-                st.rerun()
+        # Process completed — clear button already shown by render_process_status above
 
     st.info("""
     **Data Update** runs two phases:
