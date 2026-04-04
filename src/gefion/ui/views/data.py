@@ -258,12 +258,17 @@ def start_background_process(key: str, cmd: list, env: dict):
                     # Update state from progress data
                     new_phase = data.get("phase")
                     if new_phase and new_phase != state.phase:
-                        # Phase changed — reset counters
+                        # Phase changed — reset all counters
                         state.phase = new_phase
                         state.done = 0
                         state.total = 0
                         state.progress = 0
                         state.last_ok = ""
+                        state.inserted = 0
+                        state.successes = 0
+                        state.rate_per_sec = 0
+                        state.eta_seconds = 0
+                        state.errors = 0
                     if data.get("message"):
                         state.status_message = data["message"]
                     state.progress = data.get("percent", state.progress)
