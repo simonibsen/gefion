@@ -6892,8 +6892,17 @@ def _update_all_impl(
                 with create_span("price_filter.filter_symbols", symbol_count=len(symbols)):
                     price_symbols = filter_symbols_needing_update(conn, symbols, target_date)
                 price_skipped = len(symbols) - len(price_symbols)
-                if price_skipped > 0 and not json_output:
-                    emit(f"Skipped {price_skipped} up-to-date symbols, processing {len(price_symbols)} symbols for prices", json_output=False)
+                if price_skipped > 0:
+                    emit(f"Prices: skipped {price_skipped} up-to-date symbols, {len(price_symbols)} need updates",
+                         data={"phase": "prices", "skipped": price_skipped,
+                                "total": len(price_symbols),
+                                "message": f"Skipped {price_skipped} up-to-date symbols"},
+                         json_output=json_output)
+                if len(price_symbols) == 0:
+                    emit("Prices: all symbols up to date — no API calls needed",
+                         data={"phase": "prices", "done": 0, "total": 0, "percent": 100,
+                                "message": "All symbols up to date"},
+                         json_output=json_output)
             set_attributes(
                 filter_span,
                 price_symbols=len(price_symbols),
@@ -6998,10 +7007,16 @@ def _update_all_impl(
             active_feature_defs=0,
             skipped=True,
         ):
-            if not json_output:
-                emit("No active feature definitions; skipping feature computation", json_output=False)
+            emit("Features: no active feature definitions — skipping",
+                 data={"phase": "features", "done": 0, "total": 0, "percent": 100,
+                        "message": "No active feature definitions"},
+                 json_output=json_output)
     else:
         # Compute all active features using generic dispatcher
+        emit(f"Features: computing {active_feature_defs} features for {len(all_symbols)} symbols...",
+             data={"phase": "features", "done": 0, "total": len(all_symbols), "percent": 0,
+                    "message": f"Computing {active_feature_defs} features"},
+             json_output=json_output)
         feature_reporter = ProgressReporter(total=len(all_symbols), json_output=json_output, enabled=progress)
         feature_reporter.workers = feature_fetch
         feature_reporter.writer_workers = feature_writer
