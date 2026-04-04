@@ -250,8 +250,11 @@ def start_background_process(key: str, cmd: list, env: dict):
                     data = json.loads(line)
                     if not isinstance(data, dict):
                         continue
-                    if "_meta" in data or "summary" in data:
+                    if "summary" in data:
                         continue
+                    # For _meta-wrapped messages, extract the outer fields
+                    if "_meta" in data:
+                        data = {k: v for k, v in data.items() if k != "_meta"}
                     # Update state from progress data
                     new_phase = data.get("phase")
                     if new_phase and new_phase != state.phase:
