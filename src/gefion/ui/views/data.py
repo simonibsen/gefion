@@ -492,11 +492,28 @@ def render_update_section():
             if actually_done:
                 st.rerun()
             else:
+                # Show meaningful status during refresh
                 elapsed = int(time.time() - getattr(state, 'started_at', time.time()))
-                if elapsed < 60:
-                    st.caption(f"Running... ({elapsed}s)")
-                else:
-                    st.caption(f"Running... ({elapsed // 60}m {elapsed % 60}s)")
+                elapsed_str = f"{elapsed}s" if elapsed < 60 else f"{elapsed // 60}m {elapsed % 60}s"
+
+                phase = getattr(state, 'phase', '')
+                done = getattr(state, 'done', 0)
+                total = getattr(state, 'total', 0)
+                status_msg = getattr(state, 'status_message', '')
+                last_ok = getattr(state, 'last_ok', '')
+
+                parts = [f"Running ({elapsed_str})"]
+                if phase:
+                    parts.append(f"Phase: **{phase.title()}**")
+                if total > 0:
+                    pct = int(done / total * 100) if total else 0
+                    parts.append(f"{done}/{total} ({pct}%)")
+                if last_ok:
+                    parts.append(f"Last: {last_ok}")
+                if status_msg:
+                    parts.append(status_msg)
+
+                st.caption(" — ".join(parts))
                 time.sleep(2)
                 st.rerun()
             return  # Don't show update form while process is running
