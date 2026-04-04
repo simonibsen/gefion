@@ -253,7 +253,14 @@ def start_background_process(key: str, cmd: list, env: dict):
                     if "_meta" in data or "summary" in data:
                         continue
                     # Update state from progress data
-                    state.phase = data.get("phase", state.phase)
+                    new_phase = data.get("phase")
+                    if new_phase and new_phase != state.phase:
+                        # Phase changed — reset counters
+                        state.phase = new_phase
+                        state.done = 0
+                        state.total = 0
+                        state.progress = 0
+                        state.last_ok = ""
                     if data.get("message"):
                         state.status_message = data["message"]
                     state.progress = data.get("percent", state.progress)
