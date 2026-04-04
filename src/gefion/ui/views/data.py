@@ -246,8 +246,14 @@ def start_background_process(key: str, cmd: list, env: dict):
                 if len(state.output_lines) > 50:
                     state.output_lines.pop(0)
 
+                # Buffer multiline JSON (emit() uses indent=2)
+                if not hasattr(state, '_json_buffer'):
+                    state._json_buffer = ""
+                state._json_buffer += line + "\n"
+
                 try:
-                    data = json.loads(line)
+                    data = json.loads(state._json_buffer)
+                    state._json_buffer = ""  # Reset on successful parse
                     if not isinstance(data, dict):
                         continue
                     if "summary" in data:
@@ -281,7 +287,10 @@ def start_background_process(key: str, cmd: list, env: dict):
                     state.successes = data.get("successes", state.successes)
                     state.last_ok_inserted = data.get("last_ok_inserted", state.last_ok_inserted)
                 except json.JSONDecodeError:
-                    pass
+                    # Multiline JSON not yet complete — keep buffering
+                    # Reset if buffer gets too large (prevent memory leak)
+                    if len(state._json_buffer) > 10000:
+                        state._json_buffer = ""
 
             returncode = process.wait()
             stderr_thread.join(timeout=2)
