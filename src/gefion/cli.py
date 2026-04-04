@@ -7172,18 +7172,13 @@ def _update_all_impl(
                           except Exception:
                               return None
 
-                      # Use thread pool for API calls (client handles rate limiting)
+                      # Fetch sequentially — AlphaVantage rate limits aggressively
+                      # and parallel requests cause 50s+ throttle delays
                       results = []
-                      max_workers = min(4, len(stale_stocks))
-                      with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                          futures = {
-                              executor.submit(_fetch_one, sid, sym): sym
-                              for sid, sym in stale_stocks
-                          }
-                          for future in as_completed(futures):
-                              result = future.result()
-                              if result:
-                                  results.append(result)
+                      for sid, sym in stale_stocks:
+                          result = _fetch_one(sid, sym)
+                          if result:
+                              results.append(result)
 
                       # Batch DB writes in a single connection
                       if results:
