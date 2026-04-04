@@ -401,33 +401,34 @@ def render_process_status(key: str, title: str):
         if state.error_message:
             st.error(state.error_message)
 
-        # Show CLI output log
+        # Show event log — extract meaningful messages from JSON output
         output_lines = getattr(state, 'output_lines', [])
         if output_lines:
-            with st.expander("CLI Output", expanded=False):
-                # Parse JSON objects from output (may span multiple lines)
-                buffer = ""
-                json_objects = []
+            with st.expander("Event Log", expanded=False):
+                events = []
                 for line in output_lines:
-                    buffer += line + "\n"
                     try:
-                        data = json.loads(buffer)
-                        json_objects.append(data)
-                        buffer = ""
+                        data = json.loads(line)
+                        if not isinstance(data, dict) or "_meta" in data:
+                            continue
+                        msg = data.get("message", "")
+                        phase = data.get("phase", "")
+                        status = data.get("status", "")
+                        # Only keep phase transitions, summaries, and status messages
+                        if msg and (status or not data.get("done")):
+                            events.append(f"**{phase.title() if phase else ''}** {msg}")
+                        elif status and phase:
+                            events.append(f"**{phase.title()}** {status}")
                     except json.JSONDecodeError:
-                        # Incomplete JSON, continue accumulating
                         pass
-
-                # Show last few parsed JSON objects
-                for data in json_objects[-3:]:
-                    # Skip verbose meta blocks
-                    if "_meta" in data:
-                        continue
-                    # Truncate long symbol lists
-                    if "symbols" in data and len(data.get("symbols", [])) > 5:
-                        data = data.copy()
-                        data["symbols"] = data["symbols"][:5] + [f"... ({len(data['symbols'])} total)"]
-                    st.json(data)
+                # Show unique events (deduplicate)
+                seen = set()
+                for evt in events:
+                    if evt not in seen:
+                        seen.add(evt)
+                        st.markdown(f"- {evt}")
+                if not events:
+                    st.caption("No events recorded")
 
         # Control buttons
         col1, col2 = st.columns(2)
