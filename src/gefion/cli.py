@@ -7114,13 +7114,16 @@ def _update_all_impl(
 
             if not stale_stocks:
                 emit("Fundamentals: all up to date (refreshed within 30 days)",
-                     data={"phase": "fundamentals", "status": "up_to_date"},
+                     data={"phase": "fundamentals", "status": "up_to_date",
+                            "done": 0, "total": 0, "percent": 100},
                      json_output=json_output)
 
             elif stale_stocks and len(stale_stocks) <= 200:
                 emit(f"Fundamentals: {len(stale_stocks)} stocks need refresh (>30 days old or missing). "
                      f"This may take a few minutes due to API rate limits...",
-                     data={"phase": "fundamentals", "status": "refreshing", "count": len(stale_stocks)},
+                     data={"phase": "fundamentals", "status": "refreshing",
+                            "done": 0, "total": len(stale_stocks),
+                            "percent": 0},
                      json_output=json_output)
 
                 if client is None:
@@ -7205,9 +7208,15 @@ def _update_all_impl(
                                       ))
 
                                       fundamentals_updated += 1
-                                      if not json_output:
-                                          sector = parsed.get("sector") or "N/A"
-                                          emit(f"  {symbol}: {sector[:20]}")
+                                      sector = parsed.get("sector") or "N/A"
+                                      pct = int(fundamentals_updated / len(stale_stocks) * 100)
+                                      emit(f"  {symbol}: {sector[:20]}",
+                                           data={"phase": "fundamentals",
+                                                  "done": fundamentals_updated,
+                                                  "total": len(stale_stocks),
+                                                  "percent": pct,
+                                                  "last_ok": symbol},
+                                           json_output=json_output)
 
                               conn.commit()
 
