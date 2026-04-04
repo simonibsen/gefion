@@ -404,7 +404,7 @@ def render_process_status(key: str, title: str):
         # Show event log — extract meaningful messages from JSON output
         output_lines = getattr(state, 'output_lines', [])
         if output_lines:
-            with st.expander("What happened", expanded=False):
+            with st.expander("Event Log", expanded=False):
                 events = []
                 for line in output_lines:
                     try:
