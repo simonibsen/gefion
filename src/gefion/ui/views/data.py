@@ -412,13 +412,11 @@ def render_process_status(key: str, title: str):
                         if not isinstance(data, dict) or "_meta" in data:
                             continue
                         msg = data.get("message", "")
-                        phase = data.get("phase", "")
-                        status = data.get("status", "")
-                        # Only keep phase transitions, summaries, and status messages
-                        if msg and (status or not data.get("done")):
-                            events.append(f"**{phase.title() if phase else ''}** {msg}")
-                        elif status and phase:
-                            events.append(f"**{phase.title()}** {status}")
+                        # Only show lines with a real human-readable message
+                        if msg and len(msg) > 10:
+                            phase = data.get("phase", "")
+                            prefix = f"**{phase.title()}:** " if phase else ""
+                            events.append(f"{prefix}{msg}")
                     except json.JSONDecodeError:
                         pass
                 # Show unique events (deduplicate)
