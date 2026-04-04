@@ -528,10 +528,11 @@ def render_update_section():
         # Process completed — clear button already shown by render_process_status above
 
     st.info("""
-    **Data Update** runs two phases:
+    **Data Update** runs three phases:
     1. **Prices** — fetches OHLCV data from AlphaVantage (full history for new stocks, incremental for existing)
     2. **Features** — computes all active feature definitions (technical indicators,
        cross-sectional rankings, sector comparisons, etc.)
+    3. **Fundamentals** — refreshes company metadata (sector, industry, market cap) if older than 30 days
     """)
 
     col1, col2 = st.columns(2)
