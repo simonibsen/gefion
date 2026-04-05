@@ -545,6 +545,15 @@ def render_update_section():
 
         # Process completed — clear button already shown by render_process_status above
 
+    # Weekend/market-closed notice
+    from datetime import date as _date
+    _today = _date.today()
+    if _today.weekday() >= 5:  # Saturday or Sunday
+        st.warning(
+            f"Market is closed today ({_today.strftime('%A')}). "
+            f"Running a data update will only recompute features — no new price data is available until Monday."
+        )
+
     st.info("""
     **Data Update** runs three phases:
     1. **Prices** — fetches OHLCV data from AlphaVantage (full history for new stocks, incremental for existing)
