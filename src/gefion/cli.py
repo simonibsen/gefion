@@ -7166,19 +7166,34 @@ def _update_all_impl(
                           try:
                               overview = client.fetch_overview(symbol)
                               if "Error Message" in overview or "Note" in overview:
-                                  return None
+                                  return ("skip", stock_id, symbol)
                               parsed = parse_overview(overview)
-                              return (stock_id, symbol, parsed)
+                              if not parsed.get("sector"):
+                                  return ("skip", stock_id, symbol)
+                              return ("ok", stock_id, symbol, parsed)
                           except Exception:
-                              return None
+                              return ("skip", stock_id, symbol)
 
                       # Fetch sequentially — AlphaVantage rate limits aggressively
-                      # and parallel requests cause 50s+ throttle delays
                       results = []
+                      skipped_ids = []
                       for sid, sym in stale_stocks:
                           result = _fetch_one(sid, sym)
-                          if result:
-                              results.append(result)
+                          if result and result[0] == "ok":
+                              results.append(result[1:])  # (stock_id, symbol, parsed)
+                          elif result and result[0] == "skip":
+                              skipped_ids.append(result[1])  # stock_id
+
+                      # Mark skipped symbols so they're not retried every update
+                      if skipped_ids:
+                          with db_connection(url) as conn:
+                              with conn.cursor() as cur:
+                                  for sid in skipped_ids:
+                                      cur.execute(
+                                          "UPDATE stocks SET updated_at = NOW() WHERE id = %s AND updated_at IS NULL",
+                                          (sid,),
+                                      )
+                              conn.commit()
 
                       # Batch DB writes in a single connection
                       if results:
