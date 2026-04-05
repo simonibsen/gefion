@@ -494,6 +494,14 @@ def render_update_section():
                         actually_done = True
                     except PermissionError:
                         pass
+                elif proc is None:
+                    # No process object AND no PID — state is orphaned
+                    state.is_running = False
+                    state.completed = True
+                    state.completed_at = time.time()
+                    state.success = False
+                    state.error_message = "Process reference lost"
+                    actually_done = True
 
             # Method 3: Timeout fallback
             if not actually_done:
