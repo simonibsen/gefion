@@ -621,6 +621,15 @@ def render_update_section():
         cli_parts.append("--refresh")
     st.code(" ".join(cli_parts), language="bash")
 
+    # Warn if operation is too large for UI
+    if limit is None or (isinstance(limit, int) and limit > 200):
+        effective = limit or "all ~5,800"
+        st.warning(
+            f"Updating **{effective} symbols** may take a long time and the UI may lose track of progress. "
+            f"For large updates, use the CLI instead:\n\n"
+            f"```\n{' '.join(cli_parts)}\n```"
+        )
+
     if st.button("Start Update", type="primary", width="stretch"):
         # Build command
         cmd = [sys.executable, "-m", "gefion.cli", "data-update", "--json"]
