@@ -97,17 +97,27 @@ def _expected_market_date(include_today: bool = False) -> date:
             return today - timedelta(days=2)
         return today
 
-    # Auto-detect based on current time (after 4pm ET, assume today's data exists)
+    # Auto-detect based on current time in ET
+    # After 4pm ET (market close): today's data is available
+    # After midnight ET but before 9:30am: yesterday's data is available (market closed hours ago)
     try:
         et_tz = pytz.timezone('America/New_York')
         now_et = datetime.now(et_tz)
+        today_et = now_et.date()
         market_close_hour = 16  # 4pm ET
 
-        if now_et.hour >= market_close_hour and today.weekday() < 5:  # Weekday after 4pm
-            # Weekend adjustment for today
-            if today.weekday() == 5:  # Saturday -> Friday
-                return today - timedelta(days=1)
-            return today
+        if now_et.hour >= market_close_hour and today_et.weekday() < 5:
+            # After market close on a weekday — today's data is available
+            return today_et
+        elif now_et.hour < 10 and today_et.weekday() < 5:
+            # After midnight, before market open — yesterday's data is available
+            yesterday_et = today_et - timedelta(days=1)
+            # Weekend adjustment
+            if yesterday_et.weekday() == 5:
+                return yesterday_et - timedelta(days=1)
+            if yesterday_et.weekday() == 6:
+                return yesterday_et - timedelta(days=2)
+            return yesterday_et
     except Exception:
         # If timezone check fails, fall through to conservative default
         pass

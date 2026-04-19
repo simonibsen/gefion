@@ -624,6 +624,64 @@ def create_predictions_table(conn: Connection) -> None:
         set_attributes(span, table="predictions")
 
 
+def create_quarterly_financials_table(conn: Connection) -> None:
+    """Time-series table for quarterly financial reports (income, balance sheet, cash flow, earnings)."""
+    _ensure_timescaledb(conn)
+    with create_span("db.schema.create_quarterly_financials_table") as span:
+      with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS quarterly_financials (
+                data_id INTEGER NOT NULL REFERENCES stocks(id),
+                date DATE NOT NULL,
+                statement_type TEXT NOT NULL,
+                reported_at DATE,
+                -- Income statement
+                revenue BIGINT,
+                net_income BIGINT,
+                gross_profit BIGINT,
+                ebitda BIGINT,
+                operating_income BIGINT,
+                eps NUMERIC(10,4),
+                -- Balance sheet
+                total_assets BIGINT,
+                total_liabilities BIGINT,
+                shareholder_equity BIGINT,
+                current_assets BIGINT,
+                current_liabilities BIGINT,
+                long_term_debt BIGINT,
+                shares_outstanding BIGINT,
+                -- Cash flow
+                operating_cashflow BIGINT,
+                capital_expenditures BIGINT,
+                free_cash_flow BIGINT,
+                -- Earnings
+                reported_eps NUMERIC(10,4),
+                estimated_eps NUMERIC(10,4),
+                surprise NUMERIC(10,4),
+                surprise_percentage NUMERIC(10,4),
+                -- Overflow
+                raw JSONB,
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (data_id, date, statement_type)
+            );
+            """
+        )
+        cur.execute("SELECT create_hypertable('quarterly_financials', 'date', if_not_exists => TRUE);")
+        try:
+            cur.execute("SELECT set_chunk_time_interval('quarterly_financials', INTERVAL '90 days');")
+        except Exception:
+            pass
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS quarterly_financials_data_type_date_idx
+                ON quarterly_financials(data_id, statement_type, date DESC);
+            """
+        )
+      conn.commit()
+      set_attributes(span, table="quarterly_financials")
+
+
 def create_stocks_fundamentals_table(conn: Connection) -> None:
     """Time-series table for company fundamentals (market cap, PE, etc.)."""
     _ensure_timescaledb(conn)

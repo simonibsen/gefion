@@ -6439,13 +6439,190 @@ def _features_compute_impl(
             db_pool.close_pool()
 
 
+@app.command("financials-backfill")
+def financials_backfill(
+    limit: Optional[int] = typer.Option(None, help="Limit number of symbols to backfill"),
+    force: bool = typer.Option(False, "--force", help="Re-fetch even if data already exists"),
+    workers: int = typer.Option(3, "--workers", help="Parallel API workers"),
+    calls_per_minute: int = typer.Option(75, help="AlphaVantage rate limit"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """
+    Backfill quarterly financial data from AlphaVantage.
+
+    Fetches income statement, balance sheet, cash flow, and earnings
+    for each stock and stores in the quarterly_financials table.
+    Each symbol requires 4 API calls. Use --limit to control batch size.
+
+    Examples:
+        # Backfill first 10 stocks
+        gefion financials-backfill --limit 10
+
+        # Force re-fetch for all stocks
+        gefion financials-backfill --force
+    """
+    with create_span(
+        "cli.financials-backfill",
+        force=force,
+        limit=limit or 0,
+        workers=workers,
+    ):
+        _financials_backfill_impl(
+            limit, force, workers, calls_per_minute, db_url, json_output,
+        )
+
+
+def _financials_backfill_impl(
+    limit: Optional[int],
+    force: bool,
+    workers: int,
+    calls_per_minute: int,
+    db_url: Optional[str],
+    json_output: Optional[bool],
+) -> None:
+    """Implementation of financials-backfill."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from gefion.alphavantage.client import AlphaVantageClient
+    from gefion.alphavantage.catalog import (
+        parse_income_statement, parse_balance_sheet,
+        parse_cash_flow, parse_earnings,
+    )
+    from gefion.utils.progress import ProgressReporter
+
+    url = _db_url(db_url)
+
+    try:
+        client = AlphaVantageClient(calls_per_minute=calls_per_minute)
+    except ValueError as e:
+        emit_error(str(e), json_output=json_output)
+        return
+
+    # Get stocks to backfill
+    with db_connection(url) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, symbol FROM stocks ORDER BY symbol")
+            all_stocks = cur.fetchall()
+
+            # Check which already have data (unless --force)
+            existing_ids = set()
+            if not force:
+                cur.execute("SELECT DISTINCT data_id FROM quarterly_financials")
+                existing_ids = {row[0] for row in cur.fetchall()}
+
+    stocks = [(sid, sym) for sid, sym in all_stocks if force or sid not in existing_ids]
+    if limit:
+        stocks = stocks[:limit]
+
+    if not stocks:
+        if json_output:
+            emit_json({"success": True, "backfilled": 0, "message": "All stocks already have financial data"})
+        else:
+            emit("[green]All stocks already have financial data[/green]")
+        return
+
+    reporter = ProgressReporter(total=len(stocks), json_output=bool(json_output))
+    reporter.phase = "financials-backfill"
+    reporter.workers = workers
+
+    if not json_output:
+        emit(f"Backfilling quarterly financials for {len(stocks)} stocks ({workers} workers, 4 calls/symbol)...")
+        live = reporter.start_live()
+        if live:
+            live.start()
+
+    def _fetch_all_financials(stock_id: int, symbol: str):
+        """Fetch all 4 quarterly endpoints for a symbol."""
+        try:
+            income = client.fetch_income_statement(symbol)
+            balance = client.fetch_balance_sheet(symbol)
+            cashflow = client.fetch_cash_flow(symbol)
+            earnings = client.fetch_earnings(symbol)
+
+            records = []
+            records.extend(parse_income_statement(income))
+            records.extend(parse_balance_sheet(balance))
+            records.extend(parse_cash_flow(cashflow))
+            records.extend(parse_earnings(earnings))
+
+            return (stock_id, symbol, records, None)
+        except Exception as e:
+            return (stock_id, symbol, [], str(e))
+
+    # Fetch in parallel, report progress as each completes
+    results = []
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {
+            pool.submit(_fetch_all_financials, sid, sym): sym
+            for sid, sym in stocks
+        }
+        for future in as_completed(futures):
+            stock_id, symbol, records, err = future.result()
+            if err:
+                reporter.step_done(symbol, error=True, meta={"reason": err})
+            else:
+                reporter.step_done(symbol, meta={"reason": f"{len(records)} quarters"})
+            results.append((stock_id, symbol, records, err))
+
+    # Write all records in a single DB connection
+    inserted = 0
+    errors = 0
+    with db_connection(url) as conn:
+        with conn.cursor() as cur:
+            for stock_id, symbol, records, err in results:
+                if err:
+                    errors += 1
+                    continue
+                for rec in records:
+                    # Build column list from record keys (excluding non-column keys)
+                    cols = [k for k in rec.keys() if k not in ("raw",)]
+                    vals = [rec[k] for k in cols]
+                    # Add raw JSONB if present
+                    if "raw" in rec and rec["raw"]:
+                        cols.append("raw")
+                        from psycopg.types.json import Json
+                        vals.append(Json(rec["raw"]))
+
+                    # Add data_id
+                    cols.insert(0, "data_id")
+                    vals.insert(0, stock_id)
+
+                    placeholders = ", ".join(["%s"] * len(cols))
+                    col_names = ", ".join(cols)
+                    update_cols = [c for c in cols if c not in ("data_id", "date", "statement_type")]
+                    update_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+
+                    cur.execute(
+                        f"""
+                        INSERT INTO quarterly_financials ({col_names})
+                        VALUES ({placeholders})
+                        ON CONFLICT (data_id, date, statement_type) DO UPDATE SET
+                            {update_clause}
+                        """,
+                        vals,
+                    )
+                    inserted += 1
+        conn.commit()
+
+    reporter.complete()
+    if not json_output:
+        if reporter.live:
+            reporter.live.stop()
+        emit("")
+        emit(f"[bold]Complete:[/bold] {inserted} records inserted, {errors} errors")
+    else:
+        emit_json({"success": True, "inserted": inserted, "errors": errors})
+
+
 @app.command("fundamentals-update")
 def fundamentals_update(
     exchange: Optional[str] = typer.Option(None, help="Exchange filter (e.g., NASDAQ, NYSE). If omitted, update all stocks."),
     limit: Optional[int] = typer.Option(None, help="Limit number of symbols to update"),
     max_age_days: int = typer.Option(30, "--max-age", help="Skip stocks updated within this many days"),
     force: bool = typer.Option(False, "--force", help="Update all stocks regardless of age"),
+    quarterly: bool = typer.Option(False, "--quarterly", help="Also refresh quarterly financial data (income, balance sheet, cash flow, earnings)"),
     calls_per_minute: int = typer.Option(75, help="AlphaVantage rate limit"),
+    workers: int = typer.Option(3, "--workers", help="Parallel API workers (default 3, rate limiter prevents throttling)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
 ) -> None:
@@ -6453,11 +6630,15 @@ def fundamentals_update(
     Update company fundamentals (sector, industry, name) from AlphaVantage.
 
     Fetches OVERVIEW data for stocks and updates the stocks table.
+    With --quarterly, also refreshes quarterly financial data.
     By default, skips stocks updated within --max-age days (default: 30).
 
     Examples:
         # Update stale fundamentals for all stocks
         gefion fundamentals-update
+
+        # Also refresh quarterly financials
+        gefion fundamentals-update --quarterly
 
         # Force update all NASDAQ stocks
         gefion fundamentals-update --exchange NASDAQ --force
@@ -6470,11 +6651,55 @@ def fundamentals_update(
         exchange=exchange or "all",
         max_age_days=max_age_days,
         force=force,
+        quarterly=quarterly,
         limit=limit or 0,
+        workers=workers,
     ):
         _fundamentals_update_impl(
-            exchange, limit, max_age_days, force, calls_per_minute, db_url, json_output
+            exchange, limit, max_age_days, force, calls_per_minute, db_url, json_output,
+            workers=workers,
         )
+        if quarterly:
+            # Incremental quarterly refresh for successfully updated stocks
+            _financials_backfill_impl(
+                limit=limit, force=False, workers=workers,
+                calls_per_minute=calls_per_minute, db_url=db_url,
+                json_output=json_output,
+            )
+
+
+# AlphaVantage OVERVIEW key → stocks_fundamentals column mapping
+_OVERVIEW_FIELD_MAP = {
+    "MarketCapitalization": ("market_cap", int),
+    "PERatio": ("pe_ratio", float),
+    "ForwardPE": ("forward_pe", float),
+    "PEGRatio": ("peg_ratio", float),
+    "BookValue": ("book_value", float),
+    "DividendYield": ("dividend_yield", float),
+    "EPS": ("eps", float),
+    "RevenuePerShareTTM": ("revenue_per_share", float),
+    "ProfitMargin": ("profit_margin", float),
+    "OperatingMarginTTM": ("operating_margin", float),
+    "ReturnOnEquityTTM": ("return_on_equity", float),
+    "Beta": ("beta", float),
+    "EVToEBITDA": ("ev_to_ebitda", float),
+    "SharesOutstanding": ("shares_outstanding", int),
+}
+
+
+def _parse_overview_fundamentals(overview: dict) -> dict:
+    """Parse AlphaVantage OVERVIEW response into typed values for stocks_fundamentals."""
+    result = {}
+    for av_key, (col_name, col_type) in _OVERVIEW_FIELD_MAP.items():
+        raw = overview.get(av_key)
+        if raw is None or raw == "None" or raw == "-" or raw == "":
+            result[col_name] = None
+        else:
+            try:
+                result[col_name] = col_type(raw)
+            except (ValueError, TypeError):
+                result[col_name] = None
+    return result
 
 
 def _fundamentals_update_impl(
@@ -6485,8 +6710,10 @@ def _fundamentals_update_impl(
     calls_per_minute: int,
     db_url: Optional[str],
     json_output: Optional[bool],
+    workers: int = 3,
 ) -> None:
     """Implementation of fundamentals-update."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from datetime import datetime, timedelta
     from gefion.alphavantage.client import AlphaVantageClient
 
@@ -6530,54 +6757,110 @@ def _fundamentals_update_impl(
             emit("[green]All stocks are up to date[/green]")
         return
 
-    if not json_output:
-        emit(f"Updating fundamentals for {len(stocks)} stocks...")
+    from gefion.utils.progress import ProgressReporter
 
+    reporter = ProgressReporter(total=len(stocks), json_output=bool(json_output))
+    reporter.phase = "fundamentals"
+    reporter.workers = workers
+
+    if not json_output:
+        emit(f"Updating fundamentals for {len(stocks)} stocks ({workers} workers)...")
+        live = reporter.start_live()
+        if live:
+            live.start()
+
+    def _fetch_one(stock_id: int, symbol: str):
+        """Fetch overview for a single symbol. Returns (stock_id, symbol, overview, error, skipped)."""
+        try:
+            overview = client.fetch_overview(symbol)
+            if "Error Message" in overview or "Note" in overview:
+                return (stock_id, symbol, None, "API limit or error", False)
+            if not overview or not overview.get("Symbol"):
+                return (stock_id, symbol, None, None, True)  # skipped, not an error
+            return (stock_id, symbol, overview, None, False)
+        except Exception as e:
+            return (stock_id, symbol, None, str(e), False)
+
+    # Fetch in parallel (RateLimiter is thread-safe), report progress as each completes
+    results = []
     updated = 0
     errors = 0
-
-    for stock_id, symbol, _ in stocks:
-        try:
-            # Fetch overview from AlphaVantage
-            overview = client.fetch_overview(symbol)
-
-            # Check for API errors
-            if "Error Message" in overview or "Note" in overview:
-                if not json_output:
-                    emit(f"[yellow]⚠[/yellow] {symbol}: API limit or error, skipping")
+    skipped = 0
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {
+            pool.submit(_fetch_one, stock_id, symbol): symbol
+            for stock_id, symbol, _ in stocks
+        }
+        for future in as_completed(futures):
+            stock_id, symbol, overview, err, was_skipped = future.result()
+            if was_skipped:
+                skipped += 1
+                reporter.step_done(symbol)  # count as done, not an error
+            elif err:
                 errors += 1
-                continue
+                reporter.step_done(symbol, error=True, meta={"reason": err})
+            else:
+                sector = overview.get("Sector", "")
+                sector_display = sector[:20] if sector else "N/A"
+                reporter.step_done(symbol, meta={"reason": sector_display})
+            results.append((stock_id, symbol, overview, err, was_skipped))
 
-            # Extract fields
+    # Write all updates in a single DB connection
+    skipped_ids = [sid for sid, _, _, _, ws in results if ws]
+    with db_connection(url) as conn:
+        for stock_id, symbol, overview, err, was_skipped in results:
+            if err or was_skipped:
+                continue
             name = overview.get("Name", "")
             sector = overview.get("Sector", "")
             industry = overview.get("Industry", "")
 
-            # Update database
-            with db_connection(url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        UPDATE stocks
-                        SET name = %s, sector = %s, industry = %s, updated_at = NOW()
-                        WHERE id = %s
-                    """, (name or None, sector or None, industry or None, stock_id))
-                conn.commit()
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE stocks
+                    SET name = %s, sector = %s, industry = %s, updated_at = NOW()
+                    WHERE id = %s
+                """, (name or None, sector or None, industry or None, stock_id))
 
+                # Insert time-series fundamentals data
+                fundamentals = _parse_overview_fundamentals(overview)
+                if any(v is not None for v in fundamentals.values()):
+                    cols = list(fundamentals.keys())
+                    placeholders = ", ".join(["%s"] * (2 + len(cols)))
+                    col_names = ", ".join(["data_id", "date"] + cols)
+                    cur.execute(
+                        f"""
+                        INSERT INTO stocks_fundamentals ({col_names})
+                        VALUES ({placeholders})
+                        ON CONFLICT (data_id, date) DO UPDATE SET
+                            {", ".join(f"{c} = EXCLUDED.{c}" for c in cols)}
+                        """,
+                        (stock_id, date.today(), *[fundamentals[c] for c in cols]),
+                    )
             updated += 1
-            if not json_output:
-                sector_display = sector[:20] if sector else "N/A"
-                emit(f"[green]✓[/green] {symbol}: {sector_display}")
 
-        except Exception as e:
-            errors += 1
-            if not json_output:
-                emit(f"[red]✗[/red] {symbol}: {e}")
+        # Mark skipped symbols (no fundamental data) so they aren't retried next run
+        if skipped_ids:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE stocks SET updated_at = NOW() WHERE id = ANY(%s)",
+                    (skipped_ids,),
+                )
+        conn.commit()
 
-    if json_output:
-        emit_json({"success": True, "updated": updated, "errors": errors})
-    else:
+    reporter.complete()
+    if not json_output:
+        if reporter.live:
+            reporter.live.stop()
         emit("")
-        emit(f"[bold]Complete:[/bold] {updated} updated, {errors} errors")
+        parts = [f"{updated} updated"]
+        if skipped:
+            parts.append(f"{skipped} skipped")
+        if errors:
+            parts.append(f"{errors} errors")
+        emit(f"[bold]Complete:[/bold] {', '.join(parts)}")
+    else:
+        emit_json({"success": True, "updated": updated, "skipped": skipped, "errors": errors})
 
 
 @app.command("cross-sectional-compute")
@@ -6892,8 +7175,17 @@ def _update_all_impl(
                 with create_span("price_filter.filter_symbols", symbol_count=len(symbols)):
                     price_symbols = filter_symbols_needing_update(conn, symbols, target_date)
                 price_skipped = len(symbols) - len(price_symbols)
-                if price_skipped > 0 and not json_output:
-                    emit(f"Skipped {price_skipped} up-to-date symbols, processing {len(price_symbols)} symbols for prices", json_output=False)
+                if price_skipped > 0:
+                    emit(f"Prices: skipped {price_skipped} up-to-date symbols, {len(price_symbols)} need updates",
+                         data={"phase": "prices", "skipped": price_skipped,
+                                "total": len(price_symbols),
+                                "message": f"Skipped {price_skipped} up-to-date symbols"},
+                         json_output=json_output)
+                if len(price_symbols) == 0:
+                    emit("Prices: all symbols up to date — no API calls needed",
+                         data={"phase": "prices", "done": 0, "total": 0, "percent": 100,
+                                "message": "All symbols up to date"},
+                         json_output=json_output)
             set_attributes(
                 filter_span,
                 price_symbols=len(price_symbols),
@@ -6998,10 +7290,16 @@ def _update_all_impl(
             active_feature_defs=0,
             skipped=True,
         ):
-            if not json_output:
-                emit("No active feature definitions; skipping feature computation", json_output=False)
+            emit("Features: no active feature definitions — skipping",
+                 data={"phase": "features", "done": 0, "total": 0, "percent": 100,
+                        "message": "No active feature definitions"},
+                 json_output=json_output)
     else:
         # Compute all active features using generic dispatcher
+        emit(f"Features: computing {active_feature_defs} features for {len(all_symbols)} symbols...",
+             data={"phase": "features", "done": 0, "total": len(all_symbols), "percent": 0,
+                    "message": f"Computing {active_feature_defs} features"},
+             json_output=json_output)
         feature_reporter = ProgressReporter(total=len(all_symbols), json_output=json_output, enabled=progress)
         feature_reporter.workers = feature_fetch
         feature_reporter.writer_workers = feature_writer
@@ -7107,14 +7405,24 @@ def _update_all_impl(
                         SELECT s.id, s.symbol FROM stocks s
                         WHERE s.symbol = ANY(%s)
                           AND (s.sector IS NULL OR s.updated_at IS NULL
-                               OR s.updated_at < NOW() - INTERVAL '7 days')
+                               OR s.updated_at < NOW() - INTERVAL '30 days')
                     """, (symbols,))
                     stale_stocks = cur.fetchall()
                     set_attributes(fund_span, stale_count=len(stale_stocks))
 
-            if stale_stocks and len(stale_stocks) <= 200:
-                if not json_output:
-                    emit(f"Updating fundamentals for {len(stale_stocks)} stocks...")
+            if not stale_stocks:
+                emit("Fundamentals: all up to date (refreshed within 30 days)",
+                     data={"phase": "fundamentals", "status": "up_to_date",
+                            "done": 0, "total": 0, "percent": 100},
+                     json_output=json_output)
+
+            elif stale_stocks and len(stale_stocks) <= 200:
+                emit(f"Fundamentals: {len(stale_stocks)} stocks need refresh (>30 days old or missing). "
+                     f"This may take a few minutes due to API rate limits...",
+                     data={"phase": "fundamentals", "status": "refreshing",
+                            "done": 0, "total": len(stale_stocks),
+                            "percent": 0},
+                     json_output=json_output)
 
                 if client is None:
                     try:
@@ -7128,73 +7436,110 @@ def _update_all_impl(
                 if client:
                     from gefion.alphavantage.catalog import parse_overview
                     from datetime import date as date_cls
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                    init_schema_tables_conn = db_connection(url)
-                    with init_schema_tables_conn as conn:
+                    with db_connection(url) as conn:
                         init_schema_tables(conn, ["stocks_fundamentals"])
 
                     with create_span("data_update.fundamentals_fetch",
                                      stock_count=len(stale_stocks)) as fetch_span:
-                      for stock_id, symbol in stale_stocks:
-                        try:
-                            overview = client.fetch_overview(symbol)
-                            if "Error Message" in overview or "Note" in overview:
-                                continue
-                            parsed = parse_overview(overview)
 
-                            with db_connection(url) as conn:
-                                with conn.cursor() as cur:
-                                    # Update stocks table (snapshot)
-                                    cur.execute("""
-                                        UPDATE stocks
-                                        SET name = COALESCE(%s, name),
-                                            sector = COALESCE(%s, sector),
-                                            industry = COALESCE(%s, industry),
-                                            updated_at = NOW()
-                                        WHERE id = %s
-                                    """, (parsed["name"], parsed["sector"],
-                                          parsed["industry"], stock_id))
+                      # Fetch from API in parallel (respecting rate limits via client)
+                      def _fetch_one(stock_id, symbol):
+                          try:
+                              overview = client.fetch_overview(symbol)
+                              if "Error Message" in overview or "Note" in overview:
+                                  return ("skip", stock_id, symbol)
+                              parsed = parse_overview(overview)
+                              if not parsed.get("sector"):
+                                  return ("skip", stock_id, symbol)
+                              return ("ok", stock_id, symbol, parsed)
+                          except Exception:
+                              return ("skip", stock_id, symbol)
 
-                                    # Insert into stocks_fundamentals (time-series)
-                                    cur.execute("""
-                                        INSERT INTO stocks_fundamentals
-                                            (data_id, date, market_cap, pe_ratio, forward_pe,
-                                             peg_ratio, book_value, dividend_yield, eps,
-                                             revenue_per_share, profit_margin, operating_margin,
-                                             return_on_equity, beta, ev_to_ebitda, shares_outstanding)
-                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                        ON CONFLICT (data_id, date) DO UPDATE SET
-                                            market_cap = EXCLUDED.market_cap,
-                                            pe_ratio = EXCLUDED.pe_ratio,
-                                            updated_at = NOW()
-                                    """, (
-                                        stock_id, date_cls.today(),
-                                        parsed["market_cap"], parsed["pe_ratio"],
-                                        parsed["forward_pe"], parsed["peg_ratio"],
-                                        parsed["book_value"], parsed["dividend_yield"],
-                                        parsed["eps"], parsed["revenue_per_share"],
-                                        parsed["profit_margin"], parsed["operating_margin"],
-                                        parsed["return_on_equity"], parsed["beta"],
-                                        parsed["ev_to_ebitda"], parsed["shares_outstanding"],
-                                    ))
-                                conn.commit()
+                      # Fetch sequentially — AlphaVantage rate limits aggressively
+                      results = []
+                      skipped_ids = []
+                      for sid, sym in stale_stocks:
+                          result = _fetch_one(sid, sym)
+                          if result and result[0] == "ok":
+                              results.append(result[1:])  # (stock_id, symbol, parsed)
+                          elif result and result[0] == "skip":
+                              skipped_ids.append(result[1])  # stock_id
 
-                            fundamentals_updated += 1
-                            if not json_output:
-                                sector = parsed.get("sector") or "N/A"
-                                emit(f"  {symbol}: {sector[:20]}")
-                        except Exception:
-                            pass
+                      # Mark skipped symbols so they're not retried every update
+                      if skipped_ids:
+                          with db_connection(url) as conn:
+                              with conn.cursor() as cur:
+                                  for sid in skipped_ids:
+                                      cur.execute(
+                                          "UPDATE stocks SET updated_at = NOW() WHERE id = %s AND updated_at IS NULL",
+                                          (sid,),
+                                      )
+                              conn.commit()
+
+                      # Batch DB writes in a single connection
+                      if results:
+                          with db_connection(url) as conn:
+                              with conn.cursor() as cur:
+                                  for stock_id, symbol, parsed in results:
+                                      cur.execute("""
+                                          UPDATE stocks
+                                          SET name = COALESCE(%s, name),
+                                              sector = COALESCE(%s, sector),
+                                              industry = COALESCE(%s, industry),
+                                              updated_at = NOW()
+                                          WHERE id = %s
+                                      """, (parsed["name"], parsed["sector"],
+                                            parsed["industry"], stock_id))
+
+                                      cur.execute("""
+                                          INSERT INTO stocks_fundamentals
+                                              (data_id, date, market_cap, pe_ratio, forward_pe,
+                                               peg_ratio, book_value, dividend_yield, eps,
+                                               revenue_per_share, profit_margin, operating_margin,
+                                               return_on_equity, beta, ev_to_ebitda, shares_outstanding)
+                                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                          ON CONFLICT (data_id, date) DO UPDATE SET
+                                              market_cap = EXCLUDED.market_cap,
+                                              pe_ratio = EXCLUDED.pe_ratio,
+                                              updated_at = NOW()
+                                      """, (
+                                          stock_id, date_cls.today(),
+                                          parsed["market_cap"], parsed["pe_ratio"],
+                                          parsed["forward_pe"], parsed["peg_ratio"],
+                                          parsed["book_value"], parsed["dividend_yield"],
+                                          parsed["eps"], parsed["revenue_per_share"],
+                                          parsed["profit_margin"], parsed["operating_margin"],
+                                          parsed["return_on_equity"], parsed["beta"],
+                                          parsed["ev_to_ebitda"], parsed["shares_outstanding"],
+                                      ))
+
+                                      fundamentals_updated += 1
+                                      sector = parsed.get("sector") or "N/A"
+                                      pct = int(fundamentals_updated / len(stale_stocks) * 100)
+                                      emit(f"  {symbol}: {sector[:20]}",
+                                           data={"phase": "fundamentals",
+                                                  "done": fundamentals_updated,
+                                                  "total": len(stale_stocks),
+                                                  "percent": pct,
+                                                  "last_ok": symbol},
+                                           json_output=json_output)
+
+                              conn.commit()
 
                       set_attributes(fetch_span, updated=fundamentals_updated)
 
-                    if not json_output and fundamentals_updated:
-                        emit(f"Fundamentals: {fundamentals_updated} updated")
+                    if fundamentals_updated:
+                        emit(f"Fundamentals: {fundamentals_updated} updated",
+                             data={"phase": "fundamentals", "status": "complete", "updated": fundamentals_updated},
+                             json_output=json_output)
 
             elif stale_stocks and len(stale_stocks) > 200:
-                if not json_output:
-                    emit(f"[yellow]{len(stale_stocks)} stocks need fundamentals. "
-                         f"Run 'gefion fundamentals-update --limit 200' to update in batches.[/yellow]")
+                emit(f"Fundamentals: {len(stale_stocks)} stocks need refresh (skipping — too many for auto-update). "
+                     f"Run 'gefion fundamentals-update --limit 200' to update in batches.",
+                     data={"phase": "fundamentals", "status": "skipped", "count": len(stale_stocks)},
+                     json_output=json_output)
     except Exception:
         pass  # Fundamentals are optional — don't fail data-update
 
@@ -10833,6 +11178,24 @@ def data_cull(
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
+    # Suppress pkg_resources deprecation warning from google.rpc (OTEL dependency)
+    import warnings
+    warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+
+    # Load .env file from project root
+    from pathlib import Path
+    _env_file = Path(__file__).parent.parent.parent / ".env"
+    if _env_file.exists():
+        for line in _env_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+
+    # Re-initialize OTEL now that .env is loaded (module was imported before .env)
+    from gefion.observability import reinitialize as otel_reinitialize
+    otel_reinitialize()
+
     import atexit
     # Register shutdown handler to flush traces on exit
     atexit.register(otel_shutdown)

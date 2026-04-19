@@ -245,6 +245,65 @@ def get_current_span():
     return trace.get_current_span()
 
 
+def reinitialize() -> bool:
+    """
+    Re-check OTEL_ENABLED from environment and initialize if needed.
+
+    Call this after loading .env or changing environment variables.
+    Safe to call multiple times — no-op if already initialized.
+
+    Returns:
+        True if OTEL is enabled (either already or newly initialized).
+    """
+    global OTEL_ENABLED, _otel_initialized
+
+    if _otel_initialized and OTEL_ENABLED:
+        return True  # Already good
+
+    # Re-read from environment
+    env_enabled = os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
+    if not env_enabled:
+        return False
+
+    # Environment says enable but we haven't initialized yet
+    if not _otel_initialized:
+        # Need to import OTEL dependencies now (skipped at module level)
+        global trace, TracerProvider, BatchSpanProcessor, Resource, SERVICE_NAME
+        global OTLPSpanExporter, TraceIdRatioBased, ConsoleSpanExporter, PsycopgInstrumentor
+        from opentelemetry import trace as _trace
+        from opentelemetry.sdk.trace import TracerProvider as _TP
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor as _BSP
+        from opentelemetry.sdk.resources import Resource as _Res, SERVICE_NAME as _SN
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as _OTLP
+        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased as _TIRB
+        trace = _trace
+        TracerProvider = _TP
+        BatchSpanProcessor = _BSP
+        Resource = _Res
+        SERVICE_NAME = _SN
+        OTLPSpanExporter = _OTLP
+        TraceIdRatioBased = _TIRB
+        try:
+            from opentelemetry.sdk.trace.export import ConsoleSpanExporter as _CSE
+            ConsoleSpanExporter = _CSE
+        except ImportError:
+            ConsoleSpanExporter = None
+        try:
+            from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor as _PI
+            PsycopgInstrumentor = _PI
+        except ImportError:
+            PsycopgInstrumentor = None
+
+        OTEL_ENABLED = True
+        _otel_initialized = _initialize_otel()
+        if not _otel_initialized:
+            OTEL_ENABLED = False
+            return False
+
+    OTEL_ENABLED = True
+    return True
+
+
 def is_enabled() -> bool:
     """Check if OpenTelemetry is enabled."""
     return OTEL_ENABLED

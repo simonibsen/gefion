@@ -1,0 +1,14 @@
+{
+  "name": "daily_market_cap",
+  "function_name": "forward_fill_quarterly",
+  "params": {
+    "column": "daily_market_cap"
+  },
+  "source_table": "quarterly_financials",
+  "source_column": "shares_outstanding",
+  "store_table": "computed_features",
+  "store_column": "value",
+  "store_type": "double precision",
+  "active": true,
+  "version": null
+}

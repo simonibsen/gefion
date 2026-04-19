@@ -139,11 +139,11 @@ def get_process_state(key: str) -> ProcessState:
         # Migrate old ProcessState objects that don't have new fields
         if not hasattr(old_state, 'rate_per_sec') or not hasattr(old_state, 'completed_at'):
             new_state = ProcessState()
-            for f in ['process', 'is_running', 'phase', 'progress', 'done', 'total',
-                      'inserted', 'errors', 'last_ok', 'workers', 'writer_workers',
-                      'mode', 'error_message', 'completed', 'success', 'completed_at',
-                      'rate_per_sec', 'eta_seconds', 'successes', 'last_ok_inserted',
-                      'output_lines', 'work_events']:
+            for f in ['process', 'pid', 'started_at', 'is_running', 'phase', 'progress',
+                      'done', 'total', 'inserted', 'errors', 'last_ok', 'workers',
+                      'writer_workers', 'mode', 'error_message', 'completed', 'success',
+                      'completed_at', 'rate_per_sec', 'eta_seconds', 'successes',
+                      'last_ok_inserted', 'output_lines', 'work_events', 'status_message']:
                 if hasattr(old_state, f):
                     setattr(new_state, f, getattr(old_state, f))
             st.session_state[state_key] = new_state
@@ -186,6 +186,7 @@ def start_background_process(key: str, cmd: list, env: dict):
         return False
 
     state.is_running = True
+    state.started_at = time.time()
     state.completed = False
     state.success = False
     state.error_message = ""
@@ -221,6 +222,7 @@ def start_background_process(key: str, cmd: list, env: dict):
                 env=env,
             )
             state.process = process
+            state.pid = process.pid
 
             # Start stderr reader thread
             stderr_thread = threading.Thread(
@@ -248,10 +250,27 @@ def start_background_process(key: str, cmd: list, env: dict):
                     data = json.loads(line)
                     if not isinstance(data, dict):
                         continue
-                    if "_meta" in data or "summary" in data:
+                    if "summary" in data:
                         continue
+                    # For _meta-wrapped messages, extract the outer fields
+                    if "_meta" in data:
+                        data = {k: v for k, v in data.items() if k != "_meta"}
                     # Update state from progress data
-                    state.phase = data.get("phase", state.phase)
+                    new_phase = data.get("phase")
+                    if new_phase and new_phase != state.phase:
+                        # Phase changed — reset all counters
+                        state.phase = new_phase
+                        state.done = 0
+                        state.total = 0
+                        state.progress = 0
+                        state.last_ok = ""
+                        state.inserted = 0
+                        state.successes = 0
+                        state.rate_per_sec = 0
+                        state.eta_seconds = 0
+                        state.errors = 0
+                    if data.get("message"):
+                        state.status_message = data["message"]
                     state.progress = data.get("percent", state.progress)
                     state.done = data.get("done", state.done)
                     state.total = data.get("total", state.total)
@@ -338,10 +357,12 @@ def render_process_status(key: str, title: str):
         status_state = "error"
 
     with st.status(status_label, expanded=True, state=status_state):
-        # Phase and progress bar
+        # Phase and status message
         if state.phase:
-            phase_emoji = "▸" if state.phase == "prices" else "▸" if state.phase == "features" else "▸"
-            st.write(f"{phase_emoji} Phase: **{state.phase.title()}**")
+            st.write(f"▸ Phase: **{state.phase.title()}**")
+        status_msg = getattr(state, 'status_message', None)
+        if status_msg:
+            st.caption(status_msg)
 
         if state.progress > 0:
             st.progress(min(1.0, state.progress / 100.0))
@@ -388,33 +409,35 @@ def render_process_status(key: str, title: str):
         if state.error_message:
             st.error(state.error_message)
 
-        # Show CLI output log
+        # Show event log — extract meaningful messages from JSON output
         output_lines = getattr(state, 'output_lines', [])
         if output_lines:
-            with st.expander("CLI Output", expanded=False):
-                # Parse JSON objects from output (may span multiple lines)
-                buffer = ""
-                json_objects = []
+            with st.expander("Event Log", expanded=False):
+                events = []
                 for line in output_lines:
-                    buffer += line + "\n"
                     try:
-                        data = json.loads(buffer)
-                        json_objects.append(data)
-                        buffer = ""
+                        data = json.loads(line)
+                        if not isinstance(data, dict):
+                            continue
+                        # Strip _meta wrapper to get the actual payload
+                        if "_meta" in data:
+                            data = {k: v for k, v in data.items() if k != "_meta"}
+                        msg = data.get("message", "")
+                        # Only show lines with a real human-readable message
+                        if msg and len(msg) > 10:
+                            phase = data.get("phase", "")
+                            prefix = f"**{phase.title()}:** " if phase else ""
+                            events.append(f"{prefix}{msg}")
                     except json.JSONDecodeError:
-                        # Incomplete JSON, continue accumulating
                         pass
-
-                # Show last few parsed JSON objects
-                for data in json_objects[-3:]:
-                    # Skip verbose meta blocks
-                    if "_meta" in data:
-                        continue
-                    # Truncate long symbol lists
-                    if "symbols" in data and len(data.get("symbols", [])) > 5:
-                        data = data.copy()
-                        data["symbols"] = data["symbols"][:5] + [f"... ({len(data['symbols'])} total)"]
-                    st.json(data)
+                # Show unique events (deduplicate)
+                seen = set()
+                for evt in events:
+                    if evt not in seen:
+                        seen.add(evt)
+                        st.markdown(f"- {evt}")
+                if not events:
+                    st.caption("No events recorded")
 
         # Control buttons
         col1, col2 = st.columns(2)
@@ -441,32 +464,102 @@ def render_update_section():
         render_process_status("data_update", "Data Update")
 
         if state.is_running:
-            # Auto-refresh while running
+            actually_done = False
+
+            # Method 1: Check process object directly
             proc = getattr(state, 'process', None)
-            if proc and proc.poll() is not None and not state.completed:
-                # Process exited but thread hasn't caught up yet — nudge it
-                state.is_running = False
-                state.completed = True
-                state.completed_at = time.time()
-                state.success = proc.returncode == 0
+            if proc is not None:
+                try:
+                    poll = proc.poll()
+                    if poll is not None:
+                        state.is_running = False
+                        state.completed = True
+                        state.completed_at = time.time()
+                        state.success = poll == 0
+                        actually_done = True
+                except (OSError, ValueError):
+                    pass
+
+            # Method 2: Check PID if process object failed
+            if not actually_done:
+                pid = getattr(state, 'pid', None)
+                if pid:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        state.is_running = False
+                        state.completed = True
+                        state.completed_at = time.time()
+                        state.success = True
+                        actually_done = True
+                    except PermissionError:
+                        pass
+                elif proc is None:
+                    # No process object AND no PID — state is orphaned
+                    state.is_running = False
+                    state.completed = True
+                    state.completed_at = time.time()
+                    state.success = False
+                    state.error_message = "Process reference lost"
+                    actually_done = True
+
+            # Method 3: Timeout fallback
+            if not actually_done:
+                started = getattr(state, 'started_at', None)
+                if started and (time.time() - started) > 600:
+                    state.is_running = False
+                    state.completed = True
+                    state.completed_at = time.time()
+                    state.success = False
+                    state.error_message = "Process timed out (10 min)"
+                    actually_done = True
+
+            if actually_done:
                 st.rerun()
             else:
-                st.caption("Auto-refreshing...")
-                time.sleep(1.5)
+                # Show meaningful status during refresh
+                elapsed = int(time.time() - getattr(state, 'started_at', time.time()))
+                elapsed_str = f"{elapsed}s" if elapsed < 60 else f"{elapsed // 60}m {elapsed % 60}s"
+
+                phase = getattr(state, 'phase', '')
+                done = getattr(state, 'done', 0)
+                total = getattr(state, 'total', 0)
+                status_msg = getattr(state, 'status_message', '')
+                last_ok = getattr(state, 'last_ok', '')
+
+                parts = [f"Running ({elapsed_str})"]
+                if phase:
+                    parts.append(f"Phase: **{phase.title()}**")
+                if total > 0:
+                    pct = int(done / total * 100) if total else 0
+                    parts.append(f"{done}/{total} ({pct}%)")
+                if last_ok:
+                    parts.append(f"Last: {last_ok}")
+                if status_msg:
+                    parts.append(status_msg)
+
+                st.caption(" — ".join(parts))
+                time.sleep(2)
                 st.rerun()
             return  # Don't show update form while process is running
 
-        # Process completed — show clear button, don't block the form
-        if state.completed:
-            if st.button("Clear", key="clear_data_update"):
-                clear_process_state("data_update")
-                st.rerun()
+        # Process completed — clear button already shown by render_process_status above
+
+    # Weekend/market-closed notice
+    from datetime import date as _date
+    _today = _date.today()
+    if _today.weekday() >= 5:  # Saturday or Sunday
+        st.warning(
+            f"Market is closed today ({_today.strftime('%A')}). "
+            f"Running a data update will only recompute features — no new price data is available until Monday."
+        )
 
     st.info("""
-    **Data Update** runs two phases:
+    **Data Update** runs three phases:
     1. **Prices** — fetches OHLCV data from AlphaVantage (full history for new stocks, incremental for existing)
     2. **Features** — computes all active feature definitions (technical indicators,
        cross-sectional rankings, sector comparisons, etc.)
+    3. **Fundamentals** — refreshes company metadata (sector, industry, market cap) if older than 30 days
     """)
 
     col1, col2 = st.columns(2)
@@ -527,6 +620,15 @@ def render_update_section():
     if refresh:
         cli_parts.append("--refresh")
     st.code(" ".join(cli_parts), language="bash")
+
+    # Warn if operation is too large for UI
+    if limit is None or (isinstance(limit, int) and limit > 200):
+        effective = limit or "all ~5,800"
+        st.warning(
+            f"Updating **{effective} symbols** may take a long time and the UI may lose track of progress. "
+            f"For large updates, use the CLI instead:\n\n"
+            f"```\n{' '.join(cli_parts)}\n```"
+        )
 
     if st.button("Start Update", type="primary", width="stretch"):
         # Build command

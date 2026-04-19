@@ -1,0 +1,10 @@
+{
+  "name": "forward_fill_quarterly",
+  "version": "1.0",
+  "language": "python",
+  "description": "Forward-fill quarterly financial data to produce daily values. Takes quarterly data points (e.g., EPS reported each quarter) and carries each value forward until the next quarter's data arrives. Used as a building block for daily fundamental features like PE ratio.",
+  "status": "active",
+  "enabled": true,
+  "created_by": "gefion",
+  "function_body": "import pandas as pd\nimport numpy as np\n\ndef compute(rows, specs):\n    \"\"\"\n    Forward-fill quarterly data to daily frequency.\n\n    Args:\n        rows: Quarterly data with 'date' and 'value' columns\n        specs: List of specs with params.column for output column name\n\n    Returns:\n        List of dicts with date and forward-filled values\n    \"\"\"\n    if not rows:\n        return []\n\n    df = pd.DataFrame(rows)\n    if df.empty:\n        return []\n\n    df = df.sort_values('date').reset_index(drop=True)\n    df['value'] = pd.to_numeric(df['value'], errors='coerce')\n\n    # Get output column name from specs\n    if isinstance(specs, dict):\n        specs = [specs]\n    col_name = 'value'\n    for spec in specs:\n        params = spec.get('params', spec)\n        col_name = params.get('column', 'value')\n\n    results = []\n    for i, row in df.iterrows():\n        val = row['value']\n        if pd.notna(val):\n            results.append({\n                'date': row['date'],\n                col_name: float(val),\n            })\n\n    return results\n"
+}
