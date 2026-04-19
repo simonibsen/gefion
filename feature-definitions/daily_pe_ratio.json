@@ -1,0 +1,14 @@
+{
+  "name": "daily_pe_ratio",
+  "function_name": "forward_fill_quarterly",
+  "params": {
+    "column": "daily_pe_ratio"
+  },
+  "source_table": "quarterly_financials",
+  "source_column": "eps",
+  "store_table": "computed_features",
+  "store_column": "value",
+  "store_type": "double precision",
+  "active": true,
+  "version": null
+}

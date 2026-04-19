@@ -883,7 +883,7 @@ class TestBackgroundProcessPersistence:
     def test_render_process_status_shows_cli_output(self, views_dir):
         """Process status display should show CLI output log."""
         content = (views_dir / "data.py").read_text()
-        assert 'CLI Output' in content
+        assert 'Event Log' in content
         assert 'st.expander' in content
 
     def test_render_process_status_uses_getattr_for_backwards_compat(self, views_dir):

@@ -6,6 +6,7 @@ We avoid network calls here; tests rely on documented demo responses.
 
 from __future__ import annotations
 
+from datetime import date as date_type
 from typing import Dict, List, Mapping, Optional
 
 Endpoint = Dict[str, object]
@@ -164,3 +165,128 @@ def parse_overview(overview: Mapping[str, object]) -> Dict[str, object]:
         "ev_to_ebitda": _safe_float(overview.get("EVToEBITDA")),
         "shares_outstanding": _safe_int(overview.get("SharesOutstanding")),
     }
+
+
+def _parse_date(val: Optional[str]) -> Optional[date_type]:
+    """Parse a YYYY-MM-DD string to a date object."""
+    if not val or val in ("None", "-", ""):
+        return None
+    try:
+        parts = val.split("-")
+        return date_type(int(parts[0]), int(parts[1]), int(parts[2]))
+    except (ValueError, IndexError):
+        return None
+
+
+# --- Quarterly Financial Statement Parsers ---
+# Each returns List[Dict] matching the quarterly_financials table columns.
+# Core fields are typed; remaining fields go into the 'raw' JSONB column.
+
+_INCOME_CORE_FIELDS = {
+    "totalRevenue": ("revenue", _safe_int),
+    "netIncome": ("net_income", _safe_int),
+    "grossProfit": ("gross_profit", _safe_int),
+    "ebitda": ("ebitda", _safe_int),
+    "operatingIncome": ("operating_income", _safe_int),
+    "eps": ("eps", _safe_float),
+}
+
+_BALANCE_SHEET_CORE_FIELDS = {
+    "totalAssets": ("total_assets", _safe_int),
+    "totalLiabilities": ("total_liabilities", _safe_int),
+    "totalShareholderEquity": ("shareholder_equity", _safe_int),
+    "totalCurrentAssets": ("current_assets", _safe_int),
+    "totalCurrentLiabilities": ("current_liabilities", _safe_int),
+    "longTermDebt": ("long_term_debt", _safe_int),
+    "commonStockSharesOutstanding": ("shares_outstanding", _safe_int),
+}
+
+_CASH_FLOW_CORE_FIELDS = {
+    "operatingCashflow": ("operating_cashflow", _safe_int),
+    "capitalExpenditures": ("capital_expenditures", _safe_int),
+}
+
+_EARNINGS_CORE_FIELDS = {
+    "reportedEPS": ("reported_eps", _safe_float),
+    "estimatedEPS": ("estimated_eps", _safe_float),
+    "surprise": ("surprise", _safe_float),
+    "surprisePercentage": ("surprise_percentage", _safe_float),
+}
+
+# Keys to exclude from the raw overflow dict (metadata, not financial data)
+_SKIP_RAW_KEYS = {"fiscalDateEnding", "reportedDate"}
+
+
+def _parse_quarterly_reports(
+    payload: Mapping[str, object],
+    reports_key: str,
+    statement_type: str,
+    core_fields: Dict[str, tuple],
+    include_reported_at: bool = False,
+) -> List[Dict[str, object]]:
+    """Generic parser for quarterly financial reports."""
+    reports = payload.get(reports_key)
+    if not isinstance(reports, list):
+        return []
+
+    results: List[Dict[str, object]] = []
+    all_core_av_keys = set(core_fields.keys())
+
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+
+        fiscal_date = _parse_date(report.get("fiscalDateEnding"))
+        if fiscal_date is None:
+            continue
+
+        record: Dict[str, object] = {
+            "date": fiscal_date,
+            "statement_type": statement_type,
+            "reported_at": _parse_date(report.get("reportedDate")) if include_reported_at else None,
+        }
+
+        # Extract core typed fields
+        for av_key, (col_name, parser_fn) in core_fields.items():
+            record[col_name] = parser_fn(report.get(av_key))
+
+        # Overflow: everything not in core fields or skip list
+        raw = {}
+        for k, v in report.items():
+            if k not in all_core_av_keys and k not in _SKIP_RAW_KEYS:
+                raw[k] = v
+        if raw:
+            record["raw"] = raw
+
+        results.append(record)
+
+    return results
+
+
+def parse_income_statement(payload: Mapping[str, object]) -> List[Dict[str, object]]:
+    """Parse INCOME_STATEMENT response into quarterly records."""
+    return _parse_quarterly_reports(
+        payload, "quarterlyReports", "income", _INCOME_CORE_FIELDS,
+    )
+
+
+def parse_balance_sheet(payload: Mapping[str, object]) -> List[Dict[str, object]]:
+    """Parse BALANCE_SHEET response into quarterly records."""
+    return _parse_quarterly_reports(
+        payload, "quarterlyReports", "balance_sheet", _BALANCE_SHEET_CORE_FIELDS,
+    )
+
+
+def parse_cash_flow(payload: Mapping[str, object]) -> List[Dict[str, object]]:
+    """Parse CASH_FLOW response into quarterly records."""
+    return _parse_quarterly_reports(
+        payload, "quarterlyReports", "cash_flow", _CASH_FLOW_CORE_FIELDS,
+    )
+
+
+def parse_earnings(payload: Mapping[str, object]) -> List[Dict[str, object]]:
+    """Parse EARNINGS response into quarterly earnings records."""
+    return _parse_quarterly_reports(
+        payload, "quarterlyEarnings", "earnings", _EARNINGS_CORE_FIELDS,
+        include_reported_at=True,
+    )

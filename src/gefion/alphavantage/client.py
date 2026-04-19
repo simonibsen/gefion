@@ -125,8 +125,16 @@ class AlphaVantageClient:
                         data = resp.json()
                     except JSONDecodeError:
                         data = {"text": resp.text}
-                    # Treat empty payload as retryable
+                    # Empty payload: for fundamental endpoints it's a permanent data gap
+                    # (ETFs, SPACs, warrants, etc.). Don't waste retries.
+                    _NO_RETRY_EMPTY = {
+                        "OVERVIEW", "INCOME_STATEMENT", "BALANCE_SHEET",
+                        "CASH_FLOW", "EARNINGS",
+                    }
                     if not data:
+                        if function in _NO_RETRY_EMPTY:
+                            set_attributes(span, empty=True, attempts=attempt + 1)
+                            return {}
                         raise req_exc.RequestException("empty payload")
 
                     # Add timing attributes
@@ -160,3 +168,19 @@ class AlphaVantageClient:
         Description, MarketCapitalization, PERatio, etc.
         """
         return self.get("OVERVIEW", symbol=symbol)
+
+    def fetch_income_statement(self, symbol: str) -> Mapping[str, object]:
+        """Fetch quarterly and annual income statements for a symbol."""
+        return self.get("INCOME_STATEMENT", symbol=symbol)
+
+    def fetch_balance_sheet(self, symbol: str) -> Mapping[str, object]:
+        """Fetch quarterly and annual balance sheets for a symbol."""
+        return self.get("BALANCE_SHEET", symbol=symbol)
+
+    def fetch_cash_flow(self, symbol: str) -> Mapping[str, object]:
+        """Fetch quarterly and annual cash flow statements for a symbol."""
+        return self.get("CASH_FLOW", symbol=symbol)
+
+    def fetch_earnings(self, symbol: str) -> Mapping[str, object]:
+        """Fetch quarterly earnings (EPS actual vs estimate) for a symbol."""
+        return self.get("EARNINGS", symbol=symbol)

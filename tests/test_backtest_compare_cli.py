@@ -16,13 +16,12 @@ runner = CliRunner()
 
 
 def parse_json_output(output: str) -> dict:
-    """Parse JSON output, handling pretty-printed multi-line format."""
-    # Find the last complete JSON object (starts with '{\n  "_meta"')
-    last_json_start = output.rfind('{\n  "_meta"')
-    if last_json_start == -1:
-        # Fallback: try to parse the whole output
-        return json.loads(output)
-    return json.loads(output[last_json_start:])
+    """Parse JSON output, handling single-line JSON format."""
+    # Output may contain multiple JSON lines; take the last one
+    lines = [l for l in output.strip().splitlines() if l.strip().startswith("{")]
+    if lines:
+        return json.loads(lines[-1])
+    return json.loads(output)
 
 
 class TestBacktestCompareCommand:
