@@ -1,117 +1,134 @@
-# OpenTelemetry Observability (Grafana Tempo)
+# Observability (OpenTelemetry + Grafana Tempo)
 
-This document describes how to use OpenTelemetry with Grafana Tempo for performance monitoring and investigation in the Gefion system.
+Gefion uses OpenTelemetry for distributed tracing, exported to Grafana Tempo. All significant operations are instrumented — CLI commands, feature computation, database queries, API calls, UI page loads, and MCP tool invocations.
 
-## Quick Links
+Tracing is **zero overhead** when disabled (`OTEL_ENABLED=false`, the default).
 
-- **[Tempo Quick Start](TEMPO_QUICKSTART.md)** - Start Tempo + Grafana locally
-- **[Performance Optimization Workflow](PERFORMANCE_WORKFLOW.md)** - Use traces to drive tuning
+## Setup
 
-## Overview
-
-The Gefion system includes toggle-able OpenTelemetry instrumentation that can be enabled on-demand. When enabled, it traces:
-
-- **CLI commands** (e.g. `cli.feat-compute`, `cli.data-update`)
-- **Feature computation pipeline** (e.g. `compute_features`, `process_function_group`, `insert_computed_features`)
-- **Database activity** (auto-instrumented psycopg spans + `db.get_connection`)
-- **External API calls** (e.g. `alphavantage.api_call`)
-
-Observability is **zero overhead** when `OTEL_ENABLED` is not set or is `false` (the default).
-
-## Quick Start
-
-1. Start Tempo + Grafana:
+### Start Tempo + Grafana
 
 ```bash
 docker compose -f docker/tempo/docker-compose.tempo.yml up -d
 ```
 
-2. Enable tracing:
+This starts:
+- **Tempo** on port 3200 (traces backend), accepting OTLP on ports 4317 (gRPC) and 4318 (HTTP)
+- **Grafana** on port 3000 (UI for trace visualization)
+
+Verify:
 
 ```bash
-export $(cat .env.example | xargs)
+curl -s http://localhost:3200/ready    # Should return "ready"
+curl -s http://localhost:3000/api/health  # Grafana health
 ```
 
-3. Run a command:
+### Enable Tracing
+
+Set in your `.env` file (CLI auto-loads this):
 
 ```bash
-gefion feat-compute --symbols AAPL --function-names indicator --profile
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=gefion
+OTEL_EXPORTER=otlp
+OTEL_OTLP_ENDPOINT=http://localhost:4317
+OTEL_SAMPLING_RATE=1.0
 ```
 
-4. Sanity-check ingestion:
+The CLI calls `reinitialize()` after loading `.env`, so tracing works even though the observability module is imported before `.env` is read.
 
-```bash
-gefion span-check
-```
-
-`gefion span-check` prints recent traces plus a direct Tempo API link for the selected trace, which is handy during development performance checks.
-
-5. View traces:
-
-- Open http://localhost:3000
-- Explore → Tempo
-- Query: `service.name = "gefion"`
-
-## Development Use
-
-After performance-sensitive changes, run:
-
-```bash
-gefion span-check
-```
-
-Use the printed Tempo API link to inspect the selected trace details without hunting in the UI, then compare traces before/after your change.
-
-## Configuration
+### Configuration Options
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OTEL_ENABLED` | `false` | Enable/disable OpenTelemetry |
+| `OTEL_ENABLED` | `false` | Enable/disable tracing |
 | `OTEL_SERVICE_NAME` | `gefion` | Service name in traces |
-| `OTEL_EXPORTER` | `otlp` | Exporter type: `otlp` or `console` |
+| `OTEL_EXPORTER` | `otlp` | `otlp` (Tempo) or `console` (stdout) |
 | `OTEL_OTLP_ENDPOINT` | `http://localhost:4317` | Tempo OTLP gRPC endpoint |
-| `OTEL_SAMPLING_RATE` | `1.0` | Sampling rate (0.0-1.0) |
+| `OTEL_SAMPLING_RATE` | `1.0` | Sampling rate (0.0 to 1.0) |
 
-### Example configurations
+## Querying Traces
 
-Full tracing (investigation mode):
+### Tempo MCP Server
 
-```bash
-export $(cat .env.example | xargs)
+Tempo has a built-in MCP server (enabled in `docker/tempo/tempo-config.yaml`). This allows querying traces directly via TraceQL without leaving the terminal.
+
+In Claude Code, use `/gefion-perf` to query traces:
+
+| Command | What it does |
+|---------|-------------|
+| `/gefion-perf` | Show slow traces (>100ms) from the last hour |
+| `/gefion-perf 500` | Show traces slower than 500ms |
+| `/gefion-perf ui` | All UI page load traces |
+| `/gefion-perf db` | All database operation traces |
+| `/gefion-perf fix` | Find slowest trace, investigate, and fix |
+
+### Useful TraceQL Queries
+
+```
+{duration > 500ms}                          # All slow spans
+{span.name =~ "ui." && duration > 500ms}    # Slow page loads
+{span.name =~ "db." && duration > 200ms}    # Slow DB operations
+{span.name =~ "alphavantage"}               # API calls
+{status = error}                            # Errors
+{} | count() > 50                           # High span count (N+1 pattern)
 ```
 
-Low-overhead sampling (1%):
+### CLI
 
 ```bash
-export OTEL_ENABLED=true
-export OTEL_EXPORTER=otlp
-export OTEL_OTLP_ENDPOINT=http://localhost:4317
-export OTEL_SAMPLING_RATE=0.01
+gefion span-check          # Check recent traces for slow operations
+gefion span-check --limit 20  # Show more traces
 ```
 
-Console output (no Tempo required):
+### Grafana UI
 
-```bash
-export OTEL_ENABLED=true
-export OTEL_EXPORTER=console
+1. Open http://localhost:3000
+2. Navigate to Explore → Tempo
+3. Query by service name `gefion` or use TraceQL
+
+## Instrumenting Code
+
+Every significant operation should be wrapped in a span:
+
+```python
+from gefion.observability import create_span, set_attributes
+
+with create_span("module.function_name", key_param=value) as span:
+    result = do_work()
+    set_attributes(span, result_count=len(result))
 ```
 
-## Tempo API checks
+Key functions from `gefion.observability`:
 
-Quick checks to confirm the Tempo API is responding and receiving traces:
+| Function | Purpose |
+|----------|---------|
+| `create_span(name, **attrs)` | Context manager that creates a traced span |
+| `set_attributes(span, **attrs)` | Add attributes to a span |
+| `add_event(span, name, **attrs)` | Add a timestamped event to a span |
+| `get_current_span()` | Get the active span from context |
+| `is_enabled()` | Check if tracing is active |
+| `flush_telemetry()` | Force-flush pending spans |
+| `reinitialize()` | Re-check env and initialize OTEL (for late `.env` loading) |
 
-```bash
-curl -s http://localhost:3200/api/search
-curl -s "http://localhost:3200/api/search?tags=service.name=gefion&limit=5"
-```
+### Pre-commit Enforcement
+
+The pre-commit hook blocks commits of significant source files that don't import from `gefion.observability`. This ensures all new code is instrumented.
 
 ## Troubleshooting
 
-No traces appearing:
+**No traces appearing:**
 
-- Confirm services: `docker compose -f docker/tempo/docker-compose.tempo.yml ps`
-- Confirm Grafana: `curl -s http://localhost:3000/api/health`
-- Confirm Tempo API: `curl -s http://localhost:3200/api/search`
-- Confirm Gefion config: `env | rg '^OTEL_'`
-- Run: `gefion span-check` (shows trace counts + span counts)
-- Check Tempo logs: `docker compose -f docker/tempo/docker-compose.tempo.yml logs tempo`
+1. Check services: `docker compose -f docker/tempo/docker-compose.tempo.yml ps`
+2. Check Tempo: `curl -s http://localhost:3200/ready`
+3. Check OTEL config: `grep OTEL .env`
+4. Check endpoint: `curl -s -o /dev/null -w "%{http_code}" http://localhost:4318/v1/traces` (should return 405)
+5. Check logs: `docker compose -f docker/tempo/docker-compose.tempo.yml logs tempo`
+
+**Traces not appearing for CLI commands:**
+
+The CLI loads `.env` in `entrypoint()` and calls `reinitialize()`. If running Python directly (not via `gefion` command), set `OTEL_ENABLED=true` before importing `gefion.observability`.
+
+## Performance Thresholds
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for span naming conventions and performance thresholds.

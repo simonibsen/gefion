@@ -87,6 +87,15 @@ computed_features (
     feature_id → feature_definitions.id,
     value
 )
+
+-- Quarterly financial data
+quarterly_financials (
+    data_id → stocks.id,
+    fiscal_date,
+    reported_date,
+    metric_name,
+    value
+)
 ```
 
 ### Data model at a glance
@@ -124,7 +133,7 @@ computed_features (
 
 **Key Components**:
 
-- **Sandboxing** ([dispatcher.py](../src/gefion/ingest/dispatcher.py)):
+- **Sandboxing** ([dispatcher.py](../src/gefion/features/dispatcher.py)):
   - Restricted `__builtins__` (no `open`, `exec`, `eval`)
   - Limited imports (pandas, numpy, talib allowed)
   - No network or filesystem access
@@ -316,11 +325,9 @@ Price and feature data are chunked by month:
 - Transactions rolled back after test
 - Mocked AlphaVantage API for unit tests
 
-## Future Enhancements
-
 ### Cross-Sectional Features
 
-For sector-relative and market-relative features (e.g., stock return vs sector average), a dedicated table structure is planned:
+Sector-relative and market-relative features (e.g., stock return vs sector average) are supported via a dedicated table:
 
 ```sql
 CREATE TABLE cross_sectional_features (

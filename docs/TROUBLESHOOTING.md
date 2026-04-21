@@ -56,7 +56,7 @@ The issue has been fixed in the codebase. The `create_stock_ohlcv_table()` funct
 You can verify the fix worked by checking:
 
 ```bash
-psql -U Gefion -d Gefion -c "SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name = 'stock_ohlcv';"
+psql -U gefion -d gefion -c "SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name = 'stock_ohlcv';"
 ```
 
 You should see one row indicating the table is now a hypertable.

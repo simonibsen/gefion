@@ -491,13 +491,7 @@ gefion backtest compare \
 
 ### Unregistering Configs
 
-Configs can be removed from the database:
-
-```bash
-gefion strategy delete-config --name momentum_aggressive
-```
-
-Or use the UI: **Backtesting → Strategy Configs → Unregister**
+Configs can be removed via the UI: **Backtesting → Strategy Configs → Unregister**
 
 Note: Unregistering a config does NOT affect the underlying strategy.
 

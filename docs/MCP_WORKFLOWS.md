@@ -85,7 +85,7 @@ Generate predictions for AAPL, MSFT, GOOGL, TSLA, NVDA using model
 **Output:**
 - Fetches latest features from database
 - Generates q10/q50/q90 predictions for each horizon
-- Stores in `quantile_predictions` table
+- Stores in `predictions` table (prediction_type='quantile')
 
 ### Step 5: Query Results
 
@@ -167,7 +167,7 @@ Generate trend predictions for AAPL, MSFT, GOOGL using trend_v1
 version 20251218 for today.
 ```
 
-**Output stored in `trend_predictions` table:**
+**Output stored in `predictions` table (prediction_type='trend_class'):**
 ```
 AAPL (h7):
   strong_down: 5%
@@ -190,18 +190,19 @@ with probability > 40%
 ```sql
 SELECT
     s.symbol,
-    tp.horizon_days,
-    tp.predicted_class,
-    tp.strong_up_prob,
-    tp.prediction_date
-FROM trend_predictions tp
-JOIN stocks s ON tp.data_id = s.id
-JOIN ml_models m ON tp.model_id = m.id
-WHERE m.name = 'trend_v1'
-  AND tp.horizon_days = 7
-  AND tp.predicted_class = 'strong_up'
-  AND tp.strong_up_prob > 0.40
-ORDER BY tp.strong_up_prob DESC
+    p.horizon_days,
+    p.prediction_values->>'predicted_class' as predicted_class,
+    (p.prediction_values->>'strong_up')::numeric as strong_up_prob,
+    p.prediction_date
+FROM predictions p
+JOIN stocks s ON p.data_id = s.id
+JOIN ml_models m ON p.model_id = m.id
+WHERE p.prediction_type = 'trend_class'
+  AND m.name = 'trend_v1'
+  AND p.horizon_days = 7
+  AND p.prediction_values->>'predicted_class' = 'strong_up'
+  AND (p.prediction_values->>'strong_up')::numeric > 0.40
+ORDER BY (p.prediction_values->>'strong_up')::numeric DESC
 LIMIT 20
 ```
 
@@ -234,20 +235,22 @@ Show top 10 ranked by q50 prediction.
 WITH latest_predictions AS (
     SELECT
         s.symbol,
-        qp.q10,
-        qp.q50,
-        qp.q90,
-        (qp.q90 - qp.q10) as iqr,
-        tp.predicted_class,
-        tp.weak_up_prob + tp.strong_up_prob as up_prob
-    FROM quantile_predictions qp
-    JOIN trend_predictions tp ON
-        qp.data_id = tp.data_id AND
-        qp.horizon_days = tp.horizon_days AND
-        qp.prediction_date = tp.prediction_date
-    JOIN stocks s ON qp.data_id = s.id
-    WHERE qp.horizon_days = 30
-      AND qp.prediction_date = (SELECT MAX(prediction_date) FROM quantile_predictions)
+        (pq.prediction_values->>'q10')::numeric as q10,
+        (pq.prediction_values->>'q50')::numeric as q50,
+        (pq.prediction_values->>'q90')::numeric as q90,
+        (pq.prediction_values->>'q90')::numeric - (pq.prediction_values->>'q10')::numeric as iqr,
+        pt.prediction_values->>'predicted_class' as predicted_class,
+        (pt.prediction_values->>'weak_up')::numeric + (pt.prediction_values->>'strong_up')::numeric as up_prob
+    FROM predictions pq
+    JOIN predictions pt ON
+        pq.data_id = pt.data_id AND
+        pq.horizon_days = pt.horizon_days AND
+        pq.prediction_date = pt.prediction_date AND
+        pt.prediction_type = 'trend_class'
+    JOIN stocks s ON pq.data_id = s.id
+    WHERE pq.prediction_type = 'quantile'
+      AND pq.horizon_days = 30
+      AND pq.prediction_date = (SELECT MAX(prediction_date) FROM predictions WHERE prediction_type = 'quantile')
 )
 SELECT *
 FROM latest_predictions

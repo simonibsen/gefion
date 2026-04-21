@@ -98,7 +98,7 @@ For debugging or custom testing, here are the individual steps:
 gefion data-update --exchange NASDAQ --limit 50
 
 # Verify
-gefion query-database --sql "SELECT COUNT(*) FROM stocks WHERE exchange = 'NASDAQ'"
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM stocks WHERE exchange = 'NASDAQ'"
 ```
 
 ### Step 2: Build Dataset
@@ -112,7 +112,7 @@ gefion ml dataset-build \
   --horizons 7,30
 
 # Verify
-gefion query-database --sql "SELECT name, version, num_symbols FROM ml_datasets WHERE name = 'e2e_test'"
+psql $DATABASE_URL -c "SELECT name, version, num_symbols FROM ml_datasets WHERE name = 'e2e_test'"
 ```
 
 ### Step 3: Train Single Model
@@ -141,7 +141,7 @@ gefion ml train-ensemble \
 
 ```bash
 # Get latest date with features
-PRED_DATE=$(gefion query-database --sql "SELECT MAX(date) FROM computed_features" | tail -1 | tr -d ' ')
+PRED_DATE=$(psql $DATABASE_URL -t -c "SELECT MAX(date) FROM computed_features" | tr -d ' ')
 
 # Single model predictions
 gefion ml predict \
@@ -163,7 +163,7 @@ gefion ml predict-ensemble \
 ### Step 6: Verify Predictions
 
 ```bash
-gefion query-database --sql "
+psql $DATABASE_URL -c "
 SELECT m.name, COUNT(*) as predictions
 FROM quantile_predictions qp
 JOIN ml_models m ON qp.model_id = m.id
@@ -176,9 +176,9 @@ GROUP BY m.name
 
 ```bash
 # Remove test artifacts from database
-gefion query-database --sql "DELETE FROM quantile_predictions WHERE model_id IN (SELECT id FROM ml_models WHERE name LIKE 'e2e_%')"
-gefion query-database --sql "DELETE FROM ml_models WHERE name LIKE 'e2e_%'"
-gefion query-database --sql "DELETE FROM ml_datasets WHERE name = 'e2e_test'"
+psql $DATABASE_URL -c "DELETE FROM quantile_predictions WHERE model_id IN (SELECT id FROM ml_models WHERE name LIKE 'e2e_%')"
+psql $DATABASE_URL -c "DELETE FROM ml_models WHERE name LIKE 'e2e_%'"
+psql $DATABASE_URL -c "DELETE FROM ml_datasets WHERE name = 'e2e_test'"
 
 # Remove model files
 rm -rf models/e2e_*
@@ -209,5 +209,5 @@ gefion data-update --exchange NASDAQ --limit 50
 
 Check model was registered:
 ```bash
-gefion query-database --sql "SELECT * FROM ml_models ORDER BY created_at DESC LIMIT 5"
+psql $DATABASE_URL -c "SELECT * FROM ml_models ORDER BY created_at DESC LIMIT 5"
 ```
