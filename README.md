@@ -271,4 +271,4 @@ Test suite: 1,971 tests (as of v0.2.0)
 
 ## License
 
-See [LICENSE](LICENSE) file for details.
+[Elastic License 2.0 (ELv2)](LICENSE) — free to use, modify, and distribute. You may not offer it as a hosted/managed service.

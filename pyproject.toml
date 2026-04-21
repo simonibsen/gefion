@@ -7,6 +7,7 @@ name = "gefion"
 version = "0.2.0"
 description = "Quantitative trading analysis and ML pipeline — named after the Norse goddess Gefion"
 readme = "README.md"
+license = {text = "Elastic-2.0"}
 requires-python = ">=3.10"
 dependencies = [
     "typer>=0.12",
