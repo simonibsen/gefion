@@ -1,882 +1,273 @@
-# Gefion (working title)
+# Gefion
 
-Database-first ML platform for quantitative stock analysis. Ingests price data, computes technical indicators, trains ML models, and backtests trading strategies.
+**Database-first ML platform for quantitative stock analysis.** Ingests price and fundamental data, computes features, trains models, runs autonomous experiments, and backtests trading strategies.
 
-**Key Features:**
+`v0.2.0` — Alpha, actively developed.
 
-- 📊 AlphaVantage integration with 5,600+ NASDAQ stocks
-- 🔧 Technical indicators (RSI, MACD, Bollinger Bands, etc.) + cross-sectional features (market-relative)
-- 🤖 ML pipeline: quantile regression, trend classification, model ensembles, e2e testing
-- 📈 Backtesting engine with execution modeling (costs, slippage, position sizing)
-- 💬 Natural language interface via MCP server
-- 🗃️ TimescaleDB for efficient time-series storage
-- 🔌 DB-first architecture: features and functions stored in database, exported to git
+![Dashboard](images/ui-dashboard.png)
 
-## Prerequisites
+## What Gefion Does
 
-Before starting, ensure you have:
+- **Data ingestion** — daily OHLCV prices + quarterly financials from AlphaVantage for 5,800+ stocks
+- **Feature engineering** — technical indicators (RSI, MACD, Bollinger Bands, etc.), cross-sectional rankings, and fundamental features (PE ratio, market cap) computed via a metadata-driven dispatcher
+- **ML pipeline** — quantile regression (q10/q50/q90), trend classification (5-class), model ensembles, hyperparameter tuning, SHAP feature importance
+- **Autonomous experiments** — propose, approve, run, and statistically evaluate experiments with FDR correction. AI-generated feature functions via code generation
+- **Backtesting** — 8 rule-based + 2 ML strategies with execution modeling (costs, slippage, position sizing)
+- **Streamlit UI** — 10 interactive pages with contextual AI chat ("Ask Gefion") on every page
+- **Observability** — OpenTelemetry tracing to Grafana Tempo, performance feedback via TraceQL
 
-- **Python 3.10+** - Check with `python --version`
-- **Docker & Docker Compose** - For TimescaleDB database
-- **PostgreSQL client (psql)** - For schema initialization
-- **AlphaVantage API key** - Premium tier recommended for production use (75 calls/min). Get at [alphavantage.co](https://www.alphavantage.co/support/#api-key)
+## UI
 
-Optional:
+<table>
+<tr>
+<td><img src="images/ui-data-management.png" width="400"><br><b>Data Management</b></td>
+<td><img src="images/ui-features-definitions.png" width="400"><br><b>Features</b></td>
+</tr>
+<tr>
+<td><img src="images/ui-ml-train.png" width="400"><br><b>ML Pipeline — Train</b></td>
+<td><img src="images/ui-ml-evaluate.png" width="400"><br><b>ML Pipeline — Evaluate</b></td>
+</tr>
+<tr>
+<td><img src="images/ui-experiments.png" width="400"><br><b>Experiments</b></td>
+<td><img src="images/ui-charts.png" width="400"><br><b>Charts</b></td>
+</tr>
+<tr>
+<td><img src="images/ui-backtesting.png" width="400"><br><b>Backtesting</b></td>
+<td><img src="images/ui-system-operations.png" width="400"><br><b>System Operations</b></td>
+</tr>
+</table>
 
-- **Make** - For convenient commands (`make venv`, `make test`)
-- **GPU + nvidia-container-toolkit** - For accelerated ML training (XGBoost/LightGBM)
+## Quick Start
 
-## Quick Start (10 minutes)
+### Prerequisites
 
-### 1. Install and Configure
+- Python 3.10+
+- Docker & Docker Compose
+- AlphaVantage API key — get one at [alphavantage.co](https://www.alphavantage.co/support/#api-key)
+
+### 1. Install
 
 ```bash
-# Create Python environment and install gefion
-make venv                               # Creates .venv + installs gefion + dependencies
-source .venv/bin/activate               # Activate venv (Windows: .venv\Scripts\activate)
+make venv
+source .venv/bin/activate
 
-# Configure environment variables
 cp .env.example .env
-# Edit .env and set:
-#   DATABASE_URL=postgresql://gefion:gefionpass@localhost:5432/gefion
-#   ALPHAVANTAGE_API_KEY=your_key_here
+# Edit .env: set ALPHAVANTAGE_API_KEY=your_key_here
 ```
 
-### 2. Start Database
+### 2. Start Services
 
 ```bash
-docker compose up -d postgres           # Start TimescaleDB
-docker compose ps postgres              # Verify it's healthy (wait ~10 seconds)
+# PostgreSQL (TimescaleDB) + Grafana Tempo + Grafana
+docker compose up -d postgres
+docker compose -f docker/tempo/docker-compose.tempo.yml up -d
 ```
 
-### 3. Initialize Schema and Seed Data
+### 3. Initialize
 
 ```bash
-psql -d gefion -f sql/schema.sql            # Create tables, hypertables, indexes
-gefion seed-features                        # Seed technical indicator definitions (RSI, MACD, Bollinger Bands, etc.)
+gefion init    # Creates tables, hypertables, indexes, seeds features
 ```
 
-### 4. Test with Sample Data (Offline)
+### 4. Ingest Sample Data
 
 ```bash
-# Ingest sample IBM data (offline, uses bundled fixture)
+# Offline sample (no API key needed)
 gefion prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_adjusted.json
 
-# Compute RSI indicator
-gefion run-features --features indicator_rsi_14 --symbols IBM --local
+# Compute features
+gefion feat-compute --features indicator_rsi_14 --symbols IBM
 ```
 
-✅ **Success!** You now have price data and computed features in the database.
+### 5. Next Steps
 
-### Next Steps
+- **Live data**: `gefion data-update --exchange NASDAQ --limit 50`
+- **ML pipeline**: [docs/ML_QUICKSTART.md](docs/ML_QUICKSTART.md)
+- **Full CLI reference**: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 
-- **Live data ingestion:** See "Data Ingestion" section below
-- **ML workflow:** See "Machine Learning" section below
-- **Full CLI reference:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+## Autonomous Experiments
 
-## What Can You Do?
+Gefion includes an AI-powered experiment framework that systematically searches for improvements across the ML pipeline — better features, better model settings, better trading parameters — and statistically proves they're not just fitting to noise.
 
-### 📊 Data Ingestion & Features
+![Experiments](images/ui-experiments.png)
 
-Ingest daily OHLCV data and compute technical indicators:
+**How it works:**
+
+1. **Discover** — scans available data, features, and a catalog of quantitative finance principles to identify testable hypotheses
+2. **Propose** — generates experiments: new feature functions (via AI code generation), model hyperparameters, label engineering variants, or strategy parameters
+3. **Run** — executes experiments with PurgedKFold cross-validation (time-series aware, prevents data leakage)
+4. **Evaluate** — applies Benjamini-Hochberg FDR correction across all experiments in a cycle to filter false discoveries
+5. **Promote** — surviving experiments are promoted: feature functions become active, model configs are adopted
 
 ```bash
-# Update prices for NASDAQ stocks (live API)
-gefion data-update --exchange NASDAQ --limit 50 --timeframe auto
+# Run a full autonomous cycle
+gefion experiment cycle-run --name exploration-1 --max-experiments 10
 
-# Compute all indicators for those stocks
-gefion feat-compute --exchange NASDAQ --limit 50 --local
+# Or step by step
+gefion experiment discover                    # What can we test?
+gefion experiment propose --type feature_engineering  # Generate an experiment
+gefion experiment approve --id 1              # Review and approve
+gefion experiment run --id 1                  # Execute
+gefion experiment results --id 1              # Check results
 ```
 
-**Learn more:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) - Full CLI reference
-
-### 🤖 Machine Learning Pipeline
-
-Train quantile regression models to predict return distributions:
-
-```bash
-# Prerequisites: Have price data + features in database (see above)
-
-# Quick validation - run full e2e test (~2-5 minutes)
-gefion ml e2e-test --limit 10
-
-# Or step-by-step:
-
-# 1. Build dataset
-gefion ml dataset-build --name mvp --version v1 --symbols AAPL,MSFT --horizons 7,30 --export
-
-# 2. Train model (predicts q10/q50/q90 quantiles)
-gefion ml train --dataset-name mvp --dataset-version v1 --model-name model --model-version $(date +%Y%m%d)
-
-# 3. Train ensemble (combines XGBoost + LightGBM)
-gefion ml train-ensemble --dataset-name mvp --dataset-version v1 --model-name ensemble --model-version $(date +%Y%m%d)
-
-# 4. Generate predictions
-gefion ml predict --model-name model --model-version $(date +%Y%m%d) --symbols AAPL,MSFT
-
-# 5. Evaluate performance (calibration metrics)
-gefion ml eval --model-name model --model-version $(date +%Y%m%d) --start-date 2024-01-01 --end-date 2024-11-30
-```
-
-**Additional ML commands:**
-- `gefion ml train-classifier` - Train 5-class trend classifier (strong_down → strong_up)
-- `gefion ml predict-classifier` - Generate trend class predictions
-- `gefion ml predict-ensemble` - Predictions using ensemble models
-
-**Learn more:** [docs/ML_QUICKSTART.md](docs/ML_QUICKSTART.md) - Complete ML workflow guide
-
-### 💬 Natural Language Interface (MCP Server)
-
-Interact with Gefion using natural language via Model Context Protocol:
-
-```text
-You: "Update NASDAQ data for the top 100 stocks"
-Assistant: [Runs Gefion data-update --exchange NASDAQ --limit 100]
-
-You: "Build a dataset with AAPL, MSFT, GOOGL for 7 and 30 day horizons"
-Assistant: [Runs Gefion ml dataset-build ...]
-
-You: "Show me predictions for AAPL from the last week"
-Assistant: [Queries database and displays results]
-```
-
-**Learn more:** [mcp-server/README.md](mcp-server/README.md) - MCP server setup and usage
-
-## Creating Custom Features & Data Sources
-
-Gefion's DB-first architecture makes it easy to add custom indicators, alternative data, or new data sources without modifying code.
-
-### Custom Technical Indicators
-
-Create a JSON file in `feature-functions/`:
-
-```json
-{
-  "name": "price_change_pct",
-  "version": "1.0",
-  "language": "python",
-  "description": "Calculate percentage price change",
-  "status": "active",
-  "enabled": true,
-  "function_body": "import pandas as pd\n\ndef compute(rows, specs):\n    df = pd.DataFrame(rows)\n    df['price_change_pct'] = df['close'].pct_change() * 100\n    return df.to_dict('records')\n"
-}
-```
-
-Import and use:
-
-```bash
-# Import function to database
-gefion feat-fx-import --dir feature-functions
-
-# Register feature definition
-gefion feat-def-register --definition '{
-  "name": "daily_price_change_pct",
-  "function_name": "price_change_pct",
-  "params": {},
-  "source_table": "stock_ohlcv",
-  "source_column": "close",
-  "store_table": "computed_features",
-  "store_column": "value",
-  "active": true
-}'
-
-# Compute for stocks
-gefion feat-compute --features daily_price_change_pct --symbols AAPL,MSFT --local
-```
-
-### Ingesting New Data Sources
-
-Add data from new API endpoints (sentiment, fundamentals, news, etc.). You have two storage options:
-
-1. **Use `computed_features` table** (recommended for simple scalar values): Store single values per (symbol, date, feature) - good for most use cases, keeps data normalized
-2. **Create dedicated table** (for complex multi-column data): Use when you need multiple related values per date, or when the data has a unique schema
-
-## Example: AlphaVantage News Sentiment API
-
-The AlphaVantage [News Sentiment API](https://www.alphavantage.co/documentation/#news-sentiment) provides sentiment scores for news articles. This example demonstrates the **computed_features** pattern for storing scalar values. For complex data with multiple columns, consider creating a dedicated table (see Alternative section below).
-
-### Step 1: Create API Fetcher Function
-
-Store in `feature-functions/news_sentiment_fetcher.json`:
-
-```json
-{
-  "name": "news_sentiment_fetcher",
-  "version": "1.0",
-  "language": "python",
-  "description": "Fetch news sentiment from AlphaVantage API with error handling and aggregation",
-  "status": "active",
-  "enabled": true,
-  "function_body": "import requests\nimport os\nimport time\nfrom datetime import datetime\nfrom collections import defaultdict\n\ndef compute(rows, specs):\n    \"\"\"Fetch sentiment data from AlphaVantage News Sentiment API.\n    \n    Returns aggregated daily sentiment scores (mean of all articles per day).\n    Handles API errors, rate limiting, and missing data gracefully.\n    \"\"\"\n    api_key = os.environ.get('ALPHAVANTAGE_API_KEY')\n    if not api_key:\n        raise ValueError('ALPHAVANTAGE_API_KEY environment variable not set')\n    \n    symbol = rows[0]['symbol'] if rows else None\n    if not symbol:\n        return []\n    \n    # AlphaVantage rate limit: 5 calls/minute (free tier)\n    # Add 1s delay to respect rate limits when processing multiple symbols\n    time.sleep(1)\n    \n    # Call AlphaVantage News Sentiment API\n    url = f'https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={symbol}&apikey={api_key}'\n    \n    try:\n        response = requests.get(url, timeout=30)\n        response.raise_for_status()\n        data = response.json()\n    except requests.exceptions.Timeout:\n        # API timeout - return empty, will retry later\n        return []\n    except requests.exceptions.RequestException as e:\n        # Network error - return empty\n        return []\n    \n    # Check for API error responses\n    if 'Error Message' in data:\n        # Invalid API key or other API error\n        return []\n    if 'Note' in data:\n        # Rate limit exceeded - return empty, will retry later\n        return []\n    \n    # Aggregate sentiment scores by date (multiple articles per day)\n    daily_sentiments = defaultdict(lambda: {'scores': [], 'relevance': []})\n    \n    for article in data.get('feed', []):\n        try:\n            # Extract date from time_published (format: '20241215T103000')\n            time_published = article.get('time_published', '')\n            if len(time_published) < 8:\n                continue\n            date = time_published[:8]  # YYYYMMDD\n            date_formatted = f'{date[:4]}-{date[4:6]}-{date[6:8]}'\n            \n            # Find sentiment for this ticker\n            for ticker_sentiment in article.get('ticker_sentiment', []):\n                if ticker_sentiment.get('ticker') == symbol:\n                    score = ticker_sentiment.get('ticker_sentiment_score')\n                    relevance = ticker_sentiment.get('relevance_score')\n                    \n                    if score is not None and relevance is not None:\n                        daily_sentiments[date_formatted]['scores'].append(float(score))\n                        daily_sentiments[date_formatted]['relevance'].append(float(relevance))\n        except (KeyError, ValueError, TypeError):\n            # Skip malformed articles\n            continue\n    \n    # Aggregate: weighted average by relevance\n    results = []\n    for date, data in daily_sentiments.items():\n        if data['scores'] and data['relevance']:\n            # Weight sentiment scores by relevance\n            total_relevance = sum(data['relevance'])\n            if total_relevance > 0:\n                weighted_sentiment = sum(\n                    score * relevance \n                    for score, relevance in zip(data['scores'], data['relevance'])\n                ) / total_relevance\n                \n                results.append({\n                    'date': date,\n                    'sentiment_score': round(weighted_sentiment, 4),\n                    'relevance_score': round(total_relevance / len(data['relevance']), 4),\n                    'article_count': len(data['scores'])\n                })\n    \n    return results\n"
-}
-```
-
-### Step 2: Import Function to Database
-
-```bash
-gefion feat-fx-import --dir feature-functions
-```
-
-This stores the function in the `feature_functions` table, making it available to the dispatcher.
-
-### Step 3: Register Feature Definitions
-
-Register three features: sentiment score, relevance, and article count:
-
-```bash
-# Sentiment score (weighted by relevance)
-gefion feat-def-register --definition '{
-  "name": "news_sentiment_score",
-  "function_name": "news_sentiment_fetcher",
-  "params": {"column": "sentiment_score"},
-  "source_table": "stock_ohlcv",
-  "source_column": "symbol",
-  "store_table": "computed_features",
-  "store_column": "value",
-  "active": true
-}'
-
-# Average relevance score
-gefion feat-def-register --definition '{
-  "name": "news_relevance_score",
-  "function_name": "news_sentiment_fetcher",
-  "params": {"column": "relevance_score"},
-  "source_table": "stock_ohlcv",
-  "source_column": "symbol",
-  "store_table": "computed_features",
-  "store_column": "value",
-  "active": true
-}'
-
-# Article count (volume indicator)
-gefion feat-def-register --definition '{
-  "name": "news_article_count",
-  "function_name": "news_sentiment_fetcher",
-  "params": {"column": "article_count"},
-  "source_table": "stock_ohlcv",
-  "source_column": "symbol",
-  "store_table": "computed_features",
-  "store_column": "value",
-  "active": true
-}'
-```
-
-### Step 4: Compute for Symbols
-
-```bash
-# Fetch and store sentiment data (respects 5 calls/min rate limit)
-gefion feat-compute --features news_sentiment_score,news_relevance_score,news_article_count \
-  --symbols AAPL,MSFT,GOOGL --local
-```
-
-### Example Output
-
-After running the computation, your `computed_features` table will contain:
-
-| data_id | date       | feature_id | value    |
-|---------|------------|------------|----------|
-| 1       | 2024-12-13 | 42         | 0.3524   |
-| 1       | 2024-12-13 | 43         | 0.7823   |
-| 1       | 2024-12-13 | 44         | 5        |
-| 1       | 2024-12-14 | 42         | -0.1234  |
-| 1       | 2024-12-14 | 43         | 0.6421   |
-| 1       | 2024-12-14 | 44         | 3        |
-
-Where:
-
-- `feature_id=42` → news_sentiment_score (range: -1 to +1, negative=bearish, positive=bullish)
-- `feature_id=43` → news_relevance_score (range: 0 to 1, how relevant articles are)
-- `feature_id=44` → news_article_count (number of articles mentioning the ticker)
-
-### Querying Sentiment Data
-
-```sql
--- View sentiment for AAPL over last 30 days
-SELECT
-    s.symbol,
-    cf.date,
-    MAX(CASE WHEN fd.name = 'news_sentiment_score' THEN cf.value END) as sentiment,
-    MAX(CASE WHEN fd.name = 'news_relevance_score' THEN cf.value END) as relevance,
-    MAX(CASE WHEN fd.name = 'news_article_count' THEN cf.value END) as article_count
-FROM computed_features cf
-JOIN stocks s ON s.id = cf.data_id
-JOIN feature_definitions fd ON fd.id = cf.feature_id
-WHERE s.symbol = 'AAPL'
-  AND cf.date >= CURRENT_DATE - INTERVAL '30 days'
-  AND fd.name LIKE 'news_%'
-GROUP BY s.symbol, cf.date
-ORDER BY cf.date DESC;
-
--- Find stocks with strong positive sentiment (> 0.3) and high coverage
-SELECT
-    s.symbol,
-    cf.date,
-    cf.value as sentiment_score
-FROM computed_features cf
-JOIN stocks s ON s.id = cf.data_id
-JOIN feature_definitions fd ON fd.id = cf.feature_id
-WHERE fd.name = 'news_sentiment_score'
-  AND cf.value > 0.3
-  AND cf.date >= CURRENT_DATE - INTERVAL '7 days'
-ORDER BY cf.value DESC
-LIMIT 20;
-```
-
-### Using in ML Training
-
-All features in `computed_features` for the specified symbols and date range are automatically included when building datasets:
-
-```bash
-# All available features will be included (news sentiment + technical indicators)
-gefion ml dataset-build --name sentiment_test --version v1 \
-  --symbols AAPL,MSFT,GOOGL --horizons 7,30 --export
-
-# Features CSV will include columns for all computed features:
-# - news_sentiment_score
-# - news_relevance_score
-# - news_article_count
-# - indicator_rsi_14
-# - indicator_macd
-# - (all other registered and computed features)
-```
-
-**Note:** Currently, all features in `computed_features` are included. To use only specific features for training:
-
-1. Build the full dataset with `--export` to get CSVs
-2. Manually filter the `features.csv` file to include only desired columns
-3. Retrain using the filtered dataset
-
-Future versions may support feature selection during dataset build.
-
-### Rate Limiting & Performance
-
-- **AlphaVantage premium tier**: 75 API calls/minute (recommended for production)
-- **Built-in delay**: 1.0 second minimum spacing between calls (enforced to prevent burst patterns)
-- **Throughput**: ~60 symbols/minute with premium tier
-- **Batch processing**: Process 500 symbols ≈ 8 minutes; full NASDAQ universe (5,600 stocks) ≈ 90 minutes
-
-### Troubleshooting
-
-1. **Empty results returned:**
-   - Check API key is valid: `echo $ALPHAVANTAGE_API_KEY`
-   - Verify symbol exists: Small-cap stocks may have no news coverage
-   - Check date range: API returns last 50 articles (typically 7-14 days)
-
-2. **Rate limit errors:**
-   - Error: `{'Note': 'Thank you for using Alpha Vantage! Our standard API call frequency is...'}`
-   - Solution: Built-in 1s delay handles this automatically with premium tier
-   - If using free tier: Reduce `--max-workers` or expect slower processing (5 calls/min limit)
-
-3. **Missing dates:**
-   - Sentiment data is sparse (only dates with news articles)
-   - ML pipeline handles missing features via median imputation
-   - To check coverage: `SELECT COUNT(DISTINCT date) FROM computed_features WHERE feature_id=42`
-
-4. **Debugging API responses:**
-
-   ```python
-   # Test fetcher manually
-   import json
-   with open('feature-functions/news_sentiment_fetcher.json') as f:
-       func_def = json.load(f)
-
-   exec(func_def['function_body'])
-   rows = [{'symbol': 'AAPL'}]
-   result = compute(rows, {})
-   print(json.dumps(result, indent=2))
-   ```
-
-The dispatcher will:
-
-1. Load the `news_sentiment_fetcher` function from database
-2. Call it for each symbol with rate limiting
-3. Store results in `computed_features` table
-4. Features are available for ML training in dataset builds
-
-### Where Code Lives
-
-- **API fetcher functions**: `feature-functions/` directory → imported to `feature_functions` table
-- **Feature definitions**: Registered in `feature_definitions` table
-- **Dispatcher**: `src/gefion/ingest/dispatcher.py` - loads and executes functions
-- **Data storage**: `computed_features` table (or custom table if needed)
-
-### Alternative: Custom Table for Complex Data
-
-Use when data doesn't fit the `computed_features` schema (e.g., multiple columns per row):
-
-```python
-# custom_ingest.py
-import psycopg
-import pandas as pd
-
-# Read your data source (CSV, API, etc.)
-df = pd.read_csv('earnings_data.csv')
-
-# Insert into database
-with psycopg.connect(os.environ['DATABASE_URL']) as conn:
-    with conn.cursor() as cur:
-        # Option A: Use computed_features (generic)
-        for _, row in df.iterrows():
-            cur.execute("""
-                INSERT INTO computed_features (data_id, date, feature_id, value)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (data_id, date, feature_id) DO UPDATE
-                SET value = EXCLUDED.value
-            """, (stock_id, row['date'], feature_id, row['earnings_surprise']))
-
-        # Option B: Create custom table (for complex data)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS earnings_data (
-                data_id INT REFERENCES stocks(id),
-                date DATE,
-                eps_actual DECIMAL,
-                eps_estimate DECIMAL,
-                surprise_pct DECIMAL,
-                PRIMARY KEY (data_id, date)
-            )
-        """)
-
-# Then run via CLI
-python custom_ingest.py
-```
-
-### Other API Data Sources You Can Add
-
-- **AlphaVantage News Sentiment** - Article sentiment scores (example above)
-- **AlphaVantage Fundamentals** - `OVERVIEW`, `INCOME_STATEMENT`, `BALANCE_SHEET`, `EARNINGS`
-- **FRED Economic Data** - GDP, unemployment, interest rates
-- **Twitter/Reddit Sentiment** - Social media APIs
-- **SEC EDGAR** - Insider trading (Form 4), earnings filings
-- **Options Data** - `HISTORICAL_OPTIONS` endpoint
-- **Analyst Ratings** - From financial data providers
-- **Weather Data** - For retail/energy stocks
-
-### Pattern is always the same
-
-1. Create fetcher function in `feature-functions/`
-2. Import to database: `gefion feat-fx-import`
-3. Register definition: `gefion feat-def-register`
-4. Compute: `gefion feat-compute`
-
-### What's allowed in sandboxed functions
-
-- ✅ pandas, numpy, scipy, sklearn, talib
-- ✅ External APIs via requests
-- ✅ JSON/CSV parsing
-- ✅ Date/time operations
-- ❌ File I/O (use database)
-- ❌ eval(), exec(), arbitrary imports
-
-**See:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for DB-first architecture details
-
-## Architecture
-
-### End-to-End Pipeline
-
-```mermaid
-graph LR
-    AV[AlphaVantage API] -->|fetch| DU[gefion data-update]
-    DU -->|insert| OHLCV[(stock_ohlcv)]
-    OHLCV -->|source| FC[gefion feat-compute]
-    FC -->|insert| CF[(computed_features)]
-    OHLCV & CF -->|join| DB[gefion ml dataset-build]
-    DB -->|export| DS[(ml_datasets)]
-    DS -->|train| TR[gefion ml train]
-    TR -->|save| MOD[(ml_models)]
-    MOD -->|predict| PR[gefion ml predict]
-    PR -->|insert| PRED[(predictions)]
-    PRED -->|evaluate| EV[gefion ml eval]
-    EV -->|store| PERF[(model_performance)]
-    PRED -->|signal| BT[gefion backtest run]
-
-    style OHLCV fill:#e8f5e9
-    style CF fill:#e8f5e9
-    style PRED fill:#e8f5e9
-    style DS fill:#fff4e1
-    style MOD fill:#fff4e1
-```
-
-### Entity Relationship Diagram
-
-```mermaid
-erDiagram
-    stocks ||--o{ stock_ohlcv : "has prices"
-    stocks ||--o{ computed_features : "has features"
-    stocks ||--o{ predictions : "has predictions"
-    stocks ||--o{ prediction_outcomes : "has outcomes"
-
-    feature_definitions ||--o{ computed_features : "defines"
-    feature_functions ||..o{ feature_definitions : "implements (by name)"
-
-    ml_datasets ||--o{ ml_models : "trains"
-    ml_datasets ||--o{ ml_runs : "tracks"
-
-    ml_models ||--o{ predictions : "generates"
-    ml_models ||--o{ model_performance : "evaluated by"
-    ml_runs ||--o{ predictions : "run context"
-
-    strategy_registry ||--o{ strategy_configs : "parameterizes"
-
-    stocks {
-        int id PK
-        text symbol UK
-        text status
-        text sector
-    }
-
-    stock_ohlcv {
-        int data_id FK
-        date date
-        numeric open
-        numeric high
-        numeric low
-        numeric close
-        bigint volume
-    }
-
-    feature_definitions {
-        int id PK
-        text name UK
-        text function_name
-        jsonb params
-        boolean active
-    }
-
-    feature_functions {
-        int id PK
-        text name
-        text version
-        text function_body
-        boolean enabled
-    }
-
-    computed_features {
-        int data_id FK
-        date date
-        int feature_id FK
-        float value
-    }
-
-    ml_datasets {
-        int id PK
-        text name
-        text version
-        text artifact_uri
-    }
-
-    ml_models {
-        int id PK
-        text name
-        text version
-        text algorithm
-        boolean active
-    }
-
-    predictions {
-        int model_id FK
-        int data_id FK
-        date prediction_date
-        int horizon_days
-        text prediction_type
-        jsonb prediction_values
-        jsonb metadata
-    }
-
-    prediction_outcomes {
-        int data_id FK
-        date prediction_date
-        numeric actual_return
-    }
-
-    model_performance {
-        int model_id FK
-        int horizon_days
-        numeric q10_calibration
-        numeric q50_calibration
-        numeric q90_calibration
-    }
-```
-
-### Feature Computation (Dispatcher Pattern)
-
-```mermaid
-graph TB
-    subgraph "CLI"
-        CMD[gefion feat-compute --symbols AAPL,MSFT]
-    end
-
-    subgraph "Dispatcher"
-        D[Feature Dispatcher]
-        D -->|read| FD[(feature_definitions)]
-        FD -->|function_name=indicator| REG[Function Registry]
-        FD -->|function_name=derivative| REG
-    end
-
-    subgraph "Compute Functions (sandboxed)"
-        REG -->|route| IND[indicator: RSI, MACD, SMA...]
-        REG -->|route| DER[derivative: returns, ratios...]
-        REG -->|route| CUS[custom: user functions...]
-    end
-
-    subgraph "Data"
-        IND -->|read| OHLCV[(stock_ohlcv)]
-        DER -->|read| CF[(computed_features)]
-        IND & DER & CUS -->|write| CF
-    end
-
-    style D fill:#e1f5ff
-    style REG fill:#e1f5ff
-    style FD fill:#fff4e1
-```
+AI-generated feature functions run in a security sandbox (whitelisted imports: numpy, pandas, scipy, sklearn, talib). Functions that survive FDR testing are stored in the database and automatically used in future model training.
+
+## CLI Reference
+
+### Data
+
+| Command | Description |
+|---------|-------------|
+| `gefion data-update` | Update prices, compute features, refresh fundamentals |
+| `gefion prices-ingest` | Ingest daily adjusted prices from AlphaVantage |
+| `gefion universe-ingest` | Fetch listing status and ingest prices for filtered universe |
+| `gefion fundamentals-update` | Update company metadata (sector, industry) from OVERVIEW |
+| `gefion financials-backfill` | Backfill quarterly financials (income, balance sheet, cash flow, earnings) |
+| `gefion data cull` | Delete old data in dependency order |
+
+### Features
+
+| Command | Description |
+|---------|-------------|
+| `gefion feat-compute` | Compute features using the generic dispatcher |
+| `gefion feat-def-list` | List feature definitions |
+| `gefion feat-def-show` | Show a single feature definition |
+| `gefion feat-def-import` | Import feature definitions from JSON files |
+| `gefion feat-def-export` | Export feature definitions to JSON files |
+| `gefion feat-fx-list` | List registered feature functions |
+| `gefion feat-fx-import` | Import feature functions from JSON files |
+| `gefion feat-fx-export` | Export feature functions to JSON files |
+| `gefion feat-drop` | Drop feature definitions and their data |
+| `gefion feat-trim` | Trim computed features by date range |
+| `gefion cross-sectional-compute` | Compute cross-sectional rankings |
 
 ### ML Pipeline
 
-```mermaid
-graph TB
-    subgraph "1. Build Dataset"
-        DB[gefion ml dataset-build]
-        DB -->|join prices + features| FILES[CSV/Parquet files]
-        DB -->|register| DSR[(ml_datasets)]
-    end
-
-    subgraph "2. Train Model"
-        TR[gefion ml train]
-        FILES -->|load| TR
-        TR -->|quantile regression| QR[q10/q50/q90 predictions]
-        TR -->|trend classifier| TC[5-class: strong_down → strong_up]
-        TR -->|ensemble| EN[multi-algorithm blend]
-        TR -->|save artifact + register| MOD[(ml_models)]
-    end
-
-    subgraph "3. Predict"
-        PR[gefion ml predict]
-        MOD -->|load model| PR
-        PR -->|per symbol, per horizon| PRED[(predictions table)]
-    end
-
-    subgraph "4. Evaluate"
-        EV[gefion ml eval]
-        PRED & ACTUAL[actual returns] -->|compare| EV
-        EV -->|calibration, loss| PERF[(model_performance)]
-    end
-
-    style QR fill:#e8f5e9
-    style TC fill:#e8f5e9
-    style EN fill:#e8f5e9
-    style PRED fill:#e8f5e9
-```
-
-### UI + Interfaces
-
-```mermaid
-graph TB
-    subgraph "User Interfaces"
-        UI[Streamlit UI<br/>gefion ui]
-        CLI[CLI<br/>gefion ...]
-        MCP[MCP Server<br/>Natural Language]
-    end
-
-    subgraph "UI Pages"
-        DASH[Dashboard]
-        CHARTS[Charts - D3.js]
-        ML[ML Pipeline]
-        DATA[Data Management]
-        FEAT[Features]
-        BT[Backtesting]
-        OPS[System Operations]
-    end
-
-    subgraph "Ask Gefion"
-        CHAT[Contextual AI Chat]
-        CHAT -->|on every page| DASH & CHARTS & ML & DATA & FEAT & BT & OPS
-    end
-
-    subgraph "Observability"
-        OTEL[OpenTelemetry Spans]
-        TEMPO[Grafana Tempo]
-        PERF[/gefion-perf skill/]
-        OTEL -->|export| TEMPO
-        TEMPO -->|query| PERF
-    end
-
-    UI --> DASH & CHARTS & ML & DATA & FEAT & BT & OPS
-    CLI -->|wraps| MCP
-    MCP -->|routes to| CLI
-
-    style CHAT fill:#e1f5ff
-    style TEMPO fill:#fff4e1
-```
-
-### Key Concepts
-
-- **Database-First**: Features, functions, and configuration live in the database. Git exports are backups, not primary sources
-- **Metadata-Driven Features**: `feature_definitions` table describes *what* to compute; `feature_functions` stores *how*. The Dispatcher routes by `function_name`
-- **Unified Predictions**: Single `predictions` table with `prediction_type` discriminator and JSONB values — stores both quantile (q10/q50/q90) and trend class (5-class probabilities)
-- **Hypertables**: TimescaleDB partitions `stock_ohlcv`, `computed_features`, and `predictions` into 30-day chunks for efficient time-series queries
-- **Pure Functions**: Compute functions are sandboxed and side-effect-free; the Dispatcher handles all DB I/O
-- **Ask Gefion**: Contextual AI chat on every page with page-aware context injection, non-blocking execution, and inline chart rendering
-- **D3.js Charts**: 17 chart types across 4 categories, rendered as self-contained HTML via Jinja2 templates
-- **Trace-Driven Performance**: All significant operations instrumented with OpenTelemetry. `/gefion-perf` queries Tempo to find and fix bottlenecks automatically
-
-## Documentation Index
-
-**Getting Started:**
-
-- This README - Installation and overview
-- [docs/USER_GUIDE.md](docs/USER_GUIDE.md) - Full CLI reference
-- [docs/ML_QUICKSTART.md](docs/ML_QUICKSTART.md) - End-to-end ML workflow
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
-
-**Advanced:**
-
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design and DB-first architecture
-- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) - Optimization techniques
-- [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) - OpenTelemetry + Grafana Tempo for performance investigation
-- [docs/WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md](docs/WHITEPAPER_TECHNICAL_ANALYSIS_AND_ML.md) - White paper on technical analysis and ML
-- [mcp-server/README.md](mcp-server/README.md) - Natural language interface setup
-- [docs/archive/ml/](docs/archive/ml/) - ML vision and future roadmap
-- [.specify/memory/progress.md](.specify/memory/progress.md) - Current status and capabilities
-
-Tempo/Grafana docker files live in `docker/tempo/` (start with `docker compose -f docker/tempo/docker-compose.tempo.yml up -d`).
-
-### Observability & Performance
-
-Gefion uses OpenTelemetry + Grafana Tempo for tracing. During development, `gefion ui` **auto-detects Tempo** and enables tracing automatically.
-
-```bash
-# Start all services (postgres + tempo + grafana)
-# In Claude Code: /gefion-services start
-docker compose up -d postgres
-docker compose -f docker/tempo/docker-compose.tempo.yml up -d
-
-# Verify tracing works end-to-end
-bash scripts/otel_smoke_test.sh
-
-# Launch UI (auto-detects Tempo, enables OTEL)
-gefion ui
-# Shows: "Starting Gefion UI on http://localhost:8501 (tracing: enabled — Tempo detected)"
-
-# Check recent traces for slow operations
-gefion span-check --limit 10
-```
-
-**Performance Feedback Loop** (Claude Code skills):
-
-| Command | What it does |
+| Command | Description |
 |---------|-------------|
-| `/gefion-perf` | Query Tempo for slow traces, rank by duration, suggest fixes |
-| `/gefion-perf 1000` | Show traces slower than 1 second |
-| `/gefion-perf baseline` | Save current trace durations as a performance baseline |
-| `/gefion-perf compare` | Compare current traces against saved baseline, flag regressions |
-| `/gefion-perf fix` | Find slowest trace and suggest/implement a fix |
-| `/loop 5m /gefion-perf` | Continuous monitoring — check traces every 5 minutes |
+| `gefion ml dataset-build` | Build training dataset from prices + features |
+| `gefion ml train` | Train quantile regression model |
+| `gefion ml train-classifier` | Train 5-class trend classifier |
+| `gefion ml train-ensemble` | Train multi-algorithm ensemble |
+| `gefion ml predict` | Generate quantile predictions |
+| `gefion ml predict-classifier` | Generate trend class predictions |
+| `gefion ml predict-ensemble` | Generate ensemble predictions |
+| `gefion ml eval` | Evaluate model calibration and loss |
+| `gefion ml tune` | Hyperparameter tuning with Optuna |
+| `gefion ml e2e-test` | Run full pipeline end-to-end test |
+| `gefion ml feature-importance` | SHAP-based feature importance |
+| `gefion ml calibrate` | Conformal prediction calibration |
 
-**Span-specific thresholds** (what counts as "slow"):
+### Experiments
 
-| Operation | Threshold | Rationale |
-|-----------|-----------|-----------|
-| `ui.*` (page loads) | 500ms | Pages should feel instant |
-| `db.*` (database) | 500ms | Queries should be fast |
-| `charts.*` (rendering) | 2000ms | Chart rendering has overhead |
-| `cli.*` (commands) | 5000ms | CLI includes I/O |
+| Command | Description |
+|---------|-------------|
+| `gefion experiment discover` | Discover data sources and experiment opportunities |
+| `gefion experiment propose` | Propose a new experiment |
+| `gefion experiment approve` | Approve a proposed experiment |
+| `gefion experiment run` | Run an approved experiment |
+| `gefion experiment results` | View experiment results |
+| `gefion experiment cycle-start` | Start an autonomous experiment cycle |
+| `gefion experiment cycle-run` | Run a full autonomous cycle (discover → propose → run → evaluate) |
 
-**Automated enforcement** (happens without manual action):
+### Backtesting & Strategies
 
-- **Session start**: Hook checks if postgres + tempo are running, warns if not
-- **After pytest**: Hook queries Tempo for slow spans, alerts in context
-- **Pre-commit**: Blocks commits of significant files missing `from gefion.observability import`
+| Command | Description |
+|---------|-------------|
+| `gefion backtest run` | Run backtest for a trading strategy |
+| `gefion backtest compare` | Compare multiple strategies side-by-side |
+| `gefion strategy list` | List registered strategies |
+| `gefion strategy create-config` | Create a strategy configuration |
 
-More details: [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) and [docs/TEMPO_QUICKSTART.md](docs/TEMPO_QUICKSTART.md).
+### System
+
+| Command | Description |
+|---------|-------------|
+| `gefion init` | Initialize database schema and seed features |
+| `gefion health` | Check infrastructure health |
+| `gefion db-health` | Database health report |
+| `gefion db-migrate` | Run database migrations |
+| `gefion span-check` | Check recent traces for slow operations |
+| `gefion ui` | Launch Streamlit web UI |
+| `gefion backup` / `gefion restore` | Backup and restore database |
+
+Full CLI reference with flags and examples: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+
+## Architecture
+
+```mermaid
+graph LR
+    AV[AlphaVantage] -->|prices| OHLCV[(stock_ohlcv)]
+    AV -->|quarterly| QF[(quarterly_financials)]
+    OHLCV --> FC[feat-compute]
+    QF --> FC
+    FC --> CF[(computed_features)]
+    OHLCV & CF -->|join| DS[ml dataset-build]
+    DS --> TR[ml train]
+    TR --> MOD[(ml_models)]
+    MOD --> PR[ml predict]
+    PR --> PRED[(predictions)]
+    PRED --> EV[ml eval]
+    PRED --> BT[backtest run]
+```
+
+Key concepts:
+
+- **Database-first**: features, functions, and configuration live in the database. JSON files in `feature-functions/` and `feature-definitions/` are exports, not primary sources
+- **Metadata-driven features**: `feature_definitions` describes *what* to compute; `feature_functions` stores *how*. The dispatcher routes by `function_name`
+- **Hypertables**: TimescaleDB partitions time-series tables (`stock_ohlcv`, `computed_features`, `quarterly_financials`, `predictions`) for efficient queries
+- **Sandboxed functions**: compute functions run in a security sandbox (whitelisted imports only)
+
+Full architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+## Development
+
+Gefion enforces TDD and observability via automated hooks.
+
+```
+1. Start services       docker compose up -d  (or /gefion-services start)
+2. Write failing tests  tests/ before src/
+3. Implement            Minimum code to pass
+4. Instrument           from gefion.observability import create_span
+5. Check traces         /gefion-perf or gefion span-check
+6. Commit               Tests + implementation together
+```
+
+Full guide: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+
+## Documentation
+
+| Doc | Contents |
+|-----|----------|
+| [USER_GUIDE.md](docs/USER_GUIDE.md) | Full CLI reference with flags and examples |
+| [ML_QUICKSTART.md](docs/ML_QUICKSTART.md) | End-to-end ML workflow |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, ER diagram, dispatcher pattern |
+| [DEVELOPMENT.md](docs/DEVELOPMENT.md) | TDD workflow, observability, performance, hooks |
+| [OBSERVABILITY.md](docs/OBSERVABILITY.md) | OpenTelemetry + Tempo setup and usage |
+| [BACKTESTING.md](docs/BACKTESTING.md) | Strategy reference and backtesting guide |
+| [STRATEGIES.md](docs/STRATEGIES.md) | All 10 trading strategies documented |
+| [MCP_WORKFLOWS.md](docs/MCP_WORKFLOWS.md) | Natural language interface workflows |
+| [MCP_PRODUCTION.md](docs/MCP_PRODUCTION.md) | MCP server production deployment |
+| [E2E_TEST_GUIDE.md](docs/E2E_TEST_GUIDE.md) | Pipeline validation guide |
+| [DATABASE_MIGRATIONS.md](docs/DATABASE_MIGRATIONS.md) | Migration system reference |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 
 ## Running Tests
 
 ```bash
-# Quick tests (no database required)
-make test                               # Uses fixture data
+# Unit tests (no database required)
+make test
 
-# Full test suite (requires PostgreSQL running)
-make test-db                            # Includes database integration tests
+# Full suite including database tests
+make test-db
 
-# Manual pytest commands
-pytest -q                               # All tests (skips DB if not available)
-pytest -q tests -k "not db"             # Explicitly skip DB tests
-ENABLE_DB_TESTS=1 pytest -q             # Force DB tests
+# Manual
+ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" \
+  OTEL_ENABLED=false pytest tests/
 ```
 
-**Test Coverage:** 127 tests (ML, CLI, strategies, backtesting, integration)
-
-## Useful Commands
-
-```bash
-# Database
-make db-up                              # Start PostgreSQL
-make db-down                            # Stop PostgreSQL
-make db-health                          # Check database health
-
-# Development
-make venv                               # Create/upgrade virtualenv
-gefion --help                               # Show all CLI commands
-gefion ml --help                            # Show ML subcommands
-
-# Feature Management
-gefion feat-fx-export --dir feature-functions    # Export functions to git
-gefion feat-fx-import --dir feature-functions    # Import functions from git
-gefion feat-def-export --dir feature-definitions # Export definitions to git
-gefion feat-def-import --dir feature-definitions # Import definitions from git
-```
-
-## Project Status
-
-**Current State:**
-
-- ✅ Data pipeline complete (ingestion, features, storage)
-- ✅ ML pipeline complete (quantile regression, trend classification, ensembles)
-- ✅ E2E test command for quick pipeline validation
-- ✅ Advanced backtesting (6 strategies, execution modeling)
-- ✅ MCP server implemented (natural language interface)
-- ✅ Production-ready database schema (unified predictions table)
-- ✅ D3.js interactive charts (17 chart types across 4 categories)
-- ✅ Ask Gefion — contextual AI chat on every UI page
-- ✅ Comprehensive observability (48 instrumented modules, automated perf detection)
-- ✅ Cascading data cull (`gefion data cull --before DATE`)
-- ✅ Comprehensive documentation
-
-**See:**
-- [.specify/memory/progress.md](.specify/memory/progress.md) for detailed status and capabilities
-- [.specify/memory/backlog.md](.specify/memory/backlog.md) for prioritized implementation backlog
-
-## Contributing
-
-This project follows the [Gefion Constitution](.specify/memory/constitution.md). Key requirements:
-
-### Development Workflow
-
-```
-1. Start services          /gefion-services start (postgres + tempo + grafana)
-2. Write failing tests     tests/ before src/ (TDD — enforced by hooks)
-3. Implement               Minimum code to pass tests
-4. Instrument              from gefion.observability import create_span (enforced by pre-commit)
-5. Verify traces           /gefion-perf — check for slow spans
-6. Save baseline           /gefion-perf baseline (after perf fixes)
-7. Commit                  Tests + implementation together
-```
-
-### Enforcement Layers
-
-| Hook | When | What |
-|------|------|------|
-| SessionStart | Claude Code opens | Checks postgres + tempo running |
-| PreToolUse | Before code edit | TDD: tests before src changes |
-| PreCommit | Before git commit | Observability imports required |
-| PostToolUse | After pytest | Queries Tempo for slow spans |
-
-### Key Practices
-
-- **Database-first**: DB is source of truth, git exports are backups
-- **TDD (non-negotiable)**: Tests before implementation, enforced by hooks
-- **Observability (non-negotiable)**: All significant operations traced, enforced by pre-commit
-- **CLI-first**: Every feature has a CLI command before UI, major commands have MCP tools
-- **Trace-driven performance**: Use `/gefion-perf` to find and fix slow operations
+Test suite: 1,971 tests (as of v0.2.0)
 
 ## License
 

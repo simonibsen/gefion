@@ -437,7 +437,7 @@ LIMIT 10;
 
 **Solution:**
 ```bash
-gefion feat-compute --exchange NASDAQ --local --refresh-existing
+gefion feat-compute --exchange NASDAQ --update-existing
 ```
 
 ### "Dataset not found"
@@ -446,8 +446,8 @@ gefion feat-compute --exchange NASDAQ --local --refresh-existing
 
 **Solution:**
 ```bash
-# List datasets
-gefion ml dataset-list
+# Inspect dataset details
+gefion ml dataset-inspect --name ... --version ...
 
 # Rebuild if needed
 gefion ml dataset-build --name ... --export

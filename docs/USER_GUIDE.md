@@ -171,13 +171,13 @@ gefion prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_
 Run indicator features (local compute by default):
 ```bash
 # Resume from last date (only compute new dates)
-gefion run-features --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local
+gefion feat-compute --features indicator_rsi_14,indicator_macd --exchange NASDAQ
 
 # Recompute all dates (useful after fixing a feature function bug)
-gefion run-features --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing
+gefion feat-compute --features indicator_rsi_14,indicator_macd --exchange NASDAQ --refresh-existing
 ```
-- Writes tall rows into `computed_features` (no wide table). Add `--api` to fetch from Alpha Vantage instead of local compute.
-- `--max-workers` / `--writer-workers`: control fetch/write concurrency (local mode safe to increase).
+- Writes tall rows into `computed_features` (no wide table).
+- `--max-workers` / `--writer-workers`: control fetch/write concurrency.
 - Progress shows mode, queue depth, fetched count.
 
 ### Listings / Offline
@@ -203,7 +203,7 @@ Use `--listings-file <csv|json>` to bypass the API for universe selection and wo
 3. **Custom watchlist/portfolio**: Work with your own curated list of stocks
    ```bash
    # personal_portfolio.csv: AAPL,TSLA,NVDA,AMD...
-   gefion run-features --listings-file personal_portfolio.csv --local
+   gefion feat-compute --listings-file personal_portfolio.csv
    ```
 
 4. **Offline development**: Develop and test without internet or API access
@@ -213,10 +213,10 @@ Use `--listings-file <csv|json>` to bypass the API for universe selection and wo
    ```
 
 ### Feature definitions
-- Seed indicator feature metadata: `gefion seed-features` (creates `stocks`, `feature_definitions`, `computed_features`, and seeds indicator definitions).
+- Seed indicator feature metadata: `gefion feat-fx-import --dir feature-functions` (creates `stocks`, `feature_definitions`, `computed_features`, and seeds indicator definitions).
 - Register a single feature definition from JSON:
 ```bash
-gefion register-feature --definition '{
+gefion feat-def-import --definition '{
   "name": "my_feature",
   "function_name": "my_fx",
   "params": {"window": 30},
@@ -237,10 +237,10 @@ Required keys: `name`, `function_name`, `store_table`, `store_column`. Optional:
 - Trim feature data (left/right):
 ```bash
 # Trim features only (doesn't touch prices by default)
-gefion trim-features --feature indicator_rsi_14,indicator_macd --before 2024-01-01
+gefion feat-trim --feature indicator_rsi_14,indicator_macd --before 2024-01-01
 
 # Trim features AND underlying prices
-gefion trim-features --feature indicator_rsi_14 --before 2024-01-01 --trim-prices
+gefion feat-trim --feature indicator_rsi_14 --before 2024-01-01 --trim-prices
 ```
 Deletes rows in `computed_features` for the named features before/after the given dates. Use `--trim-prices` to also trim `stock_ohlcv` in the same window.
 
@@ -249,35 +249,35 @@ Deletes rows in `computed_features` for the named features before/after the give
 Trim prices (also trims features by default):
 ```bash
 # Trim prices AND all derived features
-gefion trim-prices --before 2023-01-01 --symbols IBM,MSFT
+gefion prices-trim --before 2023-01-01 --symbols IBM,MSFT
 
 # Trim prices only (keep computed features)
-gefion trim-prices --before 2023-01-01 --symbols IBM,MSFT --no-trim-features
+gefion prices-trim --before 2023-01-01 --symbols IBM,MSFT --no-trim-features
 ```
 Removes price rows before/after the given dates. By default also trims all `computed_features` derived from those prices; use `--no-trim-features` to keep features.
 
 Drop features and data (destructive):
 ```bash
-gefion features-drop --feature indicator_rsi_14 --drop-storage
+gefion feat-drop --feature indicator_rsi_14 --drop-storage
 ```
 Deletes rows from `computed_features` for the named features; with `--drop-storage` also drops non-`computed_features` store tables.
 Data-only delete (keep definitions/schema):
 ```bash
-gefion features-drop --feature indicator_rsi_14 --data-only
+gefion feat-drop --feature indicator_rsi_14 --data-only
 ```
 
 ### Update everything (prices + computed_features)
 ```bash
-gefion data-update --exchange NASDAQ --timeframe auto --refresh-existing --local
+gefion data-update --exchange NASDAQ --timeframe auto --refresh-existing
 ```
 - Fetches listings once, ingests prices, then ingests indicators into `computed_features`.
-- Honors `--local/--api` for indicators and `--refresh-existing` to upsert.
+- Honors `--refresh-existing` to upsert.
 - Processes symbols in small chunks to reduce DB pressure; keep writer workers low (default 1).
 
 ### Features management
-- List: `gefion features-list --json`
-- Show one: `gefion features-show --feature indicator_rsi_14 --json`
-- Run features (indicators): `gefion features-run --features indicator_rsi_14,indicator_macd --exchange NASDAQ --local --refresh-existing`
+- List: `gefion feat-def-list --json`
+- Show one: `gefion feat-def-show --feature indicator_rsi_14 --json`
+- Run features (indicators): `gefion feat-compute --features indicator_rsi_14,indicator_macd --exchange NASDAQ --refresh-existing`
 
 ### Fundamentals (sector, industry, company name)
 Update company fundamentals from AlphaVantage OVERVIEW endpoint:
@@ -418,7 +418,7 @@ See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-fram
 - Batch inserts are used to reduce lock contention; if you see `max_locks_per_transaction`, lower `--writer-workers` or process smaller batches.
 - Performance knobs:
   - Timescale tuning: `gefion db-tune --chunk-days 30 --compress-after-days 60` sets chunk interval and compression policies.
-  - Concurrency: keep writer workers low (1–2). Heavy commands process symbols in chunks (~50) to avoid overwhelming the DB. `features-run` always starts with 1 fetch/1 writer, then ramps fetchers up batch-by-batch on success, and backs off on errors (even when `--max-workers` is set; it’s a ceiling).
+  - Concurrency: keep writer workers low (1–2). Heavy commands process symbols in chunks (~50) to avoid overwhelming the DB. `feat-compute` always starts with 1 fetch/1 writer, then ramps fetchers up batch-by-batch on success, and backs off on errors (even when `--max-workers` is set; it’s a ceiling).
   - Use `--max-workers` and `--limit` to reduce load while testing. Larger batch sizes are better than many writers.
   - If performance drops after large ingests, run `VACUUM ANALYZE stock_ohlcv computed_features`.
 - Indicators: if local prices are missing for a symbol, feature runs will attempt to fetch daily adjusted prices from Alpha Vantage, store them, and then compute locally.

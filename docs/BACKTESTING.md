@@ -671,8 +671,8 @@ These rules are **brittle** - they don't adapt to changing market conditions and
 ┌──────────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
 │   ML Pipeline        │     │   Predictions DB     │     │   MLSignalStrategy   │
 ├──────────────────────┤     ├──────────────────────┤     ├──────────────────────┤
-│ • Train models       │────▶│ quantile_predictions │────▶│ • Query predictions  │
-│ • Generate forecasts │     │ trend_class_pred...  │     │ • Apply thresholds   │
+│ • Train models       │────▶│ predictions          │────▶│ • Query predictions  │
+│ • Generate forecasts │     │ (unified table)      │     │ • Apply thresholds   │
 │                      │     │                      │     │ • Generate signals   │
 └──────────────────────┘     └──────────────────────┘     └──────────────────────┘
                                                                     │
@@ -891,9 +891,10 @@ When evaluating ML strategy performance, consider:
 # Check prediction coverage
 psql $DATABASE_URL -c "
   SELECT prediction_date, COUNT(*) as symbols
-  FROM quantile_predictions qp
-  JOIN ml_models m ON qp.model_id = m.id
+  FROM predictions p
+  JOIN ml_models m ON p.model_id = m.id
   WHERE m.name = 'quantile_v1'
+    AND p.prediction_type = 'quantile'
     AND prediction_date BETWEEN '2024-01-01' AND '2024-12-31'
   GROUP BY prediction_date
   ORDER BY prediction_date;
@@ -1012,9 +1013,10 @@ print(f"  Total Trades: {len(results['trades'])}")
 # Check if predictions exist
 psql $DATABASE_URL -c "
   SELECT COUNT(*), MIN(prediction_date), MAX(prediction_date)
-  FROM quantile_predictions qp
-  JOIN ml_models m ON qp.model_id = m.id
-  WHERE m.name = 'your_model_name';
+  FROM predictions p
+  JOIN ml_models m ON p.model_id = m.id
+  WHERE m.name = 'your_model_name'
+    AND p.prediction_type = 'quantile';
 "
 ```
 

@@ -57,9 +57,9 @@ gefion db-health
 
 ### Creating a New Migration
 
-1. Create a new SQL file in `sql/migrations/` with the naming pattern `NNN_description.sql`:
+1. Create a new SQL file in `sql/migrations/` with the naming pattern `YYYYMMDD_NNNNNN_description.sql`:
    ```
-   005_add_user_preferences.sql
+   20251215_000001_add_user_preferences.sql
    ```
 
 2. Write your SQL statements:
@@ -116,10 +116,11 @@ The migration system consists of three main components:
 ### Naming Convention
 
 ```
-NNN_description.sql
+YYYYMMDD_NNNNNN_description.sql
 ```
 
-- `NNN`: Zero-padded number (001, 002, 003, ...)
+- `YYYYMMDD`: Date the migration was created (e.g., `20251215`)
+- `NNNNNN`: Zero-padded sequence number (e.g., `000001`)
 - `description`: Snake_case description
 - Extension: `.sql`
 
@@ -159,8 +160,8 @@ CREATE INDEX IF NOT EXISTS idx_stocks_exchange
    ```
 
 4. **One Change Per Migration** - Keep migrations focused
-   - ✅ Good: `005_add_user_email_index.sql`
-   - ❌ Bad: `005_add_indexes_and_fix_constraints_and_update_data.sql`
+   - ✅ Good: `20251215_000001_add_user_email_index.sql`
+   - ❌ Bad: `20251215_000001_add_indexes_and_fix_constraints_and_update_data.sql`
 
 5. **Avoid psql Meta-Commands** - Use standard SQL only
    - ✅ Good: SQL statements only
