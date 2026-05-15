@@ -79,6 +79,18 @@ g2 trade flatten --confirm
 
 ## Technical Debt (High Priority)
 
+### ~~Migrate Postgres to Named Volume + Clean Up g2-Era Container~~ ✅ DONE
+**Completed**: 2026-05-15
+
+Migrated `gefion-postgres` from anonymous volume `6b6f435528fb…` (g2 era) to
+named volume `gefion_postgres-data` declared in `docker-compose.yml`. 14.3 GB
+of data copied via helper container. Row counts identical pre/post. Container's
+`127.0.0.1` port binding now active — LAN access blocked. Initdb path
+corrected from `/Users/simonibsen/src/g2/...` to `/Users/simonibsen/src/gefion/...`.
+
+Old anonymous volume retained as a safety net — can be reclaimed (~14 GB) once
+confirmed unused for a few days: `docker volume rm 6b6f435528fb79fa8c02ef4cbbc35d53b3566b7ef0e5bb11d93d511846ff480d`
+
 ### ~~Unified Predictions Table~~ ✅
 **Completed**: 2026-03-27 (branch: `predictions`)
 Merged `quantile_predictions` and `trend_class_predictions` into single `predictions` table with JSONB values. Migration, helper module, CLI/UI/MCP all updated.
