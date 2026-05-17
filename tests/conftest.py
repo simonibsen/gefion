@@ -3,8 +3,12 @@ Shared test fixtures and helpers.
 """
 import json
 import os
+import socket
 import subprocess
 import sys
+import time
+import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Optional, List
 from urllib.parse import urlparse
@@ -161,3 +165,49 @@ def load_feature_functions(conn, function_names: Optional[List[str]] = None) -> 
         raise FileNotFoundError(f"Feature functions directory not found: {feature_functions_dir}")
 
     return import_functions_from_directory(conn, feature_functions_dir, function_names)
+
+
+def _find_free_port() -> int:
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture(scope="session")
+def streamlit_server():
+    """Boot the Gefion Streamlit UI on a free port for the session; tear down after."""
+    port = _find_free_port()
+    gefion_bin = Path(sys.executable).parent / "gefion"
+    env = {**os.environ, "OTEL_ENABLED": "false"}
+
+    proc = subprocess.Popen(
+        [str(gefion_bin), "ui", "--port", str(port), "--no-browser"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    url = f"http://localhost:{port}"
+    health_url = f"{url}/_stcore/health"
+
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(f"Streamlit process exited early with code {proc.returncode}")
+        try:
+            with urllib.request.urlopen(health_url, timeout=1) as r:
+                if r.status == 200 and r.read().strip() == b"ok":
+                    break
+        except Exception:
+            time.sleep(0.5)
+    else:
+        proc.terminate()
+        raise RuntimeError(f"Streamlit did not become ready at {url} within 60s")
+
+    try:
+        yield url
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
