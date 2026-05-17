@@ -41,7 +41,7 @@ charts = [
     "plotly>=5.18",
 ]
 ui = [
-    "streamlit>=1.29",
+    "streamlit>=1.57",
     "plotly>=5.18",
     "anthropic>=0.18",
 ]
