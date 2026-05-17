@@ -29,6 +29,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "playwright>=1.40",
+    "pytest-playwright>=0.4",
 ]
 ml_extended = [
     "xgboost>=2.0",
@@ -58,4 +60,7 @@ gf = "gefion.cli:entrypoint"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not ui'"
+markers = [
+    "ui: smoke tests that drive the Streamlit UI via Playwright (opt-in: pytest -m ui)",
+]
