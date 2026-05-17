@@ -3,6 +3,15 @@ Smoke tests for the Streamlit UI driven by Playwright.
 
 Marked with @pytest.mark.ui so the default test run stays headless-only.
 Run with: pytest -m ui
+
+Scope: smoke-tier only. These tests verify each page renders without
+exceptions or JS errors — they do not exercise widget interactions,
+form submission, or backend data correctness. Streamlit's WebSocket-
+driven reruns make interaction-level tests inherently fragile, and
+broad proactive coverage tends to produce flapping CI noise rather
+than catch real bugs. Add a deeper test only when a specific user
+flow has broken in a way this layer missed — then point the new test
+exactly at that regression. Don't add interaction tests speculatively.
 """
 import pytest
 
