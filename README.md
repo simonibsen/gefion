@@ -79,10 +79,16 @@ gefion prices-ingest --symbol IBM --input tests/fixtures/demo_time_series_daily_
 gefion feat-compute --features indicator_rsi_14 --symbols IBM
 ```
 
-### 5. Next Steps
+### 5. See It in the UI
 
-- **Live data**: `gefion data-update --exchange NASDAQ --limit 50`
-- **ML pipeline**: [docs/ML_QUICKSTART.md](docs/ML_QUICKSTART.md)
+```bash
+gefion ui    # http://localhost:8501 — sidebar walks every feature
+```
+
+You've now got: prices ingested, one feature computed, and the UI open. From here, the natural next step is the **end-to-end tour** (live data → trained model → backtest → chart):
+
+- **15-min end-to-end walkthrough**: [docs/GOLDEN_PATH.md](docs/GOLDEN_PATH.md)
+- **ML-only deep dive**: [docs/ML_QUICKSTART.md](docs/ML_QUICKSTART.md)
 - **Full CLI reference**: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 
 ## Autonomous Experiments
@@ -240,6 +246,7 @@ Full guide: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
 | Doc | Contents |
 |-----|----------|
+| [GOLDEN_PATH.md](docs/GOLDEN_PATH.md) | 20-min end-to-end tour: ingest → train → backtest → view |
 | [USER_GUIDE.md](docs/USER_GUIDE.md) | Full CLI reference with flags and examples |
 | [ML_QUICKSTART.md](docs/ML_QUICKSTART.md) | End-to-end ML workflow |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, ER diagram, dispatcher pattern |
