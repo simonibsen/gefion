@@ -247,6 +247,7 @@ Full guide: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 | Doc | Contents |
 |-----|----------|
 | [GOLDEN_PATH.md](docs/GOLDEN_PATH.md) | 20-min end-to-end tour: ingest → train → backtest → view |
+| [DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) | All tables and columns, plus AlphaVantage → DB column mappings (generated) |
 | [USER_GUIDE.md](docs/USER_GUIDE.md) | Full CLI reference with flags and examples |
 | [ML_QUICKSTART.md](docs/ML_QUICKSTART.md) | End-to-end ML workflow |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, ER diagram, dispatcher pattern |

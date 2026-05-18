@@ -290,3 +290,128 @@ def parse_earnings(payload: Mapping[str, object]) -> List[Dict[str, object]]:
         payload, "quarterlyEarnings", "earnings", _EARNINGS_CORE_FIELDS,
         include_reported_at=True,
     )
+
+
+# ============================================================================
+# Documentation source of truth — consumed by scripts/gen_data_dictionary.py.
+# Every new AlphaVantage endpoint that lands data in our DB MUST add an entry
+# here so the data dictionary stays accurate.
+# ============================================================================
+
+# field_map entry: av_field → (table, db_column, human_description)
+ENDPOINT_DOCS: Dict[str, Dict[str, object]] = {
+    "TIME_SERIES_DAILY_ADJUSTED": {
+        "cadence": "daily",
+        "tables": ["stock_ohlcv"],
+        "cli": "gefion data-update / gefion prices-ingest",
+        "field_map": {
+            "1. open": ("stock_ohlcv", "open", "Opening price"),
+            "2. high": ("stock_ohlcv", "high", "Daily high"),
+            "3. low": ("stock_ohlcv", "low", "Daily low"),
+            "4. close": ("stock_ohlcv", "close", "Closing price"),
+            "5. adjusted close": ("stock_ohlcv", "adjusted_close", "Split/dividend-adjusted close"),
+            "6. volume": ("stock_ohlcv", "volume", "Share volume"),
+            "7. dividend amount": ("stock_ohlcv", "dividend_amount", "Cash dividend per share on date"),
+            "8. split coefficient": ("stock_ohlcv", "split_coefficient", "Split ratio (1.0 = no split)"),
+        },
+    },
+    "LISTING_STATUS": {
+        "cadence": "weekly",
+        "tables": ["stocks"],
+        "cli": "(implicit, universe management)",
+        "field_map": {
+            "symbol": ("stocks", "symbol", "Stock ticker"),
+            "name": ("stocks", "name", "Company name"),
+            "exchange": ("stocks", "exchange", "Listing exchange (NASDAQ, NYSE, ...)"),
+            "assetType": ("stocks", "asset_type", "Stock / ETF / etc."),
+            "ipoDate": ("stocks", "ipo_date", "IPO date"),
+            "delistingDate": ("stocks", "delisting_date", "Delisting date if applicable"),
+            "status": ("stocks", "status", "active / delisted"),
+        },
+    },
+    "OVERVIEW": {
+        "cadence": "on-demand (gefion fundamentals-update)",
+        "tables": ["stocks_fundamentals"],
+        "cli": "gefion fundamentals-update",
+        "field_map": {
+            "Symbol": ("stocks_fundamentals", "symbol", "Stock ticker"),
+            "Name": ("stocks_fundamentals", "name", "Company name"),
+            "Sector": ("stocks_fundamentals", "sector", "GICS sector"),
+            "Industry": ("stocks_fundamentals", "industry", "GICS industry"),
+            "Exchange": ("stocks_fundamentals", "exchange", "Listing exchange"),
+            "AssetType": ("stocks_fundamentals", "asset_type", "Stock / ETF / etc."),
+            "MarketCapitalization": ("stocks_fundamentals", "market_cap", "Market capitalization in USD"),
+            "PERatio": ("stocks_fundamentals", "pe_ratio", "Trailing P/E ratio"),
+            "ForwardPE": ("stocks_fundamentals", "forward_pe", "Forward P/E ratio"),
+            "PEGRatio": ("stocks_fundamentals", "peg_ratio", "Price/Earnings-to-Growth"),
+            "BookValue": ("stocks_fundamentals", "book_value", "Book value per share"),
+            "DividendYield": ("stocks_fundamentals", "dividend_yield", "Annualized dividend yield"),
+            "EPS": ("stocks_fundamentals", "eps", "Earnings per share (TTM)"),
+            "RevenuePerShareTTM": ("stocks_fundamentals", "revenue_per_share", "Revenue per share TTM"),
+            "ProfitMargin": ("stocks_fundamentals", "profit_margin", "Net profit margin"),
+            "OperatingMarginTTM": ("stocks_fundamentals", "operating_margin", "Operating margin TTM"),
+            "ReturnOnEquityTTM": ("stocks_fundamentals", "return_on_equity", "Return on equity TTM"),
+            "Beta": ("stocks_fundamentals", "beta", "Beta vs market"),
+            "EVToEBITDA": ("stocks_fundamentals", "ev_to_ebitda", "Enterprise value / EBITDA"),
+            "SharesOutstanding": ("stocks_fundamentals", "shares_outstanding", "Shares outstanding"),
+        },
+    },
+    "INCOME_STATEMENT": {
+        "cadence": "quarterly (gefion financials-backfill)",
+        "tables": ["quarterly_financials"],
+        "cli": "gefion financials-backfill",
+        "notes": "statement_type = 'income'. Non-core fields preserved in `raw` JSONB column.",
+        "field_map": {
+            "totalRevenue": ("quarterly_financials", "revenue", "Total revenue for the quarter"),
+            "netIncome": ("quarterly_financials", "net_income", "Net income"),
+            "grossProfit": ("quarterly_financials", "gross_profit", "Gross profit"),
+            "ebitda": ("quarterly_financials", "ebitda", "EBITDA"),
+            "operatingIncome": ("quarterly_financials", "operating_income", "Operating income"),
+            "eps": ("quarterly_financials", "eps", "Earnings per share (basic)"),
+        },
+    },
+    "BALANCE_SHEET": {
+        "cadence": "quarterly (gefion financials-backfill)",
+        "tables": ["quarterly_financials"],
+        "cli": "gefion financials-backfill",
+        "notes": "statement_type = 'balance_sheet'. Non-core fields preserved in `raw` JSONB column.",
+        "field_map": {
+            "totalAssets": ("quarterly_financials", "total_assets", "Total assets"),
+            "totalLiabilities": ("quarterly_financials", "total_liabilities", "Total liabilities"),
+            "totalShareholderEquity": ("quarterly_financials", "shareholder_equity", "Shareholder equity"),
+            "totalCurrentAssets": ("quarterly_financials", "current_assets", "Current assets"),
+            "totalCurrentLiabilities": ("quarterly_financials", "current_liabilities", "Current liabilities"),
+            "longTermDebt": ("quarterly_financials", "long_term_debt", "Long-term debt"),
+            "commonStockSharesOutstanding": ("quarterly_financials", "shares_outstanding", "Shares outstanding at quarter end"),
+        },
+    },
+    "CASH_FLOW": {
+        "cadence": "quarterly (gefion financials-backfill)",
+        "tables": ["quarterly_financials"],
+        "cli": "gefion financials-backfill",
+        "notes": "statement_type = 'cash_flow'. Non-core fields preserved in `raw` JSONB column.",
+        "field_map": {
+            "operatingCashflow": ("quarterly_financials", "operating_cashflow", "Operating cash flow"),
+            "capitalExpenditures": ("quarterly_financials", "capital_expenditures", "Capital expenditures (CapEx)"),
+        },
+    },
+    "EARNINGS": {
+        "cadence": "quarterly (gefion financials-backfill)",
+        "tables": ["quarterly_financials"],
+        "cli": "gefion financials-backfill",
+        "notes": "statement_type = 'earnings'. Non-core fields preserved in `raw` JSONB column.",
+        "field_map": {
+            "reportedEPS": ("quarterly_financials", "reported_eps", "Actual reported EPS"),
+            "estimatedEPS": ("quarterly_financials", "estimated_eps", "Analyst consensus EPS estimate"),
+            "surprise": ("quarterly_financials", "surprise", "Reported − estimated"),
+            "surprisePercentage": ("quarterly_financials", "surprise_percentage", "Surprise as % of estimate"),
+        },
+    },
+    "CPI": {
+        "cadence": "monthly",
+        "tables": [],
+        "cli": "(not yet wired up)",
+        "notes": "Parser exists in `catalog.parse_cpi_monthly` but no destination table — scaffolded, not in production.",
+        "field_map": {},
+    },
+}
