@@ -301,3 +301,68 @@ class TestPrinciplesSuggestTool:
         idx = src.index("async def _principles_suggest(")
         handler_block = src[idx:idx + 500]
         assert '"--json"' in handler_block
+
+
+class TestExperimentProbationCheckTool:
+    """experiment_probation_check tool (FR-042: every operation via MCP)."""
+
+    def test_tool_definition_exists(self):
+        src = _read_server_source()
+        assert 'name="experiment_probation_check"' in src
+
+    def test_handler_dispatch(self):
+        src = _read_server_source()
+        assert 'name == "experiment_probation_check"' in src
+
+    def test_handler_uses_cli(self):
+        src = _read_server_source()
+        assert '"experiment", "probation-check"' in src
+
+
+class TestExperimentDemoteTool:
+    """experiment_demote tool — manual demotion must be reachable."""
+
+    def test_tool_definition_exists(self):
+        src = _read_server_source()
+        assert 'name="experiment_demote"' in src
+
+    def test_handler_dispatch(self):
+        src = _read_server_source()
+        assert 'name == "experiment_demote"' in src
+
+    def test_handler_uses_cli(self):
+        src = _read_server_source()
+        assert '"experiment", "demote"' in src
+
+    def test_requires_reason(self):
+        """Demotion without a recorded reason is not allowed."""
+        src = _read_server_source()
+        idx = src.index('name="experiment_demote"')
+        block = src[idx:idx + 900]
+        assert '"required": ["experiment_id", "reason"]' in block
+
+
+class TestExperimentChartTools:
+    """Experiment charts must be renderable via MCP (FR-040, Ask Gefion)."""
+
+    def test_trials_chart_tool_exists(self):
+        src = _read_server_source()
+        assert 'name="chart_experiment_trials"' in src
+        assert '"chart", "experiment-trials"' in src
+
+    def test_fdr_chart_tool_exists(self):
+        src = _read_server_source()
+        assert 'name="chart_experiment_fdr"' in src
+        assert '"chart", "experiment-fdr"' in src
+
+
+class TestExperimentCycleListTool:
+    """experiment_cycle_list — agents need to enumerate cycles."""
+
+    def test_tool_definition_exists(self):
+        src = _read_server_source()
+        assert 'name="experiment_cycle_list"' in src
+
+    def test_handler_uses_cli(self):
+        src = _read_server_source()
+        assert '"experiment", "cycle-list"' in src

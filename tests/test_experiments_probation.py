@@ -327,3 +327,50 @@ class TestProbationWiring:
         source = pathlib.Path("src/gefion/ui/views/experiments.py").read_text()
         assert "On probation" in source
         assert "Demoted" in source
+
+
+class TestDemoteCLI:
+    """`gefion experiment demote` — manual demotion with a recorded reason."""
+
+    def test_command_exists(self):
+        from typer.testing import CliRunner
+        from gefion.cli import app
+
+        result = CliRunner().invoke(app, ["experiment", "demote", "--help"])
+        assert result.exit_code == 0
+
+    def test_requires_reason(self):
+        from typer.testing import CliRunner
+        from gefion.cli import app
+
+        result = CliRunner().invoke(app, ["experiment", "demote", "--id", "1"])
+        assert result.exit_code != 0
+
+    def test_invokes_demote(self):
+        from unittest.mock import patch
+        from typer.testing import CliRunner
+        from gefion.cli import app
+
+        with patch("gefion.experiments.probation.demote_experiment",
+                   return_value=True) as demote:
+            result = CliRunner().invoke(
+                app, ["experiment", "demote", "--id", "41",
+                      "--reason", "manual review", "--json"])
+
+        assert demote.called
+        assert demote.call_args.args[:2] == (41, "manual review")
+        assert result.exit_code == 0
+
+    def test_already_demoted_reports_cleanly(self):
+        from unittest.mock import patch
+        from typer.testing import CliRunner
+        from gefion.cli import app
+
+        with patch("gefion.experiments.probation.demote_experiment",
+                   return_value=False):
+            result = CliRunner().invoke(
+                app, ["experiment", "demote", "--id", "41",
+                      "--reason", "manual review"])
+
+        assert result.exit_code == 0
+        assert "already" in result.stdout.lower()
