@@ -135,6 +135,13 @@ def _run_cli(cmd: List[str], timeout: int = 600) -> Dict[str, Any]:
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError:
+        # Streaming commands emit JSON progress lines before the final
+        # document — the last parseable line is the result
+        for line in reversed(result.stdout.strip().splitlines()):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
         # Some commands succeed without JSON output; treat as ok
         return {"status": "ok", "output": result.stdout[-500:]}
 
@@ -171,6 +178,58 @@ def _dataset_name_version(manifest: Dict[str, Any], dataset_uri: str) -> tuple:
     if not version:
         raise ApplyError(f"Cannot derive dataset version from {dataset_uri}")
     return name, version
+
+
+def dataset_build_cmd(manifest: Dict[str, Any], dataset_name: str,
+                      dataset_version: str) -> List[str]:
+    """Build the `ml dataset-build` command reproducing a manifest's shape.
+
+    Horizons and per-horizon label thresholds must come from the manifest —
+    the CLI's defaults assume its own default horizon set, and mismatched
+    list lengths are rejected.
+    """
+    horizons = manifest.get("horizons_days") or [7]
+    cmd = ["ml", "dataset-build",
+           "--name", dataset_name,
+           "--version", dataset_version,
+           "--horizons", ",".join(str(h) for h in horizons),
+           "--format", manifest.get("format", "parquet")]
+
+    thresholds = (manifest.get("label_spec") or {}).get("thresholds") or {}
+    if all(str(h) in thresholds for h in horizons):
+        weak = [str(thresholds[str(h)]["weak"]) for h in horizons]
+        strong = [str(thresholds[str(h)]["strong"]) for h in horizons]
+        cmd.extend(["--weak-thresholds", ",".join(weak),
+                    "--strong-thresholds", ",".join(strong)])
+
+    exchange = (manifest.get("universe") or {}).get("exchange")
+    if exchange:
+        cmd.extend(["--exchange", str(exchange)])
+    # --export: without it only a manifest is written, and training needs the
+    # features/labels parquet files. --force: rebuilt versions are derived,
+    # reproducible artifacts, so retries must be idempotent.
+    cmd.extend(["--export", "--force", "--json"])
+    return cmd
+
+
+def backtest_window(max_data_date: Optional[date], backtest_days: int,
+                    today: Optional[date] = None) -> tuple:
+    """Predict/backtest window anchored to available data, not the clock.
+
+    Price data can lag the calendar (paused ingestion, weekends); a window
+    ending today would then contain no predictions or prices at all.
+    """
+    today = today or date.today()
+    end = min(max_data_date, today) if max_data_date else today
+    return end - timedelta(days=backtest_days), end
+
+
+def _max_price_date(conn) -> Optional[date]:
+    """Most recent date with price data."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT MAX(date) FROM stock_ohlcv")
+        row = cur.fetchone()
+    return row[0] if row else None
 
 
 def _universe_flags(manifest: Dict[str, Any]) -> List[str]:
@@ -255,15 +314,7 @@ def apply_experiment(
             _emit("dataset",
                   f"Rebuilding dataset {dataset_name}:{dataset_version} with promoted feature...")
             with create_span("experiments.apply.dataset"):
-                cmd = ["ml", "dataset-build",
-                       "--name", dataset_name,
-                       "--version", dataset_version,
-                       "--horizons", str(horizon),
-                       "--format", manifest.get("format", "parquet")]
-                exchange = (manifest.get("universe") or {}).get("exchange")
-                if exchange:
-                    cmd.extend(["--exchange", str(exchange)])
-                cmd.append("--json")
+                cmd = dataset_build_cmd(manifest, dataset_name, dataset_version)
                 _run_cli(cmd, timeout=_STAGE_TIMEOUTS["dataset"])
         else:
             _emit("dataset",
@@ -292,8 +343,9 @@ def apply_experiment(
             train_result = _run_cli(cmd, timeout=_STAGE_TIMEOUTS["train"])
 
         # --- predict --------------------------------------------------------
-        end = date.today()
-        start = end - timedelta(days=backtest_days)
+        with _db_conn(db_url) as conn:
+            max_data_date = _max_price_date(conn)
+        start, end = backtest_window(max_data_date, backtest_days)
         _emit("predict",
               f"Generating predictions {start} → {end} for the backtest window...")
         with create_span("experiments.apply.predict", model_name=model_name):

@@ -410,3 +410,15 @@ class TestReusedFeatureConfig:
         config = runner._reused_feature_config("exp_missing_from_registry")
 
         assert config == {"function_name": "missing_from_registry"}
+
+
+class TestRebuildDatasetCmd:
+    """_rebuild_dataset must produce dataset files, not just a manifest."""
+
+    def test_rebuild_uses_shared_export_cmd(self):
+        """The rebuild must reuse production.dataset_build_cmd (with --export)."""
+        import inspect
+        from gefion.experiments.cycle_runner import CycleRunner
+
+        source = inspect.getsource(CycleRunner._rebuild_dataset)
+        assert "dataset_build_cmd" in source

@@ -812,29 +812,19 @@ class CycleRunner:
                 return None
 
             import json as _json
+            from gefion.experiments.production import dataset_build_cmd
+
             manifest = _json.loads(manifest_path.read_text())
             name = manifest.get("name", "cycle")
-            horizons_str = ",".join(str(h) for h in horizons)
-
-            # Build new version
             new_version = f"cycle-{cycle_id}"
 
-            cmd = [
-                "gefion", "ml", "dataset-build",
-                "--name", name,
-                "--version", new_version,
-                "--horizons", horizons_str,
-                "--format", manifest.get("format", "parquet"),
-                "--json",
-            ]
-
-            # Add exchange if in manifest
-            universe = manifest.get("universe", {})
-            if universe.get("exchange"):
-                cmd.extend(["--exchange", universe["exchange"]])
+            # Shared command builder: reproduces the manifest's horizons and
+            # thresholds, and passes --export so the files training needs
+            # actually get written
+            cmd = ["gefion", *dataset_build_cmd(manifest, name, new_version)]
 
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=120,
+                cmd, capture_output=True, text=True, timeout=300,
             )
 
             if result.returncode == 0:
