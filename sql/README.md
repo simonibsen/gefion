@@ -6,19 +6,19 @@ This directory contains SQL scripts for schema setup and feature definitions.
 
 ### schema.sql
 
-Complete database initialization script for g2 application. Creates all production tables, hypertables, and indexes.
+Complete database initialization script for the Gefion application. Creates all production tables, hypertables, and indexes.
 
 **Usage:**
 ```bash
 # Initialize database (safe to run multiple times)
-psql -d g2 -f sql/schema.sql
+psql -d gefion -f sql/schema.sql
 ```
 
 **Production Tables:**
-- `stocks` - Stock symbols dimension table
-- `stock_ohlcv` - OHLCV price data with adjusted close, dividends, and split coefficient (hypertable, 30-day chunks)
-- `feature_definitions` - Feature metadata (calc_store pattern)
-- `computed_features` - Computed features (hypertable, 30-day chunks)
+
+See [docs/DATA_DICTIONARY.md](../docs/DATA_DICTIONARY.md) — generated from
+`schema.sql` + `migrations/*.sql`, so it always reflects the full table set.
+Regenerate with `scripts/gen_data_dictionary.py --write` after schema changes.
 
 **Notes:**
 - All tables are idempotent (use `IF NOT EXISTS`)
@@ -45,10 +45,10 @@ Defines 15 recommended derivative features organized by category:
 **Usage:**
 ```bash
 # Define all 15 derivative features
-psql -d g2 -f sql/derivative_features.sql
+psql -d gefion -f sql/derivative_features.sql
 
 # Then compute them
-g2 features-compute --function-names derivative
+gefion features-compute --function-names derivative
 ```
 
 **Note:** These definitions use `ON CONFLICT (name) DO NOTHING`, so running this script multiple times is safe.
@@ -58,7 +58,7 @@ g2 features-compute --function-names derivative
 You can also define features one at a time using the CLI:
 
 ```bash
-g2 features-register --definition '{
+gefion features-register --definition '{
   "name": "derivative_rsi_14_slope_5",
   "function_name": "derivative",
   "params": {"source_feature": "indicator_rsi_14", "type": "slope", "window": 5, "method": "linreg"},
