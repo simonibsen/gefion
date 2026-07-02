@@ -125,6 +125,9 @@ Before exiting plan mode, verify:
 - All DB test connections MUST use `schema.test_db_url()` — never hardcode database URLs
 - Use `OTEL_ENABLED=false` to disable tracing in tests
 - Run full test suite: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" OTEL_ENABLED=false .venv/bin/python -m pytest`
+- **Pre-flight for DB test changes**: the suite must pass against a freshly-created test database (what a DB-backed CI job sees). Drop it first, then run the full suite — conftest recreates and initializes it:
+  `psql "postgresql://gefion:gefionpass@localhost:6432/postgres" -c 'DROP DATABASE IF EXISTS gefion_test WITH (FORCE)'`
+- If db-init fails against `gefion_test` at session start (e.g., a half-initialized database left by an aborted run), drop the database as above and rerun
 
 ## Active Technologies
 - Python 3.10+ + Streamlit (UI framework), subprocess (process execution) (001-ui-reliability)

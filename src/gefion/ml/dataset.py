@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 from typing import Any, Dict, List
 
-from gefion.observability import create_span
+from gefion.observability import create_span, set_attributes
 
 
 def _write_to_file(
@@ -47,6 +47,41 @@ def _stream_to_csv(cursor, path: Path, header: List[str], row_mapper) -> int:
             writer.writerow(row_mapper(row))
             count += 1
     return count
+
+
+def resolve_universe_symbols(conn, universe: Dict[str, Any]) -> List[str]:
+    """
+    Resolve a manifest universe spec to a concrete symbol list.
+
+    Explicit universe['symbols'] wins. Otherwise symbols are selected from the
+    stocks table, filtered by universe['exchange'] (stocks.exchange) and capped
+    by universe['limit'] when provided.
+    """
+    explicit = universe.get("symbols") or []
+    if explicit:
+        return list(explicit)
+
+    exchange = universe.get("exchange")
+    limit = universe.get("limit")
+
+    with create_span("ml.dataset.resolve_universe_symbols",
+                     exchange=exchange or "", limit=limit or 0) as span:
+        query = "SELECT symbol FROM stocks"
+        params: List[Any] = []
+        if exchange:
+            query += " WHERE exchange = %s"
+            params.append(exchange)
+        query += " ORDER BY symbol"
+        if limit:
+            query += " LIMIT %s"
+            params.append(limit)
+
+        with conn.cursor() as cur:
+            cur.execute(query + ";", params or None)
+            symbols = [row[0] for row in cur.fetchall()]
+
+        set_attributes(span, symbol_count=len(symbols))
+        return symbols
 
 
 def export_dataset_artifacts(
@@ -112,29 +147,8 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
     exclude_features = manifest.get("exclude_features") or []
 
     # Resolve exchange + limit to actual symbols if no explicit symbols provided
-    # Note: The stocks table doesn't have an 'exchange' column, so we just select
-    # the first N symbols alphabetically. The exchange parameter is stored in
-    # manifest for documentation but not used for filtering.
     if not symbols and (universe.get("exchange") or universe.get("limit")):
-        limit = universe.get("limit")
-        with conn.cursor() as cur:
-            if limit:
-                cur.execute(
-                    """
-                    SELECT symbol FROM stocks
-                    ORDER BY symbol
-                    LIMIT %s;
-                    """,
-                    (limit,),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT symbol FROM stocks
-                    ORDER BY symbol;
-                    """
-                )
-            symbols = [row[0] for row in cur.fetchall()]
+        symbols = resolve_universe_symbols(conn, universe)
 
     # Export prices - stream directly for CSV, load for parquet
     emit_progress(f"Exporting prices for {len(symbols)} symbols...")

@@ -363,6 +363,68 @@ def test_fundamentals_update_inserts_into_stocks_fundamentals():
     assert 2800000000000 in params or "2800000000000" in str(params), "market_cap should be included"
 
 
+def test_fundamentals_update_writes_exchange():
+    """The stocks UPDATE must persist the OVERVIEW Exchange field.
+
+    stocks.exchange exists in the schema but was never populated; exchange
+    filters elsewhere depend on this write (issue #29).
+    """
+    from gefion.cli import _fundamentals_update_impl
+    from gefion.alphavantage.client import AlphaVantageClient
+
+    overview = {
+        "Symbol": "AAPL",
+        "Name": "Apple Inc",
+        "Sector": "TECHNOLOGY",
+        "Industry": "CONSUMER ELECTRONICS",
+        "Exchange": "NASDAQ",
+    }
+
+    stocks = [(1, "AAPL", None)]
+    executed_sqls = []
+
+    mock_conn = Mock()
+    mock_cur = Mock()
+    mock_cur.fetchall.return_value = stocks
+
+    def track_execute(sql, params=None):
+        executed_sqls.append((sql.strip(), params))
+
+    mock_cur.execute = track_execute
+    mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cur)
+    mock_conn.cursor.return_value.__exit__ = Mock(return_value=False)
+    mock_conn.__enter__ = Mock(return_value=mock_conn)
+    mock_conn.__exit__ = Mock(return_value=False)
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def mock_connection(url):
+        yield mock_conn
+
+    with patch.dict(os.environ, {"ALPHAVANTAGE_API_KEY": "test_key", "OTEL_ENABLED": "false"}):
+        with patch("gefion.cli.db_connection", side_effect=mock_connection):
+            with patch.object(AlphaVantageClient, "fetch_overview", return_value=overview):
+                _fundamentals_update_impl(
+                    exchange=None, limit=None, max_age_days=30,
+                    force=True, calls_per_minute=75, db_url="postgresql://test",
+                    json_output=True, workers=1,
+                )
+
+    stock_updates = [
+        (sql, params) for sql, params in executed_sqls
+        if "UPDATE stocks" in sql and "SET name" in sql
+    ]
+    assert len(stock_updates) == 1, (
+        f"Expected 1 UPDATE of stocks metadata, got {len(stock_updates)}. "
+        f"SQLs: {[sql[:60] for sql, _ in executed_sqls]}"
+    )
+
+    sql, params = stock_updates[0]
+    assert "exchange" in sql, f"UPDATE must set exchange column, got: {sql}"
+    assert "NASDAQ" in params, f"Exchange value from OVERVIEW must be written, got params: {params}"
+
+
 def test_fundamentals_update_parses_numeric_fields():
     """Test that AlphaVantage string values are parsed to correct numeric types."""
     from gefion.cli import _parse_overview_fundamentals

@@ -170,11 +170,11 @@ def filter_new_rows(
     # Get the latest date we have for this symbol
     latest = latest_price_date(conn, data_id)
 
-    # If no existing data, all rows are new (but still respect target_date)
+    # If no existing data, all rows are new (but still respect date bounds)
     if latest is None:
-        if target_date is None:
+        if target_date is None and since_date is None:
             return list(rows)
-        # Filter to only rows up to target_date
+        # Filter through the loop below to apply since_date/target_date bounds
         latest = date.min  # Use minimum date so all rows pass the > latest check
 
     # Filter to only rows after the latest date AND not beyond target_date

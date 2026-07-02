@@ -9,6 +9,15 @@ from gefion.db import schema
 
 runner = CliRunner()
 
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_db_after_module():
+    """Restore canonical test DB state after this module's destructive cleanup (issue #29)."""
+    yield
+    from conftest import restore_test_db
+    restore_test_db()
+
+
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
 
 

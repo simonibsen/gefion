@@ -70,7 +70,7 @@ def pytest_sessionstart(session):
 
     print(f"\nInitializing test database '{test_db_name}'...")
     result = subprocess.run(
-        [sys.executable, "-m", "gefion.cli", "db-init"],
+        [sys.executable, "-m", "gefion.cli", "db-init", "--db-url", url],
         capture_output=True,
         text=True,
         env=env,
@@ -79,7 +79,49 @@ def pytest_sessionstart(session):
     if result.returncode == 0:
         print(f"  Test database ready: {test_db_name}")
     else:
-        print(f"  Warning: db-init failed: {result.stderr}")
+        # db-init prints errors to stdout (Rich console), so include both
+        # streams, and abort loudly: a half-initialized test database causes
+        # confusing downstream failures/hangs (issue #29).
+        pytest.exit(
+            f"db-init failed for test database '{test_db_name}' "
+            f"(exit {result.returncode}):\n"
+            f"--- stdout ---\n{result.stdout}\n"
+            f"--- stderr ---\n{result.stderr}",
+            returncode=1,
+        )
+
+
+def restore_test_db() -> None:
+    """Re-initialize the test database to its canonical state.
+
+    Test modules that destroy shared state (e.g. `DROP SCHEMA public CASCADE`
+    or replacing canonical tables with plain ones) MUST call this from a
+    module-scoped autouse fixture's teardown. Otherwise later modules — and
+    the next pytest session's db-init — see a gutted or half-initialized
+    database (issue #29).
+    """
+    if os.getenv("ENABLE_DB_TESTS") != "1":
+        return
+
+    url = test_db_url()
+    with psycopg.connect(url, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+
+    env = os.environ.copy()
+    env["OTEL_ENABLED"] = "false"
+    env["DATABASE_URL"] = url
+    result = subprocess.run(
+        [sys.executable, "-m", "gefion.cli", "db-init", "--db-url", url],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"restore_test_db: db-init failed (exit {result.returncode}):\n"
+            f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+        )
 
 
 def create_test_function(conn, name: str = "test_func", returns_value: str = "close") -> None:

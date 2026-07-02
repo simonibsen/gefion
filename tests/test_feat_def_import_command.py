@@ -19,6 +19,14 @@ from gefion.config import load_settings
 from gefion.db import schema
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_db_after_module():
+    """Restore canonical test DB state after this module's destructive cleanup (issue #29)."""
+    yield
+    from conftest import restore_test_db
+    restore_test_db()
+
+
 pytestmark = pytest.mark.skipif(
     os.getenv("ENABLE_DB_TESTS") != "1",
     reason="Database tests disabled. Set ENABLE_DB_TESTS=1 to run."

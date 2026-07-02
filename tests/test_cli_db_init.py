@@ -201,14 +201,88 @@ class TestDbInitRunsMigrations:
 
     def test_db_init_applies_migrations(self):
         """db-init runs migrations as part of initialization."""
-        result = runner.invoke(cli.app, ["db-init"])
+        # --db-url is passed explicitly: env-based DATABASE_URL is snapshotted
+        # into SETTINGS at import time, so CliRunner env patching is ignored.
+        result = runner.invoke(cli.app, ["db-init", "--db-url", test_db_url()])
         assert result.exit_code == 0
         # Should succeed without errors — migrations are idempotent
         assert "Database initialized successfully" in result.output
 
     def test_db_init_idempotent(self):
         """Running db-init twice produces the same result (no errors)."""
-        first = runner.invoke(cli.app, ["db-init"])
-        second = runner.invoke(cli.app, ["db-init"])
+        first = runner.invoke(cli.app, ["db-init", "--db-url", test_db_url()])
+        second = runner.invoke(cli.app, ["db-init", "--db-url", test_db_url()])
         assert first.exit_code == 0
         assert second.exit_code == 0
+
+
+@pytest.fixture
+def fresh_database():
+    """Create a brand-new empty database and drop it afterwards.
+
+    Simulates what a DB-backed CI job sees: db-init must succeed against a
+    database with no pre-existing tables (issue #29).
+    """
+    import psycopg
+    from urllib.parse import urlparse
+
+    base_url = test_db_url()
+    parsed = urlparse(base_url)
+    base_name = parsed.path.lstrip("/")
+    fresh_name = f"{base_name}_fresh"
+    fresh_url = base_url.replace(f"/{base_name}", f"/{fresh_name}")
+
+    with psycopg.connect(base_url, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(f'DROP DATABASE IF EXISTS "{fresh_name}" (FORCE)')
+            cur.execute(f'CREATE DATABASE "{fresh_name}"')
+    try:
+        yield fresh_url
+    finally:
+        with psycopg.connect(base_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'DROP DATABASE IF EXISTS "{fresh_name}" (FORCE)')
+
+
+class TestDbInitFreshDatabase:
+    """db-init must succeed against a completely empty database (issue #29).
+
+    schema.sql is a snapshot of the final schema, so replaying historical
+    migrations on a fresh database fails (they reference since-dropped tables
+    like quantile_predictions). db-init must instead record ("baseline") all
+    migrations as applied.
+    """
+
+    def test_db_init_on_fresh_database_succeeds(self, fresh_database):
+        """db-init exits 0 against an empty database."""
+        result = runner.invoke(cli.app, ["db-init", "--db-url", fresh_database])
+        assert result.exit_code == 0, f"db-init failed on fresh DB:\n{result.output}"
+        assert "Database initialized successfully" in result.output
+
+    def test_db_init_on_fresh_database_baselines_all_migrations(self, fresh_database):
+        """After fresh init, every migration file is recorded as applied."""
+        import psycopg
+        from gefion.db.migrate import scan_migration_files
+
+        result = runner.invoke(cli.app, ["db-init", "--db-url", fresh_database])
+        assert result.exit_code == 0, f"db-init failed on fresh DB:\n{result.output}"
+
+        package_dir = Path(cli.__file__).parent.parent.parent
+        expected = {m["version"] for m in scan_migration_files(package_dir / "sql" / "migrations")}
+
+        with psycopg.connect(fresh_database) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT version FROM schema_migrations;")
+                recorded = {row[0] for row in cur.fetchall()}
+
+        assert expected, "expected at least one migration file in sql/migrations"
+        assert expected.issubset(recorded), (
+            f"Migrations not baselined on fresh init: {sorted(expected - recorded)}"
+        )
+
+    def test_db_init_after_fresh_init_is_idempotent(self, fresh_database):
+        """A second db-init on the freshly-initialized DB still exits 0."""
+        first = runner.invoke(cli.app, ["db-init", "--db-url", fresh_database])
+        second = runner.invoke(cli.app, ["db-init", "--db-url", fresh_database])
+        assert first.exit_code == 0, f"first db-init failed:\n{first.output}"
+        assert second.exit_code == 0, f"second db-init failed:\n{second.output}"

@@ -14,6 +14,14 @@ from pathlib import Path
 from gefion.db import schema
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_db_after_module():
+    """Restore canonical test DB state after this module's destructive cleanup (issue #29)."""
+    yield
+    from conftest import restore_test_db
+    restore_test_db()
+
+
 @pytest.fixture
 def db_conn():
     """Create test database connection with feature functions loaded."""

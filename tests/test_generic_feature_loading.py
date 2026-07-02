@@ -13,6 +13,14 @@ from gefion.db import schema
 from gefion.db.ingest import load_feature_definitions_from_json, ensure_feature_definitions
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_db_after_module():
+    """Restore canonical test DB state after this module's destructive cleanup (issue #29)."""
+    yield
+    from conftest import restore_test_db
+    restore_test_db()
+
+
 def test_load_feature_definitions_from_json_single_file():
     """Test loading a single feature definition from JSON file."""
     # Create temporary JSON file
