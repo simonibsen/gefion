@@ -7567,6 +7567,27 @@ def _update_all_impl(
     except Exception:
         pass  # Fundamentals are optional — don't fail data-update
 
+    # Probation check: fresh outcomes are what make promoted-experiment
+    # performance measurable (FR-027). Optional — don't fail data-update.
+    try:
+        from gefion.experiments.probation import run_probation_checks
+
+        probation_summary = run_probation_checks()
+        if probation_summary["checked"]:
+            demoted = probation_summary["demoted"]
+            emit(
+                f"Probation: {probation_summary['checked']} experiment(s) checked, "
+                f"{len(demoted)} demoted",
+                data={"phase": "probation", **{k: len(v) for k, v in probation_summary.items()
+                                               if isinstance(v, list)}},
+                json_output=json_output,
+            )
+            for item in demoted:
+                emit(f"  Demoted experiment #{item['experiment_id']}: {item['reason']}",
+                     json_output=json_output)
+    except Exception:
+        pass
+
     emit(
         "Update complete",
         data={
@@ -10050,6 +10071,53 @@ def experiment_apply(
                 import traceback
                 traceback.print_exc()
             raise typer.Exit(1)
+
+
+@experiment_app.command("probation-check")
+def experiment_probation_check(
+    tolerance: float = typer.Option(
+        0.25, "--tolerance",
+        help="Relative degradation vs the experiment's score before demotion (0.25 = 25% worse)"
+    ),
+    min_samples: int = typer.Option(
+        30, "--min-samples",
+        help="Realized prediction outcomes required before demotion is allowed"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Check promoted experiments on probation; auto-demote degraded ones.
+
+    Idempotent — safe to run repeatedly. Runs automatically at the end of
+    `gefion data-update` (new outcomes are what make performance measurable).
+
+    Demotion requires evidence: experiments without an applied model, with
+    too few realized outcomes, or with a non-comparable objective are
+    skipped, never demoted blindly.
+    """
+    with create_span("cli.experiment_probation_check"):
+        from gefion.experiments.probation import run_probation_checks
+
+        try:
+            summary = run_probation_checks(tolerance=tolerance, min_samples=min_samples)
+        except Exception as e:
+            emit_error(f"Probation check failed: {e}", json_output=json_output)
+            raise typer.Exit(1)
+
+        if json_output:
+            emit_json(summary)
+        else:
+            from rich.console import Console
+            console = Console()
+            console.print(f"Checked {summary['checked']} experiment(s) on probation")
+            for item in summary["demoted"]:
+                console.print(f"  [red]Demoted #{item['experiment_id']}: {item['reason']}[/red]")
+            for item in summary["passed"]:
+                console.print(f"  [green]Passed #{item['experiment_id']} "
+                              f"({item.get('n_samples', 0)} outcomes)[/green]")
+            for item in summary["monitoring"]:
+                console.print(f"  [yellow]Monitoring #{item['experiment_id']}[/yellow]")
+            for item in summary["skipped"]:
+                console.print(f"  [dim]Skipped #{item['experiment_id']}: {item['reason']}[/dim]")
 
 
 @experiment_app.command("cycle-status")
