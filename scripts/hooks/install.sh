@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Install git hooks for g2 development
+# Install git hooks for gefion development
 #
 # Usage: ./scripts/hooks/install.sh
 #
@@ -25,6 +25,6 @@ echo ""
 echo "Hooks installed:"
 echo "  - commit-msg: Rejects AI attribution, shows dev rules reminder"
 echo "  - pre-commit: Checks new files for observability imports"
-echo "  - pre-push: Runs test suite before push"
+echo "  - pre-push: Runs smoke tests + data dictionary drift check before push"
 echo "  - prepare-commit-msg: Shows dev rules reminder"
 echo ""
