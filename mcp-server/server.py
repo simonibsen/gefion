@@ -1409,6 +1409,85 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="experiment_cycle_list",
+            description=(
+                "List experiment cycles with status, FDR rate, and completion times"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max cycles to return (default 20)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="experiment_probation_check",
+            description=(
+                "Check promoted experiments on probation and auto-demote measurably "
+                "degraded ones. Compares each applied model's realized quantile loss "
+                "against the experiment's score; skips (never demotes) experiments "
+                "without an applied model, with too few realized outcomes, or with a "
+                "non-comparable objective. Idempotent; also runs automatically at the "
+                "end of data_update."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tolerance": {"type": "number", "description": "Relative degradation before demotion (default 0.25 = 25% worse)"},
+                    "min_samples": {"type": "integer", "description": "Realized outcomes required before demotion (default 30)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="experiment_demote",
+            description=(
+                "Manually demote a promoted experiment artifact. Reverses promotion: "
+                "stamps demoted_at, sets the feature function to 'demoted', deactivates "
+                "its feature definition, and records the reason on the experiment. "
+                "Idempotent — demoting an already demoted experiment is a no-op."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_id": {"type": "integer", "description": "Experiment ID to demote"},
+                    "reason": {"type": "string", "description": "Why this artifact is being demoted (recorded on the experiment)"},
+                },
+                "required": ["experiment_id", "reason"],
+            },
+        ),
+        Tool(
+            name="chart_experiment_trials",
+            description=(
+                "Generate trial performance scatter chart for an experiment: trial number "
+                "vs score with the best trial highlighted. Also writes a parameter-sensitivity "
+                "heatmap when exactly two numeric parameters vary. Returns chart file paths."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_id": {"type": "integer", "description": "Experiment ID"},
+                },
+                "required": ["experiment_id"],
+            },
+        ),
+        Tool(
+            name="chart_experiment_fdr",
+            description=(
+                "Generate FDR cycle summary chart: each experiment's holdout p-value on a "
+                "log scale, the FDR threshold line, and promoted vs rejected markers. "
+                "Returns the chart file path."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cycle_id": {"type": "integer", "description": "Experiment cycle ID"},
+                },
+                "required": ["cycle_id"],
+            },
+        ),
+        Tool(
             name="principles_list",
             description=(
                 "List principles from the quantitative finance catalog"
@@ -1743,6 +1822,16 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _experiment_cycle_run(arguments)
         elif name == "experiment_apply":
             result = await _experiment_apply(arguments)
+        elif name == "experiment_cycle_list":
+            result = await _experiment_cycle_list(arguments)
+        elif name == "experiment_probation_check":
+            result = await _experiment_probation_check(arguments)
+        elif name == "experiment_demote":
+            result = await _experiment_demote(arguments)
+        elif name == "chart_experiment_trials":
+            result = await _chart_experiment_trials(arguments)
+        elif name == "chart_experiment_fdr":
+            result = await _chart_experiment_fdr(arguments)
         elif name == "experiment_cycle_status":
             result = await _experiment_cycle_status(arguments)
         elif name == "principles_list":
@@ -4004,6 +4093,67 @@ async def _experiment_apply(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _apply)
+
+
+async def _experiment_cycle_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List experiment cycles."""
+    async def _list():
+        cmd = ["experiment", "cycle-list", "--json"]
+        if args.get("limit"):
+            cmd.extend(["--limit", str(args["limit"])])
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _list)
+
+
+async def _experiment_probation_check(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Check promoted experiments on probation; auto-demote degraded ones."""
+    async def _check():
+        cmd = ["experiment", "probation-check", "--json"]
+        if args.get("tolerance") is not None:
+            cmd.extend(["--tolerance", str(args["tolerance"])])
+        if args.get("min_samples") is not None:
+            cmd.extend(["--min-samples", str(args["min_samples"])])
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _check)
+
+
+async def _experiment_demote(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Manually demote a promoted experiment artifact."""
+    async def _demote():
+        cmd = ["experiment", "demote",
+               "--id", str(args["experiment_id"]),
+               "--reason", str(args["reason"]),
+               "--json"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _demote)
+
+
+async def _chart_experiment_trials(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate trial scatter (and heatmap when applicable) for an experiment."""
+    async def _generate():
+        cmd = ["chart", "experiment-trials", str(args["experiment_id"]),
+               "--no-open", "--json"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _generate)
+
+
+async def _chart_experiment_fdr(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate FDR cycle summary chart."""
+    async def _generate():
+        cmd = ["chart", "experiment-fdr", str(args["cycle_id"]),
+               "--no-open", "--json"]
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _generate)
 
 
 async def _experiment_cycle_status(args: Dict[str, Any]) -> Dict[str, Any]:

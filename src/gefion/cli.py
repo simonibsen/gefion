@@ -10120,6 +10120,42 @@ def experiment_probation_check(
                 console.print(f"  [dim]Skipped #{item['experiment_id']}: {item['reason']}[/dim]")
 
 
+@experiment_app.command("demote")
+def experiment_demote(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to demote"),
+    reason: str = typer.Option(..., "--reason", "-r",
+                               help="Why this artifact is being demoted (recorded on the experiment)"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+) -> None:
+    """Manually demote a promoted experiment artifact.
+
+    Reverses promotion: stamps demoted_at, sets the experiment's feature
+    function to 'demoted', deactivates its feature definition, and records
+    the reason under results.probation. Idempotent — demoting an already
+    demoted experiment is a no-op.
+
+    Example:
+        gefion experiment demote --id 41 --reason "feature broken in production"
+    """
+    with create_span("cli.experiment_demote", experiment_id=experiment_id):
+        from gefion.experiments import probation
+
+        try:
+            demoted = probation.demote_experiment(experiment_id, reason)
+        except Exception as e:
+            emit_error(f"Demote failed: {e}", json_output=json_output)
+            raise typer.Exit(1)
+
+        if demoted:
+            emit(f"Demoted experiment #{experiment_id}",
+                 data={"experiment_id": experiment_id, "demoted": True, "reason": reason},
+                 json_output=json_output)
+        else:
+            emit(f"Experiment #{experiment_id} was already demoted — no change",
+                 data={"experiment_id": experiment_id, "demoted": False},
+                 json_output=json_output)
+
+
 @experiment_app.command("cycle-status")
 def experiment_cycle_status(
     cycle_id: int = typer.Argument(..., help="Cycle ID"),
