@@ -652,6 +652,55 @@ class TestExperimentDatabaseSchema:
 # =============================================================================
 
 
+@pytest.fixture
+def seeded_prices():
+    """Seed AAPL/MSFT prices in the test DB for backtest evaluation.
+
+    These tests previously used the default DATABASE_URL and only passed
+    when the dev database happened to contain price data. All DB test
+    connections must use test_db_url(), and the data must be self-seeded
+    (issue #29).
+    """
+    from datetime import date, timedelta
+
+    import psycopg
+
+    from gefion.db.ingest import insert_stock_ohlcv, upsert_stock
+    from gefion.db.schema import create_stock_ohlcv_table, create_stocks_table, test_db_url
+
+    url = test_db_url()
+    symbols = ["AAPL", "MSFT"]
+    with psycopg.connect(url, autocommit=True) as conn:
+        create_stocks_table(conn)
+        create_stock_ohlcv_table(conn)
+        for offset, symbol in enumerate(symbols):
+            stock_id = upsert_stock(conn, symbol, status="Active")
+            rows = []
+            day = date(2024, 1, 1)
+            i = 0
+            while day <= date(2024, 6, 1):
+                price = 100.0 + offset * 50 + i * 0.1
+                rows.append({
+                    "date": day,
+                    "open": price,
+                    "high": price + 1.0,
+                    "low": price - 1.0,
+                    "close": price + 0.5,
+                    "volume": 1_000_000,
+                })
+                day += timedelta(days=1)
+                i += 1
+            insert_stock_ohlcv(conn, stock_id, rows)
+
+        yield url
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM stock_ohlcv WHERE data_id IN (SELECT id FROM stocks WHERE symbol = ANY(%s))",
+                (symbols,),
+            )
+
+
 class TestStrategyParamExperiment:
     """Tests for StrategyParamExperiment type."""
 
@@ -674,7 +723,7 @@ class TestStrategyParamExperiment:
         assert exp.objective == "sharpe_ratio"
         assert exp.symbols == ["AAPL", "MSFT"]
 
-    def test_evaluate_returns_metrics(self):
+    def test_evaluate_returns_metrics(self, seeded_prices):
         """Test that evaluate() returns backtest metrics."""
         from gefion.experiments.types.strategy_params import StrategyParamExperiment
 
@@ -684,6 +733,7 @@ class TestStrategyParamExperiment:
             symbols=["AAPL", "MSFT"],
             start_date="2024-01-01",
             end_date="2024-06-01",
+            db_url=seeded_prices,
         )
 
         # Evaluate with specific params
@@ -694,7 +744,7 @@ class TestStrategyParamExperiment:
         assert "total_return" in metrics
         assert "max_drawdown" in metrics
 
-    def test_evaluate_uses_params(self):
+    def test_evaluate_uses_params(self, seeded_prices):
         """Test that different params produce different results."""
         from gefion.experiments.types.strategy_params import StrategyParamExperiment
 
@@ -704,6 +754,7 @@ class TestStrategyParamExperiment:
             symbols=["AAPL", "MSFT"],
             start_date="2024-01-01",
             end_date="2024-06-01",
+            db_url=seeded_prices,
         )
 
         # Two different parameter sets
