@@ -44,9 +44,10 @@ def load_price_data_for_backtest(
             params = []
 
             # Filter by symbols
-            # Note: exchange filtering is not currently supported as stocks table
-            # doesn't have an exchange column. When exchange is specified, we fall
-            # back to just using the limit parameter.
+            # Note: exchange filtering is not enforced yet — stocks.exchange is
+            # only populated by fundamentals-update and most rows are still
+            # NULL, so filtering would silently drop symbols. When exchange is
+            # specified, we fall back to just using the limit parameter.
             if symbols:
                 symbol_where_clauses.append("s.symbol = ANY(%s)")
                 params.append(symbols)
@@ -54,8 +55,8 @@ def load_price_data_for_backtest(
             # Apply symbol limit if specified
             if limit and not symbols:
                 # Create subquery to get limited set of stock IDs
-                # Note: When exchange is passed, we can't filter by it (no column),
-                # so we just use the limit to get top N active stocks with data
+                # Note: exchange is not enforced here (see note above), so we
+                # just use the limit to get top N active stocks with data
                 symbol_id_subquery = f"""
                     (SELECT s.id FROM stocks s
                      JOIN stock_ohlcv o ON s.id = o.data_id
@@ -130,7 +131,7 @@ def get_available_symbols(
 
     Args:
         db_url: Database connection URL
-        exchange: Filter by exchange (optional, currently ignored - no exchange column)
+        exchange: Filter by exchange (optional, not enforced yet — stocks.exchange is sparsely populated)
         limit: Maximum number of symbols to return (optional)
 
     Returns:
@@ -138,8 +139,8 @@ def get_available_symbols(
     """
     with create_span("backtest.data_loader.get_available_symbols") as span:
         with psycopg.connect(db_url) as conn:
-            # Note: exchange filtering not supported (no exchange column in stocks table)
-            # We just return active stocks with sufficient data
+            # Note: exchange filtering not enforced yet (stocks.exchange is
+            # sparsely populated). We just return active stocks with sufficient data
             where_clause = "WHERE s.status = 'Active'"
             params: List[Any] = []
 

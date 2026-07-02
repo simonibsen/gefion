@@ -438,6 +438,45 @@ def run_migrations(
         return results
 
 
+def baseline_migrations(conn: Connection, migrations_dir) -> dict:
+    """
+    Record all migration files as applied WITHOUT executing them.
+
+    Used when initializing a fresh database: schema.sql already embodies the
+    final post-migration state, so historical migrations must not be replayed
+    (some reference tables that no longer exist in the final schema). Each
+    file's checksum is recorded so later drift is still detectable.
+
+    Args:
+        conn: Database connection
+        migrations_dir: Path to migrations directory
+
+    Returns:
+        Dict with results: {"baselined": 3, "skipped": 1}
+    """
+    with create_span("db.migrate.baseline_migrations") as span:
+        ensure_migrations_table(conn)
+
+        all_migrations = scan_migration_files(migrations_dir)
+        applied = get_applied_migrations(conn)
+
+        results = {"baselined": 0, "skipped": 0}
+        for migration in all_migrations:
+            if migration["version"] in applied:
+                results["skipped"] += 1
+                continue
+            record_migration(
+                conn,
+                migration["version"],
+                migration["name"],
+                compute_checksum(migration["path"])
+            )
+            results["baselined"] += 1
+
+        set_attributes(span, baselined=results["baselined"], skipped=results["skipped"], total=len(all_migrations))
+        return results
+
+
 # =============================================================================
 # Migration Verification & Repair (#28)
 # =============================================================================

@@ -8,6 +8,14 @@ from gefion.db import schema
 from gefion.db.ingest import trim_stock_ohlcv, upsert_stock
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_db_after_module():
+    """Restore canonical test DB state after this module's destructive cleanup (issue #29)."""
+    yield
+    from conftest import restore_test_db
+    restore_test_db()
+
+
 DB_TESTS_ENABLED = os.getenv("ENABLE_DB_TESTS", "0") == "1"
 
 

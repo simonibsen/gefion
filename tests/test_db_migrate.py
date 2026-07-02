@@ -1,7 +1,7 @@
 """
 Test database migration runner (TDD approach).
 
-These tests define the expected behavior of the g2 db-migrate command.
+These tests define the expected behavior of the gefion db-migrate command.
 """
 import os
 import tempfile
@@ -28,6 +28,27 @@ def conn():
     connection.autocommit = True
     yield connection
     connection.close()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def restore_migration_baseline(conn):
+    """Restore real migration records after this module's tests.
+
+    Tests here drop schema_migrations and insert fake records. Without
+    restoring the baseline afterwards, any later db-init against the test
+    database replays historical migrations on an already-current schema and
+    fails on since-dropped tables like quantile_predictions (issue #29).
+    """
+    yield
+
+    import gefion
+    from gefion.db.migrate import baseline_migrations, ensure_migrations_table
+
+    migrations_dir = Path(gefion.__file__).parent.parent.parent / "sql" / "migrations"
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS schema_migrations CASCADE;")
+    ensure_migrations_table(conn)
+    baseline_migrations(conn, migrations_dir)
 
 
 @pytest.fixture
@@ -346,6 +367,73 @@ def test_run_migrations_stops_on_error(conn, tmp_path, clean_migrations_table):
     assert "001" in applied
     assert "002" not in applied
     assert "003" not in applied
+
+
+def test_baseline_migrations_records_without_executing(conn, tmp_path, clean_migrations_table):
+    """baseline_migrations records all migrations as applied WITHOUT running them.
+
+    Used by db-init on a fresh database: schema.sql already embodies the final
+    state, so historical migrations must be recorded, not replayed (some
+    reference tables that no longer exist, e.g. quantile_predictions).
+    """
+    from gefion.db.migrate import baseline_migrations, ensure_migrations_table, get_applied_migrations
+
+    # This migration would fail if actually executed
+    (tmp_path / "001_first.sql").write_text("ALTER TABLE no_such_table ADD COLUMN x INTEGER;")
+    (tmp_path / "002_second.sql").write_text("CREATE TABLE IF NOT EXISTS baseline_table2 (id SERIAL);")
+
+    ensure_migrations_table(conn)
+
+    result = baseline_migrations(conn, tmp_path)
+
+    assert result["baselined"] == 2
+    applied = get_applied_migrations(conn)
+    assert "001" in applied
+    assert "002" in applied
+
+    # Verify 002 was NOT executed (recorded only)
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'baseline_table2'
+            );
+        """)
+        assert not cur.fetchone()[0], "baseline must record migrations, not execute them"
+
+
+def test_baseline_migrations_records_checksums(conn, tmp_path, clean_migrations_table):
+    """baseline_migrations stores each file's checksum so drift is detectable."""
+    from gefion.db.migrate import baseline_migrations, compute_checksum, ensure_migrations_table
+
+    path = tmp_path / "001_first.sql"
+    path.write_text("CREATE TABLE IF NOT EXISTS baseline_table1 (id SERIAL);")
+
+    ensure_migrations_table(conn)
+    baseline_migrations(conn, tmp_path)
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT checksum FROM schema_migrations WHERE version = '001';")
+        row = cur.fetchone()
+
+    assert row is not None
+    assert row[0] == compute_checksum(path)
+
+
+def test_baseline_migrations_skips_already_recorded(conn, tmp_path, clean_migrations_table):
+    """baseline_migrations is idempotent and skips versions already recorded."""
+    from gefion.db.migrate import baseline_migrations, ensure_migrations_table, record_migration
+
+    (tmp_path / "001_first.sql").write_text("SELECT 1;")
+    (tmp_path / "002_second.sql").write_text("SELECT 2;")
+
+    ensure_migrations_table(conn)
+    record_migration(conn, "001", "first", "hash1")
+
+    result = baseline_migrations(conn, tmp_path)
+
+    assert result["baselined"] == 1
+    assert result["skipped"] == 1
 
 
 # ============================================================================

@@ -1566,7 +1566,9 @@ def ml_predict(
             dataset_name, dataset_version, feature_names, horizons = row[0], row[1], row[2], row[3]
 
         # Build universe of symbols
-        # Note: exchange param is stored for documentation but stocks table has no exchange column
+        # Note: exchange is accepted but not yet enforced as a filter here —
+        # stocks.exchange is only populated by fundamentals-update, and most
+        # rows are still NULL, so filtering would silently empty the universe.
         if exchange or (not sym_list and limit):
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
@@ -3565,7 +3567,9 @@ def ml_predict_ensemble(
             dataset_name, dataset_version, feature_names, horizons = row[0], row[1], row[2], row[3]
 
         # Build universe of symbols
-        # Note: exchange param is stored for documentation but stocks table has no exchange column
+        # Note: exchange is accepted but not yet enforced as a filter here —
+        # stocks.exchange is only populated by fundamentals-update, and most
+        # rows are still NULL, so filtering would silently empty the universe.
         if exchange or (not sym_list and limit):
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
@@ -4618,6 +4622,17 @@ def _db_init_impl(db_url, json_output):
 
         # Execute schema SQL via psycopg connection (enables proper tracing)
         with db_connection(url) as conn:
+            # Detect a fresh (empty) database BEFORE applying schema.sql.
+            # schema.sql is a snapshot of the final post-migration state, so
+            # replaying historical migrations on a fresh database fails (they
+            # reference since-dropped tables). Fresh databases get the
+            # migrations recorded as a baseline instead.
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT count(*) FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
+                """)
+                fresh_database = cur.fetchone()[0] == 0
             with conn.cursor() as cur:
                 cur.execute(filtered_sql)
             conn.commit()
@@ -4628,14 +4643,21 @@ def _db_init_impl(db_url, json_output):
             json_output=json_output
         )
 
-        # Run pending migrations (idempotent — skips already-applied ones)
         migrations_dir = package_dir / "sql" / "migrations"
         if migrations_dir.exists():
             with db_connection(url) as conn:
-                result = migrate.run_migrations(conn, str(migrations_dir))
-                applied = result.get("applied", 0) if isinstance(result, dict) else 0
-                if applied and not json_output:
-                    emit(f"Applied {applied} pending migration(s)")
+                if fresh_database:
+                    # Record all migrations as applied without executing them
+                    result = migrate.baseline_migrations(conn, str(migrations_dir))
+                    baselined = result.get("baselined", 0)
+                    if baselined and not json_output:
+                        emit(f"Recorded {baselined} migration(s) as baseline (fresh database)")
+                else:
+                    # Run pending migrations (idempotent — skips already-applied ones)
+                    result = migrate.run_migrations(conn, str(migrations_dir))
+                    applied = result.get("applied", 0) if isinstance(result, dict) else 0
+                    if applied and not json_output:
+                        emit(f"Applied {applied} pending migration(s)")
 
         # Seed feature functions and definitions from JSON files
         fx_dir = package_dir / "feature-functions"
@@ -6732,8 +6754,9 @@ def _fundamentals_update_impl(
             params: list = []
 
             if exchange:
-                # Note: We don't have exchange column yet, so this is a placeholder
-                # In future, filter by exchange
+                # Note: exchange is not enforced as a filter yet — this command
+                # is what populates stocks.exchange, so filtering by it here
+                # would skip the rows that still need their first update.
                 pass
 
             if not force:
@@ -6814,13 +6837,14 @@ def _fundamentals_update_impl(
             name = overview.get("Name", "")
             sector = overview.get("Sector", "")
             industry = overview.get("Industry", "")
+            stock_exchange = overview.get("Exchange", "")
 
             with conn.cursor() as cur:
                 cur.execute("""
                     UPDATE stocks
-                    SET name = %s, sector = %s, industry = %s, updated_at = NOW()
+                    SET name = %s, sector = %s, industry = %s, exchange = %s, updated_at = NOW()
                     WHERE id = %s
-                """, (name or None, sector or None, industry or None, stock_id))
+                """, (name or None, sector or None, industry or None, stock_exchange or None, stock_id))
 
                 # Insert time-series fundamentals data
                 fundamentals = _parse_overview_fundamentals(overview)

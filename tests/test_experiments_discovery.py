@@ -266,10 +266,10 @@ class TestDiscoverDataSourcesDB:
 
     def test_returns_list_of_dicts(self):
         from gefion.experiments.discovery import discover_data_sources
-        from gefion.schema import test_db_url
-        import psycopg2
+        from gefion.db.schema import test_db_url
+        import psycopg
 
-        conn = psycopg2.connect(test_db_url())
+        conn = psycopg.connect(test_db_url())
         try:
             result = discover_data_sources(conn)
             assert isinstance(result, list)
@@ -291,10 +291,10 @@ class TestDiscoverFeaturesDB:
 
     def test_returns_list_of_dicts(self):
         from gefion.experiments.discovery import discover_features
-        from gefion.schema import test_db_url
-        import psycopg2
+        from gefion.db.schema import test_db_url
+        import psycopg
 
-        conn = psycopg2.connect(test_db_url())
+        conn = psycopg.connect(test_db_url())
         try:
             result = discover_features(conn)
             assert isinstance(result, list)

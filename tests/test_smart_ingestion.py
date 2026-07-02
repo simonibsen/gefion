@@ -20,22 +20,46 @@ def require_db():
     return conn
 
 
+@pytest.fixture
+def conn():
+    """Test connection with guaranteed close.
+
+    Closing in a finally block rolls back any open transaction even when the
+    test fails mid-way. A leaked idle-in-transaction connection here used to
+    deadlock the cleanup fixture (issue #29).
+    """
+    connection = require_db()
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
 @pytest.fixture(autouse=True)
 def clean_db():
-    conn = require_db()
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-    conn.close()
+    """Reset the tables this module uses before each test.
+
+    Deliberately NOT `DROP SCHEMA public CASCADE`: that destroys
+    schema_migrations, feature seeds, and views for every test module that
+    runs afterwards. TRUNCATE ... CASCADE clears stocks and its dependents
+    while leaving the schema intact. lock_timeout turns a leaked-lock
+    deadlock into a fast failure instead of a hung CI job (issue #29).
+    """
+    connection = require_db()
+    connection.autocommit = True
+    try:
+        schema.create_stocks_table(connection)
+        schema.create_stock_ohlcv_table(connection)
+        with connection.cursor() as cur:
+            cur.execute("SET lock_timeout = '10s';")
+            cur.execute("TRUNCATE stocks RESTART IDENTITY CASCADE;")
+    finally:
+        connection.close()
     yield
 
 
-def test_filter_symbols_no_existing_data():
+def test_filter_symbols_no_existing_data(conn):
     """Symbols with no price data should not be filtered out."""
-    conn = require_db()
-    schema.create_stocks_table(conn)
-    schema.create_stock_ohlcv_table(conn)
-
     # Create symbols but no price data
     upsert_stock(conn, "AAPL")
     upsert_stock(conn, "MSFT")
@@ -47,15 +71,10 @@ def test_filter_symbols_no_existing_data():
     )
 
     assert set(symbols_needing_update) == {"AAPL", "MSFT", "GOOGL"}
-    conn.close()
 
 
-def test_filter_symbols_up_to_date():
+def test_filter_symbols_up_to_date(conn):
     """Symbols with data up to expected market date should be filtered out."""
-    conn = require_db()
-    schema.create_stocks_table(conn)
-    schema.create_stock_ohlcv_table(conn)
-
     target_date = _expected_market_date()
 
     # AAPL has data up to target_date - should be filtered out
@@ -73,15 +92,10 @@ def test_filter_symbols_up_to_date():
 
     # Only MSFT should need updates
     assert symbols_needing_update == ["MSFT"]
-    conn.close()
 
 
-def test_filter_symbols_stale_data():
+def test_filter_symbols_stale_data(conn):
     """Symbols with stale data should not be filtered out."""
-    conn = require_db()
-    schema.create_stocks_table(conn)
-    schema.create_stock_ohlcv_table(conn)
-
     old_date = date.today() - timedelta(days=5)
 
     # AAPL has old data - should NOT be filtered out
@@ -99,15 +113,10 @@ def test_filter_symbols_stale_data():
 
     # Both should need updates
     assert set(symbols_needing_update) == {"AAPL", "MSFT"}
-    conn.close()
 
 
-def test_filter_symbols_mixed():
+def test_filter_symbols_mixed(conn):
     """Mixed scenario: some up-to-date, some stale, some missing."""
-    conn = require_db()
-    schema.create_stocks_table(conn)
-    schema.create_stock_ohlcv_table(conn)
-
     target_date = _expected_market_date()
     old_date = date.today() - timedelta(days=10)
 
@@ -135,28 +144,18 @@ def test_filter_symbols_mixed():
 
     # AAPL should be filtered out, others should remain
     assert set(symbols_needing_update) == {"MSFT", "GOOGL", "TSLA"}
-    conn.close()
 
 
-def test_filter_symbols_empty_list():
+def test_filter_symbols_empty_list(conn):
     """Empty symbol list should return empty list."""
-    conn = require_db()
-    schema.create_stocks_table(conn)
-    schema.create_stock_ohlcv_table(conn)
-
     symbols_needing_update = filter_symbols_needing_update(conn, [])
 
     assert symbols_needing_update == []
-    conn.close()
 
 
-def test_filter_new_rows_from_api_response():
+def test_filter_new_rows_from_api_response(conn):
     """Only insert rows newer than latest existing date."""
     from gefion.db.ingest import filter_new_rows
-    conn = require_db()
-    schema.create_stocks_table(conn)
-    schema.create_stock_ohlcv_table(conn)
-
     # Insert existing data up to 5 days ago
     old_date = date.today() - timedelta(days=5)
     aapl_id = upsert_stock(conn, "AAPL")
@@ -187,16 +186,11 @@ def test_filter_new_rows_from_api_response():
     assert new_rows[0]["date"] == date.today()
     # Oldest new row should be 4 days ago (day 5 is the existing one)
     assert new_rows[-1]["date"] == date.today() - timedelta(days=4)
-    conn.close()
 
 
-def test_filter_new_rows_no_existing_data():
+def test_filter_new_rows_no_existing_data(conn):
     """When no existing data, all API rows are new."""
     from gefion.db.ingest import filter_new_rows
-    conn = require_db()
-    schema.create_stocks_table(conn)
-    schema.create_stock_ohlcv_table(conn)
-
     aapl_id = upsert_stock(conn, "AAPL")
 
     # API returns 100 days, no existing data
@@ -216,16 +210,11 @@ def test_filter_new_rows_no_existing_data():
 
     # All 100 rows should be new
     assert len(new_rows) == 100
-    conn.close()
 
 
-def test_filter_new_rows_since_date():
+def test_filter_new_rows_since_date(conn):
     """filter_new_rows with since_date discards rows before the cutoff."""
     from gefion.db.ingest import filter_new_rows
-    conn = require_db()
-    schema.create_stocks_table(conn)
-    schema.create_stock_ohlcv_table(conn)
-
     aapl_id = upsert_stock(conn, "AAPL")
 
     # API returns rows spanning 2025-01-01 to 2025-01-10
@@ -242,16 +231,11 @@ def test_filter_new_rows_since_date():
     assert len(new_rows) == 5
     dates = [r["date"] for r in new_rows]
     assert all(d >= date(2025, 1, 6) for d in dates)
-    conn.close()
 
 
-def test_filter_new_rows_since_and_target_date():
+def test_filter_new_rows_since_and_target_date(conn):
     """filter_new_rows respects both since_date and target_date bounds."""
     from gefion.db.ingest import filter_new_rows
-    conn = require_db()
-    schema.create_stocks_table(conn)
-    schema.create_stock_ohlcv_table(conn)
-
     aapl_id = upsert_stock(conn, "AAPL")
 
     api_response = [
@@ -270,6 +254,5 @@ def test_filter_new_rows_since_and_target_date():
     dates = [r["date"] for r in new_rows]
     assert min(dates) == date(2025, 1, 4)
     assert max(dates) == date(2025, 1, 7)
-    conn.close()
 
 

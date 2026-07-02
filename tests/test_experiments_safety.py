@@ -91,11 +91,11 @@ class TestCheckDbHealth:
     def test_returns_dict_with_required_keys(self):
         """check_db_health returns a dict with ok and message keys."""
         from gefion.experiments.safety import check_db_health
-        from gefion.schema import test_db_url
+        from gefion.db.schema import test_db_url
 
-        import psycopg2
+        import psycopg
 
-        conn = psycopg2.connect(test_db_url())
+        conn = psycopg.connect(test_db_url())
         try:
             result = check_db_health(conn)
 

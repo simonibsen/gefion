@@ -54,6 +54,59 @@ def test_export_with_exchange_limit_uses_valid_schema(db_conn, tmp_path):
     assert (tmp_path / "features.csv").exists()
 
 
+@pytest.fixture
+def exchange_test_stocks(db_conn):
+    """Insert stocks on two exchanges, clean up afterwards."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO stocks (symbol, exchange) VALUES
+                ('XCHGTESTA', 'NASDAQ'),
+                ('XCHGTESTB', 'NASDAQ'),
+                ('XCHGTESTC', 'NYSE')
+            ON CONFLICT (symbol) DO UPDATE SET exchange = EXCLUDED.exchange
+            """
+        )
+    db_conn.commit()
+    yield
+    with db_conn.cursor() as cur:
+        cur.execute("DELETE FROM stocks WHERE symbol LIKE 'XCHGTEST%'")
+    db_conn.commit()
+
+
+def test_resolve_universe_symbols_filters_by_exchange(db_conn, exchange_test_stocks):
+    """universe.exchange filters symbols by the stocks.exchange column."""
+    from gefion.ml.dataset import resolve_universe_symbols
+
+    symbols = resolve_universe_symbols(db_conn, {"exchange": "NYSE"})
+
+    assert "XCHGTESTC" in symbols, f"NYSE symbol missing: {sorted(symbols)}"
+    assert "XCHGTESTA" not in symbols and "XCHGTESTB" not in symbols, (
+        f"exchange filter ignored — NASDAQ symbols returned: {sorted(symbols)}"
+    )
+
+
+def test_resolve_universe_symbols_exchange_with_limit(db_conn, exchange_test_stocks):
+    """universe.exchange composes with universe.limit."""
+    from gefion.ml.dataset import resolve_universe_symbols
+
+    symbols = resolve_universe_symbols(db_conn, {"exchange": "NASDAQ", "limit": 1})
+
+    assert len(symbols) == 1
+    assert symbols[0] not in ("XCHGTESTC",), "limit must apply within the exchange"
+
+
+def test_resolve_universe_symbols_explicit_symbols_win(db_conn, exchange_test_stocks):
+    """Explicit universe.symbols bypasses exchange/limit resolution."""
+    from gefion.ml.dataset import resolve_universe_symbols
+
+    symbols = resolve_universe_symbols(
+        db_conn, {"symbols": ["XCHGTESTA"], "exchange": "NYSE", "limit": 1}
+    )
+
+    assert symbols == ["XCHGTESTA"]
+
+
 def test_export_with_symbols_uses_valid_schema(db_conn, tmp_path):
     """Test that explicit symbol list uses valid schema."""
     from gefion.ml.dataset import export_dataset_artifacts
@@ -94,15 +147,9 @@ def test_stocks_table_schema_documented(db_conn):
         columns = [row[0] for row in cur.fetchall()]
 
     # Document expected columns - update if schema changes
-    # Note: 'exchange' is NOT in this list (it doesn't exist)
-    expected_core_columns = {"id", "symbol"}
+    expected_core_columns = {"id", "symbol", "exchange"}
     assert expected_core_columns.issubset(set(columns)), (
         f"Missing core columns. Found: {columns}"
-    )
-
-    # Explicitly verify exchange does NOT exist (to document this fact)
-    assert "exchange" not in columns, (
-        "stocks.exchange now exists - update code that works around its absence"
     )
 
 
