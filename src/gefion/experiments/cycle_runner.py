@@ -12,6 +12,7 @@ import psycopg
 
 from gefion.experiments.core import ExperimentConfig, ExperimentRunner
 from gefion.experiments.discovery import run_discovery
+from gefion.experiments.production import PROBATION_DAYS
 from gefion.experiments.principles import load_principles
 from gefion.experiments.safety import run_preflight_checks
 from gefion.experiments.statistical import apply_fdr, compute_holdout_pvalue
@@ -718,10 +719,16 @@ class CycleRunner:
                         """, (f"exp_{fn_name}",))
                         logger.info(f"Promoted feature function + definition exp_{fn_name} to active (experiment #{exp_id})")
 
-                    # Also mark the experiment as promoted
+                    # Mark promoted and open the probation window (FR-027):
+                    # probation-check auto-demotes if performance degrades
                     cur.execute(
-                        "UPDATE experiments SET promoted_at = NOW() WHERE id = %s",
-                        (exp_id,),
+                        """
+                        UPDATE experiments
+                        SET promoted_at = NOW(),
+                            probation_until = NOW() + make_interval(days => %s::int)
+                        WHERE id = %s
+                        """,
+                        (PROBATION_DAYS, exp_id),
                     )
 
         return promoted

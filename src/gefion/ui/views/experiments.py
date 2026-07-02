@@ -190,7 +190,15 @@ def render_list_section():
                         total_trials,
                         completed_trials,
                         best_score,
-                        created_at
+                        created_at,
+                        CASE
+                            WHEN demoted_at IS NOT NULL THEN '🔴 Demoted'
+                            WHEN results->'probation'->>'status' = 'passed' THEN '🟢 Promoted'
+                            WHEN probation_until IS NOT NULL AND probation_until > NOW()
+                                THEN '🟡 On probation'
+                            WHEN promoted_at IS NOT NULL THEN '🟢 Promoted'
+                            ELSE ''
+                        END as lifecycle
                     FROM experiments
                     WHERE 1=1
                 """
@@ -216,7 +224,8 @@ def render_list_section():
                 experiments,
                 columns=[
                     "ID", "Name", "Type", "Status", "Objective",
-                    "Search", "Trials", "Done", "Best Score", "Created"
+                    "Search", "Trials", "Done", "Best Score", "Created",
+                    "Lifecycle"
                 ]
             )
             st.dataframe(df, use_container_width=True)
@@ -975,6 +984,9 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
                 trials_df = pd.DataFrame(data["trials"])
                 st.dataframe(trials_df, use_container_width=True)
 
+            # Lifecycle: promotion / probation / demotion state
+            _render_lifecycle_status(exp_id)
+
             # Charts (trials scatter + heatmap when the search space is 2D)
             _render_experiment_charts(exp_id)
 
@@ -985,6 +997,48 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
             st.code(result.stdout)
     else:
         st.error(f"Failed: {result.stderr}")
+
+
+def _render_lifecycle_status(exp_id: int):
+    """Show promotion / probation / demotion state for an experiment."""
+    try:
+        from gefion.ui.components.database import get_connection
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT promoted_at, probation_until, demoted_at,
+                           results->'probation'->>'status',
+                           results->'probation'->>'reason'
+                    FROM experiments WHERE id = %s
+                    """,
+                    (exp_id,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return
+        promoted_at, probation_until, demoted_at, probation_status, reason = row
+
+        if demoted_at:
+            st.error(
+                f":material/trending_down: **Demoted** on {demoted_at:%Y-%m-%d}: "
+                f"{reason or 'performance degraded during probation'}"
+            )
+        elif probation_status == "passed":
+            st.success(":material/verified: **Promoted** — probation passed")
+        elif probation_until:
+            from datetime import datetime, timezone
+            days_left = max(0, (probation_until - datetime.now(timezone.utc)).days)
+            st.warning(
+                f":material/pending: **On probation** — {days_left} day(s) remaining. "
+                "Auto-demoted if realized performance degrades "
+                "(checked on every `gefion data-update`)."
+            )
+        elif promoted_at:
+            st.success(f":material/verified: **Promoted** on {promoted_at:%Y-%m-%d}")
+    except Exception:
+        pass  # lifecycle banner is informational only
 
 
 def render_apply_to_production(exp_id: int):
