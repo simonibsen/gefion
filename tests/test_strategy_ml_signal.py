@@ -335,3 +335,32 @@ class TestMLSignalLookAheadProtection:
         # Default should be database
         strategy = MLSignalStrategy()
         assert strategy.prediction_source == "database"
+
+
+class TestGetPositionsFromEnginePortfolio:
+    """_get_positions must handle the backtest engine's Portfolio shape.
+
+    Portfolio.positions values are plain dicts ({"shares": n, "avg_price": p}),
+    not objects with a .shares attribute. Returning the raw dict as a share
+    count crashed the engine's sell path (min() comparing int with dict).
+    """
+
+    def test_portfolio_object_with_dict_positions(self):
+        from gefion.backtest.portfolio import Portfolio
+        from gefion.strategies.ml_signal import MLSignalStrategy
+
+        strategy = MLSignalStrategy(model_name="m", model_version="v")
+        portfolio = Portfolio(initial_cash=10000.0)
+        portfolio.positions["AAPL"] = {"shares": 42, "avg_price": 100.0}
+
+        positions = strategy._get_positions(portfolio)
+
+        assert positions == {"AAPL": 42}
+
+    def test_plain_dict_positions_still_work(self):
+        from gefion.strategies.ml_signal import MLSignalStrategy
+
+        strategy = MLSignalStrategy(model_name="m", model_version="v")
+
+        assert strategy._get_positions({"AAPL": {"shares": 7}}) == {"AAPL": 7}
+        assert strategy._get_positions({"AAPL": 7}) == {"AAPL": 7}

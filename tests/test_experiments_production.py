@@ -92,6 +92,8 @@ class TestApplyValidation:
                                experiment_type="hyperparameter")
         with patch("gefion.experiments.production._load_experiment", return_value=exp), \
              patch("gefion.experiments.production._load_manifest", return_value=_manifest()), \
+             patch("gefion.experiments.production._max_price_date", return_value=date(2026, 4, 2)), \
+             patch("gefion.experiments.production._db_conn"), \
              patch("gefion.experiments.production._run_cli", return_value={"status": "ok"}) as run_cli, \
              patch("gefion.experiments.production._record_artifacts"):
             result = apply_experiment(42)
@@ -114,6 +116,8 @@ class TestApplyOrchestration:
             run_cli.side_effect = None
         with patch("gefion.experiments.production._load_experiment", return_value=exp), \
              patch("gefion.experiments.production._load_manifest", return_value=_manifest()), \
+             patch("gefion.experiments.production._max_price_date", return_value=date(2026, 4, 2)), \
+             patch("gefion.experiments.production._db_conn"), \
              patch("gefion.experiments.production._run_cli", run_cli), \
              patch("gefion.experiments.production._record_artifacts") as record:
             result = apply_experiment(
@@ -362,3 +366,95 @@ class TestApplyUI:
     def test_manual_command_walkthrough_removed(self, view_source):
         """The copy-these-commands markdown is replaced by the button."""
         assert "Retrain a model** with the best settings" not in view_source
+
+
+class TestBacktestWindow:
+    """The predict/backtest window must anchor to available data, not the clock."""
+
+    def test_window_ends_at_max_data_date_when_stale(self):
+        from datetime import date
+        from gefion.experiments.production import backtest_window
+
+        start, end = backtest_window(max_data_date=date(2026, 4, 2),
+                                     backtest_days=90, today=date(2026, 7, 2))
+        assert end == date(2026, 4, 2)
+        assert (end - start).days == 90
+
+    def test_window_ends_today_when_data_is_fresh(self):
+        from datetime import date
+        from gefion.experiments.production import backtest_window
+
+        start, end = backtest_window(max_data_date=date(2026, 7, 2),
+                                     backtest_days=30, today=date(2026, 7, 2))
+        assert end == date(2026, 7, 2)
+        assert (end - start).days == 30
+
+    def test_window_handles_missing_data_date(self):
+        from datetime import date
+        from gefion.experiments.production import backtest_window
+
+        start, end = backtest_window(max_data_date=None,
+                                     backtest_days=30, today=date(2026, 7, 2))
+        assert end == date(2026, 7, 2)
+
+
+class TestDatasetBuildCmd:
+    """Dataset rebuild must reproduce the manifest's horizons and thresholds."""
+
+    def test_cmd_uses_manifest_horizons_and_thresholds(self):
+        from gefion.experiments.production import dataset_build_cmd
+
+        manifest = {
+            "name": "baseline",
+            "format": "parquet",
+            "universe": {"exchange": "NASDAQ"},
+            "horizons_days": [7, 30],
+            "label_spec": {"thresholds": {"7": {"weak": 0.02, "strong": 0.05},
+                                          "30": {"weak": 0.05, "strong": 0.1}}},
+        }
+        cmd = dataset_build_cmd(manifest, "baseline", "applied-exp-41")
+
+        joined = " ".join(cmd)
+        assert "--horizons 7,30" in joined
+        assert "--weak-thresholds 0.02,0.05" in joined
+        assert "--strong-thresholds 0.05,0.1" in joined
+        assert "--exchange NASDAQ" in joined
+        assert "--export" in joined  # without it only a manifest is written
+        assert "--force" in joined  # derived versions must be idempotent on retry
+
+    def test_cmd_omits_thresholds_when_manifest_lacks_them(self):
+        from gefion.experiments.production import dataset_build_cmd
+
+        manifest = {"name": "baseline", "horizons_days": [7],
+                    "universe": {"exchange": "NASDAQ"}}
+        cmd = dataset_build_cmd(manifest, "baseline", "v-test")
+
+        joined = " ".join(cmd)
+        assert "--horizons 7" in joined
+        assert "--weak-thresholds" not in joined
+
+
+class TestRunCliJsonParsing:
+    """CLI stages emit progress lines before the final JSON document."""
+
+    def test_parses_last_json_line_of_streamed_output(self):
+        from unittest.mock import patch, MagicMock
+        from gefion.experiments.production import _run_cli
+
+        stdout = (
+            '{"status": "ok", "message": "progress", "phase": "running"}\n'
+            '{"status": "ok", "metrics": {"sharpe_ratio": 1.2}}\n'
+        )
+        proc = MagicMock(returncode=0, stdout=stdout, stderr="")
+        with patch("gefion.experiments.production.subprocess.run", return_value=proc):
+            result = _run_cli(["backtest", "run"])
+
+        assert result["metrics"]["sharpe_ratio"] == 1.2
+
+    def test_single_json_document_still_parses(self):
+        from unittest.mock import patch, MagicMock
+        from gefion.experiments.production import _run_cli
+
+        proc = MagicMock(returncode=0, stdout='{"status": "ok", "x": 1}\n', stderr="")
+        with patch("gefion.experiments.production.subprocess.run", return_value=proc):
+            assert _run_cli(["ml", "train"])["x"] == 1

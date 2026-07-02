@@ -425,7 +425,7 @@ class CycleRunner:
                         _emit("proposed",
                               f"  Reusing existing feature: {existing} (already computed)",
                               {"function_name": existing, "reused": True})
-                        feature_config = {"function_name": existing.replace("exp_", "")}
+                        feature_config = self._reused_feature_config(existing)
                     else:
                         # Generate a new function
                         body = _generate_function_body(principle_id, design)
@@ -733,6 +733,37 @@ class CycleRunner:
 
         return promoted
 
+    def _reused_feature_config(self, existing_name: str) -> Dict[str, Any]:
+        """Build feature_config for a feature function reused from the registry.
+
+        The stored function body MUST travel with the config: the evaluator
+        only knows builtin templates by name, so a reused AI-generated
+        function without its body silently degrades to an all-NaN feature,
+        and promotion skips configs without a body.
+        """
+        config: Dict[str, Any] = {"function_name": existing_name.replace("exp_", "")}
+        try:
+            # Direct connection: the process-global pool may be bound to a
+            # different database than self.db_url (or exhausted); this is a
+            # one-off query at proposal time, not a hot path.
+            with psycopg.connect(self.db_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT function_body FROM feature_functions WHERE name = %s",
+                        (existing_name,),
+                    )
+                    row = cur.fetchone()
+            if row and row[0]:
+                config["function_body"] = row[0]
+            else:
+                logger.warning(
+                    f"Reused feature {existing_name} has no stored function body; "
+                    "the evaluator will not be able to compute it"
+                )
+        except Exception as e:
+            logger.warning(f"Could not load function body for {existing_name}: {e}")
+        return config
+
     def _find_existing_feature(self, fn_name: str, principle_id: str) -> Optional[str]:
         """Check if a feature function already exists for this principle.
 
@@ -781,29 +812,19 @@ class CycleRunner:
                 return None
 
             import json as _json
+            from gefion.experiments.production import dataset_build_cmd
+
             manifest = _json.loads(manifest_path.read_text())
             name = manifest.get("name", "cycle")
-            horizons_str = ",".join(str(h) for h in horizons)
-
-            # Build new version
             new_version = f"cycle-{cycle_id}"
 
-            cmd = [
-                "gefion", "ml", "dataset-build",
-                "--name", name,
-                "--version", new_version,
-                "--horizons", horizons_str,
-                "--format", manifest.get("format", "parquet"),
-                "--json",
-            ]
-
-            # Add exchange if in manifest
-            universe = manifest.get("universe", {})
-            if universe.get("exchange"):
-                cmd.extend(["--exchange", universe["exchange"]])
+            # Shared command builder: reproduces the manifest's horizons and
+            # thresholds, and passes --export so the files training needs
+            # actually get written
+            cmd = ["gefion", *dataset_build_cmd(manifest, name, new_version)]
 
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=120,
+                cmd, capture_output=True, text=True, timeout=300,
             )
 
             if result.returncode == 0:

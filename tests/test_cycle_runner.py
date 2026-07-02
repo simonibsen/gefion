@@ -342,3 +342,83 @@ class TestCycleRunnerUI:
         from pathlib import Path
         content = Path("src/gefion/ui/views/experiments.py").read_text()
         assert "cycle-run" in content
+
+
+class TestReusedFeatureConfig:
+    """Reusing an existing experimental feature must carry its function body.
+
+    Without the body, the evaluator can't compute the feature (it only knows
+    builtin templates by name), trials silently degrade to all-NaN features,
+    and _promote_fdr_survivors skips promotion. Cycle 10 hit exactly this.
+    """
+
+    def test_reused_feature_config_includes_body(self):
+        """_reused_feature_config loads the stored function body from the DB."""
+        import os
+        import psycopg
+        import pytest as _pytest
+        from gefion.db import schema
+        from gefion.experiments.cycle_runner import CycleRunner
+
+        if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+            _pytest.skip("DB tests disabled")
+        db_url = schema.test_db_url()
+        try:
+            conn = psycopg.connect(db_url)
+        except psycopg.OperationalError:
+            _pytest.skip("DB not available")
+        conn.autocommit = True
+
+        body = "import pandas as pd\n\ndef compute(df, window=10):\n    return df['close'].pct_change().rolling(window).std().fillna(0)\n"
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO feature_functions (name, version, status, language, function_body)
+                VALUES ('exp_reuse_body_test', '1', 'experimental', 'python', %s)
+                """,
+                (body,),
+            )
+        try:
+            runner = CycleRunner(db_url)
+            config = runner._reused_feature_config("exp_reuse_body_test")
+
+            assert config["function_name"] == "reuse_body_test"
+            assert config["function_body"] == body
+        finally:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM feature_functions WHERE name = 'exp_reuse_body_test'")
+            conn.close()
+
+    def test_reused_feature_config_without_stored_body(self):
+        """A registry row with an empty body still yields a usable config."""
+        import os
+        import psycopg
+        import pytest as _pytest
+        from gefion.db import schema
+        from gefion.experiments.cycle_runner import CycleRunner
+
+        if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+            _pytest.skip("DB tests disabled")
+        db_url = schema.test_db_url()
+        try:
+            conn = psycopg.connect(db_url)
+        except psycopg.OperationalError:
+            _pytest.skip("DB not available")
+        conn.autocommit = True
+
+        runner = CycleRunner(db_url)
+        config = runner._reused_feature_config("exp_missing_from_registry")
+
+        assert config == {"function_name": "missing_from_registry"}
+
+
+class TestRebuildDatasetCmd:
+    """_rebuild_dataset must produce dataset files, not just a manifest."""
+
+    def test_rebuild_uses_shared_export_cmd(self):
+        """The rebuild must reuse production.dataset_build_cmd (with --export)."""
+        import inspect
+        from gefion.experiments.cycle_runner import CycleRunner
+
+        source = inspect.getsource(CycleRunner._rebuild_dataset)
+        assert "dataset_build_cmd" in source

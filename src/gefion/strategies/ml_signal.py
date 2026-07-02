@@ -464,8 +464,11 @@ class MLSignalStrategy:
                 for sym, pos in portfolio.items()
             }
         elif hasattr(portfolio, "positions"):
+            # Portfolio.positions values are plain dicts ({"shares", "avg_price"}),
+            # not objects — returning the raw dict crashes the engine's sell path
             return {
-                sym: pos.shares if hasattr(pos, "shares") else pos
+                sym: (pos.get("shares", 0) if isinstance(pos, dict)
+                      else pos.shares if hasattr(pos, "shares") else pos)
                 for sym, pos in portfolio.positions.items()
             }
         return {}
