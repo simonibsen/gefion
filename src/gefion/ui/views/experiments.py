@@ -1,6 +1,7 @@
 """Experiments page - AI-driven parameter optimization."""
 
 import streamlit as st
+import streamlit.components.v1 as components
 import subprocess
 import sys
 from gefion.ui.components.chat import render_chat_widget
@@ -9,6 +10,74 @@ import os
 from gefion.observability import create_span, set_attributes
 
 AGENT_DECIDES = "Agent decides"
+
+
+def _render_experiment_charts(exp_id: int):
+    """Render D3 charts for a completed experiment's trials."""
+    try:
+        from gefion.ui.components.database import get_connection
+        from gefion.charts.queries import fetch_experiment_trials_for_chart
+        from gefion.charts.experiments import charts_for_experiment_type, build_heatmap_data
+        from gefion.charts.d3.renderers import create_experiment_trials, create_experiment_heatmap
+
+        with create_span("ui.experiments.render_charts", experiment_id=exp_id) as span:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT experiment_type FROM experiments WHERE id = %s", (exp_id,))
+                    row = cur.fetchone()
+                experiment_type = row[0] if row else ""
+                trials = fetch_experiment_trials_for_chart(conn, exp_id)
+            set_attributes(span, trial_count=len(trials))
+
+            if not trials:
+                return
+
+            st.markdown("### Charts")
+            html = create_experiment_trials(trials, title=f"Trials — Experiment {exp_id}")
+            components.html(html, height=450, scrolling=False)
+
+            if "heatmap" in charts_for_experiment_type(experiment_type):
+                heatmap = build_heatmap_data(trials)
+                if heatmap:
+                    html = create_experiment_heatmap(
+                        heatmap["cells"],
+                        x_label=heatmap["x_label"],
+                        y_label=heatmap["y_label"],
+                        title="Parameter Sensitivity",
+                    )
+                    components.html(html, height=550, scrolling=False)
+    except Exception as e:
+        st.caption(f"Charts unavailable: {e}")
+
+
+def _render_cycle_fdr_chart(cycle_id: int):
+    """Render the FDR summary chart for a cycle's evaluated experiments."""
+    try:
+        from gefion.ui.components.database import get_connection
+        from gefion.charts.queries import fetch_cycle_fdr_for_chart
+        from gefion.charts.d3.renderers import create_experiment_fdr
+
+        with create_span("ui.experiments.render_fdr_chart", cycle_id=cycle_id) as span:
+            with get_connection() as conn:
+                fdr_data = fetch_cycle_fdr_for_chart(conn, cycle_id)
+            set_attributes(span, experiment_count=len(fdr_data["experiments"]))
+
+            if not fdr_data["experiments"]:
+                st.caption("No holdout-evaluated experiments to chart yet.")
+                return
+
+            html = create_experiment_fdr(
+                fdr_data["experiments"],
+                fdr_rate=fdr_data["fdr_rate"],
+                title=f"FDR Summary — Cycle {cycle_id}",
+            )
+            components.html(html, height=450, scrolling=False)
+            st.caption(
+                "Experiments below the threshold line survived FDR correction "
+                "(green = promoted, red = rejected)."
+            )
+    except Exception as e:
+        st.caption(f"FDR chart unavailable: {e}")
 
 
 def get_page_context():
@@ -923,6 +992,9 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
                 trials_df = pd.DataFrame(data["trials"])
                 st.dataframe(trials_df, use_container_width=True)
 
+            # Charts (trials scatter + heatmap when the search space is 2D)
+            _render_experiment_charts(exp_id)
+
         except json.JSONDecodeError:
             st.code(result.stdout)
     else:
@@ -1601,6 +1673,8 @@ def render_cycles_section():
                                      "FDR Survived"]
                         )
                         st.dataframe(exp_df, use_container_width=True)
+
+                        _render_cycle_fdr_chart(cycle_id)
 
                 except Exception as e:
                     st.error(f"Error loading cycle details: {e}")

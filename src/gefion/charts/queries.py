@@ -397,3 +397,98 @@ def fetch_confusion_matrix(
                 matrix[labels.index(actual_class)][labels.index(predicted)] += 1
         set_attributes(span, row_count=len(rows))
         return {"labels": labels, "matrix": matrix}
+
+
+def fetch_experiment_trials_for_chart(
+    conn: psycopg.Connection,
+    experiment_id: int,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch an experiment's trials in the shape the trials scatter chart expects.
+
+    The best trial (per the experiment's objective_direction) is flagged
+    promoted=True so the chart highlights it.
+
+    Returns:
+        List of dicts with keys: trial, score, parameters, promoted
+    """
+    with create_span("charts.queries.fetch_experiment_trials_for_chart",
+                     experiment_id=experiment_id) as span:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT t.trial_number, t.score, t.params, e.objective_direction
+                FROM experiment_trials t
+                JOIN experiments e ON t.experiment_id = e.id
+                WHERE t.experiment_id = %s AND t.score IS NOT NULL
+                ORDER BY t.trial_number ASC
+                """,
+                (experiment_id,),
+            )
+            rows = cur.fetchall()
+
+        if not rows:
+            set_attributes(span, row_count=0)
+            return []
+
+        direction = rows[0][3] or "maximize"
+        scores = [float(row[1]) for row in rows]
+        best_score = min(scores) if direction == "minimize" else max(scores)
+
+        result = [
+            {
+                "trial": row[0],
+                "score": float(row[1]),
+                "parameters": row[2] or {},
+                "promoted": float(row[1]) == best_score,
+            }
+            for row in rows
+        ]
+        set_attributes(span, row_count=len(result), table="experiment_trials")
+        return result
+
+
+def fetch_cycle_fdr_for_chart(
+    conn: psycopg.Connection,
+    cycle_id: int,
+) -> Dict[str, Any]:
+    """
+    Fetch a cycle's evaluated experiments in the shape the FDR chart expects.
+
+    Experiments without a holdout_p_value are excluded — the chart's log
+    scale cannot place them, and they were never part of the FDR family.
+
+    Returns:
+        {"experiments": [{"name", "p_value", "promoted"}], "fdr_rate": float}
+    """
+    with create_span("charts.queries.fetch_cycle_fdr_for_chart", cycle_id=cycle_id) as span:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT fdr_rate FROM experiment_cycles WHERE id = %s",
+                (cycle_id,),
+            )
+            cycle_row = cur.fetchone()
+            cur.execute(
+                """
+                SELECT name, holdout_p_value, fdr_survived
+                FROM experiments
+                WHERE cycle_id = %s AND holdout_p_value IS NOT NULL
+                ORDER BY holdout_p_value ASC
+                """,
+                (cycle_id,),
+            )
+            rows = cur.fetchall()
+
+        fdr_rate = float(cycle_row[0]) if cycle_row and cycle_row[0] is not None else 0.10
+        experiments = [
+            {
+                "name": row[0],
+                # Clamp to a representable log-scale value; p-values of exactly
+                # 0 come from degenerate tests but must still plot.
+                "p_value": max(float(row[1]), 1e-10),
+                "promoted": bool(row[2]),
+            }
+            for row in rows
+        ]
+        set_attributes(span, row_count=len(experiments), table="experiments")
+        return {"experiments": experiments, "fdr_rate": fdr_rate}

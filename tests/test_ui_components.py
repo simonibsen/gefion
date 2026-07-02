@@ -151,6 +151,32 @@ class TestUIStructure:
             "charts.py must import streamlit.components.v1 as components"
         )
 
+    def test_experiments_view_renders_trials_chart(self, ui_dir):
+        """Experiment results should render the D3 trials scatter inline."""
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert "create_experiment_trials" in content, (
+            "experiments.py must render the trials chart in the results section"
+        )
+        assert "fetch_experiment_trials_for_chart" in content
+
+    def test_experiments_view_renders_heatmap_when_applicable(self, ui_dir):
+        """Two-parameter experiments should get a sensitivity heatmap."""
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert "create_experiment_heatmap" in content
+        assert "build_heatmap_data" in content
+
+    def test_experiments_view_renders_fdr_chart_in_cycles(self, ui_dir):
+        """Cycle details should render the FDR summary chart."""
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert "create_experiment_fdr" in content
+        assert "fetch_cycle_fdr_for_chart" in content
+
+    def test_experiments_view_uses_components_html(self, ui_dir):
+        """Experiment charts must embed D3 HTML via components.html()."""
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert "import streamlit.components.v1 as components" in content
+        assert "components.html(" in content
+
     def test_assistant_has_render_function(self, ui_dir):
         """Assistant view should have render_assistant function."""
         content = (ui_dir / "views" / "assistant.py").read_text()

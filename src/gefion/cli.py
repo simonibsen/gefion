@@ -10936,6 +10936,113 @@ def chart_pred_vs_actual(
         emit("Pred vs actual chart generated", data={"path": str(chart_path)}, json_output=json_output)
 
 
+@chart_app.command("experiment-trials")
+def chart_experiment_trials(
+    experiment_id: int = typer.Argument(..., help="Experiment ID"),
+    db_url: Optional[str] = typer.Option(None, "--db-url"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate trial performance scatter for an experiment (best trial highlighted)."""
+    with create_span("cli.chart.experiment_trials", experiment_id=experiment_id):
+        try:
+            from gefion.charts.queries import fetch_experiment_trials_for_chart
+            from gefion.charts.experiments import charts_for_experiment_type, build_heatmap_data
+            from gefion.charts.d3.renderers import create_experiment_trials, create_experiment_heatmap
+            from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
+        except ImportError as e:
+            emit(f"Charts not available: {e}", json_output=json_output, error=True)
+            emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        with db_connection(db_url) as conn:
+            trials = fetch_experiment_trials_for_chart(conn, experiment_id)
+
+        if not trials:
+            emit_error(f"No trials found for experiment {experiment_id}", json_output=json_output)
+            raise typer.Exit(1)
+
+        html = create_experiment_trials(trials, title=f"Trials — Experiment {experiment_id}")
+        filename = generate_chart_filename(f"experiment_{experiment_id}", "trials")
+        chart_path = save_html_string(html, filename)
+
+        # Companion heatmap when exactly two numeric parameters vary
+        heatmap_path = None
+        heatmap = build_heatmap_data(trials)
+        if heatmap:
+            heatmap_html = create_experiment_heatmap(
+                heatmap["cells"],
+                x_label=heatmap["x_label"],
+                y_label=heatmap["y_label"],
+                title=f"Parameter Sensitivity — Experiment {experiment_id}",
+            )
+            heatmap_filename = generate_chart_filename(f"experiment_{experiment_id}", "heatmap")
+            heatmap_path = save_html_string(heatmap_html, heatmap_filename)
+
+        if not no_open and not json_output:
+            open_in_browser(chart_path)
+
+        emit(
+            f"Experiment trials chart generated ({len(trials)} trials)",
+            data={
+                "chart_path": str(chart_path),
+                "heatmap_path": str(heatmap_path) if heatmap_path else None,
+                "trial_count": len(trials),
+            },
+            json_output=json_output,
+        )
+
+
+@chart_app.command("experiment-fdr")
+def chart_experiment_fdr(
+    cycle_id: int = typer.Argument(..., help="Experiment cycle ID"),
+    db_url: Optional[str] = typer.Option(None, "--db-url"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Generate FDR cycle summary chart (p-values vs threshold, promoted vs rejected)."""
+    with create_span("cli.chart.experiment_fdr", cycle_id=cycle_id):
+        try:
+            from gefion.charts.queries import fetch_cycle_fdr_for_chart
+            from gefion.charts.d3.renderers import create_experiment_fdr
+            from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
+        except ImportError as e:
+            emit(f"Charts not available: {e}", json_output=json_output, error=True)
+            emit("Install with: pip install 'gefion[charts]'", json_output=json_output, error=True)
+            raise typer.Exit(1)
+
+        with db_connection(db_url) as conn:
+            fdr_data = fetch_cycle_fdr_for_chart(conn, cycle_id)
+
+        if not fdr_data["experiments"]:
+            emit_error(
+                f"No evaluated experiments (with holdout p-values) in cycle {cycle_id}",
+                json_output=json_output,
+            )
+            raise typer.Exit(1)
+
+        html = create_experiment_fdr(
+            fdr_data["experiments"],
+            fdr_rate=fdr_data["fdr_rate"],
+            title=f"FDR Summary — Cycle {cycle_id}",
+        )
+        filename = generate_chart_filename(f"cycle_{cycle_id}", "fdr")
+        chart_path = save_html_string(html, filename)
+
+        if not no_open and not json_output:
+            open_in_browser(chart_path)
+
+        emit(
+            f"FDR summary chart generated ({len(fdr_data['experiments'])} experiments)",
+            data={
+                "chart_path": str(chart_path),
+                "experiment_count": len(fdr_data["experiments"]),
+                "fdr_rate": fdr_data["fdr_rate"],
+            },
+            json_output=json_output,
+        )
+
+
 @app.command("ui")
 def launch_ui(
     port: int = typer.Option(8501, "--port", "-p", help="Port to run the UI on"),
