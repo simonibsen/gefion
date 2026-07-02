@@ -422,3 +422,114 @@ class TestRebuildDatasetCmd:
 
         source = inspect.getsource(CycleRunner._rebuild_dataset)
         assert "dataset_build_cmd" in source
+
+
+class TestEvaluateCycleFailClosed:
+    """FDR survival requires a real holdout p-value (FR-020/021).
+
+    The original implementation used best_score as a p-value proxy, so
+    experiments that were never holdout-evaluated (p-value NULL) could
+    "survive FDR" — cycles 10/11 promoted baseline clones this way.
+    """
+
+    @staticmethod
+    def _db():
+        import os
+        import psycopg
+        import pytest as _pytest
+        from gefion.db import schema
+
+        if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+            _pytest.skip("DB tests disabled")
+        try:
+            conn = psycopg.connect(schema.test_db_url())
+        except psycopg.OperationalError:
+            _pytest.skip("DB not available")
+        conn.autocommit = True
+        return conn, schema.test_db_url()
+
+    @staticmethod
+    def _seed_cycle(conn):
+        from datetime import date, timedelta
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO experiment_cycles (name, holdout_start_date, holdout_end_date)
+                VALUES ('fdr-closed-cycle', %s, %s) RETURNING id
+                """,
+                (date.today() - timedelta(days=42), date.today()),
+            )
+            return cur.fetchone()[0]
+
+    @staticmethod
+    def _seed_experiment(conn, name, p_value):
+        from psycopg.types.json import Json
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO experiments
+                    (name, experiment_type, config, status, best_score, holdout_p_value)
+                VALUES (%s, 'feature_engineering', %s, 'completed', 0.03, %s)
+                RETURNING id
+                """,
+                (name, Json({}), p_value),
+            )
+            return cur.fetchone()[0]
+
+    def test_experiment_without_pvalue_cannot_survive(self):
+        from gefion.experiments.cycle_runner import CycleRunner
+
+        conn, db_url = self._db()
+        cycle_id = self._seed_cycle(conn)
+        exp_id = self._seed_experiment(conn, "fdr-closed-nopval", None)
+        try:
+            runner = CycleRunner(db_url)
+            result = runner._evaluate_cycle(cycle_id=cycle_id, experiment_ids=[exp_id])
+
+            assert result["survivors"] == 0
+            assert exp_id not in result["survivor_ids"]
+            assert exp_id in result["unevaluated_ids"]
+            with conn.cursor() as cur:
+                cur.execute("SELECT fdr_survived FROM experiments WHERE id = %s", (exp_id,))
+                assert cur.fetchone()[0] is False
+        finally:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM experiments WHERE id = %s", (exp_id,))
+                cur.execute("DELETE FROM experiment_cycles WHERE id = %s", (cycle_id,))
+            conn.close()
+
+    def test_real_pvalues_gate_survival(self):
+        from gefion.experiments.cycle_runner import CycleRunner
+
+        conn, db_url = self._db()
+        cycle_id = self._seed_cycle(conn)
+        strong = self._seed_experiment(conn, "fdr-closed-strong", 0.001)
+        weak = self._seed_experiment(conn, "fdr-closed-weak", 0.9)
+        unevaluated = self._seed_experiment(conn, "fdr-closed-null", None)
+        try:
+            runner = CycleRunner(db_url)
+            result = runner._evaluate_cycle(
+                cycle_id=cycle_id, experiment_ids=[strong, weak, unevaluated]
+            )
+
+            assert result["survivor_ids"] == [strong]
+            assert result["unevaluated_ids"] == [unevaluated]
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, fdr_survived FROM experiments WHERE id = ANY(%s) ORDER BY id",
+                    ([strong, weak, unevaluated],),
+                )
+                by_id = dict(cur.fetchall())
+            assert by_id[strong] is True
+            assert by_id[weak] is False
+            assert by_id[unevaluated] is False
+        finally:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM experiments WHERE id = ANY(%s)",
+                    ([strong, weak, unevaluated],),
+                )
+                cur.execute("DELETE FROM experiment_cycles WHERE id = %s", (cycle_id,))
+            conn.close()
