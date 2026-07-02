@@ -12,6 +12,16 @@ runner = CliRunner()
 fixture_path = Path(__file__).parent / "fixtures" / "demo_time_series_daily_adjusted.json"
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_db_after_module():
+    """Restore canonical test DB state after this module's destructive cleanup (issue #29)."""
+    yield
+    if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+        return
+    from conftest import restore_test_db
+    restore_test_db()
+
+
 def require_db():
     if os.getenv("ENABLE_DB_TESTS", "0") != "1":
         pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
