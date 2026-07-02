@@ -277,13 +277,20 @@ class CycleRunner:
         self.runner = ExperimentRunner(db_url)
 
     def _get_conn(self):
-        """Get connection from shared pool."""
+        """Connection to self.db_url — pooled when the pool matches it.
+
+        The process-global pool may be bound to a different database than
+        this runner was constructed for; silently using it would read and
+        write the wrong database. Fall back to a direct connection then.
+        """
         from gefion.db import pool as db_pool
         p = db_pool.get_pool()
-        if p is not None:
+        if p is None:
+            db_pool.init_pool(self.db_url)
+            p = db_pool.get_pool()
+        if getattr(p, "conninfo", "") == self.db_url:
             return p.connection()
-        db_pool.init_pool(self.db_url)
-        return db_pool.get_pool().connection()
+        return psycopg.connect(self.db_url)
 
     def run_cycle(self, cycle_id: int, on_progress: Optional[callable] = None) -> Dict[str, Any]:
         """Execute a full autonomous experiment cycle.
@@ -507,6 +514,12 @@ class CycleRunner:
             # 6. Evaluate with FDR
             _emit("evaluating", "Applying FDR correction to filter false discoveries...")
             fdr_results = self._evaluate_cycle(cycle_id, proposed_ids)
+            unevaluated = fdr_results.get("unevaluated_ids", [])
+            if unevaluated:
+                _emit("evaluating",
+                      f"{len(unevaluated)} experiment(s) have no holdout p-value and "
+                      f"cannot survive FDR (fail-closed): {unevaluated}",
+                      {"unevaluated_ids": unevaluated})
 
             # 6b. Promote FDR survivors
             survivor_ids = fdr_results.get("survivor_ids", [])
@@ -1084,33 +1097,48 @@ class CycleRunner:
         return results
 
     def _evaluate_cycle(self, cycle_id: int, experiment_ids: List[int]) -> Dict[str, Any]:
-        """Collect results and apply FDR correction."""
+        """Apply FDR correction over the cycle's holdout p-values.
+
+        Fail-closed (FR-020/021): an experiment with no holdout p-value was
+        never holdout-evaluated and CANNOT survive — a best-score proxy would
+        let baseline clones and broken features through, which is exactly
+        what promotes noise to production.
+        """
         # Load cycle FDR rate
         cycle = self._load_cycle(cycle_id)
         fdr_rate = cycle.get("fdr_rate", 0.10)
 
-        # Collect best scores as proxy p-values
-        # (In a full implementation, these would be holdout p-values from
-        # compute_holdout_pvalue, but we use best_score as a simple proxy)
-        scores = []
-        valid_ids = []
-        for exp_id in experiment_ids:
-            try:
-                exp = self.runner.get(exp_id)
-                if exp and exp.get("status") == "completed" and exp.get("best_score") is not None:
-                    scores.append(float(exp["best_score"]))
-                    valid_ids.append(exp_id)
-            except Exception:
-                continue
+        p_values: List[float] = []
+        valid_ids: List[int] = []
+        unevaluated_ids: List[int] = []
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, holdout_p_value
+                    FROM experiments
+                    WHERE id = ANY(%s) AND status = 'completed'
+                    ORDER BY id
+                    """,
+                    (list(experiment_ids),),
+                )
+                for exp_id, p_value in cur.fetchall():
+                    if p_value is None:
+                        unevaluated_ids.append(exp_id)
+                    else:
+                        p_values.append(float(p_value))
+                        valid_ids.append(exp_id)
 
-        if not scores:
-            return {"survivors": 0, "total": len(experiment_ids)}
-
-        # Apply FDR (using scores as p-value proxy — lower is better for minimize)
-        survivors_mask = apply_fdr(scores, fdr_rate)
+        survivors_mask = apply_fdr(p_values, fdr_rate) if p_values else []
         survivors = sum(survivors_mask)
 
-        # Mark survivors in DB
+        if unevaluated_ids:
+            logger.warning(
+                f"Cycle {cycle_id}: {len(unevaluated_ids)} experiment(s) have no "
+                f"holdout p-value and cannot survive FDR: {unevaluated_ids}"
+            )
+
+        # Record verdicts: survivors, rejected, and unevaluated (fail-closed)
         with self._get_conn() as conn:
             with conn.cursor() as cur:
                 for exp_id, survived in zip(valid_ids, survivors_mask):
@@ -1118,11 +1146,18 @@ class CycleRunner:
                         "UPDATE experiments SET fdr_survived = %s WHERE id = %s",
                         (survived, exp_id),
                     )
+                for exp_id in unevaluated_ids:
+                    cur.execute(
+                        "UPDATE experiments SET fdr_survived = FALSE WHERE id = %s",
+                        (exp_id,),
+                    )
             conn.commit()
 
         return {
             "survivors": survivors,
-            "total": len(valid_ids),
+            "total": len(valid_ids) + len(unevaluated_ids),
+            "evaluated": len(valid_ids),
+            "unevaluated_ids": unevaluated_ids,
             "fdr_rate": fdr_rate,
             "survivor_ids": [eid for eid, s in zip(valid_ids, survivors_mask) if s],
         }
