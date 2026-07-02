@@ -533,3 +533,40 @@ class TestEvaluateCycleFailClosed:
                 )
                 cur.execute("DELETE FROM experiment_cycles WHERE id = %s", (cycle_id,))
             conn.close()
+
+
+class TestReuseSkipsDemotedFunctions:
+    """A demoted feature function must not be silently reused by later cycles."""
+
+    def test_find_existing_feature_skips_demoted(self):
+        import os
+        import psycopg
+        import pytest as _pytest
+        from gefion.db import schema
+        from gefion.experiments.cycle_runner import CycleRunner
+
+        if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+            _pytest.skip("DB tests disabled")
+        db_url = schema.test_db_url()
+        try:
+            conn = psycopg.connect(db_url)
+        except psycopg.OperationalError:
+            _pytest.skip("DB not available")
+        conn.autocommit = True
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO feature_functions (name, version, status, language, function_body, tags)
+                VALUES ('exp_demoted_reuse_test', '1', 'demoted', 'python',
+                        'def compute(df): ...', ARRAY['demoted-reuse-principle'])
+                """
+            )
+        try:
+            runner = CycleRunner(db_url)
+            assert runner._find_existing_feature(
+                "exp_demoted_reuse_test", "demoted-reuse-principle") is None
+        finally:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM feature_functions WHERE name = 'exp_demoted_reuse_test'")
+            conn.close()

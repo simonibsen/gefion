@@ -993,6 +993,8 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
             # One-click path from winner to production
             render_apply_to_production(exp_id)
 
+            _render_demote_action(exp_id)
+
         except json.JSONDecodeError:
             st.code(result.stdout)
     else:
@@ -1039,6 +1041,27 @@ def _render_lifecycle_status(exp_id: int):
             st.success(f":material/verified: **Promoted** on {promoted_at:%Y-%m-%d}")
     except Exception:
         pass  # lifecycle banner is informational only
+
+
+def _render_demote_action(exp_id: int):
+    """Manual demotion with a required reason (FR-042)."""
+    with st.expander(":material/trending_down: Demote this experiment"):
+        st.caption(
+            "Reverses promotion: deactivates the experiment's feature and "
+            "records the reason. Idempotent — already-demoted experiments "
+            "are unaffected."
+        )
+        reason = st.text_input("Reason (required)", key=f"demote_reason_{exp_id}")
+        if st.button("Demote", key=f"demote_{exp_id}") and reason.strip():
+            cmd = [sys.executable, "-m", "gefion.cli", "experiment", "demote",
+                   "--id", str(exp_id), "--reason", reason.strip(), "--json"]
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    env=os.environ.copy())
+            if result.returncode == 0:
+                st.success(f"Experiment #{exp_id} demoted.")
+                st.rerun()
+            else:
+                st.error(f"Demote failed: {result.stderr[-300:]}")
 
 
 def render_apply_to_production(exp_id: int):
@@ -1709,6 +1732,17 @@ def _render_cycle_launcher(themes, _is_ready, all_principles, available_prefixes
 def render_cycles_section():
     """Render experiment cycles list and status."""
     st.subheader("Experiment Cycles")
+
+    if st.button(":material/pending_actions: Run probation check now",
+                 help="Re-measures promoted experiments against realized outcomes; "
+                      "also runs automatically on every data-update"):
+        cmd = [sys.executable, "-m", "gefion.cli", "experiment", "probation-check"]
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                env=os.environ.copy())
+        if result.returncode == 0:
+            st.code(result.stdout.strip() or "No experiments on probation.")
+        else:
+            st.error(f"Probation check failed: {result.stderr[-300:]}")
     st.markdown(
         "An experiment cycle groups multiple experiments and applies "
         "[False Discovery Rate](https://en.wikipedia.org/wiki/False_discovery_rate) "
@@ -1769,7 +1803,8 @@ def render_cycles_section():
                             # Get experiment details
                             cur.execute("""
                                 SELECT id, name, experiment_type, status,
-                                       best_score, completed_trials, total_trials,
+                                       best_score, holdout_p_value,
+                                       completed_trials, total_trials,
                                        fdr_survived
                                 FROM experiments WHERE cycle_id = %s
                                 ORDER BY id
@@ -1800,7 +1835,8 @@ def render_cycles_section():
                         exp_df = pd.DataFrame(
                             cycle_experiments,
                             columns=["ID", "Name", "Type", "Status",
-                                     "Best Score", "Trials Done", "Trials Total",
+                                     "Best Score", "Holdout p-value",
+                                     "Trials Done", "Trials Total",
                                      "FDR Survived"]
                         )
                         st.dataframe(exp_df, use_container_width=True)

@@ -34,7 +34,7 @@ class ModelPipeline:
         return self.model.predict(X_imputed)
 
 
-def load_dataset(artifact_uri: Path, horizon_days: int) -> Tuple[pd.DataFrame, pd.Series]:
+def load_dataset(artifact_uri: Path, horizon_days: int, with_meta: bool = False):
     """
     Load features and labels from CSV or Parquet files for a specific horizon.
 
@@ -115,6 +115,11 @@ def load_dataset(artifact_uri: Path, horizon_days: int) -> Tuple[pd.DataFrame, p
     logger.info(f"Dataset shape: X={X.shape}, y={y.shape}")
     logger.info(f"Features: {list(feature_cols)}")
 
+    if with_meta:
+        # Row-aligned symbol/date — lets callers split by date (holdout)
+        # and group scores per symbol without joining back to disk
+        return (X.reset_index(drop=True), y.reset_index(drop=True),
+                merged[["symbol", "date"]].reset_index(drop=True))
     return X, y
 
 

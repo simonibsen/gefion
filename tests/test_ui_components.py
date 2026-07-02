@@ -177,6 +177,21 @@ class TestUIStructure:
         assert "import streamlit.components.v1 as components" in content
         assert "components.html(" in content
 
+    def test_cycle_details_show_holdout_pvalues(self, ui_dir):
+        """Cycle experiments table must show holdout p-values (the FDR input)."""
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert "holdout_p_value" in content
+
+    def test_experiments_view_has_demote_action(self, ui_dir):
+        """Manual demotion must be available in the UI (FR-042)."""
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert '"experiment", "demote"' in content
+
+    def test_experiments_view_has_probation_check_trigger(self, ui_dir):
+        """A manual probation-check trigger makes the mechanism visible."""
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert '"experiment", "probation-check"' in content
+
     def test_assistant_has_render_function(self, ui_dir):
         """Assistant view should have render_assistant function."""
         content = (ui_dir / "views" / "assistant.py").read_text()
