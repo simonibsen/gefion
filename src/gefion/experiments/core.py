@@ -473,6 +473,7 @@ class ExperimentRunner:
                 )
             elif experiment["experiment_type"] == "hyperparameter":
                 from gefion.experiments.types.hyperparameter import HyperparameterExperiment
+                holdout_start, holdout_end = self._cycle_holdout_window(experiment_id)
                 evaluator = HyperparameterExperiment(
                     name=experiment["name"],
                     model_type=config.get("model_type", "lightgbm"),
@@ -482,6 +483,8 @@ class ExperimentRunner:
                     dataset_uri=config.get("dataset_uri"),
                     horizon_days=config.get("horizon_days", 7),
                     quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                    holdout_start=holdout_start,
+                    holdout_end=holdout_end,
                 )
             elif experiment["experiment_type"] == "model_comparison":
                 from gefion.experiments.types.model_comparison import ModelComparisonExperiment

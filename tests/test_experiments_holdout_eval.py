@@ -176,3 +176,59 @@ class TestRunnerHoldoutIntegration:
 
         source = inspect.getsource(core)
         assert "holdout_start_date" in source
+
+
+class TestHyperparameterHoldout:
+    """Hyperparameter experiments must earn holdout p-values too."""
+
+    def _experiment(self, tiny_dataset, holdout_start, holdout_end):
+        from gefion.experiments.types.hyperparameter import HyperparameterExperiment
+
+        return HyperparameterExperiment(
+            name="hp-holdout-test",
+            model_type="lightgbm",
+            search_space={"max_depth": {"type": "int", "low": 2, "high": 6}},
+            cv_config={"n_splits": 3, "embargo_pct": 0.0},
+            dataset_uri=tiny_dataset["uri"],
+            horizon_days=7,
+            quantiles=[0.1, 0.5, 0.9],
+            holdout_start=holdout_start,
+            holdout_end=holdout_end,
+        )
+
+    def test_trials_exclude_holdout_rows(self, tiny_dataset):
+        dates = tiny_dataset["dates"]
+        exp = self._experiment(tiny_dataset, dates[-30], dates[-1])
+
+        X_train, y_train, meta_train = exp._training_data()
+
+        assert meta_train["date"].max() < dates[-30]
+        assert len(X_train) == 4 * 90
+
+    def test_evaluate_holdout_pairs_best_vs_default_params(self, tiny_dataset):
+        """Experimental = best params; baseline = library defaults."""
+        dates = tiny_dataset["dates"]
+        exp = self._experiment(tiny_dataset, dates[-30], dates[-1])
+
+        result = exp.evaluate_holdout({"max_depth": 3, "n_estimators": 60})
+
+        assert len(result["baseline_scores"]) == len(result["experimental_scores"]) == 4
+        assert result["n_symbols"] == 4
+        assert result["holdout_rows"] > 0
+
+    def test_requires_holdout_window(self, tiny_dataset):
+        exp = self._experiment(tiny_dataset, None, None)
+
+        with pytest.raises(ValueError, match="holdout"):
+            exp.evaluate_holdout({})
+
+
+class TestRunnerPassesHoldoutToHyperparameter:
+    def test_hyperparameter_dispatch_receives_window(self):
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+
+        source = inspect.getsource(ExperimentRunner.run)
+        idx = source.index('experiment_type"] == "hyperparameter"')
+        block = source[idx:idx + 900]
+        assert "holdout_start=holdout_start" in block

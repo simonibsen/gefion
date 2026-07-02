@@ -5,6 +5,7 @@ in time-series financial data.
 """
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -117,8 +118,68 @@ class HyperparameterExperiment:
     dataset_uri: Optional[str] = None
     horizon_days: int = 7
     quantiles: List[float] = field(default_factory=lambda: [0.1, 0.5, 0.9])
+    # Holdout window (from the cycle): trials never see these rows (FR-017)
+    holdout_start: Optional[date] = None
+    holdout_end: Optional[date] = None
 
     _cached_data: Optional[tuple] = field(default=None, repr=False, compare=False)
+
+    def _load_all(self) -> tuple:
+        """Load and cache (X, y, meta) with row-aligned indexes."""
+        if self._cached_data is None:
+            X, y, meta = load_dataset(self.dataset_uri, self.horizon_days, with_meta=True)
+            object.__setattr__(self, "_cached_data", (X, y, meta))
+        return self._cached_data
+
+    def _training_data(self) -> tuple:
+        """(X, y, meta) restricted to pre-holdout rows."""
+        from gefion.experiments.types.holdout_eval import holdout_masks
+        X, y, meta = self._load_all()
+        train, _ = holdout_masks(meta, self.holdout_start, self.holdout_end)
+        return (X[train].reset_index(drop=True),
+                y[train].reset_index(drop=True),
+                meta[train].reset_index(drop=True))
+
+    def evaluate_holdout(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Best params vs library defaults, scored per symbol on the holdout.
+
+        Both models train on identical pre-holdout rows; the holdout window
+        is touched exactly once, here (FR-019).
+        """
+        from gefion.experiments.types.holdout_eval import (
+            holdout_masks, paired_result, per_symbol_pinball, require_holdout_window)
+
+        require_holdout_window(self.holdout_start, self.holdout_end)
+        with create_span("experiments.hyperparameter.evaluate_holdout",
+                         model_type=self.model_type) as span:
+            X, y, meta = self._load_all()
+            train, hold = holdout_masks(meta, self.holdout_start, self.holdout_end)
+            if not hold.any():
+                raise ValueError(
+                    f"No dataset rows fall in the holdout window "
+                    f"{self.holdout_start} - {self.holdout_end}")
+
+            y_hold = y[hold].reset_index(drop=True)
+            symbols_hold = meta["symbol"][hold].reset_index(drop=True)
+
+            exp_model = train_quantile_model(
+                X[train], y[train], algorithm=self.model_type,
+                hyperparams=params, quantiles=self.quantiles)
+            exp_scores = per_symbol_pinball(
+                predict_quantiles(exp_model, X[hold]), y_hold, symbols_hold,
+                self.quantiles)
+
+            base_model = train_quantile_model(
+                X[train], y[train], algorithm=self.model_type,
+                hyperparams=None, quantiles=self.quantiles)
+            base_scores = per_symbol_pinball(
+                predict_quantiles(base_model, X[hold]), y_hold, symbols_hold,
+                self.quantiles)
+
+            result = paired_result(base_scores, exp_scores,
+                                   int(train.sum()), int(hold.sum()))
+            set_attributes(span, n_symbols=result["n_symbols"])
+            return result
 
     def evaluate(self, params: Dict[str, Any]) -> Dict[str, float]:
         """Run purged CV with given hyperparameters and return averaged metrics.
@@ -134,11 +195,8 @@ class HyperparameterExperiment:
             model_type=self.model_type,
             horizon_days=self.horizon_days,
         ) as span:
-            # Load dataset (cache across trials)
-            if self._cached_data is None:
-                X, y = load_dataset(self.dataset_uri, self.horizon_days)
-                object.__setattr__(self, "_cached_data", (X, y))
-            X, y = self._cached_data
+            # Pre-holdout rows only (FR-017): trials never see holdout data
+            X, y, _ = self._training_data()
 
             cv = PurgedKFold(
                 n_splits=self.cv_config.get("n_splits", 5),

@@ -166,13 +166,8 @@ class FeatureEngineeringExperiment:
 
     def _masks(self, meta: pd.DataFrame) -> tuple:
         """(train_mask, holdout_mask) boolean arrays over dataset rows."""
-        dates = pd.to_datetime(meta["date"]).dt.date
-        if self.holdout_start is None:
-            return np.ones(len(meta), dtype=bool), np.zeros(len(meta), dtype=bool)
-        end = self.holdout_end or dates.max()
-        train = (dates < self.holdout_start).values
-        hold = ((dates >= self.holdout_start) & (dates <= end)).values
-        return train, hold
+        from gefion.experiments.types.holdout_eval import holdout_masks
+        return holdout_masks(meta, self.holdout_start, self.holdout_end)
 
     def _training_data(self) -> tuple:
         """(X, y, meta) restricted to pre-holdout rows."""
@@ -232,14 +227,8 @@ class FeatureEngineeringExperiment:
     def _per_symbol_pinball(self, preds: pd.DataFrame, y: pd.Series,
                             symbols: pd.Series) -> Dict[str, float]:
         """Mean pinball loss per symbol over the given predictions."""
-        losses = []
-        for q in self.quantiles:
-            col = f"q{int(q * 100)}"
-            err = y.values - preds[col].values
-            losses.append(np.where(err >= 0, q * err, (q - 1) * err))
-        row_loss = np.mean(losses, axis=0)
-        frame = pd.DataFrame({"symbol": symbols.values, "loss": row_loss})
-        return frame.groupby("symbol")["loss"].mean().to_dict()
+        from gefion.experiments.types.holdout_eval import per_symbol_pinball
+        return per_symbol_pinball(preds, y, symbols, self.quantiles)
 
     def evaluate_holdout(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Train best config on pre-holdout data, score on the holdout window.
