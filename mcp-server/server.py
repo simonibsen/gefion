@@ -1378,6 +1378,24 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="experiment_apply",
+            description=(
+                "Apply a promoted experiment winner to production. Runs the full pipeline: "
+                "rebuild dataset (with promoted features), retrain the model with winning "
+                "parameters, generate predictions, backtest the ml_signal strategy, record "
+                "artifacts, and open the probation window. Only completed experiments that "
+                "survived FDR correction (or standalone manual experiments) can be applied."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_id": {"type": "integer", "description": "Experiment ID to apply"},
+                    "backtest_days": {"type": "integer", "description": "History window in days for predictions and backtest (default 90)"},
+                },
+                "required": ["experiment_id"],
+            },
+        ),
+        Tool(
             name="experiment_cycle_status",
             description=(
                 "Get status of an experiment cycle"
@@ -1723,6 +1741,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _experiment_cycle_start(arguments)
         elif name == "experiment_cycle_run":
             result = await _experiment_cycle_run(arguments)
+        elif name == "experiment_apply":
+            result = await _experiment_apply(arguments)
         elif name == "experiment_cycle_status":
             result = await _experiment_cycle_status(arguments)
         elif name == "principles_list":
@@ -3972,6 +3992,18 @@ async def _experiment_cycle_run(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _experiment_apply(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply a promoted experiment winner to production."""
+    async def _apply():
+        cmd = ["experiment", "apply", "--id", str(args["experiment_id"]), "--json"]
+        if args.get("backtest_days"):
+            cmd.extend(["--backtest-days", str(args["backtest_days"])])
+        executor = GefionExecutor()
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _apply)
 
 
 async def _experiment_cycle_status(args: Dict[str, Any]) -> Dict[str, Any]:
