@@ -3,7 +3,8 @@
 These tests verify that the db-cleanup command properly identifies and removes
 orphaned data from database tables.
 """
-import pytest
+from unittest.mock import MagicMock, patch
+
 from typer.testing import CliRunner
 from gefion.cli import app
 
@@ -36,12 +37,17 @@ class TestDbCleanupCommand:
 class TestDbCleanupDryRun:
     """Tests for db-cleanup dry run behavior."""
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("psycopg", reason="Database not available"),
-        reason="Database tests disabled"
-    )
     def test_dry_run_does_not_delete(self):
         """Dry run should report but not delete."""
-        result = runner.invoke(app, ["db-cleanup", "--dry-run"])
+        with patch("gefion.cli.db_connection") as mock_db:
+            mock_cur = MagicMock()
+            mock_cur.fetchone.return_value = (0,)
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+            mock_db.return_value.__enter__.return_value = mock_conn
+            mock_db.return_value.__exit__.return_value = False
+
+            result = runner.invoke(app, ["db-cleanup", "--dry-run"])
+
         # Should either find no orphans or report dry run
         assert "Dry run" in result.output or "No orphaned data" in result.output

@@ -35,7 +35,8 @@ class TestChartPriceCommand:
             ]
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
                  patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
-                 patch("gefion.charts.output.open_in_browser"):
+                 patch("gefion.charts.output.open_in_browser"), \
+                 patch("gefion.cli.db_connection"):
 
                 result = runner.invoke(app, ["chart", "price", "AAPL", "--no-open"])
 
@@ -50,7 +51,8 @@ class TestChartPriceCommand:
             ]
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
                  patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
-                 patch("gefion.charts.output.open_in_browser") as mock_open:
+                 patch("gefion.charts.output.open_in_browser") as mock_open, \
+                 patch("gefion.cli.db_connection"):
 
                 runner.invoke(app, ["chart", "price", "AAPL", "--no-open"])
 
@@ -65,7 +67,8 @@ class TestChartPriceCommand:
             ]
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
                  patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
-                 patch("gefion.charts.output.open_in_browser"):
+                 patch("gefion.charts.output.open_in_browser"), \
+                 patch("gefion.cli.db_connection"):
 
                 result = runner.invoke(app, ["chart", "price", "AAPL", "--json", "--no-open"])
 
@@ -95,7 +98,8 @@ class TestChartPredictionsCommand:
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
                  patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
                  patch("gefion.charts.queries.fetch_predictions_for_chart", return_value=mock_preds), \
-                 patch("gefion.charts.output.open_in_browser"):
+                 patch("gefion.charts.output.open_in_browser"), \
+                 patch("gefion.cli.db_connection"):
 
                 result = runner.invoke(app, ["chart", "predictions", "AAPL", "--model", "test_model", "--no-open"])
 
@@ -123,7 +127,8 @@ class TestChartFeaturesCommand:
             with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
                  patch("gefion.charts.queries.fetch_ohlcv_for_chart", return_value=mock_ohlcv), \
                  patch("gefion.charts.queries.fetch_features_for_chart", return_value=mock_features), \
-                 patch("gefion.charts.output.open_in_browser"):
+                 patch("gefion.charts.output.open_in_browser"), \
+                 patch("gefion.cli.db_connection"):
 
                 result = runner.invoke(app, ["chart", "features", "AAPL", "--features", "rsi_14", "--no-open"])
 
@@ -244,7 +249,7 @@ class TestChartCalibrationCommand:
                  patch("gefion.charts.d3.renderers.create_calibration_chart", return_value=mock_html), \
                  patch("gefion.charts.output.save_html_string", return_value=chart_path), \
                  patch("gefion.charts.output.open_in_browser"), \
-                 patch("gefion.cli_helpers.db_connection") as mock_db:
+                 patch("gefion.cli.db_connection") as mock_db:
 
                 mock_conn = MagicMock()
                 mock_db.return_value.__enter__ = MagicMock(return_value=mock_conn)
@@ -256,7 +261,7 @@ class TestChartCalibrationCommand:
     def test_no_data_emits_error(self):
         """chart calibration should emit error when no data found."""
         with patch("gefion.charts.queries.fetch_model_calibration", return_value=None), \
-             patch("gefion.cli_helpers.db_connection") as mock_db:
+             patch("gefion.cli.db_connection") as mock_db:
 
             mock_conn = MagicMock()
             mock_db.return_value.__enter__ = MagicMock(return_value=mock_conn)
@@ -293,7 +298,7 @@ class TestChartConfusionMatrixCommand:
                  patch("gefion.charts.d3.renderers.create_confusion_matrix_chart", return_value=mock_html), \
                  patch("gefion.charts.output.save_html_string", return_value=chart_path), \
                  patch("gefion.charts.output.open_in_browser"), \
-                 patch("gefion.cli_helpers.db_connection") as mock_db:
+                 patch("gefion.cli.db_connection") as mock_db:
 
                 mock_conn = MagicMock()
                 mock_db.return_value.__enter__ = MagicMock(return_value=mock_conn)
@@ -327,7 +332,7 @@ class TestChartPipelineHealthCommand:
                  patch("gefion.charts.d3.renderers.create_pipeline_health_chart", return_value=mock_html), \
                  patch("gefion.charts.output.save_html_string", return_value=chart_path), \
                  patch("gefion.charts.output.open_in_browser"), \
-                 patch("gefion.cli_helpers.db_connection") as mock_db:
+                 patch("gefion.cli.db_connection") as mock_db:
 
                 mock_conn = MagicMock()
                 mock_db.return_value.__enter__ = MagicMock(return_value=mock_conn)
@@ -367,7 +372,7 @@ class TestChartPredVsActualCommand:
                  patch("gefion.charts.d3.renderers.create_pred_vs_actual_chart", return_value=mock_html), \
                  patch("gefion.charts.output.save_html_string", return_value=chart_path), \
                  patch("gefion.charts.output.open_in_browser"), \
-                 patch("gefion.cli_helpers.db_connection") as mock_db:
+                 patch("gefion.cli.db_connection") as mock_db:
 
                 mock_conn = MagicMock()
                 mock_db.return_value.__enter__ = MagicMock(return_value=mock_conn)

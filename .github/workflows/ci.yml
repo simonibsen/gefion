@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OTEL_ENABLED: "false"
+      # Rich force-enables terminal rendering when it sees GITHUB_ACTIONS,
+      # which wraps/colors Typer help text and breaks substring asserts.
+      # TERM=dumb disables ANSI; COLUMNS stops 80-col truncation.
+      TERM: dumb
+      COLUMNS: "200"
     steps:
       - uses: actions/checkout@v4
 
