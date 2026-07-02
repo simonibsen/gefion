@@ -84,7 +84,7 @@ def _expected_market_date(include_today: bool = False) -> date:
     to avoid false positives before market data is published.
     """
     from datetime import datetime
-    import pytz
+    from zoneinfo import ZoneInfo
 
     today = date.today()
 
@@ -101,7 +101,7 @@ def _expected_market_date(include_today: bool = False) -> date:
     # After 4pm ET (market close): today's data is available
     # After midnight ET but before 9:30am: yesterday's data is available (market closed hours ago)
     try:
-        et_tz = pytz.timezone('America/New_York')
+        et_tz = ZoneInfo('America/New_York')
         now_et = datetime.now(et_tz)
         today_et = now_et.date()
         market_close_hour = 16  # 4pm ET
