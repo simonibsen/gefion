@@ -908,6 +908,25 @@ class TestLabelEngineeringEvaluate:
         assert "create_span" in src
 
 
+
+
+def _fe_meta(n=100):
+    """Row-aligned symbol/date meta matching the new load_dataset contract."""
+    import pandas as pd
+    half = n // 2
+    dates = list(pd.bdate_range("2026-01-01", periods=half).date)
+    return pd.DataFrame({"symbol": ["S1"] * half + ["S2"] * half,
+                         "date": dates + dates})
+
+
+def _fe_prices(prices_df, n=100):
+    """Attach symbol/date keys so prices align to dataset rows by merge."""
+    out = prices_df.copy()
+    meta = _fe_meta(n)
+    out["symbol"] = meta["symbol"]
+    out["date"] = meta["date"]
+    return out
+
 class TestFeatureEngineeringEvaluate:
     """Tests for FeatureEngineeringExperiment.evaluate()."""
 
@@ -934,8 +953,10 @@ class TestFeatureEngineeringEvaluate:
         prices = pd.DataFrame({"close": np.random.randn(100).cumsum() + 100})
         preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
 
-        with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
-             patch("gefion.experiments.types.feature_engineering._load_prices", return_value=prices), \
+        with patch("gefion.experiments.types.feature_engineering.load_dataset",
+                   return_value=(X, y, _fe_meta(len(X)))), \
+             patch("gefion.experiments.types.feature_engineering._load_prices",
+                   return_value=_fe_prices(prices, len(X))), \
              patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",
@@ -977,8 +998,10 @@ class TestFeatureEngineeringEvaluate:
         })
         preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
 
-        with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
-             patch("gefion.experiments.types.feature_engineering._load_prices", return_value=prices), \
+        with patch("gefion.experiments.types.feature_engineering.load_dataset",
+                   return_value=(X, y, _fe_meta(len(X)))), \
+             patch("gefion.experiments.types.feature_engineering._load_prices",
+                   return_value=_fe_prices(prices, len(X))), \
              patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",
@@ -1034,8 +1057,10 @@ def compute(df, window=10):
         prices = pd.DataFrame({"close": np.random.randn(100).cumsum() + 100})
         preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
 
-        with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
-             patch("gefion.experiments.types.feature_engineering._load_prices", return_value=prices), \
+        with patch("gefion.experiments.types.feature_engineering.load_dataset",
+                   return_value=(X, y, _fe_meta(len(X)))), \
+             patch("gefion.experiments.types.feature_engineering._load_prices",
+                   return_value=_fe_prices(prices, len(X))), \
              patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",
@@ -1075,8 +1100,10 @@ def compute(df, window=10):
         prices = pd.DataFrame({"close": np.random.randn(100).cumsum() + 100})
         preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
 
-        with patch("gefion.experiments.types.feature_engineering.load_dataset", return_value=(X, y)), \
-             patch("gefion.experiments.types.feature_engineering._load_prices", return_value=prices), \
+        with patch("gefion.experiments.types.feature_engineering.load_dataset",
+                   return_value=(X, y, _fe_meta(len(X)))), \
+             patch("gefion.experiments.types.feature_engineering._load_prices",
+                   return_value=_fe_prices(prices, len(X))), \
              patch("gefion.experiments.types.feature_engineering.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.feature_engineering.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.feature_engineering.calculate_calibration_metrics",

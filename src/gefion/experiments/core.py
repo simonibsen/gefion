@@ -511,6 +511,7 @@ class ExperimentRunner:
                 )
             elif experiment["experiment_type"] == "feature_engineering":
                 from gefion.experiments.types.feature_engineering import FeatureEngineeringExperiment
+                holdout_start, holdout_end = self._cycle_holdout_window(experiment_id)
                 evaluator = FeatureEngineeringExperiment(
                     name=experiment["name"],
                     principle_id=config.get("principle_id", ""),
@@ -523,6 +524,8 @@ class ExperimentRunner:
                     dataset_uri=config.get("dataset_uri"),
                     horizon_days=config.get("horizon_days", 7),
                     quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                    holdout_start=holdout_start,
+                    holdout_end=holdout_end,
                 )
             elif experiment["experiment_type"] == "feature_selection":
                 from gefion.experiments.types.feature_selection import FeatureSelectionExperiment
@@ -641,6 +644,37 @@ class ExperimentRunner:
 
                     if goal_achieved and early_stop:
                         break
+
+            # Holdout evaluation (FR-019): the holdout is touched exactly
+            # once, here, to produce the p-value the FDR gate requires.
+            # Failure leaves holdout_p_value NULL, which fails closed.
+            if hasattr(evaluator, "evaluate_holdout") and getattr(
+                    evaluator, "holdout_start", None) is not None:
+                try:
+                    from gefion.experiments.statistical import compute_holdout_pvalue
+                    holdout_result = evaluator.evaluate_holdout(best_params or {})
+                    p_value = compute_holdout_pvalue(
+                        holdout_result["baseline_scores"],
+                        holdout_result["experimental_scores"],
+                    )
+                    self._store_holdout_result(experiment_id, p_value, {
+                        "p_value": p_value,
+                        "n_symbols": holdout_result["n_symbols"],
+                        "holdout_rows": holdout_result["holdout_rows"],
+                        "baseline_mean": float(
+                            sum(holdout_result["baseline_scores"])
+                            / len(holdout_result["baseline_scores"])),
+                        "experimental_mean": float(
+                            sum(holdout_result["experimental_scores"])
+                            / len(holdout_result["experimental_scores"])),
+                    })
+                    logger.info(
+                        f"Holdout evaluation for experiment {experiment_id}: "
+                        f"p={p_value:.5f} over {holdout_result['n_symbols']} symbols")
+                except Exception as e:
+                    logger.warning(
+                        f"Holdout evaluation failed for experiment {experiment_id}: "
+                        f"{e} — holdout_p_value stays NULL (fails closed)")
 
             # Mark experiment as completed
             self._complete_experiment(
@@ -803,6 +837,45 @@ class ExperimentRunner:
                     WHERE id = %s
                 """, (datetime.now(), json.dumps(results), experiment_id))
                 conn.commit()
+
+    def _cycle_holdout_window(self, experiment_id: int):
+        """Holdout window (start, end) from the experiment's cycle, else (None, None)."""
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT c.holdout_start_date, c.holdout_end_date
+                        FROM experiments e
+                        JOIN experiment_cycles c ON e.cycle_id = c.id
+                        WHERE e.id = %s
+                        """,
+                        (experiment_id,),
+                    )
+                    row = cur.fetchone()
+            if row:
+                return row[0], row[1]
+        except Exception as e:
+            logger.warning(f"Could not load holdout window for experiment {experiment_id}: {e}")
+        return None, None
+
+    def _store_holdout_result(self, experiment_id: int, p_value: float,
+                              summary: Dict[str, Any]) -> None:
+        """Record the holdout p-value and evaluation summary."""
+        from psycopg.types.json import Json
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE experiments
+                    SET holdout_p_value = %s,
+                        results = jsonb_set(COALESCE(results, '{}'::jsonb),
+                                            '{holdout}', %s::jsonb)
+                    WHERE id = %s
+                    """,
+                    (p_value, Json(summary), experiment_id),
+                )
+            conn.commit()
 
     def get_results(self, experiment_id: int) -> Dict[str, Any]:
         """Get results for a completed experiment."""

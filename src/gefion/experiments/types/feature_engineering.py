@@ -5,6 +5,7 @@ Features are tagged as experimental until auto-promoted via statistical gates.
 """
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -141,8 +142,155 @@ class FeatureEngineeringExperiment:
     horizon_days: int = 7
     cv_config: Optional[Dict[str, Any]] = None
     quantiles: List[float] = field(default_factory=lambda: [0.1, 0.5, 0.9])
+    # Holdout window (from the cycle): trials/CV never see these rows;
+    # they are used exactly once, in evaluate_holdout (FR-017/019)
+    holdout_start: Optional[date] = None
+    holdout_end: Optional[date] = None
 
     _cached_data: Optional[tuple] = field(default=None, repr=False, compare=False)
+
+    def _load_all(self) -> tuple:
+        """Load and cache (X, y, meta, prices) with row-aligned indexes.
+
+        Prices are aligned to X rows by (symbol, date) merge — positional
+        slicing is wrong whenever row order differs between files.
+        """
+        if self._cached_data is None:
+            X, y, meta = load_dataset(self.dataset_uri, self.horizon_days, with_meta=True)
+            raw_prices = _load_prices(self.dataset_uri)
+            prices = None
+            if raw_prices is not None and {"symbol", "date"} <= set(raw_prices.columns):
+                prices = meta.merge(raw_prices, on=["symbol", "date"], how="left")
+            object.__setattr__(self, "_cached_data", (X, y, meta, prices))
+        return self._cached_data
+
+    def _masks(self, meta: pd.DataFrame) -> tuple:
+        """(train_mask, holdout_mask) boolean arrays over dataset rows."""
+        dates = pd.to_datetime(meta["date"]).dt.date
+        if self.holdout_start is None:
+            return np.ones(len(meta), dtype=bool), np.zeros(len(meta), dtype=bool)
+        end = self.holdout_end or dates.max()
+        train = (dates < self.holdout_start).values
+        hold = ((dates >= self.holdout_start) & (dates <= end)).values
+        return train, hold
+
+    def _training_data(self) -> tuple:
+        """(X, y, meta) restricted to pre-holdout rows."""
+        X, y, meta, _ = self._load_all()
+        train, _ = self._masks(meta)
+        return (X[train].reset_index(drop=True),
+                y[train].reset_index(drop=True),
+                meta[train].reset_index(drop=True))
+
+    def _compute_feature_column(self, params: Dict[str, Any]) -> pd.Series:
+        """Compute the experimental feature for every dataset row.
+
+        Computed per symbol so rolling windows never bleed across symbol
+        boundaries in the concatenated frame.
+        """
+        X, _, meta, prices = self._load_all()
+        function_name = self.feature_config.get("function_name", "rolling_zscore")
+        function_body = self.feature_config.get("function_body")
+        values = pd.Series(np.nan, index=range(len(X)))
+
+        if prices is None:
+            logger.warning("No price data in dataset; experimental feature will be NaN")
+            return values
+
+        if function_body:
+            feat_fn = _exec_function_body(function_body, function_name)
+            if feat_fn is None:
+                logger.warning(f"Custom function '{function_name}' could not be loaded")
+                return values
+            for _, grp in prices.groupby("symbol", sort=False):
+                try:
+                    res = feat_fn(grp.reset_index(drop=True), **params)
+                    values.iloc[grp.index] = np.asarray(res)[:len(grp)]
+                except Exception as e:
+                    logger.warning(f"Custom function '{function_name}' failed: {e}")
+            return values
+
+        feat_fn = _FEATURE_FUNCTIONS.get(function_name)
+        if feat_fn is None:
+            logger.warning(
+                f"'{function_name}' is not a builtin feature function and the "
+                f"experiment config has no function_body. Feature will be NaN. "
+                f"Builtins: {sorted(_FEATURE_FUNCTIONS)}"
+            )
+            return values
+        if self.source_column not in prices.columns:
+            logger.warning(
+                f"Source column '{self.source_column}' not found in prices. "
+                f"Available: {list(prices.columns)}. Feature will be NaN."
+            )
+            return values
+        for _, grp in prices.groupby("symbol", sort=False):
+            series = feat_fn(grp[self.source_column].reset_index(drop=True), **params)
+            values.iloc[grp.index] = np.asarray(series)[:len(grp)]
+        return values
+
+    def _per_symbol_pinball(self, preds: pd.DataFrame, y: pd.Series,
+                            symbols: pd.Series) -> Dict[str, float]:
+        """Mean pinball loss per symbol over the given predictions."""
+        losses = []
+        for q in self.quantiles:
+            col = f"q{int(q * 100)}"
+            err = y.values - preds[col].values
+            losses.append(np.where(err >= 0, q * err, (q - 1) * err))
+        row_loss = np.mean(losses, axis=0)
+        frame = pd.DataFrame({"symbol": symbols.values, "loss": row_loss})
+        return frame.groupby("symbol")["loss"].mean().to_dict()
+
+    def evaluate_holdout(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Train best config on pre-holdout data, score on the holdout window.
+
+        Fits the experimental model (with the feature) and a baseline (same
+        pipeline without it) on identical pre-holdout rows, then returns
+        paired per-symbol pinball losses on the holdout window for
+        compute_holdout_pvalue. The holdout is touched exactly once, here.
+        """
+        if self.holdout_start is None or self.holdout_end is None:
+            raise ValueError(
+                "evaluate_holdout requires a holdout window (holdout_start/holdout_end)"
+            )
+        with create_span("experiments.feature_engineering.evaluate_holdout",
+                         horizon_days=self.horizon_days) as span:
+            X, y, meta, _ = self._load_all()
+            train, hold = self._masks(meta)
+            if not hold.any():
+                raise ValueError(
+                    f"No dataset rows fall in the holdout window "
+                    f"{self.holdout_start} - {self.holdout_end}"
+                )
+            function_name = self.feature_config.get("function_name", "rolling_zscore")
+            feature_col = f"exp_{function_name}"
+            X_exp = X.copy()
+            X_exp[feature_col] = self._compute_feature_column(params)
+
+            y_hold = y[hold].reset_index(drop=True)
+            symbols_hold = meta["symbol"][hold].reset_index(drop=True)
+
+            exp_model = train_quantile_model(
+                X_exp[train], y[train], algorithm=self.algorithm, quantiles=self.quantiles)
+            exp_scores = self._per_symbol_pinball(
+                predict_quantiles(exp_model, X_exp[hold]), y_hold, symbols_hold)
+
+            base_model = train_quantile_model(
+                X[train], y[train], algorithm=self.algorithm, quantiles=self.quantiles)
+            base_scores = self._per_symbol_pinball(
+                predict_quantiles(base_model, X[hold]), y_hold, symbols_hold)
+
+            symbols = sorted(set(base_scores) & set(exp_scores))
+            result = {
+                "baseline_scores": [float(base_scores[s]) for s in symbols],
+                "experimental_scores": [float(exp_scores[s]) for s in symbols],
+                "symbols": symbols,
+                "n_symbols": len(symbols),
+                "holdout_rows": int(hold.sum()),
+                "train_rows": int(train.sum()),
+            }
+            set_attributes(span, n_symbols=len(symbols), holdout_rows=int(hold.sum()))
+            return result
 
     def evaluate(self, params: Dict[str, Any]) -> Dict[str, float]:
         """Compute experimental feature with given params, train, and evaluate.
@@ -161,57 +309,15 @@ class FeatureEngineeringExperiment:
             function_name=function_name,
             horizon_days=self.horizon_days,
         ) as span:
-            # Load dataset + prices (cache across trials)
-            if self._cached_data is None:
-                X, y = load_dataset(self.dataset_uri, self.horizon_days)
-                prices = _load_prices(self.dataset_uri)
-                object.__setattr__(self, "_cached_data", (X, y, prices))
-            X_base, y, prices = self._cached_data
-
-            # Compute experimental feature
-            X = X_base.copy()
+            # Pre-holdout rows only (FR-017): trials must never see holdout data
+            X_full, y_full, meta, _ = self._load_all()
+            train, _ = self._masks(meta)
             feature_col = f"exp_{function_name}"
-            function_body = self.feature_config.get("function_body")
+            feature_full = self._compute_feature_column(params)
 
-            if function_body:
-                # Custom function body — execute in security sandbox
-                feat_fn = _exec_function_body(function_body, function_name)
-                if feat_fn is not None and prices is not None:
-                    # Build a DataFrame with price data for the function
-                    price_df = prices.iloc[:len(X)].reset_index(drop=True)
-                    try:
-                        result = feat_fn(price_df, **params)
-                        X[feature_col] = result.values if hasattr(result, 'values') else result
-                    except Exception as e:
-                        logger.warning(f"Custom function '{function_name}' failed: {e}")
-                        X[feature_col] = np.nan
-                else:
-                    logger.warning(f"Custom function '{function_name}' could not be loaded or no price data")
-                    X[feature_col] = np.nan
-            else:
-                # Builtin function from _FEATURE_FUNCTIONS
-                feat_fn = _FEATURE_FUNCTIONS.get(function_name)
-
-                # Source column comes from prices (close, volume, etc.), not features
-                if feat_fn is not None and prices is not None and self.source_column in prices.columns:
-                    source_series = prices[self.source_column].iloc[:len(X)].reset_index(drop=True)
-                    X[feature_col] = feat_fn(source_series, **params)
-                elif feat_fn is not None and self.source_column in X.columns:
-                    X[feature_col] = feat_fn(X[self.source_column], **params)
-                elif feat_fn is None:
-                    logger.warning(
-                        f"'{function_name}' is not a builtin feature function and the "
-                        f"experiment config has no function_body. Feature will be NaN. "
-                        f"Builtins: {sorted(_FEATURE_FUNCTIONS)}"
-                    )
-                    X[feature_col] = np.nan
-                else:
-                    logger.warning(
-                        f"Source column '{self.source_column}' not found in prices or features. "
-                        f"Available price columns: {list(prices.columns) if prices is not None else 'none'}. "
-                        f"Feature will be NaN."
-                    )
-                    X[feature_col] = np.nan
+            X = X_full[train].reset_index(drop=True).copy()
+            y = y_full[train].reset_index(drop=True)
+            X[feature_col] = feature_full.values[train]
 
             cv = PurgedKFold(
                 n_splits=cv_cfg.get("n_splits", 5),

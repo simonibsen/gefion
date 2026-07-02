@@ -786,9 +786,11 @@ class CycleRunner:
         try:
             with self._get_conn() as conn:
                 with conn.cursor() as cur:
-                    # Check by exact name
+                    # Check by exact name — demoted functions failed probation
+                    # or review and must not be silently resurrected
                     cur.execute(
-                        "SELECT name FROM feature_functions WHERE name = %s",
+                        "SELECT name FROM feature_functions "
+                        "WHERE name = %s AND status != 'demoted'",
                         (fn_name,),
                     )
                     row = cur.fetchone()
@@ -797,7 +799,8 @@ class CycleRunner:
 
                     # Check by principle_id in tags
                     cur.execute(
-                        "SELECT name FROM feature_functions WHERE %s = ANY(tags)",
+                        "SELECT name FROM feature_functions "
+                        "WHERE %s = ANY(tags) AND status != 'demoted'",
                         (principle_id,),
                     )
                     row = cur.fetchone()
