@@ -1,5 +1,7 @@
 # Gefion
 
+[![CI](https://github.com/simonibsen/gefion/actions/workflows/ci.yml/badge.svg)](https://github.com/simonibsen/gefion/actions/workflows/ci.yml)
+
 **Database-first ML platform for quantitative stock analysis.** Ingests price and fundamental data, computes features, trains models, runs autonomous experiments, and backtests trading strategies.
 
 `v0.2.0` — Alpha, actively developed.
