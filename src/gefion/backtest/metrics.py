@@ -241,14 +241,16 @@ def calculate_trade_metrics(trades: List[Dict[str, Any]]) -> Dict[str, float]:
             "total_trades": 0,
         }
 
-    # Separate wins and losses
-    wins = [t["pnl"] for t in trades if t.get("pnl", 0) > 0]
-    losses = [t["pnl"] for t in trades if t.get("pnl", 0) < 0]
+    # Only closed trades carry pnl; buys cannot "win" and must not
+    # dilute the denominator
+    closed = [t for t in trades if "pnl" in t]
+    wins = [t["pnl"] for t in closed if t["pnl"] > 0]
+    losses = [t["pnl"] for t in closed if t["pnl"] < 0]
 
     total_trades = len(trades)
 
-    # Win rate
-    win_rate = len(wins) / total_trades if total_trades > 0 else 0.0
+    # Win rate over closed trades
+    win_rate = len(wins) / len(closed) if closed else 0.0
 
     # Profit factor (gross profit / gross loss)
     gross_profit = sum(wins) if wins else 0.0

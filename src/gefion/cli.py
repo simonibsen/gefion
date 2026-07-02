@@ -8131,16 +8131,9 @@ def backtest_run(
             calculate_benchmark,
         )
 
-        # Convert trades to include PnL for trade metrics
-        trades_with_pnl = []
-        for t in trades:
-            pnl = t.get("pnl", 0)
-            if pnl == 0 and t.get("action") == "sell":
-                # Estimate PnL from price difference if not provided
-                pnl = (t.get("price", 0) - t.get("avg_cost", t.get("price", 0))) * t.get("shares", 0)
-            trades_with_pnl.append({**t, "pnl": pnl})
-
-        trade_metrics = calculate_trade_metrics(trades_with_pnl)
+        # Engine sell records carry realized pnl; buys have none and
+        # must stay pnl-less so closed-trade metrics count correctly
+        trade_metrics = calculate_trade_metrics(trades)
 
         # Calculate monthly returns from equity curve
         monthly_returns = calculate_monthly_returns(equity_curve) if equity_curve else []
@@ -8206,7 +8199,7 @@ def backtest_run(
                         "value": round(t.get("shares", 0) * t.get("price", 0), 2),
                         "pnl": round(t.get("pnl", 0), 2),
                     }
-                    for t in trades_with_pnl
+                    for t in trades
                 ],
                 "equity_curve": [
                     {"date": str(e["date"]), "equity": round(e["equity"], 2)}
