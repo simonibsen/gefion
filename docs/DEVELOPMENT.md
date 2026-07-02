@@ -89,11 +89,20 @@ ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/ge
 ## Versioning
 
 Semantic versioning (`0.x.y`). The `0.` prefix signals alpha/pre-release.
+Releases are fully automated (issue #30) — no manual bumping or tagging.
 
-- **Version source of truth**: `pyproject.toml` (`version = "0.2.0"`)
-- **When to bump**: on each PR merge to main. Increment minor (`0.2.0` → `0.3.0`) for feature work, patch (`0.2.0` → `0.2.1`) for bugfixes
-- **Tag after merge**: `git tag v0.3.0 && git push --tags`
-- **Update CHANGELOG.md** with a summary of changes for each version
+- **Version source of truth**: git tags (`vX.Y.Z`). `setuptools-scm` derives
+  the package version from the latest tag at install/build time;
+  `gefion.__version__` reads it from package metadata. Nothing in the repo
+  hardcodes a version.
+- **How releases happen**: on every push to main, the Release workflow runs
+  `python-semantic-release`, which parses Conventional Commits since the last
+  tag (`fix:` → patch, `feat:` → minor) and pushes a new tag + GitHub Release
+  with generated notes. Tag-only: it never commits back to main.
+- **Changelog**: the [releases page](https://github.com/simonibsen/gefion/releases)
+  (generated from commit messages — another reason commit subjects matter).
+- **While on 0.x**: `major_on_zero = false`, so breaking changes bump minor,
+  not to 1.0. Going 1.0 is a deliberate decision.
 
 ## Code Style
 - Type hints for all function signatures

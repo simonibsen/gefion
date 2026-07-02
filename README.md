@@ -1,10 +1,13 @@
 # Gefion
 
 [![CI](https://github.com/simonibsen/gefion/actions/workflows/ci.yml/badge.svg)](https://github.com/simonibsen/gefion/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/simonibsen/gefion)](https://github.com/simonibsen/gefion/releases)
 
 **Database-first ML platform for quantitative stock analysis.** Ingests price and fundamental data, computes features, trains models, runs autonomous experiments, and backtests trading strategies.
 
-`v0.2.0` — Alpha, actively developed.
+Alpha, actively developed. Releases are cut automatically from
+[Conventional Commits](https://www.conventionalcommits.org/) — see the
+[releases page](https://github.com/simonibsen/gefion/releases) for the changelog.
 
 ![Dashboard](images/ui-dashboard.png)
 
@@ -277,7 +280,7 @@ ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/ge
   OTEL_ENABLED=false pytest tests/
 ```
 
-Test suite: 1,971 tests (as of v0.2.0)
+Test suite: 2,300+ tests
 
 ## License
 
