@@ -312,6 +312,8 @@ class BacktestEngine:
                 shares = min(shares, int(position.get("shares", 0)))
                 if shares <= 0:
                     return None
+                # Capture cost basis before the sell mutates the position
+                avg_cost = float(position.get("avg_price", 0.0))
 
                 portfolio.sell(
                     symbol=symbol,
@@ -332,6 +334,10 @@ class BacktestEngine:
                 "shares": shares,
                 "price": execution_price,
             }
+            if action == "sell":
+                # Realized pnl — trade metrics (win_rate, profit_factor)
+                # are meaningless without it
+                trade["pnl"] = (execution_price - avg_cost) * shares
             if signal.get("reason"):
                 trade["reason"] = signal["reason"]
             if self.slippage and execution_price != price:

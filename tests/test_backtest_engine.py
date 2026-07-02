@@ -344,3 +344,35 @@ class TestBacktestEngineIntegration:
 
         assert len(results["trades"]) == 1
         assert results["trades"][0]["price"] == 100.0  # No slippage
+
+
+class TestSellTradesCarryPnl:
+    """Engine sell records must carry realized pnl for trade metrics.
+
+    Portfolio computes realized_pnl internally but the engine's trade
+    record dropped it, so win_rate/profit_factor were always 0.0.
+    """
+
+    def test_sell_trade_includes_pnl(self):
+        from datetime import date
+        from gefion.backtest.engine import BacktestEngine
+        from gefion.backtest.portfolio import Portfolio
+
+        engine = BacktestEngine(
+            price_data=[], strategy=lambda *a, **k: [],
+            initial_cash=100000.0,
+            start_date=date(2026, 1, 1), end_date=date(2026, 3, 1))
+        portfolio = Portfolio(initial_cash=100000.0)
+        prices = {"AAPL": 100.0}
+
+        buy = engine._execute_signal(
+            {"action": "buy", "symbol": "AAPL", "shares": 10},
+            portfolio, prices, date(2026, 1, 5))
+        assert buy is not None
+
+        sell = engine._execute_signal(
+            {"action": "sell", "symbol": "AAPL", "shares": 10},
+            portfolio, {"AAPL": 110.0}, date(2026, 2, 5))
+
+        assert sell is not None
+        assert sell["pnl"] == pytest.approx((110.0 - 100.0) * 10)

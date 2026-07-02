@@ -241,3 +241,48 @@ class TestExtendedMetricsIntegration:
         assert "profit_factor" in metrics
         assert "avg_win_loss_ratio" in metrics
         assert "total_trades" in metrics
+
+
+class TestWinRateUsesClosedTrades:
+    """win_rate must be computed over closed (pnl-bearing) trades only.
+
+    Buys cannot 'win' — counting them in the denominator dilutes the metric,
+    and before the engine attached pnl to sells it was always exactly 0.0.
+    """
+
+    def test_win_rate_over_closed_trades_only(self):
+        from gefion.backtest.metrics import calculate_trade_metrics
+
+        trades = [
+            {"action": "buy", "symbol": "A", "shares": 10, "price": 100},
+            {"action": "buy", "symbol": "B", "shares": 10, "price": 100},
+            {"action": "sell", "symbol": "A", "shares": 10, "price": 110, "pnl": 100.0},
+            {"action": "sell", "symbol": "B", "shares": 10, "price": 95, "pnl": -50.0},
+        ]
+        m = calculate_trade_metrics(trades)
+
+        assert m["win_rate"] == 0.5  # 1 of 2 closed trades, not 1 of 4
+        assert m["total_trades"] == 4
+        assert m["profit_factor"] == 2.0  # 100 / 50
+
+    def test_no_closed_trades_reports_zero(self):
+        from gefion.backtest.metrics import calculate_trade_metrics
+
+        trades = [{"action": "buy", "symbol": "A", "shares": 10, "price": 100}]
+        m = calculate_trade_metrics(trades)
+
+        assert m["win_rate"] == 0.0
+
+
+class TestCliDoesNotInjectPnlIntoAllTrades:
+    """The CLI must pass engine trades through untouched.
+
+    Its old compensation hack stamped pnl=0 onto every trade (buys
+    included), defeating closed-trade detection: a 2-for-2 winning run
+    reported win_rate 0.5 and profit_factor 0.0.
+    """
+
+    def test_cli_hack_removed(self):
+        import pathlib
+        src = pathlib.Path("src/gefion/cli.py").read_text()
+        assert "trades_with_pnl" not in src
