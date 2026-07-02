@@ -37,7 +37,7 @@ def clean_db():
     with conn.cursor() as cur:
         # Use targeted cleanup instead of DROP SCHEMA to avoid deadlocks
         if _table_exists(cur, 'computed_features'):
-            cur.execute("DELETE FROM computed_features WHERE data_id = 1;")
+            cur.execute("DELETE FROM computed_features WHERE data_id IN (SELECT id FROM stocks WHERE symbol = 'TEST');")
         if _table_exists(cur, 'feature_definitions'):
             cur.execute("DELETE FROM feature_definitions WHERE name = 'indicator_rsi_14';")
         if _table_exists(cur, 'stocks'):
@@ -53,8 +53,11 @@ def test_insert_computed_features_accepts_date_strings():
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
     # Create test stock
+    # RETURNING id instead of an explicit id: explicit-id inserts leave the
+    # stocks_id_seq stale, poisoning later sequence-based inserts (issue #29).
     with conn.cursor() as cur:
-        cur.execute("INSERT INTO stocks (id, symbol) VALUES (1, 'TEST')")
+        cur.execute("INSERT INTO stocks (symbol) VALUES ('TEST') RETURNING id")
+        stock_id = cur.fetchone()[0]
     defs = [
         {
             "name": "indicator_rsi_14",
@@ -75,7 +78,7 @@ def test_insert_computed_features_accepts_date_strings():
         {"date": "2025-01-01", "rsi_14": 50.0},
         {"date": datetime(2025, 1, 2), "rsi_14": 55.0},
     ]
-    inserted = insert_computed_features(conn, data_id=1, rows=rows, feature_map={"rsi_14": fid})
+    inserted = insert_computed_features(conn, data_id=stock_id, rows=rows, feature_map={"rsi_14": fid})
     assert inserted == 2
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM computed_features;")

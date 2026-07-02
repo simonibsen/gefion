@@ -35,8 +35,8 @@ def require_db():
 def clean_db(monkeypatch):
     conn = require_db()
     conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    from conftest import reset_public_schema
+    reset_public_schema(conn)
     conn.close()
     monkeypatch.setenv("DATABASE_URL", schema.test_db_url())
     yield

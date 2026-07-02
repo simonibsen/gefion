@@ -85,8 +85,8 @@ def db_conn():
     try:
         with psycopg.connect(db_url) as conn:
             conn.autocommit = True
-            with conn.cursor() as cur:
-                cur.execute("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
+            from conftest import reset_public_schema
+            reset_public_schema(conn)
             yield conn
     except psycopg.OperationalError:
         pytest.skip("Database not available")
