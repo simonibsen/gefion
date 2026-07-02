@@ -30,11 +30,53 @@ jobs:
 
       # Same gate as the local pre-push hook. DB tests are skipped
       # (ENABLE_DB_TESTS unset) and UI/Playwright tests are deselected
-      # via addopts; a DB-backed job can be added later with a
-      # TimescaleDB service container.
+      # via addopts; the db-test job below runs the full suite against
+      # a TimescaleDB service container.
       - name: Run unit tests
         run: pytest tests/
 
       # Hermetic: reads sql/schema.sql + sql/migrations/*.sql, no DB.
       - name: Data dictionary drift check
         run: python scripts/gen_data_dictionary.py --check
+
+  db-test:
+    name: DB-backed tests (TimescaleDB)
+    runs-on: ubuntu-latest
+    env:
+      OTEL_ENABLED: "false"
+      # See the test job for why TERM/COLUMNS are set.
+      TERM: dumb
+      COLUMNS: "200"
+      ENABLE_DB_TESTS: "1"
+      # Mirrors the local convention: point at the base database and let
+      # conftest derive gefion_test, create it, and run db-init against it.
+      # The suite self-seeds all data it needs (issue #29) — no fixtures.
+      DATABASE_URL: postgresql://gefion:gefionpass@localhost:5432/gefion
+    services:
+      timescaledb:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: gefion
+          POSTGRES_PASSWORD: gefionpass
+          POSTGRES_DB: gefion
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gefion"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package with extras
+        run: pip install -e ".[dev,ml_extended,charts,ui]"
+
+      - name: Run full test suite (including DB tests)
+        run: pytest tests/
