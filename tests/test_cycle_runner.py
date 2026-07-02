@@ -87,6 +87,7 @@ class TestCycleRunnerOrchestration:
 
         with patch.object(runner, "_load_cycle", return_value=cycle), \
              patch.object(runner, "_run_discovery", return_value=hypotheses), \
+             patch.object(runner, "_preflight_check", return_value=[]), \
              patch.object(runner, "_propose_experiment", return_value=1) as mock_propose, \
              patch.object(runner, "_run_experiments", return_value=[]), \
              patch.object(runner, "_evaluate_cycle", return_value={}), \
@@ -110,6 +111,7 @@ class TestCycleRunnerOrchestration:
 
         with patch.object(runner, "_load_cycle", return_value=cycle), \
              patch.object(runner, "_run_discovery", return_value=hypotheses), \
+             patch.object(runner, "_preflight_check", return_value=[]), \
              patch.object(runner, "_propose_experiment", return_value=1) as mock_propose, \
              patch.object(runner, "_run_experiments", return_value=[]), \
              patch.object(runner, "_evaluate_cycle", return_value={}), \

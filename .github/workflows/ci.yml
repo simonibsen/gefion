@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Unit tests + drift checks
+    runs-on: ubuntu-latest
+    env:
+      OTEL_ENABLED: "false"
+      # Rich force-enables terminal rendering when it sees GITHUB_ACTIONS,
+      # which wraps/colors Typer help text and breaks substring asserts.
+      # TERM=dumb disables ANSI; COLUMNS stops 80-col truncation.
+      TERM: dumb
+      COLUMNS: "200"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package with extras
+        run: pip install -e ".[dev,ml_extended,charts,ui]"
+
+      # Same gate as the local pre-push hook. DB tests are skipped
+      # (ENABLE_DB_TESTS unset) and UI/Playwright tests are deselected
+      # via addopts; a DB-backed job can be added later with a
+      # TimescaleDB service container.
+      - name: Run unit tests
+        run: pytest tests/
+
+      # Hermetic: reads sql/schema.sql + sql/migrations/*.sql, no DB.
+      - name: Data dictionary drift check
+        run: python scripts/gen_data_dictionary.py --check
