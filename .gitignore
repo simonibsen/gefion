@@ -11,12 +11,13 @@ __pycache__/
 dist/
 build/
 
-# Database files
-db/
+# Database files (root data dir only — unanchored `db/` used to swallow
+# src/gefion/db/, leaving source files out of the repo)
+/db/
 
 # ML artifacts (generated output)
-datasets/
-models/
+/datasets/
+/models/
 
 # OS noise
 .DS_Store
