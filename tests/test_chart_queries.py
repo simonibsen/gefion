@@ -436,3 +436,139 @@ class TestFetchBacktestEquityCurve:
         data = fetch_backtest_equity_curve(conn, "nonexistent_backtest_id")
 
         assert data == []
+
+
+class TestFetchExperimentTrialsForChart:
+    """Tests for fetch_experiment_trials_for_chart function."""
+
+    def test_query_references_trials_table(self):
+        """SQL should read from experiment_trials."""
+        import inspect
+        from gefion.charts.queries import fetch_experiment_trials_for_chart
+
+        source = inspect.getsource(fetch_experiment_trials_for_chart)
+        assert "experiment_trials" in source
+
+    @pytest.fixture
+    def experiment_with_trials(self, conn):
+        """Create an experiment with three trials; yield its id, then clean up."""
+        from psycopg.types.json import Json
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO experiments (name, experiment_type, config, objective_direction)
+                VALUES ('chart-test-exp', 'hyperparameter', %s, 'maximize')
+                RETURNING id
+                """,
+                (Json({}),),
+            )
+            exp_id = cur.fetchone()[0]
+            for n, score in ((1, 0.8), (2, 1.5), (3, 1.1)):
+                cur.execute(
+                    """
+                    INSERT INTO experiment_trials (experiment_id, trial_number, params, metrics, score)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (exp_id, n, Json({"lr": 0.01 * n, "depth": n}), Json({}), score),
+                )
+        yield exp_id
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM experiments WHERE id = %s", (exp_id,))
+
+    def test_returns_chart_ready_trials(self, conn, experiment_with_trials):
+        """Rows should have trial/score/parameters/promoted keys."""
+        from gefion.charts.queries import fetch_experiment_trials_for_chart
+
+        data = fetch_experiment_trials_for_chart(conn, experiment_with_trials)
+
+        assert len(data) == 3
+        for row in data:
+            assert set(row.keys()) >= {"trial", "score", "parameters", "promoted"}
+            assert isinstance(row["score"], float)
+
+    def test_best_trial_is_marked_promoted(self, conn, experiment_with_trials):
+        """Only the best trial (per objective direction) should be promoted=True."""
+        from gefion.charts.queries import fetch_experiment_trials_for_chart
+
+        data = fetch_experiment_trials_for_chart(conn, experiment_with_trials)
+
+        promoted = [row for row in data if row["promoted"]]
+        assert len(promoted) == 1
+        assert promoted[0]["trial"] == 2  # score 1.5 is the max
+
+    def test_unknown_experiment_returns_empty(self, conn):
+        from gefion.charts.queries import fetch_experiment_trials_for_chart
+
+        assert fetch_experiment_trials_for_chart(conn, -1) == []
+
+
+class TestFetchCycleFdrForChart:
+    """Tests for fetch_cycle_fdr_for_chart function."""
+
+    def test_query_references_fdr_columns(self):
+        """SQL should read holdout_p_value and fdr_survived."""
+        import inspect
+        from gefion.charts.queries import fetch_cycle_fdr_for_chart
+
+        source = inspect.getsource(fetch_cycle_fdr_for_chart)
+        assert "holdout_p_value" in source
+        assert "fdr_survived" in source
+
+    @pytest.fixture
+    def cycle_with_experiments(self, conn):
+        """Create a cycle with evaluated experiments; yield its id, then clean up."""
+        from psycopg.types.json import Json
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO experiment_cycles (name, holdout_start_date, holdout_end_date, fdr_rate)
+                VALUES ('chart-test-cycle', %s, %s, 0.10)
+                RETURNING id
+                """,
+                (date.today() - timedelta(days=42), date.today()),
+            )
+            cycle_id = cur.fetchone()[0]
+            exp_ids = []
+            for name, p_value, survived in (
+                ("exp-signal", 0.003, True),
+                ("exp-noise", 0.42, False),
+                ("exp-unevaluated", None, None),
+            ):
+                cur.execute(
+                    """
+                    INSERT INTO experiments
+                        (name, experiment_type, config, cycle_id, holdout_p_value, fdr_survived)
+                    VALUES (%s, 'feature_engineering', %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (name, Json({}), cycle_id, p_value, survived),
+                )
+                exp_ids.append(cur.fetchone()[0])
+        yield cycle_id
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM experiments WHERE cycle_id = %s", (cycle_id,))
+            cur.execute("DELETE FROM experiment_cycles WHERE id = %s", (cycle_id,))
+
+    def test_returns_experiments_and_rate(self, conn, cycle_with_experiments):
+        """Result should carry chart-ready experiment rows plus the cycle's FDR rate."""
+        from gefion.charts.queries import fetch_cycle_fdr_for_chart
+
+        result = fetch_cycle_fdr_for_chart(conn, cycle_with_experiments)
+
+        assert result["fdr_rate"] == pytest.approx(0.10)
+        rows = result["experiments"]
+        assert len(rows) == 2  # unevaluated experiment excluded (no p-value)
+        by_name = {row["name"]: row for row in rows}
+        assert by_name["exp-signal"]["promoted"] is True
+        assert by_name["exp-noise"]["promoted"] is False
+        for row in rows:
+            assert isinstance(row["p_value"], float)
+            assert row["p_value"] > 0  # FDR chart uses a log scale
+
+    def test_unknown_cycle_returns_empty(self, conn):
+        from gefion.charts.queries import fetch_cycle_fdr_for_chart
+
+        result = fetch_cycle_fdr_for_chart(conn, -1)
+        assert result["experiments"] == []

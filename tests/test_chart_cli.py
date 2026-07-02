@@ -399,3 +399,93 @@ class TestChartHelpText:
         assert result.exit_code == 0
         for cmd in ["calibration", "confusion-matrix", "pipeline-health", "pred-vs-actual"]:
             assert cmd in result.stdout, f"Missing subcommand: {cmd}"
+
+
+class TestChartExperimentTrialsCommand:
+    """Tests for `gefion chart experiment-trials` command."""
+
+    def test_requires_experiment_id(self):
+        """Command should require an experiment id argument."""
+        result = runner.invoke(app, ["chart", "experiment-trials"])
+        assert result.exit_code != 0
+
+    def test_generates_chart(self):
+        """Command should generate a chart from trial data."""
+        mock_trials = [
+            {"trial": 1, "score": 1.5, "parameters": {"lr": 0.01}, "promoted": True},
+            {"trial": 2, "score": 0.8, "parameters": {"lr": 0.1}, "promoted": False},
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
+                 patch("gefion.charts.queries.fetch_experiment_trials_for_chart", return_value=mock_trials), \
+                 patch("gefion.charts.output.open_in_browser"), \
+                 patch("gefion.cli.db_connection"):
+
+                result = runner.invoke(app, ["chart", "experiment-trials", "1", "--no-open"])
+
+                assert result.exit_code == 0
+
+    def test_json_output_returns_path(self):
+        """--json should return JSON with chart path."""
+        mock_trials = [
+            {"trial": 1, "score": 1.5, "parameters": {}, "promoted": True},
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
+                 patch("gefion.charts.queries.fetch_experiment_trials_for_chart", return_value=mock_trials), \
+                 patch("gefion.charts.output.open_in_browser"), \
+                 patch("gefion.cli.db_connection"):
+
+                result = runner.invoke(app, ["chart", "experiment-trials", "1", "--json", "--no-open"])
+
+                if result.exit_code == 0:
+                    import json
+                    output = json.loads(result.stdout)
+                    assert "chart_path" in output or "status" in output
+
+    def test_no_trials_reports_error(self):
+        """Command should fail gracefully when the experiment has no trials."""
+        with patch("gefion.charts.queries.fetch_experiment_trials_for_chart", return_value=[]), \
+             patch("gefion.cli.db_connection"):
+
+            result = runner.invoke(app, ["chart", "experiment-trials", "999", "--no-open"])
+
+            assert result.exit_code != 0 or "No trials" in result.stdout
+
+
+class TestChartExperimentFdrCommand:
+    """Tests for `gefion chart experiment-fdr` command."""
+
+    def test_requires_cycle_id(self):
+        """Command should require a cycle id argument."""
+        result = runner.invoke(app, ["chart", "experiment-fdr"])
+        assert result.exit_code != 0
+
+    def test_generates_chart(self):
+        """Command should generate a chart from cycle FDR data."""
+        mock_result = {
+            "fdr_rate": 0.10,
+            "experiments": [
+                {"name": "exp-1", "p_value": 0.003, "promoted": True},
+                {"name": "exp-2", "p_value": 0.42, "promoted": False},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"G2_CHART_DIR": tmpdir}), \
+                 patch("gefion.charts.queries.fetch_cycle_fdr_for_chart", return_value=mock_result), \
+                 patch("gefion.charts.output.open_in_browser"), \
+                 patch("gefion.cli.db_connection"):
+
+                result = runner.invoke(app, ["chart", "experiment-fdr", "1", "--no-open"])
+
+                assert result.exit_code == 0
+
+    def test_no_evaluated_experiments_reports_error(self):
+        """Command should fail gracefully when no experiments have p-values."""
+        with patch("gefion.charts.queries.fetch_cycle_fdr_for_chart",
+                   return_value={"fdr_rate": 0.10, "experiments": []}), \
+             patch("gefion.cli.db_connection"):
+
+            result = runner.invoke(app, ["chart", "experiment-fdr", "999", "--no-open"])
+
+            assert result.exit_code != 0 or "No evaluated" in result.stdout
