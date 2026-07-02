@@ -198,6 +198,13 @@ class FeatureEngineeringExperiment:
                     X[feature_col] = feat_fn(source_series, **params)
                 elif feat_fn is not None and self.source_column in X.columns:
                     X[feature_col] = feat_fn(X[self.source_column], **params)
+                elif feat_fn is None:
+                    logger.warning(
+                        f"'{function_name}' is not a builtin feature function and the "
+                        f"experiment config has no function_body. Feature will be NaN. "
+                        f"Builtins: {sorted(_FEATURE_FUNCTIONS)}"
+                    )
+                    X[feature_col] = np.nan
                 else:
                     logger.warning(
                         f"Source column '{self.source_column}' not found in prices or features. "
