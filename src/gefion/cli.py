@@ -9973,6 +9973,85 @@ def experiment_cycle_run(
             raise typer.Exit(1)
 
 
+@experiment_app.command("apply")
+def experiment_apply(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to apply"),
+    backtest_days: int = typer.Option(
+        90, "--backtest-days",
+        help="History window (days) to generate predictions over and backtest against"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON (streams progress lines)"),
+) -> None:
+    """Apply a promoted experiment winner to production.
+
+    Runs the full pipeline for the winner: rebuild dataset (with any
+    promoted features), retrain the model with the winning parameters,
+    generate predictions, and backtest the ml_signal strategy — then
+    records the artifacts on the experiment and opens its probation window.
+
+    Examples:
+        # Apply an FDR-surviving experiment end to end
+        gefion experiment apply --id 42
+
+        # Stream machine-readable progress
+        gefion experiment apply --id 42 --json
+    """
+    with create_span("cli.experiment_apply", experiment_id=experiment_id):
+        from gefion.experiments.production import apply_experiment, ApplyError
+
+        try:
+            if json_output:
+                def _on_progress(phase, message, detail=None):
+                    emit(message, data={"phase": phase, **(detail or {})}, json_output=True)
+
+                result = apply_experiment(
+                    experiment_id, on_progress=_on_progress, backtest_days=backtest_days
+                )
+                emit_json(result)
+            else:
+                from rich.console import Console
+                console = Console()
+
+                phase_styles = {
+                    "validate": "[dim]",
+                    "dataset": "[blue]",
+                    "train": "[yellow]",
+                    "predict": "[cyan]",
+                    "backtest": "[magenta]",
+                    "complete": "[bold green]",
+                }
+
+                def _on_progress(phase, message, detail=None):
+                    style = phase_styles.get(phase, "[dim]")
+                    console.print(f"  {style}{message}[/]")
+
+                console.print(f"\n[bold]Applying experiment #{experiment_id}[/bold]\n")
+                result = apply_experiment(
+                    experiment_id, on_progress=_on_progress, backtest_days=backtest_days
+                )
+
+                console.print(f"\n[bold green]Applied![/bold green]")
+                console.print(f"  Model:    {result['model_name']}:{result['model_version']}")
+                console.print(f"  Dataset:  {result['dataset_name']}:{result['dataset_version']}")
+                metrics = (result.get("backtest") or {}).get("metrics") or {}
+                for key in ("sharpe_ratio", "total_return", "max_drawdown", "win_rate"):
+                    if key in metrics:
+                        console.print(f"  {key}: {metrics[key]}")
+                console.print(
+                    f"  Probation: {result['probation_days']} days "
+                    "(auto-demoted if performance degrades)"
+                )
+        except ApplyError as e:
+            emit_error(f"Apply failed: {e}", json_output=json_output)
+            raise typer.Exit(1)
+        except Exception as e:
+            emit_error(f"Apply failed: {e}", json_output=json_output)
+            if os.environ.get("DEBUG"):
+                import traceback
+                traceback.print_exc()
+            raise typer.Exit(1)
+
+
 @experiment_app.command("cycle-status")
 def experiment_cycle_status(
     cycle_id: int = typer.Argument(..., help="Cycle ID"),

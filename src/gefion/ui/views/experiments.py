@@ -674,20 +674,16 @@ def render_results_section():
 
         ### From Experiment to Trading
 
-        Once you find a winning experiment:
-        1. **Retrain** a production model using the best parameters:
-           `gefion ml train --dataset-name baseline --dataset-version v2 --model-name prod --model-version $(date +%Y%m%d)`
-           with the best hyperparameters from the experiment
-        2. **Generate predictions** for your stock universe:
-           `gefion ml predict --model-name prod --model-version <ver>`
-        3. **Interpret predictions** for each stock:
-           - **q50 > 0.02** (median return > 2%) → potential buy
-           - **q50 < -0.02** → potential short
-           - **q10 > -0.01** (downside limited) → higher confidence buy
-           - **q90 - q10 narrow** → model is confident
-           - **q90 - q10 wide** → high uncertainty, smaller position or skip
-        4. **Backtest** the strategy using ML signals:
-           Go to Backtesting → select `ml_signal` strategy → use your model
+        Once you find a winning experiment, load its results below and click
+        **Apply to Production** — it retrains a model with the best parameters,
+        generates predictions, and backtests the `ml_signal` strategy in one step.
+
+        **Interpreting the predictions it generates:**
+        - **q50 > 0.02** (median return > 2%) → potential buy
+        - **q50 < -0.02** → potential short
+        - **q10 > -0.01** (downside limited) → higher confidence buy
+        - **q90 - q10 narrow** → model is confident
+        - **q90 - q10 wide** → high uncertainty, smaller position or skip
 
         ### FDR Survivors
         In a cycle with multiple experiments, FDR filtering keeps only results
@@ -727,6 +723,10 @@ def render_results_section():
             show_trials = st.checkbox("Show all trials", value=False)
 
             if st.button("Load Results", width="stretch"):
+                st.session_state["results_loaded_exp_id"] = exp_id
+
+            # Persist across reruns so the Apply button below keeps working
+            if st.session_state.get("results_loaded_exp_id") == exp_id:
                 load_experiment_results(exp_id, show_trials=show_trials)
         else:
             st.info("No completed experiments yet. Run an experiment from the Discovery tab.")
@@ -968,23 +968,6 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
                     "Use them to retrain a production model or configure a trading strategy."
                 )
 
-            # What to do next
-            best_params = data.get("best_params", {})
-            if best_params:
-                with st.expander(":material/arrow_forward: What to do with these results"):
-                    st.markdown(f"""
-                    **To use these results:**
-
-                    1. **Retrain a model** with the best settings and evaluate on fresh data
-                    2. **Generate predictions** for your stock universe
-                    3. **Review predictions** — stocks with q50 > 2% are potential buys,
-                       q50 < -2% are potential shorts
-                    4. **Check confidence** — narrow q10-to-q90 range means the model is confident
-                    5. **Backtest** using the `ml_signal` strategy to validate before live trading
-
-                    Best parameters found: `{json.dumps(best_params)}`
-                    """)
-
             # Trials table
             if show_trials and "trials" in data:
                 st.markdown("### All Trials")
@@ -995,10 +978,104 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
             # Charts (trials scatter + heatmap when the search space is 2D)
             _render_experiment_charts(exp_id)
 
+            # One-click path from winner to production
+            render_apply_to_production(exp_id)
+
         except json.JSONDecodeError:
             st.code(result.stdout)
     else:
         st.error(f"Failed: {result.stderr}")
+
+
+def render_apply_to_production(exp_id: int):
+    """One-click apply: retrain, predict, and backtest the experiment winner."""
+    st.markdown("### Apply to Production")
+    st.caption(
+        "Runs the full pipeline for this winner: rebuild the dataset (including any "
+        "promoted features), retrain a model with the best parameters, generate "
+        "predictions, and backtest the ml_signal strategy. Artifacts are recorded on "
+        "the experiment and a probation window opens."
+    )
+
+    if not st.button(
+        ":material/rocket_launch: Apply to Production",
+        key=f"apply_to_production_{exp_id}",
+        type="primary",
+    ):
+        return
+
+    st.code(f"gefion experiment apply --id {exp_id}", language="bash")
+
+    env = os.environ.copy()
+    cmd = [sys.executable, "-m", "gefion.cli", "experiment", "apply",
+           "--id", str(exp_id), "--json"]
+
+    phase_icons = {
+        "validate": ":material/checklist:",
+        "dataset": ":material/dataset:",
+        "train": ":material/model_training:",
+        "predict": ":material/online_prediction:",
+        "backtest": ":material/query_stats:",
+        "complete": ":material/celebration:",
+    }
+
+    with st.status("Applying experiment to production...", expanded=True) as status:
+        try:
+            with create_span("ui.experiments.apply_to_production", experiment_id=exp_id):
+                progress_area = st.empty()
+                progress_lines = []
+
+                process = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, bufsize=1, env=env,
+                )
+
+                final_result = None
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if isinstance(data, dict):
+                            phase = data.get("phase", "")
+                            msg = data.get("message", data.get("msg", ""))
+                            if phase and msg:
+                                icon = phase_icons.get(phase, ":material/arrow_forward:")
+                                progress_lines.append(f"{icon} {msg}")
+                                progress_area.markdown("\n\n".join(progress_lines[-8:]))
+                            if data.get("model_name") and data.get("status") == "ok":
+                                final_result = data
+                    except json.JSONDecodeError:
+                        pass
+
+                returncode = process.wait()
+
+            if returncode == 0:
+                status.update(label="Applied to production!", state="complete")
+                if final_result:
+                    st.success(
+                        f"Model `{final_result['model_name']}:{final_result['model_version']}` "
+                        f"trained, predictions generated, backtest complete. "
+                        f"Probation: {final_result.get('probation_days', 7)} days."
+                    )
+                    metrics = (final_result.get("backtest") or {}).get("metrics") or {}
+                    if metrics:
+                        cols = st.columns(min(len(metrics), 4))
+                        for col, key in zip(cols, ("sharpe_ratio", "total_return",
+                                                   "max_drawdown", "win_rate")):
+                            if key in metrics:
+                                with col:
+                                    st.metric(key.replace("_", " ").title(), f"{metrics[key]:.3f}")
+                else:
+                    st.success("Applied! Check the experiment's results for artifacts.")
+            else:
+                stderr = process.stderr.read()
+                status.update(label="Apply failed", state="error")
+                st.error(f"Apply failed: {stderr[-500:]}")
+        except Exception as e:
+            status.update(label="Apply failed", state="error")
+            st.error(f"Apply failed: {e}")
 
 
 def _get_theme_map():
