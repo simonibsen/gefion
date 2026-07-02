@@ -1,6 +1,6 @@
--- G2 Database Schema
+-- Gefion Database Schema
 --
--- Creates core tables for the G2 trading system:
+-- Creates core tables for the Gefion trading system:
 --   - stocks: Stock symbols and metadata
 --   - stock_ohlcv: OHLCV price data (hypertable)
 --   - feature_definitions: Metadata-driven feature configuration
@@ -11,7 +11,7 @@
 --   - Run: CREATE EXTENSION IF NOT EXISTS timescaledb;
 --
 -- Usage:
---   psql -d g2 -f sql/schema.sql
+--   psql -d gefion -f sql/schema.sql
 
 -- Enable TimescaleDB extension
 CREATE EXTENSION IF NOT EXISTS timescaledb;
@@ -143,6 +143,50 @@ SELECT create_hypertable('stocks_fundamentals', 'date', if_not_exists => TRUE);
 SELECT set_chunk_time_interval('stocks_fundamentals', INTERVAL '90 days');
 CREATE INDEX IF NOT EXISTS stocks_fundamentals_data_date_idx
     ON stocks_fundamentals(data_id, date DESC);
+
+-- Quarterly financial statements hypertable
+-- One row per (symbol, fiscal_date, statement_type) from AlphaVantage
+-- INCOME_STATEMENT / BALANCE_SHEET / CASH_FLOW / EARNINGS.
+-- Also created at runtime by src/gefion/db/schema.py:create_quarterly_financials_table;
+-- declared here so sql/ fully describes the database schema.
+CREATE TABLE IF NOT EXISTS quarterly_financials (
+    data_id INTEGER NOT NULL REFERENCES stocks(id),
+    date DATE NOT NULL,
+    statement_type TEXT NOT NULL,
+    reported_at DATE,
+    -- Income statement
+    revenue BIGINT,
+    net_income BIGINT,
+    gross_profit BIGINT,
+    ebitda BIGINT,
+    operating_income BIGINT,
+    eps NUMERIC(10,4),
+    -- Balance sheet
+    total_assets BIGINT,
+    total_liabilities BIGINT,
+    shareholder_equity BIGINT,
+    current_assets BIGINT,
+    current_liabilities BIGINT,
+    long_term_debt BIGINT,
+    shares_outstanding BIGINT,
+    -- Cash flow
+    operating_cashflow BIGINT,
+    capital_expenditures BIGINT,
+    free_cash_flow BIGINT,
+    -- Earnings
+    reported_eps NUMERIC(10,4),
+    estimated_eps NUMERIC(10,4),
+    surprise NUMERIC(10,4),
+    surprise_percentage NUMERIC(10,4),
+    -- Overflow
+    raw JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (data_id, date, statement_type)
+);
+SELECT create_hypertable('quarterly_financials', 'date', if_not_exists => TRUE);
+SELECT set_chunk_time_interval('quarterly_financials', INTERVAL '90 days');
+CREATE INDEX IF NOT EXISTS quarterly_financials_data_type_date_idx
+    ON quarterly_financials(data_id, statement_type, date DESC);
 
 -- Computed features hypertable
 -- Tall table storing all computed features (indicators, derivatives, etc.)
@@ -613,17 +657,35 @@ CREATE INDEX IF NOT EXISTS idx_trials_experiment ON experiment_trials(experiment
 CREATE INDEX IF NOT EXISTS idx_trials_score ON experiment_trials(score DESC);
 
 -- =============================================================================
+-- MIGRATION BOOKKEEPING
+-- =============================================================================
+
+-- Created and managed at runtime by src/gefion/db/migrate.py; declared here
+-- so sql/ fully describes the database schema.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    id SERIAL PRIMARY KEY,
+    version TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    applied_at TIMESTAMP DEFAULT NOW(),
+    checksum TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_schema_migrations_version
+    ON schema_migrations(version);
+
+-- =============================================================================
 -- SUMMARY
 -- =============================================================================
 
 \echo ''
 \echo '========================================='
-\echo 'G2 Database Initialization Complete'
+\echo 'Gefion Database Initialization Complete'
 \echo '========================================='
 \echo ''
 \echo 'Tables Created:'
 \echo '  - stocks (dimension table)'
 \echo '  - stock_ohlcv (hypertable)'
+\echo '  - stocks_fundamentals (hypertable)'
+\echo '  - quarterly_financials (hypertable)'
 \echo '  - feature_definitions'
 \echo '  - computed_features (hypertable)'
 \echo '  - strategy_registry'
@@ -636,7 +698,9 @@ CREATE INDEX IF NOT EXISTS idx_trials_score ON experiment_trials(score DESC);
 \echo '  - model_performance'
 \echo '  - volatility_thresholds (hypertable)'
 \echo '  - experiments'
+\echo '  - experiment_cycles'
 \echo '  - experiment_trials'
+\echo '  - schema_migrations'
 \echo ''
 \echo 'Views Created:'
 \echo '  - signal_strength_view'

@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Generate docs/DATA_DICTIONARY.md from the live DB schema + catalog.py.
+"""Generate docs/DATA_DICTIONARY.md from the SQL schema files + catalog.py.
 
 Sources of truth:
-  - PostgreSQL information_schema (live tables/columns)
+  - sql/schema.sql and sql/migrations/*.sql (applied in order), parsed
+    statically — no live database is consulted
   - src/gefion/alphavantage/catalog.ENDPOINT_DOCS (AlphaVantage source mappings)
 
 The generated doc cannot drift from these — re-run this script after schema
 or catalog changes and commit the diff.
+
+The parser covers the DDL dialect this repo actually uses:
+  CREATE TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN [IF NOT EXISTS] /
+  DROP COLUMN / DROP CONSTRAINT / ADD [CONSTRAINT ...] PRIMARY KEY,
+  DROP TABLE IF EXISTS, and SELECT create_hypertable(...).
+Anything else (indexes, views, extensions, DML) is ignored. If you add DDL
+the parser doesn't understand, extend it here — the drift test will catch
+silent omissions only if the doc changes, so prefer failing loudly.
 
 Usage:
   gen_data_dictionary.py                    # emit to stdout
@@ -16,89 +25,226 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
+import re
 import sys
 from collections import defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = REPO_ROOT / "docs" / "DATA_DICTIONARY.md"
+SCHEMA_FILE = REPO_ROOT / "sql" / "schema.sql"
+MIGRATIONS_DIR = REPO_ROOT / "sql" / "migrations"
 
 # Make `gefion.*` importable
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-import psycopg  # noqa: E402
 from gefion.alphavantage.catalog import ENDPOINT_DOCS  # noqa: E402
 
 
-def _database_url() -> str:
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        # Fallback to local dev default
-        url = "postgresql://gefion:gefionpass@localhost:6432/gefion"
-    return url
+# ---------------------------------------------------------------------------
+# SQL DDL parsing
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Column:
+    name: str
+    data_type: str
+    nullable: bool
 
 
-def _fetch_tables(conn) -> List[str]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            ORDER BY table_name
-            """
+@dataclass
+class Table:
+    name: str
+    columns: "Dict[str, Column]" = field(default_factory=dict)
+    primary_key: List[str] = field(default_factory=list)
+    is_hypertable: bool = False
+
+
+_TYPE_RE = re.compile(
+    r"^(BIGSERIAL|SERIAL|BIGINT|INTEGER|INT|SMALLINT|"
+    r"DOUBLE\s+PRECISION|REAL|"
+    r"NUMERIC(?:\s*\(\s*\d+\s*,\s*\d+\s*\))?|"
+    r"CHARACTER\s+VARYING(?:\s*\(\s*\d+\s*\))?|VARCHAR(?:\s*\(\s*\d+\s*\))?|"
+    r"TIMESTAMPTZ|TIMESTAMP(?:\s+WITH(?:OUT)?\s+TIME\s+ZONE)?|"
+    r"DATE|TIME|BOOLEAN|JSONB|JSON|TEXT|UUID|BYTEA)"
+    r"(\s*\[\s*\])?",
+    re.IGNORECASE,
+)
+
+_TABLE_CONSTRAINT_RE = re.compile(
+    r"^(PRIMARY\s+KEY|UNIQUE|CONSTRAINT|FOREIGN\s+KEY|CHECK|EXCLUDE|LIKE)\b",
+    re.IGNORECASE,
+)
+
+_PK_COLS_RE = re.compile(r"PRIMARY\s+KEY\s*\(([^)]*)\)", re.IGNORECASE)
+
+
+def _strip_sql_noise(sql: str) -> str:
+    """Remove `--` comments and psql meta-commands (\\echo etc.)."""
+    lines = []
+    for line in sql.splitlines():
+        if line.lstrip().startswith("\\"):
+            continue
+        idx = line.find("--")
+        if idx != -1:
+            line = line[:idx]
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _statements(sql: str) -> List[str]:
+    return [s.strip() for s in _strip_sql_noise(sql).split(";") if s.strip()]
+
+
+def _split_top_level_commas(s: str) -> List[str]:
+    parts, depth, current = [], 0, []
+    for ch in s:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    tail = "".join(current).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def _normalize_type(raw: str, array_suffix: str) -> str:
+    norm = re.sub(r"\s+", " ", raw.upper()).replace("( ", "(").replace(" )", ")")
+    return norm + ("[]" if array_suffix else "")
+
+
+def _parse_column_def(item: str) -> "Column | None":
+    m = re.match(r'^"?([A-Za-z_][A-Za-z0-9_]*)"?\s+(.*)$', item, re.DOTALL)
+    if not m:
+        return None
+    name, rest = m.group(1), m.group(2).strip()
+    tm = _TYPE_RE.match(rest)
+    if not tm:
+        return None
+    data_type = _normalize_type(tm.group(1), tm.group(2) or "")
+    remainder = rest[tm.end():]
+    is_serial = data_type in ("SERIAL", "BIGSERIAL")
+    inline_pk = re.search(r"\bPRIMARY\s+KEY\b", remainder, re.IGNORECASE)
+    not_null = re.search(r"\bNOT\s+NULL\b", remainder, re.IGNORECASE)
+    return Column(
+        name=name,
+        data_type=data_type,
+        nullable=not (inline_pk or not_null or is_serial),
+    )
+
+
+def _apply_create_table(stmt: str, tables: Dict[str, Table]) -> None:
+    m = re.match(
+        r'^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s*\((.*)\)\s*$',
+        stmt,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return
+    name, body = m.group(1), m.group(2)
+    if name in tables:  # CREATE TABLE IF NOT EXISTS on existing table: no-op
+        return
+    table = Table(name=name)
+    for item in _split_top_level_commas(body):
+        if _TABLE_CONSTRAINT_RE.match(item):
+            pk = _PK_COLS_RE.search(item)
+            if pk and not item.upper().startswith("FOREIGN"):
+                table.primary_key = [c.strip().strip('"') for c in pk.group(1).split(",")]
+            continue
+        col = _parse_column_def(item)
+        if col is None:
+            continue
+        if col.name not in table.columns:
+            table.columns[col.name] = col
+        # Inline single-column PRIMARY KEY
+        rest = item[len(col.name):]
+        if re.search(r"\bPRIMARY\s+KEY\b", rest, re.IGNORECASE) and not _PK_COLS_RE.search(item):
+            table.primary_key = [col.name]
+    tables[name] = table
+
+
+def _apply_alter_table(stmt: str, tables: Dict[str, Table]) -> None:
+    m = re.match(
+        r'^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?"?(\w+)"?\s+(.*)$',
+        stmt,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return
+    table = tables.get(m.group(1))
+    if table is None:  # e.g. ALTERs to legacy tables dropped by later migrations
+        return
+    for clause in _split_top_level_commas(m.group(2)):
+        add_col = re.match(
+            r"^ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?(.*)$",
+            clause,
+            re.IGNORECASE | re.DOTALL,
         )
-        return [r[0] for r in cur.fetchall()]
-
-
-def _fetch_columns(conn, table: str) -> List[Tuple[str, str, str, Optional[str]]]:
-    """Returns (column_name, data_type, nullable, default) per column."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT column_name, data_type, is_nullable, column_default
-            FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = %s
-            ORDER BY ordinal_position
-            """,
-            (table,),
+        if add_col:
+            col = _parse_column_def(add_col.group(1).strip())
+            if col is not None and col.name not in table.columns:
+                table.columns[col.name] = col
+            continue
+        drop_col = re.match(
+            r'^DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?"?(\w+)"?', clause, re.IGNORECASE
         )
-        return list(cur.fetchall())
-
-
-def _fetch_hypertables(conn) -> set:
-    """Return set of TimescaleDB hypertable names, or empty set if extension absent."""
-    with conn.cursor() as cur:
-        try:
-            cur.execute("SELECT hypertable_name FROM timescaledb_information.hypertables")
-            return {r[0] for r in cur.fetchall()}
-        except psycopg.errors.UndefinedTable:
-            conn.rollback()
-            return set()
-        except Exception:
-            conn.rollback()
-            return set()
-
-
-def _fetch_primary_key(conn, table: str) -> List[str]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT kc.column_name
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kc
-              ON kc.table_name = tc.table_name AND kc.constraint_name = tc.constraint_name
-            WHERE tc.table_schema = 'public'
-              AND tc.table_name = %s
-              AND tc.constraint_type = 'PRIMARY KEY'
-            ORDER BY kc.ordinal_position
-            """,
-            (table,),
+        if drop_col:
+            table.columns.pop(drop_col.group(1), None)
+            continue
+        drop_constraint = re.match(
+            r'^DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?"?(\w+)"?', clause, re.IGNORECASE
         )
-        return [r[0] for r in cur.fetchall()]
+        if drop_constraint:
+            if drop_constraint.group(1).endswith("_pkey"):
+                table.primary_key = []
+            continue
+        add_pk = re.match(
+            r"^ADD\s+(?:CONSTRAINT\s+\w+\s+)?PRIMARY\s+KEY\s*\(([^)]*)\)",
+            clause,
+            re.IGNORECASE,
+        )
+        if add_pk:
+            table.primary_key = [c.strip().strip('"') for c in add_pk.group(1).split(",")]
 
+
+def _apply_statement(stmt: str, tables: Dict[str, Table]) -> None:
+    upper = stmt.upper()
+    if upper.startswith("CREATE TABLE"):
+        _apply_create_table(stmt, tables)
+    elif upper.startswith("ALTER TABLE"):
+        _apply_alter_table(stmt, tables)
+    elif upper.startswith("DROP TABLE"):
+        m = re.match(r"^DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(.*)$", stmt, re.IGNORECASE | re.DOTALL)
+        if m:
+            for name in m.group(1).replace("CASCADE", "").replace("cascade", "").split(","):
+                tables.pop(name.strip().strip('"'), None)
+    else:
+        hyper = re.search(r"create_hypertable\(\s*'(\w+)'", stmt, re.IGNORECASE)
+        if hyper and hyper.group(1) in tables:
+            tables[hyper.group(1)].is_hypertable = True
+
+
+def build_schema() -> Dict[str, Table]:
+    """Parse sql/schema.sql then sql/migrations/*.sql in filename order."""
+    tables: Dict[str, Table] = {}
+    files = [SCHEMA_FILE] + sorted(MIGRATIONS_DIR.glob("*.sql"))
+    for path in files:
+        for stmt in _statements(path.read_text()):
+            _apply_statement(stmt, tables)
+    return tables
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
 
 def _build_source_map() -> Dict[Tuple[str, str], List[Tuple[str, str, str]]]:
     """Map (table, column) → list of (endpoint, av_field, description)."""
@@ -110,7 +256,7 @@ def _build_source_map() -> Dict[Tuple[str, str], List[Tuple[str, str, str]]]:
     return out
 
 
-# One-sentence purpose per table. Hand-curated because the DB doesn't
+# One-sentence purpose per table. Hand-curated because the schema files don't
 # carry semantic descriptions. Add an entry here when introducing a new
 # table; the generator emits "(no description yet)" otherwise.
 TABLE_PURPOSE: Dict[str, str] = {
@@ -134,32 +280,27 @@ TABLE_PURPOSE: Dict[str, str] = {
     "experiments": "Autonomous experimentation framework: proposed/approved/run experiments.",
     "experiment_cycles": "Top-level autonomous experiment cycles (discover → propose → run → evaluate).",
     "experiment_trials": "Individual trials within an experiment (e.g. one hyperparameter combination).",
+    "schema_migrations": "Migration bookkeeping: which sql/migrations/*.sql files have been applied (managed by `src/gefion/db/migrate.py`).",
 }
 
 
-def _format_type(data_type: str) -> str:
-    # Compact display: information_schema returns 'integer', 'numeric', etc.
-    return data_type.upper()
-
-
-def render(conn) -> str:
-    tables = _fetch_tables(conn)
-    hypertables = _fetch_hypertables(conn)
+def render(tables: Dict[str, Table]) -> str:
+    table_names = sorted(tables)
     source_map = _build_source_map()
 
     lines: List[str] = []
     lines.append("# Gefion Data Dictionary")
     lines.append("")
     lines.append(
-        "*Generated by `scripts/gen_data_dictionary.py` from the live PostgreSQL "
-        "schema and `src/gefion/alphavantage/catalog.py`. Do not edit by hand — "
-        "re-run the script and commit the diff.*"
+        "*Generated by `scripts/gen_data_dictionary.py` from `sql/schema.sql`, "
+        "`sql/migrations/*.sql`, and `src/gefion/alphavantage/catalog.py`. "
+        "Do not edit by hand — re-run the script and commit the diff.*"
     )
     lines.append("")
     lines.append("## Contents")
     lines.append("")
     lines.append("- [Tables](#tables)")
-    for t in tables:
+    for t in table_names:
         lines.append(f"  - [`{t}`](#{t.replace('_', '-')})")
     lines.append("- [AlphaVantage endpoints → tables](#alphavantage-endpoints--tables)")
     lines.append("")
@@ -167,18 +308,17 @@ def render(conn) -> str:
     lines.append("## Tables")
     lines.append("")
 
-    for table in tables:
-        cols = _fetch_columns(conn, table)
-        pk = set(_fetch_primary_key(conn, table))
-        is_hyper = table in hypertables
-        purpose = TABLE_PURPOSE.get(table, "*(no description yet)*")
+    for name in table_names:
+        table = tables[name]
+        pk = set(table.primary_key)
+        purpose = TABLE_PURPOSE.get(name, "*(no description yet)*")
 
-        lines.append(f"### `{table}`")
+        lines.append(f"### `{name}`")
         lines.append("")
         lines.append(purpose)
         lines.append("")
         attrs = []
-        if is_hyper:
+        if table.is_hypertable:
             attrs.append("**TimescaleDB hypertable**")
         if pk:
             attrs.append(f"Primary key: `{', '.join(sorted(pk))}`")
@@ -188,8 +328,8 @@ def render(conn) -> str:
 
         lines.append("| Column | Type | Null | Source | Notes |")
         lines.append("|---|---|---|---|---|")
-        for col_name, data_type, is_nullable, _default in cols:
-            sources = source_map.get((table, col_name), [])
+        for col in table.columns.values():
+            sources = source_map.get((name, col.name), [])
             if sources:
                 source_str = "<br>".join(
                     f"`{ep}`.<br>`{av_field}`" for ep, av_field, _desc in sources
@@ -198,14 +338,14 @@ def render(conn) -> str:
             else:
                 source_str = ""
                 notes_str = ""
-            null_marker = "✓" if is_nullable == "YES" else ""
-            type_str = _format_type(data_type)
-            if col_name in pk:
-                col_display = f"**`{col_name}`** 🔑"
+            nullable = col.nullable and col.name not in pk
+            null_marker = "✓" if nullable else ""
+            if col.name in pk:
+                col_display = f"**`{col.name}`** 🔑"
             else:
-                col_display = f"`{col_name}`"
+                col_display = f"`{col.name}`"
             lines.append(
-                f"| {col_display} | {type_str} | {null_marker} | {source_str} | {notes_str} |"
+                f"| {col_display} | {col.data_type} | {null_marker} | {source_str} | {notes_str} |"
             )
         lines.append("")
 
@@ -253,8 +393,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Output path (default docs/DATA_DICTIONARY.md)")
     args = parser.parse_args()
 
-    with psycopg.connect(_database_url()) as conn:
-        content = render(conn)
+    content = render(build_schema())
 
     if args.check:
         if not args.output.exists():
