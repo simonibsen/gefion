@@ -91,6 +91,26 @@ def pytest_sessionstart(session):
         )
 
 
+def reset_public_schema(conn) -> None:
+    """DROP SCHEMA public CASCADE + CREATE, retrying on deadlock.
+
+    Dropping hypertables can deadlock against TimescaleDB's background
+    workers (job scheduler/telemetry), which grab catalog locks on their own
+    schedule. Deadlocks are transient — retry instead of failing the run.
+    Use this instead of executing DROP SCHEMA directly in test fixtures.
+    """
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+            return
+        except psycopg.errors.DeadlockDetected:
+            if attempt == attempts:
+                raise
+            time.sleep(0.5 * attempt)
+
+
 def restore_test_db() -> None:
     """Re-initialize the test database to its canonical state.
 
@@ -105,8 +125,7 @@ def restore_test_db() -> None:
 
     url = test_db_url()
     with psycopg.connect(url, autocommit=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        reset_public_schema(conn)
 
     env = os.environ.copy()
     env["OTEL_ENABLED"] = "false"

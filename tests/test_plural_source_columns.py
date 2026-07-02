@@ -29,8 +29,8 @@ def db_conn():
     try:
         with psycopg.connect(db_url) as conn:
             conn.autocommit = True
-            with conn.cursor() as cur:
-                cur.execute("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
+            from conftest import reset_public_schema
+            reset_public_schema(conn)
 
             # Create schema with new plural columns
             schema.create_feature_definitions_table(conn)

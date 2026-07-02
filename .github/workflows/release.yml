@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Never run two releases concurrently — version computation depends on
+# the tag state at checkout time.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag + GitHub Release (semantic-release)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create tags and releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: semantic-release needs every commit since
+          # the last tag to compute the next version.
+          fetch-depth: 0
+
+      # Tag-only flow (see [tool.semantic_release] in pyproject.toml):
+      # no version-bump commit, no committed changelog — branch protection
+      # on main (required checks, signed commits, enforce_admins) would
+      # reject a bot commit. The changelog lives in the generated GitHub
+      # Release notes; the package version comes from the tag at build
+      # time via setuptools-scm.
+      - name: Semantic release (tag + GitHub Release only)
+        uses: python-semantic-release/python-semantic-release@v9
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          commit: false
+          changelog: false
+          tag: true
+          push: true
+          vcs_release: true
+          build: false

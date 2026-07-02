@@ -33,8 +33,8 @@ def require_db():
 def clean_db():
     conn = require_db()
     conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    from conftest import reset_public_schema
+    reset_public_schema(conn)
     conn.close()
     yield
 
@@ -46,8 +46,11 @@ def test_insert_computed_features_accepts_numpy_int():
     schema.create_feature_definitions_table(conn)
     schema.create_computed_features_table(conn)
     # Create test stock
+    # RETURNING id instead of an explicit id: explicit-id inserts leave the
+    # stocks_id_seq stale, poisoning later sequence-based inserts (issue #29).
     with conn.cursor() as cur:
-        cur.execute("INSERT INTO stocks (id, symbol) VALUES (1, 'TEST')")
+        cur.execute("INSERT INTO stocks (symbol) VALUES ('TEST') RETURNING id")
+        stock_id = cur.fetchone()[0]
     defs = [
         {
             "name": "indicator_adx_14",
@@ -65,7 +68,7 @@ def test_insert_computed_features_accepts_numpy_int():
     ensure_store_targets(conn, defs)
     fid = fid_map["indicator_adx_14"]
     rows = [{"date": date(2025, 1, 1), "adx_14": 10.0}]
-    inserted = insert_computed_features(conn, data_id=np.int64(1), rows=rows, feature_map={"adx_14": fid})
+    inserted = insert_computed_features(conn, data_id=np.int64(stock_id), rows=rows, feature_map={"adx_14": fid})
     assert inserted == 1
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM computed_features;")

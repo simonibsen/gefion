@@ -39,6 +39,14 @@ jobs:
       - name: Data dictionary drift check
         run: python scripts/gen_data_dictionary.py --check
 
+  # This job is a REQUIRED status check on main. Escape hatch: if it ever
+  # blocks a merge through no fault of the code (e.g. a service-container
+  # startup flake), re-run the job first; if it's genuinely stuck, remove
+  # "DB-backed tests (TimescaleDB)" from the required checks in
+  # Settings → Branches → main (or:
+  #   gh api -X DELETE repos/simonibsen/gefion/branches/main/protection/required_status_checks/contexts \
+  #     --input - <<< '["DB-backed tests (TimescaleDB)"]'
+  # ) and re-add it after merging.
   db-test:
     name: DB-backed tests (TimescaleDB)
     runs-on: ubuntu-latest

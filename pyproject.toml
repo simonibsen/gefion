@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gefion"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Quantitative trading analysis and ML pipeline — named after the Norse goddess Gefion"
 readme = "README.md"
 license = {text = "Elastic-2.0"}
@@ -57,6 +57,23 @@ all = [
 [project.scripts]
 gefion = "gefion.cli:entrypoint"
 gf = "gefion.cli:entrypoint"
+
+# Version is derived from git tags (vX.Y.Z). fallback_version keeps
+# tag-less environments (shallow CI checkouts, tarballs) installable.
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
+
+# Release automation (issue #30): tag-only flow — python-semantic-release
+# computes the next version from Conventional Commits since the last tag,
+# then pushes a tag + GitHub Release. It never commits back to main
+# (branch protection would reject it); see .github/workflows/release.yml.
+[tool.semantic_release]
+tag_format = "v{version}"
+commit_parser = "conventional"
+# While on 0.x: breaking changes bump minor, not to 1.0 — going 1.0 is a
+# deliberate decision.
+major_on_zero = false
+allow_zero_version = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
