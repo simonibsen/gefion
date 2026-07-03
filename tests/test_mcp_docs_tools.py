@@ -59,10 +59,17 @@ class TestDocsSearchTool:
 
 
 class TestDocResolution:
-    """The path guard itself, exercised directly."""
+    """The path guard itself, exercised directly.
+
+    Loading the server module requires the `mcp` package, which CI does
+    not install — these tests run locally and skip there. The
+    source-inspection tests above still cover CI.
+    """
 
     def _load_server_module(self):
         import importlib.util
+        import pytest as _pytest
+        _pytest.importorskip("mcp")
         spec = importlib.util.spec_from_file_location("gefion_mcp_server", SERVER_PATH)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
