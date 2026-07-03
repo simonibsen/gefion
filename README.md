@@ -106,9 +106,9 @@ Gefion includes an AI-powered experiment framework that systematically searches 
 
 1. **Discover** — scans available data, features, and a catalog of quantitative finance principles to identify testable hypotheses
 2. **Propose** — generates experiments: new feature functions (via AI code generation), model hyperparameters, label engineering variants, or strategy parameters
-3. **Run** — executes experiments with PurgedKFold cross-validation (time-series aware, prevents data leakage)
-4. **Evaluate** — applies Benjamini-Hochberg FDR correction across all experiments in a cycle to filter false discoveries
-5. **Promote** — surviving experiments are promoted: feature functions become active, model configs are adopted
+3. **Run** — executes experiments with PurgedKFold cross-validation on pre-holdout data only (the most recent ~6 weeks are structurally excluded from all training)
+4. **Evaluate** — each experiment earns a one-sided holdout p-value (only genuine improvement counts), then Benjamini-Hochberg FDR correction runs across the cycle. Fail-closed: no p-value, no survival
+5. **Promote** — survivors are promoted with a 7-day probation window; `experiment apply` takes a winner to production (dataset rebuild → retrain → predict → backtest), and probation auto-demotes anything whose realized performance degrades
 
 ```bash
 # Run a full autonomous cycle
@@ -180,7 +180,12 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion experiment run` | Run an approved experiment |
 | `gefion experiment results` | View experiment results |
 | `gefion experiment cycle-start` | Start an autonomous experiment cycle |
-| `gefion experiment cycle-run` | Run a full autonomous cycle (discover → propose → run → evaluate) |
+| `gefion experiment cycle-run` | Run a full autonomous cycle (discover → propose → run → evaluate → promote) |
+| `gefion experiment cycle-list` / `cycle-status` | List cycles / inspect one |
+| `gefion experiment apply` | Take a promoted winner to production (rebuild → retrain → predict → backtest) |
+| `gefion experiment probation-check` | Re-measure promoted artifacts; auto-demote degradation (also runs on every data-update) |
+| `gefion experiment demote` | Manually demote a promoted artifact (reason required) |
+| `gefion chart experiment-trials` / `experiment-fdr` | Trial scatter / FDR cycle summary charts |
 
 ### Backtesting & Strategies
 
