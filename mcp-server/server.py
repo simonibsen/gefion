@@ -18,6 +18,7 @@ import subprocess
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1458,6 +1459,45 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="docs_list",
+            description=(
+                "List gefion's documentation files (user guide, architecture, "
+                "backtesting, MCP workflows, troubleshooting, ...) with one-line "
+                "summaries. Use docs_read to fetch one."
+            ),
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="docs_read",
+            description=(
+                "Read one documentation file by name (from docs_list), e.g. "
+                "USER_GUIDE.md or README.md. Use this to ground how-to answers "
+                "in the actual documentation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Doc filename, e.g. USER_GUIDE.md"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="docs_search",
+            description=(
+                "Case-insensitive search across all documentation; returns "
+                "doc name, line number, and surrounding context per hit."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Text to search for"},
+                    "max_results": {"type": "integer", "description": "Max hits (default 20)"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
             name="chart_experiment_trials",
             description=(
                 "Generate trial performance scatter chart for an experiment: trial number "
@@ -1828,6 +1868,12 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _experiment_probation_check(arguments)
         elif name == "experiment_demote":
             result = await _experiment_demote(arguments)
+        elif name == "docs_list":
+            result = await _docs_list(arguments)
+        elif name == "docs_read":
+            result = await _docs_read(arguments)
+        elif name == "docs_search":
+            result = await _docs_search(arguments)
         elif name == "chart_experiment_trials":
             result = await _chart_experiment_trials(arguments)
         elif name == "chart_experiment_fdr":
@@ -4081,6 +4127,81 @@ async def _experiment_cycle_run(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _run)
+
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DOCS_DIR = _REPO_ROOT / "docs"
+
+
+def _resolve_doc(name: str) -> Optional[Path]:
+    """Resolve a doc name to a real file, refusing anything outside docs/.
+
+    Accepts bare names of markdown files in docs/ plus README.md at the
+    repo root. Path separators and traversal are rejected outright.
+    """
+    if not name or "/" in name or "\\" in name or ".." in name:
+        return None
+    if name == "README.md":
+        path = _REPO_ROOT / "README.md"
+        return path if path.exists() else None
+    path = (_DOCS_DIR / name).resolve()
+    try:
+        path.relative_to(_DOCS_DIR.resolve())
+    except ValueError:
+        return None
+    return path if (path.exists() and path.suffix == ".md") else None
+
+
+def _doc_summary(path: Path) -> str:
+    """First heading or non-empty line of a doc."""
+    try:
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if line:
+                return line.lstrip("# ").strip()[:120]
+    except OSError:
+        pass
+    return ""
+
+
+async def _docs_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List available documentation files with one-line summaries."""
+    docs = []
+    candidates = [_REPO_ROOT / "README.md"] + sorted(_DOCS_DIR.glob("*.md"))
+    for path in candidates:
+        if path.exists():
+            docs.append({"name": path.name, "summary": _doc_summary(path)})
+    return {"docs": docs, "count": len(docs)}
+
+
+async def _docs_read(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Read one documentation file by name."""
+    path = _resolve_doc(str(args.get("name", "")))
+    if path is None:
+        return {"error": f"Unknown doc: {args.get('name')!r}. Use docs_list for names."}
+    return {"name": path.name, "content": path.read_text()}
+
+
+async def _docs_search(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Case-insensitive search across documentation, with line context."""
+    query = str(args.get("query", "")).strip().lower()
+    if not query:
+        return {"error": "query is required"}
+    max_hits = int(args.get("max_results", 20))
+    hits = []
+    candidates = [_REPO_ROOT / "README.md"] + sorted(_DOCS_DIR.glob("*.md"))
+    for path in candidates:
+        if not path.exists():
+            continue
+        lines = path.read_text().splitlines()
+        for i, line in enumerate(lines):
+            if query in line.lower():
+                start, end = max(0, i - 1), min(len(lines), i + 2)
+                hits.append({"doc": path.name, "line": i + 1,
+                             "context": "\n".join(lines[start:end])})
+                if len(hits) >= max_hits:
+                    return {"hits": hits, "truncated": True}
+    return {"hits": hits, "truncated": False}
 
 
 async def _experiment_apply(args: Dict[str, Any]) -> Dict[str, Any]:

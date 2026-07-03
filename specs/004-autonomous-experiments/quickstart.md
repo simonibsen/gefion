@@ -19,54 +19,79 @@ Shows what data sources exist, which features are computed, and where gaps exist
 ### 2. Start a cycle
 
 ```bash
-gefion experiment cycle start --name "first-cycle" --holdout-weeks 6 --fdr-rate 0.10
+gefion experiment cycle-start --name "first-cycle" --holdout-weeks 6 --fdr-rate 0.10
 ```
 
-This reserves the most recent 6 weeks as holdout and creates a cycle container.
+This reserves the most recent 6 weeks of data as holdout and creates a cycle
+container. Optionally pass `--config <file.json>` with guardrails
+(allowed_types, max_trials_per_experiment, dataset_uri, algorithm, ...).
 
-### 3. Propose experiments (agent or manual)
+### 3. Run the cycle autonomously
 
-Via Ask Gefion:
-> "Suggest experiments for feature engineering based on the principles catalog"
-
-Or manually:
 ```bash
-gefion experiment propose "frac-diff-close" \
+gefion experiment cycle-run 1
+```
+
+The orchestrator discovers hypotheses, proposes experiments (generating
+feature functions via AI when needed — demoted functions are never reused),
+runs them, and applies the statistical gate.
+
+Or propose manually:
+```bash
+gefion experiment propose --name "frac-diff-close" \
   --type feature_engineering \
   --principle ldp-fractional-diff \
   --cycle 1 \
   --null-hypothesis "Fractionally differentiated close has no higher feature importance than standard returns" \
   --search-space '{"d": [0.3, 0.4, 0.5]}'
+gefion experiment approve --id <experiment_id>
+gefion experiment run --id <experiment_id>
 ```
 
-### 4. Run experiments
+For each experiment the runner:
+- Runs trials with purged CV on **pre-holdout rows only** (holdout structurally excluded)
+- After trials, trains the best configuration and a baseline on identical
+  pre-holdout data and scores both on the holdout window — exactly once
+- Records a **one-sided holdout p-value** (only improvement counts; label
+  experiments are scored by a signal contest on realized returns, not
+  prediction metrics)
+
+### 4. The statistical gate (automatic in cycle-run)
+
+BH-FDR is applied across the cycle's holdout p-values. **Fail-closed**: an
+experiment with no p-value cannot survive. Survivors are promoted (feature
+functions become active) and a 7-day probation window opens.
+
+### 5. Take a winner to production
 
 ```bash
-gefion experiment run <experiment_id>
+gefion experiment apply --id <experiment_id>
 ```
 
-The experiment runner:
-- Computes new features (training data only — holdout excluded)
-- Rebuilds dataset with new features
-- Trains model with purged CV
-- Evaluates on holdout
-- Records p-value
+Rebuilds the dataset with the promoted feature, retrains with the winning
+parameters, generates predictions, and backtests the `ml_signal` strategy.
+Artifacts are recorded on the experiment; probation monitoring arms.
 
-### 5. Evaluate the cycle
+Probation runs automatically at the end of every `gefion data-update`, or
+manually:
 
 ```bash
-gefion experiment cycle evaluate 1
+gefion experiment probation-check      # auto-demotes measurable degradation
+gefion experiment demote --id <id> --reason "..."   # manual demotion
 ```
-
-Applies BH-FDR across all experiments in the cycle. Survivors are auto-promoted. Results show which experiments passed and which were rejected.
 
 ### 6. Review results
 
-In the UI: Navigate to Experiments → Cycles → select cycle → view D3 charts (FDR summary, trial scatter, feature importance).
+In the UI: Experiments → Cycles → select cycle → holdout p-values, FDR chart,
+lifecycle badges (🟡 on probation / 🟢 promoted / 🔴 demoted). Loaded
+experiment results show trial charts and the Apply to Production button.
 
 Via CLI:
 ```bash
-gefion experiment results <experiment_id> --show-trials
+gefion experiment results --id <experiment_id> --trials
+gefion experiment cycle-list
+gefion chart experiment-fdr <cycle_id>       # FDR summary chart
+gefion chart experiment-trials <experiment_id>
 ```
 
 ## Agent-Driven Cycle (via skill)
@@ -75,4 +100,6 @@ gefion experiment results <experiment_id> --show-trials
 /gefion-experiment
 ```
 
-The agent autonomously: discovers data → consults principles → proposes experiments → executes → evaluates → promotes survivors → reports.
+The agent autonomously: discovers data → consults principles → proposes
+experiments → executes → evaluates on holdout → FDR gate → promotes genuine
+survivors → reports.

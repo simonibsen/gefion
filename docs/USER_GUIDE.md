@@ -335,7 +335,14 @@ gefion cross-sectional-compute --feature indicator_rsi_14 --json
 
 ### AI Experimentation Framework
 
-The experiments module enables autonomous strategy parameter optimization. AI proposes experiments, users approve, and the system runs trials using grid, random, or Bayesian search.
+The experiments module enables autonomous experimentation across the full
+pipeline: feature engineering (AI-generated code), hyperparameters, model
+comparison, label engineering, feature selection, and strategy parameters.
+Cycle experiments are judged by a statistical gate — trials train on
+pre-holdout data only, each experiment earns a one-sided holdout p-value,
+and Benjamini-Hochberg FDR decides survival (fail-closed: no p-value, no
+promotion). Survivors get a 7-day probation window and can be taken to
+production with one command.
 
 **Propose an experiment:**
 ```bash
@@ -382,11 +389,43 @@ gefion experiment approve --id 1
 gefion experiment run --id 1
 
 # View results
-gefion experiment results --id 1 --show-trials
+gefion experiment results --id 1 --trials
 
 # Get detailed status
 gefion experiment status --id 1
 ```
+
+**Autonomous cycles and the production flow:**
+```bash
+# Start a cycle (reserves the most recent weeks as holdout)
+gefion experiment cycle-start --name exploration-1 --max-experiments 5
+
+# Run it end to end: discover → propose → run → holdout-evaluate → FDR → promote
+gefion experiment cycle-run 1
+
+# Inspect cycles
+gefion experiment cycle-list
+gefion experiment cycle-status 1
+
+# Take a promoted winner to production:
+# dataset rebuild → retrain → predict → ml_signal backtest → probation window
+gefion experiment apply --id 42
+
+# Probation: re-measures applied winners against realized outcomes.
+# Runs automatically at the end of every `gefion data-update`.
+gefion experiment probation-check
+
+# Manual demotion (reason is recorded on the experiment)
+gefion experiment demote --id 42 --reason "degraded after regime change"
+
+# Charts
+gefion chart experiment-trials 42     # trial scatter (+ heatmap when 2 params vary)
+gefion chart experiment-fdr 1         # cycle p-values vs FDR threshold
+```
+
+In the UI (Experiments page): lifecycle badges (🟡 on probation / 🟢 promoted /
+🔴 demoted), holdout p-values in cycle details, inline charts, an Apply to
+Production button on loaded results, and demote/probation-check actions.
 
 **Chaining experiments:**
 ```bash
@@ -409,7 +448,7 @@ gefion experiment parent --id 2
 - `random` - Random sampling
 - `bayesian` - Adaptive optimization (Optuna TPE sampler)
 
-See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-framework.md) for detailed documentation.
+See [specs/004-autonomous-experiments/](../specs/004-autonomous-experiments/) for the full specification and [specs/004-autonomous-experiments/quickstart.md](../specs/004-autonomous-experiments/quickstart.md) for a hands-on walkthrough.
 
 ## Tips and Behaviors
 - Prices/indicators skip symbols already current (latest date = today).

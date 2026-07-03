@@ -352,20 +352,48 @@ This enables:
 
 ### Overview
 
-The experiments module enables autonomous experimentation with trading strategy parameters, ML model hyperparameters, and feature selection. It follows a **hybrid autonomy** model where AI proposes experiments and users approve them initially.
+The experiments module enables autonomous experimentation across the full pipeline — features, hyperparameters, model choice, prediction targets, and strategy parameters. AI proposes experiments (cycles auto-approve within guardrails); a statistical gate, not human judgment, decides what gets promoted.
 
 ### Core Concepts
 
-**Experiment Types** (extensible):
-- `strategy_params` - Optimize trading strategy parameters via grid/random/bayesian search
-- Future: `feature_selection`, `hyperparameter`, `model_comparison`
+**Experiment Types**:
+- `feature_engineering` - New computed features (AI-generated code, sandboxed)
+- `hyperparameter` - Model tuning with purged CV
+- `model_comparison` - Algorithm choice vs the incumbent
+- `label_engineering` - Changed prediction targets (evaluated via a signal
+  contest on realized returns — prediction metrics are not comparable
+  across different targets)
+- `feature_selection`, `strategy_params`, `pipeline`
 
 **Experiment Lifecycle**:
 ```
 proposed → approved → running → completed/failed
-    ↓
- rejected
+    ↓                              ↓
+ rejected              holdout evaluation (one-sided p-value)
+                                   ↓
+                     BH-FDR across the cycle (fail-closed:
+                     no p-value → cannot survive)
+                                   ↓
+                  promoted (+ 7-day probation window opens)
+                                   ↓
+              apply → dataset rebuild → retrain → predict → backtest
+                                   ↓
+        probation-check (auto on every data-update) → passed / demoted
 ```
+
+**Statistical guardrails** (FR-017/019/020):
+- Trials and CV train on **pre-holdout rows only**; the holdout window
+  (most recent ~6 weeks, stored per cycle) is touched exactly once, at
+  final evaluation
+- The holdout p-value is **one-sided** — only improvement over the
+  baseline counts; a significantly worse experiment gets p ≈ 1
+- Promotion is never based on best_score; best_score only selects the
+  configuration that holdout evaluation then judges
+
+**Search Strategies**:
+- `GridSearch` - Exhaustive search over parameter grid
+- `RandomSearch` - Random sampling from parameter space
+- `BayesianSearch` - Adaptive optimization using Optuna's TPE sampler
 
 **Search Strategies**:
 - `GridSearch` - Exhaustive search over parameter grid
@@ -385,8 +413,18 @@ experiments (
     goal_target, goal_type,    -- Optional goal (achieve, improve)
     status,                    -- proposed, approved, running, completed, failed
     parent_experiment_id,      -- For chaining
-    results JSONB,             -- Best params, metrics
-    best_score, total_trials, completed_trials
+    results JSONB,             -- Best params, metrics, holdout summary, applied artifacts
+    best_score, total_trials, completed_trials,
+    cycle_id,                  -- Cycle membership (FDR family)
+    holdout_p_value,           -- One-sided; NULL = never survives FDR
+    fdr_survived, promoted_at,
+    probation_until, demoted_at
+)
+
+-- Cycle container (holdout window + FDR rate per family of experiments)
+experiment_cycles (
+    id, name, holdout_start_date, holdout_end_date,
+    fdr_rate, status, summary JSONB
 )
 
 -- Individual trial results
@@ -423,17 +461,31 @@ Experiment C (threshold_tuning)
 ```
 src/gefion/experiments/
 ├── __init__.py          # Public API exports
-├── core.py              # ExperimentConfig, ExperimentRunner
+├── core.py              # ExperimentConfig, ExperimentRunner (+ holdout step)
+├── cycle_runner.py      # Autonomous cycle orchestration + FDR gate
+├── production.py        # apply: winner → rebuild → retrain → predict → backtest
+├── probation.py         # probation checks + demotion
+├── statistical.py       # BH-FDR, one-sided holdout p-values
+├── holdout.py           # Holdout window management
+├── discovery.py         # Data/gap discovery
+├── principles.py        # Principles catalog access
 ├── search.py            # GridSearch, RandomSearch, BayesianSearch
 └── types/
-    └── strategy_params.py   # StrategyParamExperiment
+    ├── holdout_eval.py          # Shared holdout-evaluation helpers
+    ├── feature_engineering.py
+    ├── hyperparameter.py        # + PurgedKFold
+    ├── model_comparison.py
+    ├── label_engineering.py
+    ├── feature_selection.py
+    ├── strategy_params.py
+    └── pipeline.py
 ```
 
-See [.specify/specs/experiments-framework.md](../.specify/specs/experiments-framework.md) for detailed documentation.
+See [specs/004-autonomous-experiments/](../specs/004-autonomous-experiments/) for the full specification and [specs/004-autonomous-experiments/quickstart.md](../specs/004-autonomous-experiments/quickstart.md) for a hands-on walkthrough.
 
 ## Related Documentation
 
-- **Experiments**: [.specify/specs/experiments-framework.md](../.specify/specs/experiments-framework.md) - AI experimentation framework
+- **Experiments**: [specs/004-autonomous-experiments/](../specs/004-autonomous-experiments/) - AI experimentation framework spec
 - **Backlog**: [.specify/memory/backlog.md](../.specify/memory/backlog.md) - Future features and backlog
 - **ML Vision**: [archive/ml/HIGHLEVEL.md](archive/ml/HIGHLEVEL.md) - Long-term ML goals
 - **Security Deep Dive**: [archive/ml/SECURITY_SANDBOXING.md](archive/ml/SECURITY_SANDBOXING.md) - Threat model and mitigation

@@ -941,6 +941,43 @@ Ask Claude to:
 
 ---
 
+## Autonomous Experiment Workflows
+
+The experiment framework is fully reachable via MCP — an AI agent can run
+the entire research loop conversationally.
+
+### Run a cycle and read the verdict
+
+```
+1. experiment_cycle_start   → creates the cycle (holdout window + FDR rate)
+2. experiment_cycle_run     → discover → propose → run → holdout-evaluate → FDR → promote
+3. experiment_cycle_status  → survivors, p-values, promotion state
+4. chart_experiment_fdr     → cycle summary chart (p-values vs FDR threshold)
+5. chart_experiment_trials  → per-experiment trial scatter
+```
+
+Every cycle experiment earns a **one-sided holdout p-value** (trials train on
+pre-holdout rows only; the holdout window is scored exactly once). FDR is
+fail-closed: an experiment with no p-value cannot survive.
+
+### Take a winner to production
+
+```
+1. experiment_apply           → dataset rebuild → retrain → predict → ml_signal backtest
+                                 (opens a 7-day probation window)
+2. experiment_probation_check → re-measures realized performance; auto-demotes degradation
+                                 (also runs automatically at the end of data_update)
+3. experiment_demote          → manual demotion with a recorded reason
+```
+
+### Inspect the estate
+
+```
+experiment_list        → all experiments (filter by status/type)
+experiment_cycle_list  → all cycles
+experiment_results     → one experiment's trials, best params, holdout summary
+```
+
 ## Next Steps
 
 After mastering these workflows:
