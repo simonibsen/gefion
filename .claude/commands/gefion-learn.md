@@ -32,13 +32,13 @@ Read it at start; update it whenever a checkpoint passes. If it doesn't exist, t
 - **Never bulk-ingest data**: no bare `data-update` (disk constraint). If a data exercise is needed, use `--limit` and existing symbols.
 - Prefer `--json` + explanation when the learner should read output; prefer the UI when the lesson is visual (charts, lifecycle badges).
 - The UI runs at http://localhost:8501 (`gefion ui --no-browser` if down). All CLI examples use `.venv/bin/python -m gefion.cli …` (alias: `gefion …` if installed).
-- If a command errors, teach the debugging path (error message → `docs/TROUBLESHOOTING.md` → `gefion health-check`), don't just fix it silently.
+- If a command errors, teach the debugging path (error message → `docs/TROUBLESHOOTING.md` → `gefion health`), don't just fix it silently.
 
 ### Curriculum
 
 **Module 0 — Orientation & services**
 Concepts: what gefion is (ML stock-prediction research system), the service stack (PostgreSQL+TimescaleDB, Tempo, Grafana), where things live (`src/gefion`, `datasets/`, `~/.gefion`).
-Do: `/gefion-services start` equivalent (`docker ps` to inspect), `gefion health-check`, `gefion system-status --json`, open the UI Dashboard.
+Do: `/gefion-services start` equivalent (`docker ps` to inspect), `gefion health`, `gefion system-status --json`, open the UI Dashboard.
 Checkpoint: learner explains what each running container does.
 
 **Module 1 — Data layer**
