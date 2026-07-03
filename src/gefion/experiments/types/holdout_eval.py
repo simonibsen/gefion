@@ -14,6 +14,29 @@ import pandas as pd
 from gefion.observability import create_span, set_attributes
 
 
+def load_all_cached(exp) -> tuple:
+    """Load and cache (X, y, meta) on an experiment instance.
+
+    Works for any evaluator dataclass with dataset_uri, horizon_days and a
+    _cached_data field (set via object.__setattr__ for frozen-safety).
+    """
+    from gefion.ml.models import load_dataset
+
+    if exp._cached_data is None:
+        X, y, meta = load_dataset(exp.dataset_uri, exp.horizon_days, with_meta=True)
+        object.__setattr__(exp, "_cached_data", (X, y, meta))
+    return exp._cached_data
+
+
+def training_data(exp) -> tuple:
+    """(X, y, meta) restricted to pre-holdout rows (FR-017)."""
+    X, y, meta = load_all_cached(exp)
+    train, _ = holdout_masks(meta, exp.holdout_start, exp.holdout_end)
+    return (X[train].reset_index(drop=True),
+            y[train].reset_index(drop=True),
+            meta[train].reset_index(drop=True))
+
+
 def holdout_masks(meta: pd.DataFrame, holdout_start, holdout_end) -> tuple:
     """(train_mask, holdout_mask) boolean arrays over dataset rows.
 
