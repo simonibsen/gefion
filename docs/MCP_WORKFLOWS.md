@@ -970,12 +970,31 @@ fail-closed: an experiment with no p-value cannot survive.
 3. experiment_demote          → manual demotion with a recorded reason
 ```
 
+### Manual experiment flow
+
+```
+experiment_discover → experiment_propose → experiment_approve → experiment_run
+experiment_status   → live progress of a running experiment
+experiment_chain / experiment_children → chained experiments using parent outputs
+```
+
 ### Inspect the estate
 
 ```
 experiment_list        → all experiments (filter by status/type)
 experiment_cycle_list  → all cycles
 experiment_results     → one experiment's trials, best params, holdout summary
+```
+
+## Documentation Tools
+
+Remote MCP clients can't read the repo, so the documentation itself is
+reachable as tools:
+
+```
+docs_list    → documentation files with one-line summaries
+docs_read    → one doc by name (e.g. USER_GUIDE.md)
+docs_search  → case-insensitive search with line context
 ```
 
 ## Next Steps

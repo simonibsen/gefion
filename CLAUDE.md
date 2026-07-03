@@ -95,6 +95,14 @@ Before exiting plan mode, verify:
 
 ## Other Guidelines
 
+### Documentation (definition of done)
+- A user-facing change (new/renamed command, MCP tool, or workflow change)
+  is not done until README/docs/USER_GUIDE reflect it — and, if the learning
+  path changed, `.claude/commands/gefion-learn.md` too — in the same PR
+- `tests/test_docs_drift.py` enforces the mechanical part (commands and MCP
+  tools referenced in docs must exist and be documented); narrative drift is
+  on the author
+
 ### Code Style
 - Follow existing patterns in the codebase
 - Use type hints for all function signatures

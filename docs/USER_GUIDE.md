@@ -195,7 +195,7 @@ Use `--listings-file <csv|json>` to bypass the API for universe selection and wo
 2. **Reproducibility**: Lock to a specific universe for consistent backtesting
    ```bash
    # Save current NASDAQ 100 to file
-   gefion universe-list --exchange NASDAQ --limit 100 > nasdaq100_2024.csv
+   gefion universe-ingest --exchange NASDAQ --limit 100   # then export via query_database / psql
    # Use same universe months later
    gefion data-update --listings-file nasdaq100_2024.csv
    ```
@@ -380,10 +380,12 @@ gefion experiment propose \
 **Manage experiments:**
 ```bash
 # List pending approvals
+gefion experiment pending
 gefion experiment list --status proposed
 
-# Approve for execution
+# Approve or reject
 gefion experiment approve --id 1
+gefion experiment reject --id 1
 
 # Run experiment (executes all trials)
 gefion experiment run --id 1
