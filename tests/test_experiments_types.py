@@ -574,7 +574,7 @@ class TestHyperparameterExperiment:
         y = pd.Series(np.random.randn(100), name="forward_return")
         preds = pd.DataFrame({"q10": np.random.randn(20), "q50": np.random.randn(20), "q90": np.random.randn(20)})
 
-        with patch("gefion.experiments.types.hyperparameter.load_dataset",
+        with patch("gefion.ml.models.load_dataset",
                    return_value=(X, y, _fe_meta(len(X)))), \
              patch("gefion.experiments.types.hyperparameter.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.hyperparameter.predict_quantiles", return_value=preds), \
@@ -607,7 +607,7 @@ class TestHyperparameterExperiment:
         y = pd.Series(np.random.randn(100), name="forward_return")
         preds = pd.DataFrame({"q10": np.random.randn(20), "q50": np.random.randn(20), "q90": np.random.randn(20)})
 
-        with patch("gefion.experiments.types.hyperparameter.load_dataset",
+        with patch("gefion.ml.models.load_dataset",
                    return_value=(X, y, _fe_meta(len(X)))), \
              patch("gefion.experiments.types.hyperparameter.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.hyperparameter.predict_quantiles", return_value=preds), \
@@ -645,7 +645,7 @@ class TestHyperparameterExperiment:
             {"quantile_loss": 0.06, "avg_iqr": 0.14},
         ]
 
-        with patch("gefion.experiments.types.hyperparameter.load_dataset",
+        with patch("gefion.ml.models.load_dataset",
                    return_value=(X, y, _fe_meta(len(X)))), \
              patch("gefion.experiments.types.hyperparameter.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.hyperparameter.predict_quantiles", return_value=preds), \
@@ -730,7 +730,8 @@ class TestModelComparisonExperiment:
         y = pd.Series(np.random.randn(100), name="forward_return")
         preds = pd.DataFrame({"q10": np.random.randn(20), "q50": np.random.randn(20), "q90": np.random.randn(20)})
 
-        with patch("gefion.experiments.types.model_comparison.load_dataset", return_value=(X, y)), \
+        with patch("gefion.ml.models.load_dataset",
+                   return_value=(X, y, _fe_meta(len(X)))), \
              patch("gefion.experiments.types.model_comparison.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.model_comparison.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.model_comparison.calculate_calibration_metrics",
@@ -760,7 +761,8 @@ class TestModelComparisonExperiment:
         y = pd.Series(np.random.randn(100), name="forward_return")
         preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
 
-        with patch("gefion.experiments.types.model_comparison.load_dataset", return_value=(X, y)), \
+        with patch("gefion.ml.models.load_dataset",
+                   return_value=(X, y, _fe_meta(len(X)))), \
              patch("gefion.experiments.types.model_comparison.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.model_comparison.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.model_comparison.calculate_calibration_metrics",

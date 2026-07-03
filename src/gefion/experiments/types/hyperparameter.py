@@ -126,19 +126,13 @@ class HyperparameterExperiment:
 
     def _load_all(self) -> tuple:
         """Load and cache (X, y, meta) with row-aligned indexes."""
-        if self._cached_data is None:
-            X, y, meta = load_dataset(self.dataset_uri, self.horizon_days, with_meta=True)
-            object.__setattr__(self, "_cached_data", (X, y, meta))
-        return self._cached_data
+        from gefion.experiments.types.holdout_eval import load_all_cached
+        return load_all_cached(self)
 
     def _training_data(self) -> tuple:
         """(X, y, meta) restricted to pre-holdout rows."""
-        from gefion.experiments.types.holdout_eval import holdout_masks
-        X, y, meta = self._load_all()
-        train, _ = holdout_masks(meta, self.holdout_start, self.holdout_end)
-        return (X[train].reset_index(drop=True),
-                y[train].reset_index(drop=True),
-                meta[train].reset_index(drop=True))
+        from gefion.experiments.types.holdout_eval import training_data
+        return training_data(self)
 
     def evaluate_holdout(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Best params vs library defaults, scored per symbol on the holdout.

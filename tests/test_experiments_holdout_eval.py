@@ -232,3 +232,69 @@ class TestRunnerPassesHoldoutToHyperparameter:
         idx = source.index('experiment_type"] == "hyperparameter"')
         block = source[idx:idx + 900]
         assert "holdout_start=holdout_start" in block
+
+
+class TestModelComparisonHoldout:
+    """Model comparison experiments must earn holdout p-values too."""
+
+    def _experiment(self, tiny_dataset, holdout_start, holdout_end):
+        from gefion.experiments.types.model_comparison import ModelComparisonExperiment
+
+        return ModelComparisonExperiment(
+            name="mc-holdout-test",
+            model_types=["lightgbm", "xgboost"],
+            cv_config={"n_splits": 3, "embargo_pct": 0.0},
+            dataset_uri=tiny_dataset["uri"],
+            horizon_days=7,
+            quantiles=[0.1, 0.5, 0.9],
+            holdout_start=holdout_start,
+            holdout_end=holdout_end,
+        )
+
+    def test_trials_exclude_holdout_rows(self, tiny_dataset):
+        dates = tiny_dataset["dates"]
+        exp = self._experiment(tiny_dataset, dates[-30], dates[-1])
+
+        X_train, y_train, meta_train = exp._training_data()
+
+        assert meta_train["date"].max() < dates[-30]
+        assert len(X_train) == 4 * 90
+
+    def test_evaluate_holdout_pairs_winner_vs_incumbent(self, tiny_dataset):
+        """Experimental = winning model type; baseline = incumbent algorithm."""
+        dates = tiny_dataset["dates"]
+        exp = self._experiment(tiny_dataset, dates[-30], dates[-1])
+
+        result = exp.evaluate_holdout({"model_type": "xgboost"})
+
+        assert len(result["baseline_scores"]) == len(result["experimental_scores"]) == 4
+        assert result["n_symbols"] == 4
+        assert result["holdout_rows"] > 0
+
+    def test_incumbent_winning_yields_identical_scores(self, tiny_dataset):
+        """If the incumbent wins the comparison there is no improvement to
+        promote — paired scores are identical, so the t-test yields p=1.0
+        and FDR correctly rejects. Honest semantics, not a bug."""
+        dates = tiny_dataset["dates"]
+        exp = self._experiment(tiny_dataset, dates[-30], dates[-1])
+
+        result = exp.evaluate_holdout({"model_type": "lightgbm"})
+
+        assert result["baseline_scores"] == pytest.approx(result["experimental_scores"])
+
+    def test_requires_holdout_window(self, tiny_dataset):
+        exp = self._experiment(tiny_dataset, None, None)
+
+        with pytest.raises(ValueError, match="holdout"):
+            exp.evaluate_holdout({"model_type": "xgboost"})
+
+
+class TestRunnerPassesHoldoutToModelComparison:
+    def test_model_comparison_dispatch_receives_window(self):
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+
+        source = inspect.getsource(ExperimentRunner.run)
+        idx = source.index('experiment_type"] == "model_comparison"')
+        block = source[idx:idx + 900]
+        assert "holdout_start=holdout_start" in block

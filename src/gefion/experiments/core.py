@@ -488,6 +488,7 @@ class ExperimentRunner:
                 )
             elif experiment["experiment_type"] == "model_comparison":
                 from gefion.experiments.types.model_comparison import ModelComparisonExperiment
+                holdout_start, holdout_end = self._cycle_holdout_window(experiment_id)
                 evaluator = ModelComparisonExperiment(
                     name=experiment["name"],
                     model_types=config.get("model_types", []),
@@ -496,6 +497,9 @@ class ExperimentRunner:
                     dataset_uri=config.get("dataset_uri"),
                     horizon_days=config.get("horizon_days", 7),
                     quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                    baseline_model_type=config.get("baseline_model_type", "lightgbm"),
+                    holdout_start=holdout_start,
+                    holdout_end=holdout_end,
                 )
             elif experiment["experiment_type"] == "label_engineering":
                 from gefion.experiments.types.label_engineering import LabelEngineeringExperiment

@@ -4,6 +4,7 @@ Evaluates multiple model types on identical data splits for fair comparison.
 """
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -34,8 +35,59 @@ class ModelComparisonExperiment:
     dataset_uri: Optional[str] = None
     horizon_days: int = 7
     quantiles: List[float] = field(default_factory=lambda: [0.1, 0.5, 0.9])
+    # Holdout window (from the cycle): trials never see these rows (FR-017)
+    holdout_start: Optional[date] = None
+    holdout_end: Optional[date] = None
+    # The algorithm the winner must beat on holdout to earn promotion
+    baseline_model_type: str = "lightgbm"
 
     _cached_data: Optional[tuple] = field(default=None, repr=False, compare=False)
+
+    def _training_data(self) -> tuple:
+        from gefion.experiments.types.holdout_eval import training_data
+        return training_data(self)
+
+    def evaluate_holdout(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Winning model type vs the incumbent, scored per symbol on holdout.
+
+        Both train on identical pre-holdout rows; the holdout window is
+        touched exactly once, here (FR-019). If the incumbent itself won
+        the comparison the paired scores are identical and the t-test
+        yields p=1.0 — no improvement to promote, correctly rejected.
+        """
+        from gefion.experiments.types.holdout_eval import (
+            holdout_masks, load_all_cached, paired_result, per_symbol_pinball,
+            require_holdout_window)
+
+        require_holdout_window(self.holdout_start, self.holdout_end)
+        winner = params.get("model_type", self.baseline_model_type)
+        with create_span("experiments.model_comparison.evaluate_holdout",
+                         winner=winner, baseline=self.baseline_model_type) as span:
+            X, y, meta = load_all_cached(self)
+            train, hold = holdout_masks(meta, self.holdout_start, self.holdout_end)
+            if not hold.any():
+                raise ValueError(
+                    f"No dataset rows fall in the holdout window "
+                    f"{self.holdout_start} - {self.holdout_end}")
+
+            y_hold = y[hold].reset_index(drop=True)
+            symbols_hold = meta["symbol"][hold].reset_index(drop=True)
+
+            def _scores(algorithm: str) -> Dict[str, float]:
+                model = train_quantile_model(
+                    X[train], y[train], algorithm=algorithm, quantiles=self.quantiles)
+                return per_symbol_pinball(
+                    predict_quantiles(model, X[hold]), y_hold, symbols_hold,
+                    self.quantiles)
+
+            exp_scores = _scores(winner)
+            base_scores = (exp_scores if winner == self.baseline_model_type
+                           else _scores(self.baseline_model_type))
+
+            result = paired_result(base_scores, exp_scores,
+                                   int(train.sum()), int(hold.sum()))
+            set_attributes(span, n_symbols=result["n_symbols"])
+            return result
 
     def evaluate(self, params: Dict[str, Any]) -> Dict[str, float]:
         """Train the specified algorithm with purged CV and return averaged metrics.
@@ -54,11 +106,8 @@ class ModelComparisonExperiment:
             algorithm=algorithm,
             horizon_days=self.horizon_days,
         ) as span:
-            # Load dataset (cache across trials)
-            if self._cached_data is None:
-                X, y = load_dataset(self.dataset_uri, self.horizon_days)
-                object.__setattr__(self, "_cached_data", (X, y))
-            X, y = self._cached_data
+            # Pre-holdout rows only (FR-017): trials never see holdout data
+            X, y, _ = self._training_data()
 
             cv = PurgedKFold(
                 n_splits=cv_cfg.get("n_splits", 5),
