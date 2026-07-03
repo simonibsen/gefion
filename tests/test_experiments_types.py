@@ -859,7 +859,8 @@ class TestLabelEngineeringEvaluate:
         y = pd.Series(np.random.randn(100), name="forward_return")
         preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
 
-        with patch("gefion.experiments.types.label_engineering.load_dataset", return_value=(X, y)), \
+        with patch("gefion.ml.models.load_dataset",
+                   return_value=(X, y, _fe_meta(len(X)))), \
              patch("gefion.experiments.types.label_engineering.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.label_engineering.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.label_engineering.calculate_calibration_metrics",
@@ -891,7 +892,8 @@ class TestLabelEngineeringEvaluate:
         y = pd.Series(np.random.uniform(0.9, 1.1, 100), name="forward_return")
         preds = pd.DataFrame({"q10": np.random.randn(50), "q50": np.random.randn(50), "q90": np.random.randn(50)})
 
-        with patch("gefion.experiments.types.label_engineering.load_dataset", return_value=(X, y)), \
+        with patch("gefion.ml.models.load_dataset",
+                   return_value=(X, y, _fe_meta(len(X)))), \
              patch("gefion.experiments.types.label_engineering.train_quantile_model") as mock_train, \
              patch("gefion.experiments.types.label_engineering.predict_quantiles", return_value=preds), \
              patch("gefion.experiments.types.label_engineering.calculate_calibration_metrics",

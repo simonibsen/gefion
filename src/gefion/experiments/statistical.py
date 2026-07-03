@@ -53,24 +53,31 @@ def apply_fdr(p_values: List[float], fdr_rate: float = 0.10) -> List[bool]:
 def compute_holdout_pvalue(
     baseline_scores: List[float],
     experimental_scores: List[float],
+    alternative: str = "less",
 ) -> float:
-    """Compute p-value comparing experimental vs baseline scores on holdout data.
+    """One-sided p-value: is the experimental arm BETTER than baseline?
 
-    Uses a paired t-test (two-sided) when scores are paired (same stocks),
-    or an independent t-test otherwise.
+    Two-sided testing was direction-blind — a significantly WORSE
+    experiment earned a small p-value and could survive FDR. The test is
+    now one-sided; the caller declares which direction is better:
+    "less" (default) for loss-like scores, "greater" for return-like.
 
-    Returns p-value between 0 and 1.
+    Uses a paired t-test when scores are paired (same stocks/dates),
+    or an independent t-test otherwise. Returns p-value in [0, 1].
     """
     if not baseline_scores or not experimental_scores:
         raise ValueError("Both baseline_scores and experimental_scores must be non-empty")
 
     with create_span("experiments.statistical.compute_pvalue",
                       n_baseline=len(baseline_scores),
-                      n_experimental=len(experimental_scores)):
+                      n_experimental=len(experimental_scores),
+                      alternative=alternative):
         if len(baseline_scores) == len(experimental_scores):
-            t_stat, p_value = stats.ttest_rel(experimental_scores, baseline_scores)
+            t_stat, p_value = stats.ttest_rel(
+                experimental_scores, baseline_scores, alternative=alternative)
         else:
-            t_stat, p_value = stats.ttest_ind(experimental_scores, baseline_scores)
+            t_stat, p_value = stats.ttest_ind(
+                experimental_scores, baseline_scores, alternative=alternative)
 
         # Identical distributions produce NaN — treat as no difference (p=1.0)
         if math.isnan(p_value):

@@ -5,6 +5,7 @@ Evaluates how different label transformations affect model quality.
 """
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -57,8 +58,86 @@ class LabelEngineeringExperiment:
     horizon_days: int = 7
     cv_config: Optional[Dict[str, Any]] = None
     quantiles: List[float] = field(default_factory=lambda: [0.1, 0.5, 0.9])
+    # Holdout window (from the cycle): trials never see these rows (FR-017)
+    holdout_start: Optional[date] = None
+    holdout_end: Optional[date] = None
+    # Stocks each arm picks per holdout date in the signal contest
+    top_n: int = 5
 
     _cached_data: Optional[tuple] = field(default=None, repr=False, compare=False)
+
+    def _training_data(self) -> tuple:
+        from gefion.experiments.types.holdout_eval import training_data
+        return training_data(self)
+
+    def evaluate_holdout(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Signal contest on the holdout window (FR-013).
+
+        Label experiments change the prediction target, so prediction
+        metrics are not comparable across arms. Instead: both arms train
+        on identical pre-holdout rows (experimental on transformed labels,
+        baseline on raw); each holdout date, each arm picks its top-N
+        stocks by its own predicted q50 (rank-based, so label scale is
+        irrelevant); the per-date score for BOTH arms is the mean realized
+        raw forward return of the picks. Paired per-date scores, one-sided
+        "greater". Deliberately ignores costs/turnover — the apply flow
+        runs the full backtest as a second gate.
+        """
+        from gefion.experiments.types.holdout_eval import (
+            holdout_masks, load_all_cached, require_holdout_window)
+
+        require_holdout_window(self.holdout_start, self.holdout_end)
+        label_type = params.get("label_type", self.label_type)
+        top_n = int(params.get("top_n", self.top_n))
+        with create_span("experiments.label_engineering.evaluate_holdout",
+                         label_type=label_type, top_n=top_n) as span:
+            X, y, meta = load_all_cached(self)
+            train, hold = holdout_masks(meta, self.holdout_start, self.holdout_end)
+            if not hold.any():
+                raise ValueError(
+                    f"No dataset rows fall in the holdout window "
+                    f"{self.holdout_start} - {self.holdout_end}")
+
+            transform_fn = _LABEL_TRANSFORMS.get(label_type, _LABEL_TRANSFORMS["raw"])
+            X_train, y_train = X[train], y[train]
+            # Transform computed on training labels only — quantile-based
+            # transforms must not peek at holdout values
+            y_train_exp = transform_fn(y_train.copy(), **{
+                k: v for k, v in params.items() if k not in ("label_type", "top_n")})
+
+            exp_model = train_quantile_model(
+                X_train, y_train_exp, algorithm=self.algorithm, quantiles=self.quantiles)
+            base_model = train_quantile_model(
+                X_train, y_train, algorithm=self.algorithm, quantiles=self.quantiles)
+
+            X_hold = X[hold]
+            picks = pd.DataFrame({
+                "date": meta["date"][hold].values,
+                "realized": y[hold].values,  # raw forward return: shared yardstick
+                "exp_q50": predict_quantiles(exp_model, X_hold)["q50"].values,
+                "base_q50": predict_quantiles(base_model, X_hold)["q50"].values,
+            })
+
+            exp_scores, base_scores, dates = [], [], []
+            for d, grp in picks.groupby("date", sort=True):
+                exp_scores.append(float(
+                    grp.nlargest(min(top_n, len(grp)), "exp_q50")["realized"].mean()))
+                base_scores.append(float(
+                    grp.nlargest(min(top_n, len(grp)), "base_q50")["realized"].mean()))
+                dates.append(str(d))
+
+            result = {
+                "baseline_scores": base_scores,
+                "experimental_scores": exp_scores,
+                "n_dates": len(dates),
+                "holdout_rows": int(hold.sum()),
+                "train_rows": int(train.sum()),
+                "alternative": "greater",
+                "score_kind": "portfolio_forward_return",
+                "top_n": top_n,
+            }
+            set_attributes(span, n_dates=len(dates), holdout_rows=int(hold.sum()))
+            return result
 
     def evaluate(self, params: Dict[str, Any]) -> Dict[str, float]:
         """Transform labels with given params, train, and evaluate.
@@ -78,11 +157,8 @@ class LabelEngineeringExperiment:
             label_type=label_type,
             horizon_days=self.horizon_days,
         ) as span:
-            # Load dataset (cache across trials)
-            if self._cached_data is None:
-                X, y = load_dataset(self.dataset_uri, self.horizon_days)
-                object.__setattr__(self, "_cached_data", (X, y))
-            X, y_raw = self._cached_data
+            # Pre-holdout rows only (FR-017): trials never see holdout data
+            X, y_raw, _ = self._training_data()
 
             # Transform labels
             transform_fn = _LABEL_TRANSFORMS.get(label_type, _LABEL_TRANSFORMS["raw"])

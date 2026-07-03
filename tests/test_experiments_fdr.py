@@ -116,16 +116,21 @@ class TestApplyFdr:
 class TestComputeHoldoutPvalue:
     """Tests for compute_holdout_pvalue paired t-test."""
 
-    def test_clearly_different_distributions(self):
-        """Clearly separated distributions should produce a small p-value."""
+    def test_clear_improvement_earns_small_pvalue(self):
+        """Clearly better (lower-loss) experimental scores earn a small p-value.
+
+        The test is one-sided: only improvement counts. A clearly WORSE
+        experiment must not look significant (covered in
+        test_experiments_holdout_eval.py::TestPvalueDirection).
+        """
         from gefion.experiments.statistical import compute_holdout_pvalue
 
-        baseline = [1.0, 1.1, 0.9, 1.0, 1.05, 0.95, 1.02, 0.98, 1.01, 0.99]
-        experimental = [2.0, 2.1, 1.9, 2.0, 2.05, 1.95, 2.02, 1.98, 2.01, 1.99]
+        baseline = [2.0, 2.1, 1.9, 2.0, 2.05, 1.95, 2.02, 1.98, 2.01, 1.99]
+        experimental = [1.0, 1.1, 0.9, 1.0, 1.05, 0.95, 1.02, 0.98, 1.01, 0.99]
 
         p = compute_holdout_pvalue(baseline, experimental)
         assert isinstance(p, float)
-        assert p < 0.01, f"Expected very small p-value for different distributions, got {p}"
+        assert p < 0.01, f"Expected very small p-value for clear improvement, got {p}"
 
     def test_identical_distributions_large_pvalue(self):
         """Identical distributions should produce a large p-value (>0.05)."""

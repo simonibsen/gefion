@@ -298,3 +298,111 @@ class TestRunnerPassesHoldoutToModelComparison:
         idx = source.index('experiment_type"] == "model_comparison"')
         block = source[idx:idx + 900]
         assert "holdout_start=holdout_start" in block
+
+
+class TestPvalueDirection:
+    """The gate must be one-sided: only IMPROVEMENT earns a small p-value.
+
+    Two-sided testing let significantly WORSE experiments survive FDR.
+    """
+
+    def test_worse_loss_scores_do_not_earn_small_pvalue(self):
+        from gefion.experiments.statistical import compute_holdout_pvalue
+
+        baseline = [0.030, 0.031, 0.029, 0.030, 0.032, 0.031]
+        much_worse = [0.050, 0.052, 0.049, 0.051, 0.053, 0.050]
+        p = compute_holdout_pvalue(baseline, much_worse, alternative="less")
+        assert p > 0.5  # worse must never look significant
+
+    def test_better_loss_scores_earn_small_pvalue(self):
+        from gefion.experiments.statistical import compute_holdout_pvalue
+
+        baseline = [0.050, 0.052, 0.049, 0.051, 0.053, 0.050]
+        better = [0.030, 0.031, 0.029, 0.030, 0.032, 0.031]
+        p = compute_holdout_pvalue(baseline, better, alternative="less")
+        assert p < 0.01
+
+    def test_greater_direction_for_return_scores(self):
+        from gefion.experiments.statistical import compute_holdout_pvalue
+
+        baseline = [0.001, 0.002, 0.001, 0.0, 0.002, 0.001]
+        higher = [0.010, 0.012, 0.011, 0.009, 0.012, 0.010]
+        assert compute_holdout_pvalue(baseline, higher, alternative="greater") < 0.01
+        assert compute_holdout_pvalue(higher, baseline, alternative="greater") > 0.5
+
+    def test_default_is_one_sided_less(self):
+        """Default matches the loss semantics of all existing callers."""
+        from gefion.experiments.statistical import compute_holdout_pvalue
+
+        baseline = [0.030, 0.031, 0.029, 0.030, 0.032, 0.031]
+        much_worse = [0.050, 0.052, 0.049, 0.051, 0.053, 0.050]
+        assert compute_holdout_pvalue(baseline, much_worse) > 0.5
+
+
+class TestLabelEngineeringHoldout:
+    """Label experiments are evaluated via trading outcomes (FR-013)."""
+
+    def _experiment(self, tiny_dataset, holdout_start, holdout_end):
+        from gefion.experiments.types.label_engineering import LabelEngineeringExperiment
+
+        return LabelEngineeringExperiment(
+            name="label-holdout-test",
+            principle_id="p",
+            null_hypothesis="h",
+            label_type="winsorized",
+            algorithm="lightgbm",
+            cv_config={"n_splits": 3, "embargo_pct": 0.0},
+            dataset_uri=tiny_dataset["uri"],
+            horizon_days=7,
+            quantiles=[0.1, 0.5, 0.9],
+            holdout_start=holdout_start,
+            holdout_end=holdout_end,
+        )
+
+    def test_trials_exclude_holdout_rows(self, tiny_dataset):
+        dates = tiny_dataset["dates"]
+        exp = self._experiment(tiny_dataset, dates[-30], dates[-1])
+
+        X_train, y_train, meta_train = exp._training_data()
+
+        assert meta_train["date"].max() < dates[-30]
+        assert len(X_train) == 4 * 90
+
+    def test_evaluate_holdout_scores_realized_returns_per_date(self, tiny_dataset):
+        """Both arms are judged on the SAME outcome variable — realized raw
+        forward returns of the stocks each arm's signal selects per date —
+        never on prediction metrics against different targets."""
+        dates = tiny_dataset["dates"]
+        exp = self._experiment(tiny_dataset, dates[-30], dates[-1])
+
+        result = exp.evaluate_holdout({"label_type": "winsorized"})
+
+        assert len(result["baseline_scores"]) == len(result["experimental_scores"])
+        assert len(result["baseline_scores"]) == 30  # paired per holdout date
+        assert result["alternative"] == "greater"  # returns: higher is better
+        assert result["score_kind"] == "portfolio_forward_return"
+
+    def test_requires_holdout_window(self, tiny_dataset):
+        exp = self._experiment(tiny_dataset, None, None)
+
+        with pytest.raises(ValueError, match="holdout"):
+            exp.evaluate_holdout({})
+
+
+class TestRunnerPassesHoldoutToLabelEngineering:
+    def test_label_engineering_dispatch_receives_window(self):
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+
+        source = inspect.getsource(ExperimentRunner.run)
+        idx = source.index('experiment_type"] == "label_engineering"')
+        block = source[idx:idx + 1400]
+        assert "holdout_start=holdout_start" in block
+
+    def test_runner_respects_evaluator_alternative(self):
+        """The runner must use the evaluator's declared score direction."""
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+
+        source = inspect.getsource(ExperimentRunner.run)
+        assert 'alternative' in source
