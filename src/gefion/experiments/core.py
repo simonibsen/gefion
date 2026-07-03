@@ -503,6 +503,7 @@ class ExperimentRunner:
                 )
             elif experiment["experiment_type"] == "label_engineering":
                 from gefion.experiments.types.label_engineering import LabelEngineeringExperiment
+                holdout_start, holdout_end = self._cycle_holdout_window(experiment_id)
                 evaluator = LabelEngineeringExperiment(
                     name=experiment["name"],
                     principle_id=config.get("principle_id", ""),
@@ -515,6 +516,8 @@ class ExperimentRunner:
                     dataset_uri=config.get("dataset_uri"),
                     horizon_days=config.get("horizon_days", 7),
                     quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                    holdout_start=holdout_start,
+                    holdout_end=holdout_end,
                 )
             elif experiment["experiment_type"] == "feature_engineering":
                 from gefion.experiments.types.feature_engineering import FeatureEngineeringExperiment
@@ -663,10 +666,15 @@ class ExperimentRunner:
                     p_value = compute_holdout_pvalue(
                         holdout_result["baseline_scores"],
                         holdout_result["experimental_scores"],
+                        # Evaluators declare their score direction: "less"
+                        # for losses, "greater" for return-like scores
+                        alternative=holdout_result.get("alternative", "less"),
                     )
                     self._store_holdout_result(experiment_id, p_value, {
                         "p_value": p_value,
-                        "n_symbols": holdout_result["n_symbols"],
+                        "n_units": holdout_result.get("n_symbols",
+                                                      holdout_result.get("n_dates")),
+                        "score_kind": holdout_result.get("score_kind", "pinball_loss"),
                         "holdout_rows": holdout_result["holdout_rows"],
                         "baseline_mean": float(
                             sum(holdout_result["baseline_scores"])
@@ -677,7 +685,7 @@ class ExperimentRunner:
                     })
                     logger.info(
                         f"Holdout evaluation for experiment {experiment_id}: "
-                        f"p={p_value:.5f} over {holdout_result['n_symbols']} symbols")
+                        f"p={p_value:.5f}")
                 except Exception as e:
                     logger.warning(
                         f"Holdout evaluation failed for experiment {experiment_id}: "
