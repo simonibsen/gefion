@@ -38,7 +38,7 @@ Read it at start; update it whenever a checkpoint passes. If it doesn't exist, t
 
 **Module 0 — Orientation & services**
 Concepts: what gefion is (ML stock-prediction research system), the service stack (PostgreSQL+TimescaleDB, Tempo, Grafana), where things live (`src/gefion`, `datasets/`, `~/.gefion`).
-Do: `/gefion-services start` equivalent (`docker ps` to inspect), `gefion health`, `gefion system-status --json`, open the UI Dashboard.
+Do: `/gefion-services start` equivalent (`docker ps` to inspect), `gefion health`, open the UI Dashboard.
 Checkpoint: learner explains what each running container does.
 
 **Module 1 — Data layer**
