@@ -406,3 +406,23 @@ class TestRunnerPassesHoldoutToLabelEngineering:
 
         source = inspect.getsource(ExperimentRunner.run)
         assert 'alternative' in source
+
+
+# --- per-date holdout scores for regime-conditional evaluation (005 T034) ---
+
+def test_paired_result_by_date_produces_per_observation_records():
+    import pandas as pd
+    from datetime import date
+    from gefion.experiments.types.holdout_eval import per_row_pinball, paired_result_by_date
+
+    y = pd.Series([1.0, 2.0, 3.0])
+    preds = pd.DataFrame({"q10": [0.9, 2.1, 2.8], "q50": [1.0, 2.0, 3.0], "q90": [1.1, 1.9, 3.2]})
+    base_loss = per_row_pinball(preds, y, [0.1, 0.5, 0.9])
+    assert len(base_loss) == 3  # one loss per row (not grouped by symbol)
+
+    dates = [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)]
+    out = paired_result_by_date(base_loss, base_loss, dates, holdout_rows=3)
+    assert "observations" in out and len(out["observations"]) == 3
+    rec = out["observations"][0]
+    assert set(rec) == {"date", "baseline_score", "experimental_score"}
+    assert rec["date"] == dates[0]

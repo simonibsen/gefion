@@ -9448,6 +9448,9 @@ def experiment_status(
 @experiment_app.command("run")
 def experiment_run(
     experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to run"),
+    by_regime: Optional[str] = typer.Option(
+        None, "--by-regime",
+        help="Also evaluate the holdout conditionally by a regime (name) — spec 005"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ) -> None:
     """Run an approved experiment."""
@@ -9474,6 +9477,61 @@ def experiment_run(
 
         # Run the experiment
         results = runner.run(experiment_id)
+
+        # Regime-conditional holdout evaluation (spec 005) — strictly additive.
+        # Requires per-observation holdout scores from the evaluator; when the
+        # experiment type does not expose them, say so honestly rather than
+        # fabricating a verdict.
+        if by_regime:
+            observations = (results.get("holdout") or {}).get("observations")
+            if not observations:
+                _msg = (f"Conditional evaluation unavailable: experiment "
+                        f"{experiment_id}'s type does not emit per-observation "
+                        "holdout scores (no by-regime verdict possible).")
+                if json_output:
+                    results["by_regime"] = {"error": _msg}
+                else:
+                    Console().print(f"[yellow]{_msg}[/yellow]")
+            else:
+                from gefion.regimes.conditional import (
+                    assemble_fdr_family, conditional_pvalues)
+                with _regime_conn(None) as _rc:
+                    with _rc.cursor() as _cur:
+                        _cur.execute(
+                            """SELECT rl.date, rl.label FROM regime_labels rl
+                               JOIN regime_definitions rd ON rd.id = rl.regime_id
+                               WHERE rd.name = %s""",
+                            (by_regime,),
+                        )
+                        _labels = {d: lab for d, lab in _cur.fetchall()}
+                if not _labels:
+                    _msg = f"Regime '{by_regime}' has no computed labels."
+                    if json_output:
+                        results["by_regime"] = {"error": _msg}
+                    else:
+                        Console().print(f"[yellow]{_msg}[/yellow]")
+                else:
+                    # per-observation dates arrive as ISO strings when they
+                    # round-trip through JSON; normalize to date objects
+                    import datetime as _dt
+                    for _o in observations:
+                        if isinstance(_o["date"], str):
+                            _o["date"] = _dt.date.fromisoformat(_o["date"])
+                    verdicts = conditional_pvalues(
+                        observations, _labels,
+                        alternative=(results.get("holdout") or {}).get(
+                            "alternative", "less"))
+                    verdicts = assemble_fdr_family(verdicts)
+                    results["by_regime"] = {"regime": by_regime, "verdicts": verdicts}
+                    if not json_output:
+                        console = Console()
+                        console.print("\n[bold]Per-regime holdout verdicts:[/bold]")
+                        for v in verdicts:
+                            p = "no p-value (fail-closed)" if v["pvalue"] is None \
+                                else f"p={v['pvalue']:.4f}"
+                            flag = " [yellow](low-power)[/yellow]" if v["low_power"] else ""
+                            surv = " [green]SURVIVED[/green]" if v.get("survived") else ""
+                            console.print(f"  {v['bucket']}: {p}{flag}{surv}")
 
         if json_output:
             emit_json(results)

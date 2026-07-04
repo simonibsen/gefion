@@ -125,3 +125,10 @@ def test_interaction_errors_gracefully_without_data(db_url):
         "--db-url", db_url,
     ])
     assert r.exit_code != 0
+
+
+def test_experiment_run_has_by_regime_option():
+    """US3 T034: experiment run exposes --by-regime (conditional evaluation)."""
+    r = runner.invoke(app, ["experiment", "run", "--help"])
+    assert r.exit_code == 0
+    assert "--by-regime" in r.output

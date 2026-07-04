@@ -80,6 +80,29 @@ def paired_result(base_scores: Dict[str, float], exp_scores: Dict[str, float],
         }
 
 
+def per_row_pinball(preds: pd.DataFrame, y: pd.Series, quantiles: List[float]) -> np.ndarray:
+    """Row-level mean pinball loss (aligned to preds/y rows; not grouped by symbol)."""
+    losses = []
+    for q in quantiles:
+        col = f"q{int(q * 100)}"
+        err = y.values - preds[col].values
+        losses.append(np.where(err >= 0, q * err, (q - 1) * err))
+    return np.mean(losses, axis=0)
+
+
+def paired_result_by_date(base_row_loss, exp_row_loss, dates, holdout_rows: int) -> Dict:
+    """Per-observation paired scores with dates — the input to regime-conditional
+    evaluation (spec 005). base_row_loss/exp_row_loss are aligned row-level losses for
+    the two arms over the same holdout rows."""
+    with create_span("experiments.holdout_eval.paired_result_by_date") as span:
+        observations = [
+            {"date": d, "baseline_score": float(b), "experimental_score": float(e)}
+            for d, b, e in zip(dates, base_row_loss, exp_row_loss)
+        ]
+        set_attributes(span, n_observations=len(observations), holdout_rows=holdout_rows)
+        return {"observations": observations, "holdout_rows": holdout_rows}
+
+
 def require_holdout_window(holdout_start, holdout_end) -> None:
     if holdout_start is None or holdout_end is None:
         raise ValueError(
