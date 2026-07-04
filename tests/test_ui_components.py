@@ -1877,3 +1877,8 @@ class TestRegimeSlicingUI:
         content = (ui_dir / "views" / "regimes.py").read_text()
         assert "_render_interaction_panel" in content
         assert "continuous_interaction" in content
+
+    def test_experiments_view_renders_by_regime_verdicts(self, ui_dir):
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert "_render_by_regime_verdicts" in content
+        assert "Per-regime holdout verdicts" in content

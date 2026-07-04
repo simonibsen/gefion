@@ -1263,6 +1263,7 @@ async def list_tools() -> List[Tool]:
                 "type": "object",
                 "properties": {
                     "experiment_id": {"type": "integer", "description": "Experiment ID to run"},
+                    "by_regime": {"type": "string", "description": "Also evaluate the holdout conditionally by a regime (name) — spec 005"},
                 },
                 "required": ["experiment_id"],
             },
@@ -4137,6 +4138,8 @@ async def _experiment_run(args: Dict[str, Any]) -> Dict[str, Any]:
     """Run an approved experiment."""
     async def _run():
         cmd = ["experiment", "run", "--id", str(args["experiment_id"])]
+        if args.get("by_regime"):
+            cmd.extend(["--by-regime", args["by_regime"]])
         executor = GefionExecutor()
         return await executor.run(*cmd)
 

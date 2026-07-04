@@ -517,5 +517,6 @@ Define, compute, and inspect market/sector/asset regimes for conditional evaluat
 - `gefion regime archive <name>` — archive a definition.
 - `gefion regime export <dir>` / `gefion regime import <dir>` — JSON backup/restore of definitions.
 - `gefion regime interaction --signal <feat> --by <feat> [--horizon-days N]` — continuous-interaction test (does a signal's edge scale with a conditioning variable?).
+- `gefion experiment run --id N --by-regime <name>` — conditional holdout verdicts: a p-value per regime bucket, all entered into one flat Benjamini-Hochberg family (fail-closed on low-power buckets).
 
 All commands accept `--json` and `--db-url`.

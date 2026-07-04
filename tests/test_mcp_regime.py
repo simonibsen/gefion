@@ -58,3 +58,12 @@ def test_backtest_run_tool_has_by_regime_arg():
     # schema property present + handler wraps the CLI flag
     assert '"by_regime"' in src
     assert "'--by-regime', args['by_regime']" in src or '"--by-regime", args["by_regime"]' in src
+
+
+def test_experiment_run_tool_has_by_regime_arg():
+    """US3 T035: experiment_run MCP tool exposes by_regime and wraps --by-regime."""
+    src = _src()
+    start = src.index("async def _experiment_run(")
+    end = src.index("\nasync def ", start + 1)
+    body = src[start:end]
+    assert "by_regime" in body and "--by-regime" in body

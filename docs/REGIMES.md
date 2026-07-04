@@ -67,8 +67,21 @@ gefion regime define --name vol-regime --scope market \
   --expression expr.json --bucketing buckets.json
 gefion regime compute vol-regime --dataset dev
 gefion regime labels  vol-regime
-gefion backtest run ... --by-regime vol-regime    # per-regime metrics (US2)
+gefion backtest run ... --by-regime vol-regime      # per-regime metrics (US2)
+gefion regime interaction --signal momentum --by realized_vol_20   # gradient (US5)
+gefion experiment run --id 1 --by-regime vol-regime # conditional verdicts (US3)
 ```
+
+### Conditional experiment verdicts
+
+`gefion experiment run --id N --by-regime <name>` additionally evaluates the holdout
+*conditionally*: per-observation holdout scores are bucketed by the regime's causal labels,
+each bucket earns its own one-sided holdout p-value, and every (regime × bucket) test enters
+one **flat Benjamini-Hochberg family** — the added multiple testing is corrected, never
+hidden. Fail-closed: a bucket below the effective-sample floor, or with undefined labels,
+gets **no p-value and cannot survive**. Experiment types that do not emit per-observation
+holdout scores report "conditional evaluation unavailable" honestly instead of fabricating
+a verdict.
 
 Every operation is reachable via CLI, MCP (`regime_*` tools), and the UI **Regimes** page.
 
