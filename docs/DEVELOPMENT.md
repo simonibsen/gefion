@@ -198,3 +198,27 @@ def conn():
 | Pre-push | `git push` | smoke tests (data-dictionary generator, CLI init, config, health) + **data-dictionary drift** (`gen_data_dictionary.py --check`) |
 | CI | on PR | full unit + DB suite |
 | `tests/test_docs_drift.py` | test suite | documented `gefion <cmd>` commands and `experiment_`/`docs_` MCP tools must exist/be documented |
+
+### More patterns (added while building spec 005 US3)
+
+- **Two JSON-output styles coexist in `cli.py`.** Newer commands use
+  `get_output(json_output)` → `out.success/out.json/out.table`; older ones (e.g. the
+  `experiment` group) use `emit(...)` / `emit_json(...)` and `rich.Console` directly.
+  Match whichever style the command group you're editing already uses.
+- **Extending an existing MCP tool with a new argument** = two edits + a test:
+  add the property to the tool's `inputSchema`, thread it into the handler's `cmd`
+  building, and test by slicing the handler body from the server source
+  (`src.index("async def _tool(") .. next "async def"`), asserting the flag appears.
+- **Experiments UI results flow**: the results detail view parses the CLI's stdout JSON
+  into `data` and renders sections in order — add a new `_render_*(data)` helper and call
+  it just before `_render_lifecycle_status(exp_id)` in `views/experiments.py`.
+- **`compute_holdout_pvalue` contract** (`experiments/statistical.py`): paired one-sided
+  t-test (`ttest_rel` when score lists are equal length); the caller declares direction —
+  `"less"` for loss-like scores, `"greater"` for return-like; NaN (identical arms) → 1.0.
+  Default holdout scores are **per-symbol** (`paired_result`); regime-conditional
+  evaluation needs **per-observation** scores with dates (`paired_result_by_date`).
+- **Shell: `cp` may be aliased to `cp -i`** — a scripted overwrite can silently no-op on
+  the interactive prompt. Restore files with `git checkout -- <file>` or the Edit tool,
+  not `cp`.
+- **Stale `.git/index.lock`**: a zero-byte lock with no running git process is leftover
+  from an interrupted command — verify with `ps aux | grep git`, then `rm -f`.
