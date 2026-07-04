@@ -1858,3 +1858,17 @@ class TestChartsPageLayout:
         assert ctx["page_name"] == "Charts"
         # Should have summary
         assert "summary" in ctx
+
+
+class TestRegimeSlicingUI:
+    """US2 T024: backtest view supports regime slicing."""
+
+    @pytest.fixture
+    def ui_dir(self):
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui"
+
+    def test_backtest_view_supports_by_regime(self, ui_dir):
+        content = (ui_dir / "views" / "backtest.py").read_text()
+        assert "--by-regime" in content
+        assert "by_regime" in content
+        assert "Per-regime metrics" in content

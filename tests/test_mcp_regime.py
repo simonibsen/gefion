@@ -49,3 +49,11 @@ def test_regime_handlers_wrap_correct_cli_command():
         # handler body should reference the regime CLI subcommand it wraps
         needle = f'"{cli[0]}", "{cli[1]}"'
         assert needle in src, f"{tool} handler does not wrap CLI {' '.join(cli)}"
+
+
+def test_backtest_run_tool_has_by_regime_arg():
+    """US2 T023: backtest_run MCP tool exposes by_regime and wraps --by-regime."""
+    src = _src()
+    # schema property present + handler wraps the CLI flag
+    assert '"by_regime"' in src
+    assert "'--by-regime', args['by_regime']" in src or '"--by-regime", args["by_regime"]' in src

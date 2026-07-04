@@ -1129,6 +1129,7 @@ async def list_tools() -> List[Tool]:
                     "model_name": {"type": "string", "description": "Model name (required for ml_signal and ml_filter strategies)"},
                     "model_version": {"type": "string", "description": "Model version (required for ml_signal and ml_filter strategies)"},
                     "horizon": {"type": "integer", "description": "Prediction horizon in days (for ML strategies)", "default": 7},
+                    "by_regime": {"type": "string", "description": "Slice results by a regime (name) — adds per-regime metrics (spec 005)"},
                 },
                 "required": ["strategy", "start_date", "end_date"],
             },
@@ -3962,6 +3963,10 @@ async def _backtest_run(args: Dict[str, Any]) -> Dict[str, Any]:
                 'method': args['sizing_method'],
                 'amount': args.get('sizing_amount')
             }
+
+        # Regime slicing (spec 005) — additive per-regime metrics
+        if args.get('by_regime'):
+            cmd.extend(['--by-regime', args['by_regime']])
 
         result = await executor.run(*cmd)
 
