@@ -185,8 +185,9 @@ def _row_to_definition(row) -> "RegimeDefinition":
 
 def store_definition(conn, defn: "RegimeDefinition") -> int:
     """Validate and upsert a regime definition; return its id."""
-    defn.validate()
     with create_span("regimes.definitions.store", regime=defn.name):
+        # validate inside the store span so its child span nests, not a lone root
+        defn.validate()
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -246,8 +247,9 @@ def list_definitions(conn, scope: Optional[str] = None, status: Optional[str] = 
 
 def archive_definition(conn, name: str) -> None:
     """Set a definition's status to 'archived'."""
-    with conn.cursor() as cur:
-        cur.execute("UPDATE regime_definitions SET status = 'archived' WHERE name = %s", (name,))
+    with create_span("regimes.definitions.archive", regime=name):
+        with conn.cursor() as cur:
+            cur.execute("UPDATE regime_definitions SET status = 'archived' WHERE name = %s", (name,))
 
 
 def export_definition(defn: "RegimeDefinition", directory: str) -> str:
