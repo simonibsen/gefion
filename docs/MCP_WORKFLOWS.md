@@ -1008,3 +1008,15 @@ After mastering these workflows:
 5. **Deploy production monitoring** with alerting
 
 See [.specify/memory/backlog.md](../.specify/memory/backlog.md) for roadmap.
+
+## Regime slicing tools (spec 005)
+
+The `regime_*` MCP tools mirror the `gefion regime` CLI (see [REGIMES.md](REGIMES.md)):
+
+- `regime_define` — define and store a regime (expression AST + bucketing).
+- `regime_list` — list regime definitions.
+- `regime_show` — show a regime definition.
+- `regime_compute` — compute causal labels for a regime.
+- `regime_labels` — summarize computed labels (bucket coverage).
+- `regime_archive` — archive a regime definition.
+- `regime_definitions_export` / `regime_definitions_import` — JSON backup/restore.
