@@ -161,3 +161,110 @@ class RegimeDefinition:
     def from_json(cls, payload: str) -> "RegimeDefinition":
         data = json.loads(payload)
         return cls(**data)
+
+
+# --- persistence ----------------------------------------------------------
+
+import os
+import pathlib
+
+from psycopg.types.json import Json
+
+_COLUMNS = (
+    "name", "scope", "expression", "bucketing", "persistence",
+    "origin", "descriptive_metadata", "status",
+)
+
+
+def _row_to_definition(row) -> "RegimeDefinition":
+    return RegimeDefinition(
+        name=row[0], scope=row[1], expression=row[2], bucketing=row[3],
+        persistence=row[4], origin=row[5], descriptive_metadata=row[6], status=row[7],
+    )
+
+
+def store_definition(conn, defn: "RegimeDefinition") -> int:
+    """Validate and upsert a regime definition; return its id."""
+    defn.validate()
+    with create_span("regimes.definitions.store", regime=defn.name):
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO regime_definitions
+                    (name, scope, expression, bucketing, persistence, origin,
+                     descriptive_metadata, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name) DO UPDATE SET
+                    scope = EXCLUDED.scope,
+                    expression = EXCLUDED.expression,
+                    bucketing = EXCLUDED.bucketing,
+                    persistence = EXCLUDED.persistence,
+                    origin = EXCLUDED.origin,
+                    descriptive_metadata = EXCLUDED.descriptive_metadata,
+                    status = EXCLUDED.status
+                RETURNING id
+                """,
+                (
+                    defn.name, defn.scope, Json(defn.expression), Json(defn.bucketing),
+                    Json(defn.persistence) if defn.persistence is not None else None,
+                    defn.origin,
+                    Json(defn.descriptive_metadata) if defn.descriptive_metadata is not None else None,
+                    defn.status,
+                ),
+            )
+            return cur.fetchone()[0]
+
+
+def load_definition(conn, name: str) -> Optional["RegimeDefinition"]:
+    """Load one definition by name, or None if absent."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {', '.join(_COLUMNS)} FROM regime_definitions WHERE name = %s",
+            (name,),
+        )
+        row = cur.fetchone()
+    return _row_to_definition(row) if row else None
+
+
+def list_definitions(conn, scope: Optional[str] = None, status: Optional[str] = None):
+    """List definitions, optionally filtered by scope and/or status."""
+    clauses, params = [], []
+    if scope is not None:
+        clauses.append("scope = %s")
+        params.append(scope)
+    if status is not None:
+        clauses.append("status = %s")
+        params.append(status)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {', '.join(_COLUMNS)} FROM regime_definitions{where} ORDER BY name",
+            params,
+        )
+        return [_row_to_definition(r) for r in cur.fetchall()]
+
+
+def archive_definition(conn, name: str) -> None:
+    """Set a definition's status to 'archived'."""
+    with conn.cursor() as cur:
+        cur.execute("UPDATE regime_definitions SET status = 'archived' WHERE name = %s", (name,))
+
+
+def export_definition(defn: "RegimeDefinition", directory: str) -> str:
+    """Write a definition to <directory>/<name>.json; return the path (Database-First backup)."""
+    defn.validate()
+    pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
+    path = os.path.join(directory, f"{defn.name}.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(dataclasses.asdict(defn), indent=2, sort_keys=True))
+    return path
+
+
+def import_definitions(conn, directory: str) -> int:
+    """Import every <name>.json in directory into the DB; return the count stored."""
+    count = 0
+    for path in sorted(pathlib.Path(directory).glob("*.json")):
+        with open(path, encoding="utf-8") as fh:
+            store_definition(conn, RegimeDefinition.from_json(fh.read()))
+        count += 1
+    return count
