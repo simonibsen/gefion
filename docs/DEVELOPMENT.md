@@ -109,3 +109,92 @@ Releases are fully automated (issue #30) — no manual bumping or tagging.
 - Parameterized SQL queries (never string interpolation)
 - Wrap JSONB values with `Json()` adapter for PostgreSQL
 - Use `gefion.db.pool` for connection pooling in parallel operations
+
+## Patterns & Gotchas (living reference)
+
+> **This is a living document.** When you rediscover a convention or hit a gotcha during
+> implementation, add it here so the next author (human or AI) looks it up instead of
+> re-deriving it. Append freely; keep entries short and concrete.
+
+### Adding a capability across all surfaces (definition of done)
+
+A user-facing capability is not done until it exists on **CLI, MCP, and UI** and is
+documented. Typical order: schema (if needed) → service module → CLI → MCP → UI → docs.
+
+**CLI command** — register a sub-app once, then add commands:
+```python
+foo_app = typer.Typer(help="Foo commands")
+app.add_typer(foo_app, name="foo", cls=SortedGroup)
+
+@foo_app.command("bar")
+def foo_bar(
+    name: str = typer.Argument(..., help="..."),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    from gefion.output import get_output
+    out = get_output(json_output)
+    ...
+    out.success("done"); out.json({...}) if out.json_mode else None
+```
+Use `out.table(columns=[Column(...)], rows=..., json_data=...)` for tabular output.
+Add `--db-url` to any DB-touching command so tests can target the test DB.
+
+**MCP tool** (`mcp-server/server.py`) — wraps the CLI; three edits + a handler:
+1. `Tool(name="foo_bar", description=..., inputSchema={...})` in `list_tools()`
+2. `elif name == "foo_bar": result = await _foo_bar(arguments)` in `call_tool()`
+3. handler: `async def _foo_bar(args): return await _execute_with_health_check(['postgres'], lambda: GefionExecutor().run("foo", "bar", ...))`
+
+**UI view** (`src/gefion/ui/views/`) — `def render_foo():`; register in `src/gefion/ui/app.py`
+`PAGES` list + the dispatch `elif current_page == "Foo": ... render_foo()`. Add the view
+filename to `expected_views` in `tests/test_ui_components.py`.
+
+### Writing a DB-backed test
+
+```python
+import os, psycopg, pytest
+from gefion.db import schema
+
+@pytest.fixture
+def conn():
+    if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+        pytest.skip("DB tests disabled")
+    c = psycopg.connect(schema.test_db_url()); c.autocommit = True
+    # clean up rows you touch, before and after
+    yield c
+    c.close()
+```
+- Guard every DB test with `ENABLE_DB_TESTS`. Never hardcode a DB URL — use `schema.test_db_url()`.
+- For **CLI** tests, pass `--db-url schema.test_db_url()` (see `test_cli_cross_sectional.py`).
+- Run: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" OTEL_ENABLED=false .venv/bin/python -m pytest`
+- Pre-flight: drop `gefion_test` first so the suite runs against a fresh DB (conftest recreates it).
+
+### Adding a database table (checklist)
+
+1. **Get owner approval** — schema changes require it (Schema Governance).
+2. **Two-file rule**: add the DDL to `sql/schema.sql` **and** a migration
+   `sql/migrations/YYYYMMDD_NNNNNN_name.sql`, kept in sync.
+3. **Regenerate the data dictionary** — `.venv/bin/python scripts/gen_data_dictionary.py --write`
+   and commit `docs/DATA_DICTIONARY.md`. **Easy to forget; the pre-push hook fails if you do.**
+4. Verify: drop `gefion_test`, run the schema/DB tests (db-init builds from `schema.sql`).
+
+### Gotchas
+
+- **`create_span(name, **attrs)`** — the first positional arg is the span name. Passing
+  `name=...` as an attribute raises `TypeError: got multiple values for argument 'name'`.
+  Use a different attribute key (e.g. `regime=...`).
+- **A PRIMARY KEY column cannot be NULL.** For an "applies to all / no specific entity"
+  row, use a sentinel (e.g. `entity_id INTEGER NOT NULL DEFAULT 0`), not NULL.
+- **A TimescaleDB unique/primary key must include the partition column** (usually `date`).
+- **JSONB**: wrap values with `Json()` (`from psycopg.types.json import Json`) on write;
+  they come back as `dict`.
+
+### Enforcement map (what runs when)
+
+| Hook | When | What it checks |
+|------|------|----------------|
+| PreToolUse | before Edit/Write to `src/` | TDD — a `tests/` change must accompany `src/` |
+| PreCommit | `git commit` | observability import in significant files |
+| Pre-push | `git push` | smoke tests (data-dictionary generator, CLI init, config, health) + **data-dictionary drift** (`gen_data_dictionary.py --check`) |
+| CI | on PR | full unit + DB suite |
+| `tests/test_docs_drift.py` | test suite | documented `gefion <cmd>` commands and `experiment_`/`docs_` MCP tools must exist/be documented |
