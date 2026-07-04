@@ -54,11 +54,20 @@ class TestUIStructure:
             "experiments.py",
             "documentation.py",
             "settings.py",
+            "regimes.py",
         ]
 
         assert views_dir.exists()
         for view in expected_views:
             assert (views_dir / view).exists(), f"View {view} not found"
+
+    def test_regimes_has_render_function(self, ui_dir):
+        """Regimes view should have a render_regimes function and register in app.py."""
+        content = (ui_dir / "views" / "regimes.py").read_text()
+        assert "def render_regimes(" in content
+        app_content = (ui_dir / "app.py").read_text()
+        assert "render_regimes" in app_content
+        assert "Regimes" in app_content
 
     def test_all_ui_views_compile(self, ui_dir):
         """Every UI view module must be valid Python (no syntax errors)."""

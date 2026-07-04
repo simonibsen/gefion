@@ -47,6 +47,7 @@ PAGES = [
     ("ML Pipeline", ":material/model_training:"),
     ("Backtesting", ":material/history:"),
     ("Experiments", ":material/science:"),
+    ("Regimes", ":material/insights:"),
     ("Charts", ":material/bar_chart:"),
     ("Documentation", ":material/menu_book:"),
     ("Settings", ":material/settings:"),
@@ -113,6 +114,9 @@ def main():
         elif current_page == "Experiments":
             from gefion.ui.views.experiments import render_experiments
             render_experiments()
+        elif current_page == "Regimes":
+            from gefion.ui.views.regimes import render_regimes
+            render_regimes()
         elif current_page == "Documentation":
             from gefion.ui.views.documentation import render_docs
             render_docs()
