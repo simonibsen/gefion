@@ -19,6 +19,8 @@
   - [`prediction_outcomes`](#prediction-outcomes)
   - [`predictions`](#predictions)
   - [`quarterly_financials`](#quarterly-financials)
+  - [`regime_definitions`](#regime-definitions)
+  - [`regime_labels`](#regime-labels)
   - [`schema_migrations`](#schema-migrations)
   - [`stock_ohlcv`](#stock-ohlcv)
   - [`stocks`](#stocks)
@@ -355,6 +357,39 @@ Quarterly financial statements (income, balance sheet, cash flow, earnings). One
 | `surprise_percentage` | NUMERIC(10,4) | ✓ | `EARNINGS`.<br>`surprisePercentage` | Surprise as % of estimate |
 | `raw` | JSONB | ✓ |  |  |
 | `created_at` | TIMESTAMP | ✓ |  |  |
+
+### `regime_definitions`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `name` | TEXT |  |  |  |
+| `scope` | TEXT |  |  |  |
+| `expression` | JSONB |  |  |  |
+| `bucketing` | JSONB |  |  |  |
+| `persistence` | JSONB | ✓ |  |  |
+| `origin` | TEXT |  |  |  |
+| `descriptive_metadata` | JSONB | ✓ |  |  |
+| `status` | TEXT |  |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
+
+### `regime_labels`
+
+*(no description yet)*
+
+**TimescaleDB hypertable** · Primary key: `date, entity_id, regime_id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`regime_id`** 🔑 | INTEGER |  |  |  |
+| **`date`** 🔑 | DATE |  |  |  |
+| **`entity_id`** 🔑 | INTEGER |  |  |  |
+| `label` | TEXT |  |  |  |
+| `dataset_version` | TEXT |  |  |  |
 
 ### `schema_migrations`
 
