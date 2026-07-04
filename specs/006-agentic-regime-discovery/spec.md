@@ -59,6 +59,22 @@ because it looks rigorous.
    survival. Low-power bucket → no survival. Unrecorded candidate → the run is invalid.
 5. **Reproducible, audited runs (defeats T6).** Discovery is seeded and deterministic; the
    full candidate ledger is inspectable.
+6. **Expressiveness that scales with data, not a free-for-all (defeats T2/T4 at the source).**
+   The agent's hypothesis class is deliberately tiered so honest inference is always
+   possible:
+   - **Default — continuous-interaction tests.** The gradient question ("does the edge scale
+     with this variable?") is answered by a single interaction coefficient/p-value — cheap,
+     honest, no bucket search.
+   - **Structural — bounded compositional grammar.** Compositions are drawn from a
+     pre-registered primitive library (bounded *M*) up to a max composition depth (*K*),
+     making the search space finite and enumerable so the FDR denominator is exact.
+     Compositionality is where *2ᴹ* explosions live, so depth *K* is a first-class,
+     recorded cap.
+   - **Expressive — free-form, unlocked only with fresh-holdout validation.** Arbitrary
+     free-form expressions are permitted for the agent *only* when validated on a genuinely
+     independent, purged holdout (which large datasets make affordable). Free-form without
+     fresh-holdout validation is prohibited, because no correction can rescue an unbounded,
+     data-reusing search.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -184,6 +200,41 @@ candidate ledger and verdicts.
 2. **Given** the same seed and inputs, **When** the run is repeated, **Then** the ledger and
    verdicts are identical.
 
+---
+
+### User Story 6 — Cross-Era Grading and a Diagnostics Ledger for What We Couldn't Test (Priority: P2)
+
+A discovered edge is promoted on **one** hard, fail-closed, out-of-sample holdout gate — but
+its *trust* is graded by how widely it survives across time eras and dataset versions.
+Edges that pass the gate but are cross-era-weak are promoted *flagged as regime-limited*
+with tighter probation, so transient alpha is captured without being trusted like a durable
+edge. Separately, every limit the search hits — budget exhausted, depth capped, and
+especially min-sample refusals — is recorded in a diagnostics ledger, split into
+sample-dependent learnings (re-test on a new dataset) and structural learnings (accumulate).
+
+**Why this priority**: This is how the system stays honest *and* useful across the move from
+a tiny dev dataset to decades of production data — it neither over-trusts a one-era edge nor
+throws away legitimate transient alpha, and it turns the search's negative space into a
+learning signal (e.g. "we keep wanting VIX regimes but VIX isn't ingested").
+
+**Independent Test**: Run discovery on data with an edge present in only one era; verify it
+passes the hard gate, is flagged regime-limited, and that a min-sample refusal on a rare
+regime is recorded as a sample-dependent (re-testable) diagnostic, not a structural one.
+
+**Acceptance Scenarios**:
+
+1. **Given** an edge that passes the honest holdout gate but survives in only one era,
+   **When** it is promoted, **Then** it is flagged regime-limited/decaying and placed on
+   tighter probation, not trusted as durable.
+2. **Given** an edge that survives across multiple eras and dataset versions, **When** it is
+   graded, **Then** it receives a higher trust grade than a single-era survivor.
+3. **Given** a candidate refused for insufficient sample, **When** it is recorded, **Then**
+   the diagnostic is tagged sample-dependent (with the quantitative reason, e.g. "18 of 100
+   required") so it is re-evaluated — not inherited — on a larger dataset.
+4. **Given** a structural limit (e.g. a required input is not ingested, or depth-3
+   conjunctions are always under-powered on this dataset), **When** it is recorded, **Then**
+   it is tagged structural and accumulates as a data-priority / search-design signal.
+
 ### Edge Cases
 
 - **Degenerate regimes**: a discovered regime that assigns nearly all observations to one
@@ -197,7 +248,19 @@ candidate ledger and verdicts.
 - **Budget exhaustion mid-cycle**: partial searches MUST still record the true number of
   tests attempted so accounting stays honest.
 - **Interaction with 005**: discovered regimes flow through 005's slicing/reconciliation and
-  inherit its low-power/undefined handling.
+  inherit its low-power/undefined handling, including persistence (episodes, not flicker).
+- **Composition-depth explosion**: without a hard cap on depth *K*, compositional search
+  grows ~2ᴹ; the cap and the true realized search size MUST be recorded every run.
+- **Uncomputable proposals**: a proposed regime whose inputs are not in the dataset (e.g.
+  VIX when it isn't ingested) MUST be rejected at proposal time via the data-availability
+  inventory (spec 004 discovery) and recorded as a structural diagnostic, not attempted.
+- **Non-stationarity across the data expansion**: adding decades spans different macro eras;
+  more data tests stationarity rather than merely adding power, so cross-era survival is a
+  grading dimension, not an afterthought.
+- **Dev-scale is plumbing only**: on a tiny dataset the loop's real job is to prove the
+  machinery (segregation, ledgers, fail-closed) via the negative control; meaningful
+  discovery emerges only at production data scale, and initial "not enough data" verdicts
+  are correct behavior, not a defect.
 
 ## Requirements *(mandatory)*
 
@@ -243,11 +306,44 @@ candidate ledger and verdicts.
   parent-context propagation (Constitution: Observability).
 - **FR-117** *(documentation, definition of done)*: User-facing docs MUST be updated in the
   same PR (see **Documentation Impact**) and `tests/test_docs_drift.py` MUST pass.
+- **FR-118**: The agent's hypothesis class MUST be tiered: **continuous-interaction tests as
+  the default gradient mechanism**; **bounded compositional grammar** (pre-registered
+  primitive library of size *M*, max composition depth *K*) for structural search; and
+  **free-form expressions only when validated on a fresh, purged, independent holdout**.
+- **FR-119**: Free-form agentic expressions without fresh-holdout validation MUST be
+  prohibited; the framework MUST NOT emit a p-value for an unbounded, data-reusing search.
+- **FR-120**: Composition depth *K* and the realized search-space size MUST be capped,
+  declared, and recorded each run; the FDR family MUST reflect the true realized size.
+- **FR-121**: Regime proposals whose inputs are unavailable in the target dataset MUST be
+  rejected at proposal time using the spec-004 data-availability inventory, and recorded as
+  structural diagnostics rather than attempted.
+- **FR-122**: Promotion MUST be two-tier — a single hard, fail-closed, out-of-sample holdout
+  gate decides admit/reject; **cross-era and cross-dataset survival grades trust/rank among
+  admitted edges only** and MUST NOT relax the hard gate.
+- **FR-123**: An admitted edge that is cross-era-weak MUST be flagged regime-limited/decaying
+  and placed on tighter probation (reusing the existing probation mechanism), so transient
+  alpha is captured but not trusted as durable.
+- **FR-124**: The system MUST maintain a **diagnostics ledger** of every limit hit (budget,
+  depth, min-sample refusal, uncomputable proposal), each tagged **sample-dependent**
+  (re-evaluated on a new dataset) or **structural** (accumulated), with quantitative reasons.
+- **FR-125**: Every discovery artifact (search space, candidate, verdict, diagnostic) MUST
+  carry dataset provenance and descriptive metadata (005 FR-023/024); sample-dependent
+  diagnostics MUST NOT be inherited across dataset versions without re-evaluation.
+- **FR-126**: Discovered regimes MUST inherit 005's persistence handling — favoring
+  contiguous episodes — and record realized persistence as a gradable property.
 
 ### Key Entities *(include if feature involves data)*
 
 - **RegimeSearchSpace**: the declared, bounded universe of candidate regimes a discovery run
-  may explore, plus the per-cycle budget. Pins down the denominator of error control.
+  may explore — the primitive library (size *M*), the max composition depth (*K*), the
+  expressiveness tier in use, and the per-cycle budget. Pins down the denominator of error
+  control.
+- **DiscoveryDiagnostics**: the ledger of limits the search hit — budget/depth exhaustion,
+  min-sample refusals, uncomputable proposals — each tagged sample-dependent vs structural
+  with a quantitative reason and dataset provenance. The negative-space learning signal.
+- **TrustGrade**: the cross-era / cross-dataset survival grade attached to an admitted edge
+  (distinct from the hard admit/reject gate), including the regime-limited/decaying flag and
+  probation tightness.
 - **DiscoveredRegime**: a `RegimeDefinition` (from 005) whose computation is machine-
   generated (Level 2/3), carrying provenance (seeding principle or method), fitted
   parameters, and the training folds it was fit on.
@@ -260,8 +356,10 @@ candidate ledger and verdicts.
 ## Documentation Impact *(mandatory — definition of done)*
 
 - **docs/REGIMES.md** (created in 005) — add the discovery section: the threat model (T1–T6),
-  the nested/pre-registered/search-aware/fail-closed defense, and how to read a discovery
-  ledger.
+  the nested/pre-registered/search-aware/fail-closed defense, the expressiveness tiers
+  (continuous-interaction → bounded grammar → free-form-with-fresh-holdout), two-tier
+  promotion (hard gate vs cross-era grading), and how to read both the candidate and
+  diagnostics ledgers.
 - **README.md** — add the `regime discover` command(s) to the CLI Reference; note discovery
   under Autonomous Experiments.
 - **docs/USER_GUIDE.md** — full CLI reference for the `regime discover` group and options.
@@ -299,3 +397,11 @@ candidate ledger and verdicts.
 - **SC-106**: No degenerate, unstable, or entangled regime is ever among surviving verdicts.
 - **SC-107**: All discovery operations are reachable and consistent across CLI, MCP, and UI,
   and `tests/test_docs_drift.py` passes.
+- **SC-108**: No free-form agentic expression is ever assigned a p-value without fresh-holdout
+  validation; every run records its expressiveness tier, primitive-library size, and depth
+  cap, and the FDR family matches the realized search size.
+- **SC-109**: Every admitted edge carries a trust grade; on data with a single-era edge, the
+  edge is admitted, flagged regime-limited, and placed on tighter probation in 100% of runs.
+- **SC-110**: 100% of limit-hits are recorded in the diagnostics ledger and correctly tagged
+  sample-dependent vs structural; sample-dependent diagnostics from a small dataset are
+  re-evaluated (not inherited) when the same search runs on a larger dataset.
