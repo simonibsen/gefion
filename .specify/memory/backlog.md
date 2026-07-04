@@ -48,6 +48,25 @@ Systematic hardening of the Streamlit UI assistant view:
 
 ## Future Features
 
+### Regime follow-ups (spec 005 shipped 2026-07; spec 006 parked)
+**Source**: specs/005-regime-slicing, specs/006-agentic-regime-discovery
+**Priority**: Medium (006 explicitly parked until production-scale data)
+
+Spec 005 (regime slicing) shipped: definitions/labels, sliced backtests,
+continuous-interaction, conditional experiment verdicts — across CLI/MCP/UI.
+Remaining within 005's spec surface:
+1. Per-entity (sector/industry/asset) label computation — US1 shipped market scope;
+   `compute_labels` raises NotImplementedError for finer scopes
+2. Detector-function leaf runtime (HMM/clustering via the feature-function sandbox) —
+   representation exists (FR-019a); execution gated to 006's fresh-holdout tier
+3. Reference-leaf resolution (compose stored regimes by name) and optional DSL string sugar
+4. Per-observation holdout scores wired into more experiment types (only the shared
+   helper exists; evaluators must emit `observations` for live conditional verdicts)
+
+Spec 006 (agentic regime discovery) is fully specified and **parked by design** until
+decades-scale data lands: nested segregation, search-aware FDR, diagnostics ledger,
+cross-era grading. Do not start it on the dev dataset.
+
 ### Live & Paper Trading (ML_ROADMAP Phase 6)
 **Source**: ML_ROADMAP.md
 **Priority**: Low (future)

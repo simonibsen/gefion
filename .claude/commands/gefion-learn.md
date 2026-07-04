@@ -62,6 +62,7 @@ Checkpoint: learner interprets a prediction (median outlook, confidence from the
 **Module 4 — Backtesting**
 Concepts: strategies (momentum, mean_reversion, ml_signal, …), the metrics that come from the equity curve (return, Sharpe, drawdown) vs from closed trades (win_rate, profit_factor — and the no-losses profit_factor=0 convention).
 Do: run a small real backtest, e.g. `gefion backtest run --strategy ml_signal --model-name exp42_lightgbm --model-version applied-20260702 --horizon-days 7 --start-date 2026-01-02 --end-date 2026-04-02 --exchange NASDAQ --limit 50 --json`; read the metrics; UI Backtesting page.
+Aside (regimes): an edge is rarely unconditional — `docs/REGIMES.md` describes the *state* of the market as a causal, persistent dimension you can slice a backtest by (`--by-regime`; MCP `regime_*` tools; UI Regimes page). Mention it here; the deep dive belongs with Module 6 (conditional verdicts enter one flat FDR family; low-power buckets fail closed — never read a low-power bucket as a finding).
 Checkpoint: learner explains why win_rate counts only closed trades.
 
 **Module 5 — Charts & observability**
