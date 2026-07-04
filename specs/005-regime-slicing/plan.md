@@ -48,7 +48,7 @@ history across all instruments/exchanges (dataset provenance + per-dataset diagn
 
 | Principle | Status | How the plan satisfies it |
 |---|---|---|
-| I. Database-First | **PASS (gated)** | Regime definitions live in DB + exported to `regime-definitions/` JSON. New tables (`regime_definitions`, `regime_labels`) are **proposed DDL only** — owner approval required before writing `schema.sql`/migration (Schema Governance). No autonomous schema change. |
+| I. Database-First | **PASS** | Regime definitions live in DB + exported to `regime-definitions/` JSON. New tables (`regime_definitions`, `regime_labels`) DDL **APPROVED by owner 2026-07-04** (see contracts/sql.md); two-file rule (schema.sql + migration) applied at implementation as the first test-guarded task. |
 | II. TDD (non-negotiable) | **PASS** | Every step lists the test file before the src file; DB tests use `schema.test_db_url()` with `ENABLE_DB_TESTS` guards. |
 | III. CLI-First | **PASS** | New `gefion regime …` group + `backtest run --by-regime`; MCP tools mirror the CLI; `/gefion` operator skill reviewed for new tools; skill (if any) prefixed `gefion-`. |
 | IV. Observability | **PASS** | All `regimes/` modules import `gefion.observability`; significant ops use `create_span`/`@traced` with parent-context propagation. |

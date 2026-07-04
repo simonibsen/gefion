@@ -1,8 +1,13 @@
-# SQL Contract (PROPOSED — owner approval required) — Regime Slicing (005)
+# SQL Contract — Regime Slicing (005)
 
-Per Schema Governance, this DDL is **proposed for review only**. It MUST NOT be written to
-`sql/schema.sql` or run against any database until the owner approves. On approval, apply the
-two-file rule: add to `schema.sql` (canonical, `CREATE IF NOT EXISTS`) *and* a paired migration.
+**Status: APPROVED by owner 2026-07-04** (scope: exactly the two tables below, with the four
+decisions — CHECK-enum scope, JSONB columns, `entity_id=0` sentinel, provenance on labels).
+Approval covers only this change; future schema changes require separate approval.
+
+On implementation, apply the two-file rule: add to `schema.sql` (canonical, `CREATE IF NOT
+EXISTS`) *and* a paired migration `sql/migrations/20260704_NNNNNN_regime_slicing.sql`, kept in
+sync. Sequenced as the first (test-guarded) implementation task so db-init/migration applies
+cleanly before any data-layer code.
 
 ## `regime_definitions`
 ```sql
@@ -24,16 +29,18 @@ CREATE TABLE IF NOT EXISTS regime_definitions (
 ## `regime_labels` (hypertable)
 ```sql
 CREATE TABLE IF NOT EXISTS regime_labels (
-    regime_id        INT NOT NULL REFERENCES regime_definitions(id),
+    regime_id        INT  NOT NULL REFERENCES regime_definitions(id),
     date             DATE NOT NULL,
-    entity_id        INT,                             -- NULL for market scope
-    label            TEXT NOT NULL,                   -- bucket label or 'undefined'
+    entity_id        INT  NOT NULL DEFAULT 0,          -- 0 = market-wide (no specific entity)
+    label            TEXT NOT NULL,                    -- bucket label or 'undefined'
     dataset_version  TEXT NOT NULL,
-    PRIMARY KEY (regime_id, entity_id, date)
+    PRIMARY KEY (regime_id, entity_id, date)           -- includes partition col `date` (TimescaleDB req.)
 );
 SELECT create_hypertable('regime_labels', 'date', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS brin_regime_labels_date ON regime_labels USING BRIN (date);
 ```
+Note: `entity_id` uses sentinel `0` for market scope rather than NULL, because a PRIMARY KEY
+column cannot be NULL. Sector/industry/asset scopes use the stock id.
 
 ## Migration
 ```

@@ -45,11 +45,12 @@ fresh-holdout tier, FR-019a).
 |---|---|---|
 | `regime_id` | int FK → regime_definitions | |
 | `date` | date | hypertable time dimension |
-| `entity_id` | int NULL | NULL for `market` scope; stock id otherwise |
+| `entity_id` | int NOT NULL DEFAULT 0 | `0` = market-wide; stock id for sector/industry/asset scope |
 | `label` | text | bucket label or `undefined` |
 | `dataset_version` | text | provenance key (FR-023) |
 
-PK/space partition: (`regime_id`, `entity_id`, `date`). Exactly one row per (regime, date[, entity]).
+PK: (`regime_id`, `entity_id`, `date`) — includes partition col `date` (TimescaleDB requirement);
+`entity_id` uses sentinel `0` (not NULL) since PK columns cannot be NULL. One row per (regime, date, entity).
 Causality: every label at `date` computed from data ≤ `date` (FR-004). BRIN index on `date`.
 
 ### RegimeSlicedResult (computed, not persisted by default)
