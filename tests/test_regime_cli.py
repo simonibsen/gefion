@@ -108,3 +108,10 @@ def test_export_then_import(db_url, tmp_path):
     assert r.exit_code == 0
     r = runner.invoke(app, ["regime", "show", "vol-regime", "--db-url", db_url, "--json"])
     assert r.exit_code == 0
+
+
+def test_backtest_run_has_by_regime_option():
+    """US2 T022: backtest run exposes --by-regime (additive slicing)."""
+    r = runner.invoke(app, ["backtest", "run", "--help"])
+    assert r.exit_code == 0
+    assert "--by-regime" in r.output

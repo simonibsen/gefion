@@ -7802,6 +7802,11 @@ def backtest_run(
         "--filter-max-q10",
         help="Block if q10 below this (ml_filter strategy)"
     ),
+    by_regime: Optional[str] = typer.Option(
+        None,
+        "--by-regime",
+        help="Slice results by a regime (name); adds per-regime metrics (spec 005)"
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -8167,6 +8172,23 @@ def backtest_run(
             "total_trades": trade_count,
         }
 
+        # Optional regime slicing (spec 005) — strictly additive
+        _by_regime_block = None
+        if by_regime:
+            from gefion.regimes.slicing import slice_backtest_by_regime
+            with _regime_conn(None) as _rc:
+                with _rc.cursor() as _cur:
+                    _cur.execute(
+                        """SELECT rl.date, rl.label FROM regime_labels rl
+                           JOIN regime_definitions rd ON rd.id = rl.regime_id
+                           WHERE rd.name = %s""",
+                        (by_regime,),
+                    )
+                    _labels_by_date = {d: lab for d, lab in _cur.fetchall()}
+            if _labels_by_date:
+                _by_regime_block = slice_backtest_by_regime(
+                    equity_curve, trades, _labels_by_date, initial_cash)
+
         # Format and output results
         emit(
             "Backtest complete",
@@ -8219,6 +8241,7 @@ def backtest_run(
                         for e in benchmark_result.get("equity_curve", [])
                     ],
                 },
+                **({"by_regime": _by_regime_block} if _by_regime_block else {}),
             },
             json_output=json_output,
         )
