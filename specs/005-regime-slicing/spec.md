@@ -54,9 +54,16 @@ spec delivers the slice.
 ### User Story 1 — Describe and Compute a Regime (Priority: P1)
 
 A researcher describes the state of the market/sector/asset as a named, time-indexed
-regime: a computation over available data plus a bucketing rule that maps each date (and,
-for scoped regimes, each entity) to a discrete regime label. The system computes and
-stores those labels so they can be attached to any downstream analysis.
+regime: a computation over available data plus a rule that maps each date (and, for scoped
+regimes, each entity) to a regime label. A regime may be **atomic** (one condition, e.g. a
+volatility tercile) or a **composition** — a free-form causal expression combining
+conditions across scopes and inputs with boolean/threshold logic (e.g. "VIX rising AND
+defense-industry volume rising"). Because a human authoring one regime is a *single*
+pre-registered hypothesis (no search multiplicity), free-form expressiveness is safe here;
+the bounded-grammar constraint applies only to the autonomous searcher (spec 006).
+Regimes are **persistent states**, not scattered day-matches: labels favor contiguous
+episodes (via dwell-time / hysteresis), and persistence is a recorded, gradable property.
+The system computes and stores labels so they can be attached to any downstream analysis.
 
 **Why this priority**: Nothing else in the feature exists without a regime object to slice
 by. This is the foundational MVP and is independently valuable — even just producing and
@@ -81,6 +88,17 @@ labels, and verify the output is a queryable time series assigning exactly one l
 4. **Given** any regime definition, **When** labels are computed, **Then** each label at
    time *t* depends only on data available at or before *t* (no lookahead), and this is
    verified by construction.
+5. **Given** a compositional regime combining a `market`-scoped condition and an
+   `industry`-scoped condition, **When** labels are computed, **Then** each atomic
+   sub-condition resolves at its own scope per (date, entity), the boolean combines them,
+   and the composite's output scope is the finest scope involved.
+6. **Given** a raw threshold condition that flickers day-to-day, **When** the regime
+   specifies hysteresis / minimum dwell-time, **Then** the computed labels form contiguous
+   episodes rather than scattered single-day matches, and the regime's average dwell-time
+   is recorded.
+7. **Given** any computed regime, **When** it is stored, **Then** it carries dataset
+   provenance (which instruments/exchanges/date-range/snapshot it was computed on) and
+   descriptive metadata (what it captures, its inputs, bucket frequencies, dwell-time).
 
 ---
 
@@ -172,6 +190,32 @@ UI renders per-regime metric blocks.
 
 ---
 
+### User Story 5 — Continuous (Graded) Conditioning (Priority: P2)
+
+Beyond discrete buckets, a researcher can ask whether a signal's edge varies *continuously*
+with a conditioning variable — "does momentum's edge scale smoothly with volatility?" —
+via a single interaction test (one coefficient) rather than a grid of bucket comparisons.
+This is the default, statistically cheapest way to capture a gradient, and it avoids the
+sample-fragmentation and multiple-testing costs of fine-grained bucketing.
+
+**Why this priority**: It captures the most common "regime" question (a smooth gradient)
+with one honest test instead of many, and it is the recommended default over dense
+bucketing. It builds on Story 1's causal conditioning variables.
+
+**Independent Test**: On synthetic data where a signal's edge scales linearly with a
+conditioning variable, verify the interaction test recovers a significant monotone
+relationship with a single p-value, and reports nothing spurious when the edge is flat.
+
+**Acceptance Scenarios**:
+
+1. **Given** a signal and a causal conditioning variable, **When** the researcher runs a
+   continuous-interaction test, **Then** the system reports a single interaction estimate
+   and p-value for how the edge varies with the variable — not a per-bucket grid.
+2. **Given** a genuinely flat relationship, **When** the interaction test runs, **Then** it
+   reports no significant interaction (no false gradient from bucketing noise).
+
+---
+
 ### Edge Cases
 
 - **Lookahead / leakage**: a regime label that uses information from after time *t*
@@ -190,6 +234,14 @@ UI renders per-regime metric blocks.
   MUST grow accordingly so slicing cannot smuggle a lucky bucket past the gate.
 - **Reconciliation**: per-regime results must reconcile to aggregates (no double-counted
   or dropped trades at bucket boundaries).
+- **Flicker / low persistence**: a regime whose labels flip frequently (near-zero
+  dwell-time) is economically suspect and MUST be flagged; hysteresis/min-dwell exists to
+  prevent single-day matches from masquerading as a regime.
+- **Composition sample fragmentation**: deep conjunctions grow rarer fast; a composite that
+  falls below the minimum-sample threshold is refused (Story 1's power rule), not reported.
+- **Cross-dataset transfer**: a regime/diagnostic is true *relative to its dataset*;
+  sample-dependent facts (coverage, rarity) MUST NOT be assumed to transfer to a different
+  dataset version and must be re-evaluated there.
 
 ## Requirements *(mandatory)*
 
@@ -240,19 +292,47 @@ UI renders per-regime metric blocks.
 - **FR-016** *(documentation, definition of done)*: The change is not done until user-facing
   docs reflect it in the same PR — see **Documentation Impact** below — and
   `tests/test_docs_drift.py` passes for any new commands and MCP tools.
+- **FR-019**: A `RegimeDefinition` MUST support a **compositional expression** form —
+  boolean/threshold composition of atomic conditions across inputs and scopes, including
+  directional conditions (e.g. "rising"). Human-authored regimes MAY use free-form
+  expressions; the bounded-grammar constraint is imposed only on the autonomous searcher
+  (spec 006).
+- **FR-020**: For a compositional regime, the system MUST resolve each atomic sub-condition
+  at its own scope per (date, entity), combine them by the specified logic, and assign the
+  composite an output scope equal to the finest scope involved.
+- **FR-021**: A regime MUST support **persistence** controls (hysteresis / minimum
+  dwell-time) that form contiguous episodes from raw conditions, and MUST record its
+  realized persistence (average dwell-time) as a gradable property.
+- **FR-022**: The system MUST support **continuous-interaction** evaluation — testing how a
+  signal's edge varies with a conditioning variable via a single interaction estimate and
+  p-value — as the default gradient mechanism, distinct from discrete bucketing.
+- **FR-023**: Every regime definition, label set, and sliced result MUST carry **dataset
+  provenance** (instruments, exchanges, date range, snapshot/version, tied to the dataset
+  manifest) so no finding is context-free.
+- **FR-024**: The system MUST store **descriptive metadata** in three layers — dataset
+  descriptors (instrument count, exchange coverage, per-instrument bar density, date span),
+  regime descriptors (what it captures, inputs, bucket frequencies, dwell-time), and result
+  descriptors — sufficient to reason about whether a finding transfers to another dataset.
 
 ### Key Entities *(include if feature involves data)*
 
-- **RegimeDefinition**: a named, versioned description of a regime — its scope
-  (market/sector/industry/asset), the computation over source data, and the bucketing rule
-  (thresholds/method) producing discrete labels. Stored in DB, exported to JSON.
-- **RegimeLabel**: the computed time series — one discrete label (or `undefined`) per
-  (date[, entity]) for a given RegimeDefinition. The object everything slices against.
+- **RegimeDefinition**: a named, versioned description of a regime — its scope, its
+  computation (atomic or a `RegimeExpression`), its bucketing and persistence rules, its
+  origin (human-authored here; machine-generated in 006), plus dataset provenance and
+  descriptive metadata. Stored in DB, exported to JSON. Deliberately origin-agnostic so
+  006 reuses the same object.
+- **RegimeExpression**: the compositional form of a definition — a causal boolean/threshold
+  composition of atomic conditions across inputs and scopes (incl. directional conditions).
+  Free-form for human authors; drawn from a bounded grammar for the autonomous searcher.
+- **RegimeLabel**: the computed time series — one label (or `undefined`) per (date[, entity])
+  for a given RegimeDefinition, favoring contiguous episodes. The object everything slices
+  against.
 - **RegimeScope**: the granularity at which a regime applies (market → all entities on a
-  date share one label; asset → per-entity labels).
+  date share one label; asset → per-entity labels); under composition, the finest scope wins.
 - **RegimeSlicedResult**: the per-regime breakdown of a backtest or experiment evaluation —
-  each bucket's metrics/p-value plus sample size and low-power/undefined flags, guaranteed
-  to reconcile to the aggregate.
+  each bucket's metrics/p-value (or a continuous-interaction estimate) plus sample size,
+  persistence, low-power/undefined flags, and dataset provenance; guaranteed to reconcile
+  to the aggregate.
 
 ## Documentation Impact *(mandatory — definition of done)*
 
@@ -265,7 +345,11 @@ Per the project's documentation-as-definition-of-done rule, this PR MUST update:
 - **docs/BACKTESTING.md** — how per-regime metrics are computed, the reconciliation
   guarantee, and the minimum-sample / low-power flagging.
 - **New concept doc** (e.g. `docs/REGIMES.md`) — the "why not just a feature" rationale, the
-  causal-label requirement, and the conditional-FDR accounting; linked from the docs index.
+  causal-label requirement, the conditional-FDR accounting, compositional/continuous
+  conditioning, persistence, and a **"market regime ≠ ML regime" terminology note**
+  (market regime = a state of the environment indexed by time; ML regime = a state of the
+  learner indexed by capacity/data/compute — e.g. double descent, lazy vs. feature-learning,
+  scaling-law regimes) to pre-empt a very natural misread; linked from the docs index.
 - **docs/DATA_DICTIONARY.md** — the new regime definition/label tables and columns.
 - **docs/MCP_WORKFLOWS.md** — the mirrored MCP tools for regime operations.
 - **.claude/commands/gefion-learn.md** — if the learning path changes, add a short regime
@@ -298,6 +382,12 @@ Per the project's documentation-as-definition-of-done rule, this PR MUST update:
   MCP, and UI, and `tests/test_docs_drift.py` passes.
 - **SC-006**: Backtests run without slicing show zero behavioral or output change
   (regression-tested against pre-feature baselines).
+- **SC-007**: On synthetic data with an edge that scales linearly with a conditioning
+  variable, the continuous-interaction test recovers the relationship with a single p-value
+  and reports no spurious gradient when the edge is flat.
+- **SC-008**: 100% of stored regimes, labels, and sliced results carry dataset provenance
+  and the three descriptive-metadata layers; a reviewer can determine, from metadata alone,
+  whether a sample-dependent diagnostic should be re-evaluated on a different dataset.
 
 ## Future Direction: Agentic Regime Discovery (→ Spec 006)
 
