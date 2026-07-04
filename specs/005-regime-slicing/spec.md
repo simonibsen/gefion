@@ -49,6 +49,43 @@ first to discover that an edge is concentrated in a regime — and *that finding
 justifies building the interaction feature. The slice points; the feature exploits. This
 spec delivers the slice.
 
+## Clarifications
+
+### Session 2026-07-04
+
+- Q: How is a compositional regime expression represented and stored? → A: A declarative
+  expression tree (AST) is the canonical core — leaves are atomic causal conditions (inline
+  or references to named atomic regimes), nodes are boolean/threshold operators, stored as
+  JSON with no code execution. A sandboxed **detector-function leaf** (reusing the existing
+  feature-function sandbox) is permitted as a *gated escape hatch* for detectors that cannot
+  be expressed declaratively (e.g. HMM states, clustering); in 006 that leaf is admissible
+  only under the free-form / fresh-holdout tier, since code is not countable. A DSL string
+  is optional syntax sugar over the AST; reference-only composition is a restricted mode of
+  the same AST. Rationale: the declarative core gives a countable search space, causality by
+  construction, and auditability — the properties 006's honest FDR depends on — while the
+  code leaf preserves full expressiveness where genuinely needed.
+- Q: Which multiple-testing scheme should conditional (per-regime) evaluation use in v1? →
+  A: Flat Benjamini-Hochberg over the entire realized family (K experiments × R regimes ×
+  buckets). Simplest scheme that provably controls FDR with no structural assumptions, and
+  it matches the BH machinery already in the codebase. Hierarchical / gatekeeping and
+  group-structured FDR are deferred as future power optimizations, to be justified only once
+  a measured power problem exists on real data.
+- Q: How should the minimum-sample threshold measure "enough to make a claim"? → A: Base the
+  floor on **effective (independence-adjusted) sample size** — e.g. count of independent
+  episodes / block-adjusted N — not raw day-count, because persistent regimes and
+  autocorrelated returns make raw counts overstate power. The floor is configurable; the
+  exact numeric default is a plan-level detail expressed in effective terms.
+- Q: What statistical form should the continuous-interaction test take in v1? → A: A single
+  **linear interaction term** in a regression (signal × conditioning variable), reporting
+  one coefficient and one p-value. Simple, standard, interpretable, and a valid conservative
+  test. Rank-based / nonparametric monotonic tests are deferred robustness extensions.
+- Q: Should persistence controls (hysteresis / min-dwell) be required or optional, and what
+  default? → A: Optional per-regime controls, **off by default**, but the system ALWAYS
+  measures realized dwell-time and flags flicker (grade, not gate) so a suspect regime never
+  hides; a hard minimum-dwell floor stays available per regime for authors who want it.
+  Rationale: consistent with grade-don't-gate; some legitimate regimes are genuinely fast,
+  so forcing a min-dwell on all would distort them.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Describe and Compute a Regime (Priority: P1)
@@ -263,15 +300,20 @@ relationship with a single p-value, and reports nothing spurious when the edge i
   factor, trade count) computed with the existing metric functions.
 - **FR-007**: Backtest slicing MUST be opt-in; a backtest run without slicing MUST be
   unchanged in behavior and output.
-- **FR-008**: System MUST annotate every per-regime metric block with its sample size and
-  MUST flag or withhold buckets below a configurable minimum-sample threshold.
+- **FR-008**: System MUST annotate every per-regime metric block with both its raw and its
+  **effective (independence-adjusted) sample size** and MUST flag or withhold buckets whose
+  *effective* sample falls below a configurable minimum-sample threshold. Effective sample
+  accounts for episode structure / autocorrelation (e.g. independent-episode count or a
+  block-adjusted N), not raw day-count.
 - **FR-009**: Per-regime results MUST reconcile to the aggregate (trades and total return
   across buckets sum to the un-sliced totals).
 - **FR-010**: The experiment framework MUST support conditional evaluation that emits a
   per-regime holdout p-value in addition to (not instead of) the aggregate.
 - **FR-011**: Per-regime hypothesis tests MUST be entered into the cycle's FDR family so
-  the added multiple testing is corrected; the correction MUST reflect the true number of
-  tests (K×R or a documented hierarchical alternative).
+  the added multiple testing is corrected via **flat Benjamini-Hochberg over the full
+  realized family** (K experiments × R regimes × buckets); the correction MUST reflect the
+  true number of tests actually performed. Hierarchical / group-structured schemes are
+  deferred future power optimizations, not v1.
 - **FR-012**: Conditional evaluation MUST honor fail-closed: a bucket with no valid
   p-value (including low-power buckets) cannot survive.
 - **FR-013**: All regime-slicing operations MUST be reachable via CLI, MCP, and UI
@@ -292,20 +334,31 @@ relationship with a single p-value, and reports nothing spurious when the edge i
 - **FR-016** *(documentation, definition of done)*: The change is not done until user-facing
   docs reflect it in the same PR — see **Documentation Impact** below — and
   `tests/test_docs_drift.py` passes for any new commands and MCP tools.
-- **FR-019**: A `RegimeDefinition` MUST support a **compositional expression** form —
-  boolean/threshold composition of atomic conditions across inputs and scopes, including
-  directional conditions (e.g. "rising"). Human-authored regimes MAY use free-form
-  expressions; the bounded-grammar constraint is imposed only on the autonomous searcher
-  (spec 006).
+- **FR-019**: A `RegimeDefinition` MUST support a **compositional expression** form,
+  canonically represented as a **declarative expression tree (AST)** — leaves are atomic
+  causal conditions (inline or references to named atomic regimes), nodes are
+  boolean/threshold operators, including directional conditions (e.g. "rising"). The AST
+  MUST be stored as data (JSON), require no code execution to evaluate, and be causal by
+  construction. Human-authored regimes MAY use free-form trees; the bounded-grammar
+  constraint is imposed only on the autonomous searcher (spec 006).
+- **FR-019a**: The AST MUST permit a **sandboxed detector-function leaf** (reusing the
+  existing feature-function sandbox) as a gated escape hatch for detectors not expressible
+  declaratively (e.g. HMM states, clustering). Such a leaf breaks countability, so in 006 it
+  is admissible only under the free-form / fresh-holdout tier. An optional DSL string form
+  and a reference-only mode are both surfaces over the same AST.
 - **FR-020**: For a compositional regime, the system MUST resolve each atomic sub-condition
   at its own scope per (date, entity), combine them by the specified logic, and assign the
   composite an output scope equal to the finest scope involved.
 - **FR-021**: A regime MUST support **persistence** controls (hysteresis / minimum
-  dwell-time) that form contiguous episodes from raw conditions, and MUST record its
-  realized persistence (average dwell-time) as a gradable property.
+  dwell-time) that form contiguous episodes from raw conditions. These controls are
+  **optional and off by default**, but the system MUST always record realized persistence
+  (average dwell-time) as a gradable property and MUST flag low-persistence (flicker)
+  regimes. A hard minimum-dwell floor MUST be available per regime for authors who opt in.
 - **FR-022**: The system MUST support **continuous-interaction** evaluation — testing how a
-  signal's edge varies with a conditioning variable via a single interaction estimate and
-  p-value — as the default gradient mechanism, distinct from discrete bucketing.
+  signal's edge varies with a conditioning variable via a single **linear interaction term**
+  in a regression (signal × conditioning variable), reporting one coefficient and p-value —
+  as the default gradient mechanism, distinct from discrete bucketing. Rank-based /
+  nonparametric monotonic tests are deferred robustness extensions.
 - **FR-023**: Every regime definition, label set, and sliced result MUST carry **dataset
   provenance** (instruments, exchanges, date range, snapshot/version, tied to the dataset
   manifest) so no finding is context-free.
@@ -321,9 +374,13 @@ relationship with a single p-value, and reports nothing spurious when the edge i
   origin (human-authored here; machine-generated in 006), plus dataset provenance and
   descriptive metadata. Stored in DB, exported to JSON. Deliberately origin-agnostic so
   006 reuses the same object.
-- **RegimeExpression**: the compositional form of a definition — a causal boolean/threshold
-  composition of atomic conditions across inputs and scopes (incl. directional conditions).
-  Free-form for human authors; drawn from a bounded grammar for the autonomous searcher.
+- **RegimeExpression**: the compositional form of a definition — a **declarative expression
+  tree (AST)**: leaves are atomic causal conditions (inline or references to named atomic
+  regimes) or, as a gated escape hatch, a sandboxed detector-function leaf (for HMM/clustering
+  and similar); nodes are boolean/threshold operators (incl. directional conditions). Stored
+  as JSON, evaluated without code execution except at detector-function leaves. Free-form for
+  human authors; drawn from a bounded grammar for the autonomous searcher. DSL-string and
+  reference-only forms are surfaces over the same AST.
 - **RegimeLabel**: the computed time series — one label (or `undefined`) per (date[, entity])
   for a given RegimeDefinition, favoring contiguous episodes. The object everything slices
   against.
