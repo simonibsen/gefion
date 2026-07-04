@@ -50,6 +50,30 @@ def _render_experiment_charts(exp_id: int):
         st.caption(f"Charts unavailable: {e}")
 
 
+def _render_by_regime_verdicts(data: dict):
+    """Per-regime holdout verdicts (spec 005): p-value per bucket, fail-closed flags."""
+    block = data.get("by_regime")
+    if not block:
+        return
+    st.markdown("### Per-regime holdout verdicts")
+    if block.get("error"):
+        st.info(block["error"])
+        return
+    st.caption(f"Regime: **{block.get('regime', '?')}** — every (regime × bucket) test "
+               "enters one flat Benjamini-Hochberg family; low-power buckets fail closed.")
+    rows = []
+    for v in block.get("verdicts", []):
+        rows.append({
+            "bucket": v["bucket"],
+            "p-value": "—(fail-closed)" if v.get("pvalue") is None else f"{v['pvalue']:.4f}",
+            "effective_n": v.get("effective_n"),
+            "low_power": "⚠️" if v.get("low_power") else "",
+            "survived FDR": "✅" if v.get("survived") else "✗",
+        })
+    if rows:
+        st.dataframe(rows, width="stretch")
+
+
 def _render_cycle_fdr_chart(cycle_id: int):
     """Render the FDR summary chart for a cycle's evaluated experiments."""
     try:
@@ -983,6 +1007,9 @@ def load_experiment_results(exp_id: int, show_trials: bool = False):
                 import pandas as pd
                 trials_df = pd.DataFrame(data["trials"])
                 st.dataframe(trials_df, use_container_width=True)
+
+            # Regime-conditional verdicts (spec 005)
+            _render_by_regime_verdicts(data)
 
             # Lifecycle: promotion / probation / demotion state
             _render_lifecycle_status(exp_id)

@@ -1129,6 +1129,7 @@ async def list_tools() -> List[Tool]:
                     "model_name": {"type": "string", "description": "Model name (required for ml_signal and ml_filter strategies)"},
                     "model_version": {"type": "string", "description": "Model version (required for ml_signal and ml_filter strategies)"},
                     "horizon": {"type": "integer", "description": "Prediction horizon in days (for ML strategies)", "default": 7},
+                    "by_regime": {"type": "string", "description": "Slice results by a regime (name) — adds per-regime metrics (spec 005)"},
                 },
                 "required": ["strategy", "start_date", "end_date"],
             },
@@ -1262,6 +1263,7 @@ async def list_tools() -> List[Tool]:
                 "type": "object",
                 "properties": {
                     "experiment_id": {"type": "integer", "description": "Experiment ID to run"},
+                    "by_regime": {"type": "string", "description": "Also evaluate the holdout conditionally by a regime (name) — spec 005"},
                 },
                 "required": ["experiment_id"],
             },
@@ -1712,6 +1714,105 @@ async def list_tools() -> List[Tool]:
                 "required": ["input"],
             },
         ),
+
+        # --- Regime slicing (spec 005) ---
+        Tool(
+            name="regime_define",
+            description="Define and store a regime (declarative expression AST + bucketing).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Regime name (kebab-case slug)"},
+                    "scope": {"type": "string", "description": "market|sector|industry|asset"},
+                    "expression": {"type": "string", "description": "Path to RegimeExpression AST JSON"},
+                    "bucketing": {"type": "string", "description": "Path to bucketing JSON"},
+                    "min_dwell": {"type": "integer", "description": "Optional persistence min dwell"},
+                },
+                "required": ["name", "scope", "expression", "bucketing"],
+            },
+        ),
+        Tool(
+            name="regime_list",
+            description="List regime definitions.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scope": {"type": "string", "description": "Filter by scope"},
+                    "status": {"type": "string", "description": "Filter by status"},
+                },
+            },
+        ),
+        Tool(
+            name="regime_show",
+            description="Show a regime definition (AST, bucketing, persistence, metadata).",
+            inputSchema={
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "Regime name"}},
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="regime_compute",
+            description="Compute causal labels for a regime from its referenced features.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Regime name"},
+                    "dataset": {"type": "string", "description": "Dataset version tag", "default": "dev"},
+                    "window": {"type": "integer", "description": "Rolling window", "default": 60},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="regime_labels",
+            description="Summarize computed labels: bucket frequencies, episodes, dwell-time.",
+            inputSchema={
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "Regime name"}},
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="regime_archive",
+            description="Archive a regime definition.",
+            inputSchema={
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "Regime name"}},
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="regime_definitions_export",
+            description="Export all regime definitions to JSON files (Database-First backup).",
+            inputSchema={
+                "type": "object",
+                "properties": {"directory": {"type": "string", "description": "Output directory"}},
+                "required": ["directory"],
+            },
+        ),
+        Tool(
+            name="regime_definitions_import",
+            description="Import regime definitions from JSON files.",
+            inputSchema={
+                "type": "object",
+                "properties": {"directory": {"type": "string", "description": "Directory of regime JSON files"}},
+                "required": ["directory"],
+            },
+        ),
+        Tool(
+            name="regime_interaction",
+            description="Test whether a signal's edge varies continuously with a conditioning variable.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {"type": "string", "description": "Signal feature name"},
+                    "by": {"type": "string", "description": "Conditioning variable (feature name)"},
+                    "horizon_days": {"type": "integer", "description": "Forward-return horizon", "default": 7},
+                },
+                "required": ["signal", "by"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -1904,6 +2005,25 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _backup(arguments)
         elif name == "restore":
             result = await _restore(arguments)
+        # Regime slicing (spec 005)
+        elif name == "regime_define":
+            result = await _regime_define(arguments)
+        elif name == "regime_list":
+            result = await _regime_list(arguments)
+        elif name == "regime_show":
+            result = await _regime_show(arguments)
+        elif name == "regime_compute":
+            result = await _regime_compute(arguments)
+        elif name == "regime_labels":
+            result = await _regime_labels(arguments)
+        elif name == "regime_archive":
+            result = await _regime_archive(arguments)
+        elif name == "regime_definitions_export":
+            result = await _regime_definitions_export(arguments)
+        elif name == "regime_definitions_import":
+            result = await _regime_definitions_import(arguments)
+        elif name == "regime_interaction":
+            result = await _regime_interaction(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -3860,6 +3980,10 @@ async def _backtest_run(args: Dict[str, Any]) -> Dict[str, Any]:
                 'amount': args.get('sizing_amount')
             }
 
+        # Regime slicing (spec 005) — additive per-regime metrics
+        if args.get('by_regime'):
+            cmd.extend(['--by-regime', args['by_regime']])
+
         result = await executor.run(*cmd)
 
         # Add feature info to result
@@ -4014,6 +4138,8 @@ async def _experiment_run(args: Dict[str, Any]) -> Dict[str, Any]:
     """Run an approved experiment."""
     async def _run():
         cmd = ["experiment", "run", "--id", str(args["experiment_id"])]
+        if args.get("by_regime"):
+            cmd.extend(["--by-regime", args["by_regime"]])
         executor = GefionExecutor()
         return await executor.run(*cmd)
 
@@ -4421,6 +4547,90 @@ async def _get_role_info(args: Dict[str, Any]) -> Dict[str, Any]:
         "guidelines": role_info['guidelines'],
         "blocked_tools": list(OPERATOR_BLOCKED_TOOLS) if MCP_ROLE == 'operator' else [],
     }
+
+
+# ============================================================================
+# Regime slicing tools (spec 005) — wrap the `gefion regime` CLI
+# ============================================================================
+
+async def _regime_define(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Define and store a regime."""
+    async def _run():
+        cmd = ["regime", "define", "--name", args["name"], "--scope", args["scope"],
+               "--expression", args["expression"], "--bucketing", args["bucketing"]]
+        if args.get("min_dwell"):
+            cmd.extend(["--min-dwell", str(args["min_dwell"])])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List regime definitions."""
+    async def _run():
+        cmd = ["regime", "list"]
+        if args.get("scope"):
+            cmd.extend(["--scope", args["scope"]])
+        if args.get("status"):
+            cmd.extend(["--status", args["status"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_show(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Show a regime definition."""
+    async def _run():
+        return await GefionExecutor().run("regime", "show", args["name"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_compute(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute causal labels for a regime."""
+    async def _run():
+        cmd = ["regime", "compute", args["name"]]
+        if args.get("dataset"):
+            cmd.extend(["--dataset", args["dataset"]])
+        if args.get("window"):
+            cmd.extend(["--window", str(args["window"])])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_labels(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize computed regime labels."""
+    async def _run():
+        return await GefionExecutor().run("regime", "labels", args["name"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_archive(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Archive a regime definition."""
+    async def _run():
+        return await GefionExecutor().run("regime", "archive", args["name"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_definitions_export(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Export regime definitions to JSON files."""
+    async def _run():
+        return await GefionExecutor().run("regime", "export", args["directory"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_definitions_import(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Import regime definitions from JSON files."""
+    async def _run():
+        return await GefionExecutor().run("regime", "import", args["directory"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_interaction(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Continuous-interaction test: does a signal's edge vary with a conditioning variable."""
+    async def _run():
+        cmd = ["regime", "interaction", "--signal", args["signal"], "--by", args["by"]]
+        if args.get("horizon_days"):
+            cmd.extend(["--horizon-days", str(args["horizon_days"])])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
 
 
 # ============================================================================

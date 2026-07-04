@@ -657,6 +657,37 @@ CREATE INDEX IF NOT EXISTS idx_trials_experiment ON experiment_trials(experiment
 CREATE INDEX IF NOT EXISTS idx_trials_score ON experiment_trials(score DESC);
 
 -- =============================================================================
+-- REGIME SLICING (spec 005)
+-- =============================================================================
+-- Named, causal, persistent market/sector/asset regimes used to evaluate
+-- signals and strategies conditionally. Definitions are the recipe; labels are
+-- the computed per-(date, entity) states. See specs/005-regime-slicing/.
+
+CREATE TABLE IF NOT EXISTS regime_definitions (
+    id                    SERIAL PRIMARY KEY,
+    name                  TEXT UNIQUE NOT NULL,
+    scope                 TEXT NOT NULL CHECK (scope IN ('market','sector','industry','asset')),
+    expression            JSONB NOT NULL,            -- RegimeExpression AST
+    bucketing             JSONB NOT NULL,
+    persistence           JSONB,                     -- {min_dwell, mode} — off by default
+    origin                TEXT NOT NULL DEFAULT 'human',
+    descriptive_metadata  JSONB,
+    status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS regime_labels (
+    regime_id        INTEGER NOT NULL REFERENCES regime_definitions(id),
+    date             DATE NOT NULL,
+    entity_id        INTEGER NOT NULL DEFAULT 0,     -- 0 = market-wide; else stock id
+    label            TEXT NOT NULL,                  -- bucket label or 'undefined'
+    dataset_version  TEXT NOT NULL,
+    PRIMARY KEY (regime_id, entity_id, date)
+);
+SELECT create_hypertable('regime_labels', 'date', if_not_exists => TRUE);
+CREATE INDEX IF NOT EXISTS regime_labels_brin ON regime_labels USING BRIN(date);
+
+-- =============================================================================
 -- MIGRATION BOOKKEEPING
 -- =============================================================================
 

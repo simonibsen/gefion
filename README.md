@@ -196,6 +196,22 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion strategy list` | List registered strategies |
 | `gefion strategy create-config` | Create a strategy configuration |
 
+### Regimes
+
+Describe the state of the market/sector/asset as a causal, persistent dimension and evaluate
+signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
+
+| Command | Description |
+|---------|-------------|
+| `gefion regime define` | Define a regime (expression AST + bucketing) |
+| `gefion regime list` | List regime definitions |
+| `gefion regime show` | Show a regime definition |
+| `gefion regime compute` | Compute causal labels for a regime |
+| `gefion regime labels` | Summarize computed labels (bucket coverage) |
+| `gefion regime archive` | Archive a regime definition |
+| `gefion regime export` | Export regime definitions to JSON |
+| `gefion regime import` | Import regime definitions from JSON |
+
 ### System
 
 | Command | Description |

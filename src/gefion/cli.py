@@ -93,6 +93,9 @@ app.add_typer(chart_app, name="chart", cls=SortedGroup)
 data_app = typer.Typer(help="Data management commands (cull)")
 app.add_typer(data_app, name="data", cls=SortedGroup)
 
+regime_app = typer.Typer(help="Regime slicing commands (define/compute/list/show/labels)")
+app.add_typer(regime_app, name="regime", cls=SortedGroup)
+
 
 def emit(
     message: str,
@@ -7799,6 +7802,11 @@ def backtest_run(
         "--filter-max-q10",
         help="Block if q10 below this (ml_filter strategy)"
     ),
+    by_regime: Optional[str] = typer.Option(
+        None,
+        "--by-regime",
+        help="Slice results by a regime (name); adds per-regime metrics (spec 005)"
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -8164,6 +8172,23 @@ def backtest_run(
             "total_trades": trade_count,
         }
 
+        # Optional regime slicing (spec 005) — strictly additive
+        _by_regime_block = None
+        if by_regime:
+            from gefion.regimes.slicing import slice_backtest_by_regime
+            with _regime_conn(None) as _rc:
+                with _rc.cursor() as _cur:
+                    _cur.execute(
+                        """SELECT rl.date, rl.label FROM regime_labels rl
+                           JOIN regime_definitions rd ON rd.id = rl.regime_id
+                           WHERE rd.name = %s""",
+                        (by_regime,),
+                    )
+                    _labels_by_date = {d: lab for d, lab in _cur.fetchall()}
+            if _labels_by_date:
+                _by_regime_block = slice_backtest_by_regime(
+                    equity_curve, trades, _labels_by_date, initial_cash)
+
         # Format and output results
         emit(
             "Backtest complete",
@@ -8216,6 +8241,7 @@ def backtest_run(
                         for e in benchmark_result.get("equity_curve", [])
                     ],
                 },
+                **({"by_regime": _by_regime_block} if _by_regime_block else {}),
             },
             json_output=json_output,
         )
@@ -9422,6 +9448,9 @@ def experiment_status(
 @experiment_app.command("run")
 def experiment_run(
     experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to run"),
+    by_regime: Optional[str] = typer.Option(
+        None, "--by-regime",
+        help="Also evaluate the holdout conditionally by a regime (name) — spec 005"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ) -> None:
     """Run an approved experiment."""
@@ -9448,6 +9477,61 @@ def experiment_run(
 
         # Run the experiment
         results = runner.run(experiment_id)
+
+        # Regime-conditional holdout evaluation (spec 005) — strictly additive.
+        # Requires per-observation holdout scores from the evaluator; when the
+        # experiment type does not expose them, say so honestly rather than
+        # fabricating a verdict.
+        if by_regime:
+            observations = (results.get("holdout") or {}).get("observations")
+            if not observations:
+                _msg = (f"Conditional evaluation unavailable: experiment "
+                        f"{experiment_id}'s type does not emit per-observation "
+                        "holdout scores (no by-regime verdict possible).")
+                if json_output:
+                    results["by_regime"] = {"error": _msg}
+                else:
+                    Console().print(f"[yellow]{_msg}[/yellow]")
+            else:
+                from gefion.regimes.conditional import (
+                    assemble_fdr_family, conditional_pvalues)
+                with _regime_conn(None) as _rc:
+                    with _rc.cursor() as _cur:
+                        _cur.execute(
+                            """SELECT rl.date, rl.label FROM regime_labels rl
+                               JOIN regime_definitions rd ON rd.id = rl.regime_id
+                               WHERE rd.name = %s""",
+                            (by_regime,),
+                        )
+                        _labels = {d: lab for d, lab in _cur.fetchall()}
+                if not _labels:
+                    _msg = f"Regime '{by_regime}' has no computed labels."
+                    if json_output:
+                        results["by_regime"] = {"error": _msg}
+                    else:
+                        Console().print(f"[yellow]{_msg}[/yellow]")
+                else:
+                    # per-observation dates arrive as ISO strings when they
+                    # round-trip through JSON; normalize to date objects
+                    import datetime as _dt
+                    for _o in observations:
+                        if isinstance(_o["date"], str):
+                            _o["date"] = _dt.date.fromisoformat(_o["date"])
+                    verdicts = conditional_pvalues(
+                        observations, _labels,
+                        alternative=(results.get("holdout") or {}).get(
+                            "alternative", "less"))
+                    verdicts = assemble_fdr_family(verdicts)
+                    results["by_regime"] = {"regime": by_regime, "verdicts": verdicts}
+                    if not json_output:
+                        console = Console()
+                        console.print("\n[bold]Per-regime holdout verdicts:[/bold]")
+                        for v in verdicts:
+                            p = "no p-value (fail-closed)" if v["pvalue"] is None \
+                                else f"p={v['pvalue']:.4f}"
+                            flag = " [yellow](low-power)[/yellow]" if v["low_power"] else ""
+                            surv = " [green]SURVIVED[/green]" if v.get("survived") else ""
+                            console.print(f"  {v['bucket']}: {p}{flag}{surv}")
 
         if json_output:
             emit_json(results)
@@ -11482,6 +11566,229 @@ def data_cull(
         if os.environ.get("DEBUG"):
             traceback.print_exc()
         raise typer.Exit(1)
+
+
+# =============================================================================
+# REGIME SLICING (spec 005)
+# =============================================================================
+
+from gefion.output import get_output  # noqa: E402
+
+
+def _regime_conn(db_url: Optional[str]):
+    """Open a connection to the given db_url (or the configured default)."""
+    import psycopg
+    url = db_url or str(SETTINGS.database_url)
+    conn = psycopg.connect(url)
+    conn.autocommit = True
+    return conn
+
+
+@regime_app.command("define")
+def regime_define(
+    name: str = typer.Option(..., "--name", help="Regime name (kebab-case slug)"),
+    scope: str = typer.Option(..., "--scope", help="market|sector|industry|asset"),
+    expression: str = typer.Option(..., "--expression", help="Path to RegimeExpression AST JSON"),
+    bucketing: str = typer.Option(..., "--bucketing", help="Path to bucketing JSON"),
+    min_dwell: Optional[int] = typer.Option(None, "--min-dwell", help="Persistence min dwell (optional)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Define and store a regime (Database-First; also exported on request)."""
+    from gefion.regimes.definitions import RegimeDefinition, RegimeExpressionError, store_definition
+    out = get_output(json_output)
+    try:
+        with open(expression) as fh:
+            expr = json.load(fh)
+        with open(bucketing) as fh:
+            buckets = json.load(fh)
+        persistence = {"min_dwell": min_dwell, "mode": "min_dwell"} if min_dwell else None
+        defn = RegimeDefinition(name=name, scope=scope, expression=expr,
+                                bucketing=buckets, persistence=persistence)
+        with _regime_conn(db_url) as conn:
+            rid = store_definition(conn, defn)
+        out.success(f"Defined regime '{name}' (id={rid})")
+        if out.json_mode:
+            out.json({"id": rid, "name": name, "scope": scope})
+    except (RegimeExpressionError, ValueError) as exc:
+        out.error(f"Invalid regime definition: {exc}")
+        raise typer.Exit(1)
+
+
+@regime_app.command("list")
+def regime_list(
+    scope: Optional[str] = typer.Option(None, "--scope", help="Filter by scope"),
+    status: Optional[str] = typer.Option(None, "--status", help="Filter by status"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """List regime definitions."""
+    from gefion.regimes.definitions import list_definitions
+    from gefion.output import Column
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        defs = list_definitions(conn, scope=scope, status=status)
+    data = [{"name": d.name, "scope": d.scope, "status": d.status,
+             "origin": d.origin} for d in defs]
+    out.table(
+        columns=[Column("Name", json_key="name"), Column("Scope", json_key="scope"),
+                 Column("Status", json_key="status"), Column("Origin", json_key="origin")],
+        rows=[[d["name"], d["scope"], d["status"], d["origin"]] for d in data],
+        title="Regimes", data_key="regimes", json_data=data,
+    )
+
+
+@regime_app.command("show")
+def regime_show(
+    name: str = typer.Argument(..., help="Regime name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Show a regime definition (AST, bucketing, persistence, metadata)."""
+    import dataclasses
+    from gefion.regimes.definitions import load_definition
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        defn = load_definition(conn, name)
+    if defn is None:
+        out.error(f"Regime '{name}' not found")
+        raise typer.Exit(1)
+    payload = dataclasses.asdict(defn)
+    if out.json_mode:
+        out.json(payload)
+    else:
+        out.info(f"Regime: {defn.name} [{defn.scope}] status={defn.status}")
+        out.info(json.dumps(payload, indent=2))
+
+
+@regime_app.command("compute")
+def regime_compute(
+    name: str = typer.Argument(..., help="Regime name"),
+    dataset_version: str = typer.Option("dev", "--dataset", help="Dataset version tag (provenance)"),
+    window: int = typer.Option(60, "--window", help="Rolling window for causal bucketing"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Compute causal labels for a regime from its referenced features."""
+    from gefion.regimes.definitions import load_definition
+    from gefion.regimes.labels import compute_and_store, load_market_feature_series
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        defn = load_definition(conn, name)
+        if defn is None:
+            out.error(f"Regime '{name}' not found")
+            raise typer.Exit(1)
+        try:
+            features = load_market_feature_series(conn, defn)
+        except LookupError as exc:
+            out.error(f"Cannot compute regime '{name}': {exc}")
+            raise typer.Exit(1)
+        n = compute_and_store(conn, defn, features, window=window, dataset_version=dataset_version)
+    out.success(f"Computed {n} labels for '{name}' (dataset={dataset_version})")
+    if out.json_mode:
+        out.json({"regime": name, "labels": n, "dataset_version": dataset_version})
+
+
+@regime_app.command("labels")
+def regime_labels(
+    name: str = typer.Argument(..., help="Regime name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Summarize computed labels: bucket frequencies, episodes, dwell-time."""
+    from gefion.regimes.definitions import load_definition
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        defn = load_definition(conn, name)
+        if defn is None:
+            out.error(f"Regime '{name}' not found")
+            raise typer.Exit(1)
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT rl.label, count(*) FROM regime_labels rl
+                   JOIN regime_definitions rd ON rd.id = rl.regime_id
+                   WHERE rd.name = %s GROUP BY rl.label ORDER BY rl.label""",
+                (name,),
+            )
+            freqs = {lab: cnt for lab, cnt in cur.fetchall()}
+    if out.json_mode:
+        out.json({"regime": name, "bucket_frequencies": freqs})
+    else:
+        out.info(f"Label frequencies for '{name}': {freqs}")
+
+
+@regime_app.command("interaction")
+def regime_interaction(
+    signal: str = typer.Option(..., "--signal", help="Signal feature name"),
+    by: str = typer.Option(..., "--by", help="Conditioning variable (feature name)"),
+    horizon_days: int = typer.Option(7, "--horizon-days", help="Forward-return horizon"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Test whether a signal's edge varies continuously with a conditioning variable."""
+    from gefion.regimes.interaction import continuous_interaction, load_market_interaction_data
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            s, c, r = load_market_interaction_data(conn, signal, by, horizon_days)
+        except LookupError as exc:
+            out.error(f"Cannot run interaction test: {exc}")
+            raise typer.Exit(1)
+    result = continuous_interaction(s, c, r)
+    out.success(
+        f"Interaction {signal}×{by}: coef={result['interaction_coef']:.4f} "
+        f"p={result['interaction_pvalue']:.4f} (n={result['n']})"
+    )
+    if out.json_mode:
+        out.json(result)
+
+
+@regime_app.command("archive")
+def regime_archive(
+    name: str = typer.Argument(..., help="Regime name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Archive a regime definition."""
+    from gefion.regimes.definitions import archive_definition
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        archive_definition(conn, name)
+    out.success(f"Archived regime '{name}'")
+
+
+@regime_app.command("export")
+def regime_export(
+    directory: str = typer.Argument(..., help="Output directory"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Export all regime definitions to JSON files (Database-First backup)."""
+    from gefion.regimes.definitions import list_definitions, export_definition
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        defs = list_definitions(conn)
+    for defn in defs:
+        export_definition(defn, directory)
+    out.success(f"Exported {len(defs)} regime(s) to {directory}")
+    if out.json_mode:
+        out.json({"exported": len(defs), "directory": directory})
+
+
+@regime_app.command("import")
+def regime_import(
+    directory: str = typer.Argument(..., help="Directory of regime JSON files"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Import regime definitions from JSON files."""
+    from gefion.regimes.definitions import import_definitions
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        count = import_definitions(conn, directory)
+    out.success(f"Imported {count} regime(s) from {directory}")
+    if out.json_mode:
+        out.json({"imported": count, "directory": directory})
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper

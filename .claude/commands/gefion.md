@@ -163,6 +163,22 @@ For ML-based strategies (`ml_signal`, `ml_filter`), require a model name/version
 
 ---
 
+### Mode: `regime <name?>`
+
+Regime slicing — conditional evaluation across market/sector/asset states (see `docs/REGIMES.md`).
+
+1. If no name specified, list defined regimes via `regime_list`
+2. Inspect a definition with `regime_show`; compute causal labels with `regime_compute`; summarize coverage/episodes with `regime_labels`
+3. To define a new regime, use `regime_define` (expression AST + bucketing); manage with `regime_archive`, `regime_definitions_export`/`regime_definitions_import`
+4. To slice results conditionally:
+   - Backtests: pass `by_regime` to `backtest_run` → per-regime metrics with low-power flags
+   - Experiments: pass `by_regime` to `experiment_run` → per-regime holdout p-values in one flat FDR family
+5. For a smooth gradient question ("does the edge scale with volatility?"), use `regime_interaction` instead of buckets
+
+**Honesty rules:** never present a low-power bucket as a finding; a bucket with no p-value fails closed and cannot survive.
+
+---
+
 ### Free-Form Request Handling
 
 If the arguments don't match a mode keyword, interpret the user's intent and route to the appropriate MCP tools. Common patterns:
@@ -179,6 +195,9 @@ If the arguments don't match a mode keyword, interpret the user's intent and rou
 | "run experiment" | `experiment_propose` → `experiment_approve` → `experiment_run` |
 | "backup my data" | `backup` |
 | "what's wrong" / "diagnose" | `system_status` + `health_check` |
+| "when does this strategy work" / "slice by regime" | `regime_list` → `backtest_run` with `by_regime` |
+| "does the edge depend on volatility" | `regime_interaction` |
+| "define a market regime" | `regime_define` → `regime_compute` → `regime_labels` |
 
 ---
 
@@ -192,6 +211,7 @@ Always respect these dependency ordering rules:
 4. **Predictions must exist before evaluation**: `ml_predict` (over a date range) before `ml_eval`
 5. **Evaluation should precede calibration**: `ml_eval` to measure, then `ml_calibrate` to fix
 6. **ML models required for ML strategies**: `ml_predict` before `backtest_run` with `ml_signal`/`ml_filter`
+7. **Regime labels must be computed before slicing**: `regime_define` → `regime_compute` before `backtest_run`/`experiment_run` with `by_regime`
 
 If a prerequisite is missing, tell the user what's needed and offer to run the prerequisite step.
 
