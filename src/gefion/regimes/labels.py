@@ -193,6 +193,32 @@ def compute_labels(
         return [(d, 0, lab) for d, lab in lab_series]
 
 
+def load_market_feature_series(conn, defn: RegimeDefinition) -> Dict[str, Series]:
+    """Load a market-level daily series (mean across entities) for each feature the
+    definition references, from computed_features. Raises LookupError if a referenced
+    feature is unknown or has no data (honest error — no silent empty regime)."""
+    with create_span("regimes.labels.load_market_features", regime=defn.name):
+        features: Dict[str, Series] = {}
+        refs = {leaf["feature"] for leaf in iter_leaves(defn.expression)
+                if leaf.get("leaf") == "comparison"}
+        with conn.cursor() as cur:
+            for ref in refs:
+                cur.execute("SELECT id FROM feature_definitions WHERE name = %s", (ref,))
+                found = cur.fetchone()
+                if not found:
+                    raise LookupError(f"feature {ref!r} is not defined")
+                cur.execute(
+                    """SELECT date, AVG(value) FROM computed_features
+                       WHERE feature_id = %s GROUP BY date ORDER BY date""",
+                    (found[0],),
+                )
+                rows = [(d, float(v)) for d, v in cur.fetchall() if v is not None]
+                if not rows:
+                    raise LookupError(f"feature {ref!r} has no computed data")
+                features[ref] = rows
+        return features
+
+
 def compute_and_store(
     conn,
     defn: RegimeDefinition,
