@@ -3,7 +3,7 @@
 [![CI](https://github.com/simonibsen/gefion/actions/workflows/ci.yml/badge.svg)](https://github.com/simonibsen/gefion/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/simonibsen/gefion)](https://github.com/simonibsen/gefion/releases)
 
-**Database-first ML platform for quantitative stock analysis.** Ingests price and fundamental data, computes features, trains models, runs autonomous experiments, and backtests trading strategies.
+**Autonomous ML research system for quantitative trading.** Ingests price and fundamental data, generates its own hypotheses, engineers features, trains models, and backtests strategies — keeping only what survives statistical validation.
 
 Alpha, actively developed. Releases are cut automatically from
 [Conventional Commits](https://www.conventionalcommits.org/) — see the
