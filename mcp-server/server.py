@@ -1799,6 +1799,19 @@ async def list_tools() -> List[Tool]:
                 "required": ["directory"],
             },
         ),
+        Tool(
+            name="regime_interaction",
+            description="Test whether a signal's edge varies continuously with a conditioning variable.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {"type": "string", "description": "Signal feature name"},
+                    "by": {"type": "string", "description": "Conditioning variable (feature name)"},
+                    "horizon_days": {"type": "integer", "description": "Forward-return horizon", "default": 7},
+                },
+                "required": ["signal", "by"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -2008,6 +2021,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_definitions_export(arguments)
         elif name == "regime_definitions_import":
             result = await _regime_definitions_import(arguments)
+        elif name == "regime_interaction":
+            result = await _regime_interaction(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -4602,6 +4617,16 @@ async def _regime_definitions_import(args: Dict[str, Any]) -> Dict[str, Any]:
     """Import regime definitions from JSON files."""
     async def _run():
         return await GefionExecutor().run("regime", "import", args["directory"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_interaction(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Continuous-interaction test: does a signal's edge vary with a conditioning variable."""
+    async def _run():
+        cmd = ["regime", "interaction", "--signal", args["signal"], "--by", args["by"]]
+        if args.get("horizon_days"):
+            cmd.extend(["--horizon-days", str(args["horizon_days"])])
+        return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
 

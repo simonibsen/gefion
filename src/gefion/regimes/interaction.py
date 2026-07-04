@@ -46,6 +46,52 @@ def _newey_west_lags(n: int) -> int:
     return max(1, int(np.floor(4 * (n / 100.0) ** (2.0 / 9.0))))
 
 
+def _market_feature_series(cur, feature: str) -> Dict[Any, float]:
+    """Market-level daily mean of a computed feature; {} if the feature is unknown/empty."""
+    cur.execute("SELECT id FROM feature_definitions WHERE name = %s", (feature,))
+    found = cur.fetchone()
+    if not found:
+        raise LookupError(f"feature {feature!r} is not defined")
+    cur.execute(
+        "SELECT date, AVG(value) FROM computed_features WHERE feature_id = %s "
+        "GROUP BY date ORDER BY date",
+        (found[0],),
+    )
+    return {d: float(v) for d, v in cur.fetchall() if v is not None}
+
+
+def load_market_interaction_data(conn, signal: str, conditioning: str, horizon_days: int):
+    """Load aligned market-level (signal, conditioning, forward-return) arrays by date.
+
+    Forward return is the market-mean of each stock's close-to-close return `horizon_days`
+    trading rows ahead. Raises LookupError if any input has no data.
+    """
+    with conn.cursor() as cur:
+        sig = _market_feature_series(cur, signal)
+        cond = _market_feature_series(cur, conditioning)
+        cur.execute(
+            """
+            SELECT date, AVG(fwd) FROM (
+                SELECT date, close,
+                       LEAD(close, %s) OVER (PARTITION BY data_id ORDER BY date) / NULLIF(close, 0) - 1 AS fwd
+                FROM stock_ohlcv
+            ) t
+            WHERE fwd IS NOT NULL GROUP BY date ORDER BY date
+            """,
+            (horizon_days,),
+        )
+        rets = {d: float(v) for d, v in cur.fetchall() if v is not None}
+    if not rets:
+        raise LookupError("no forward returns available (need OHLCV price data)")
+    common = sorted(set(sig) & set(cond) & set(rets))
+    if len(common) < 5:
+        raise LookupError(
+            f"only {len(common)} aligned dates across signal/conditioning/returns (need >=5)")
+    return (np.array([sig[d] for d in common]),
+            np.array([cond[d] for d in common]),
+            np.array([rets[d] for d in common]))
+
+
 def continuous_interaction(
     signal, conditioning, returns, lags: Optional[int] = None
 ) -> Dict[str, Any]:

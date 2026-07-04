@@ -51,7 +51,8 @@ def render_regimes():
 
         set_attributes(span, regime_count=len(defs))
 
-        tab_list, tab_new = st.tabs(["Defined regimes", "New regime"])
+        tab_list, tab_new, tab_interaction = st.tabs(
+            ["Defined regimes", "New regime", "Interaction test"])
 
         with tab_list:
             if not defs:
@@ -79,7 +80,39 @@ def render_regimes():
         with tab_new:
             _render_new_regime_form()
 
+        with tab_interaction:
+            _render_interaction_panel()
+
         render_chat_widget(get_page_context())
+
+
+def _render_interaction_panel():
+    """Continuous-interaction test: does a signal's edge scale with a conditioning variable?"""
+    st.markdown("Test whether a signal's edge varies **continuously** with a conditioning "
+                "variable (one interaction coefficient + p-value).")
+    with st.form("interaction"):
+        signal = st.text_input("Signal feature", placeholder="momentum")
+        by = st.text_input("Conditioning variable", placeholder="realized_vol_20")
+        horizon = st.number_input("Horizon (days)", min_value=1, value=7)
+        submitted = st.form_submit_button("Run interaction test")
+    if submitted:
+        from gefion.ui.components.database import get_connection
+        from gefion.regimes.interaction import (
+            continuous_interaction, load_market_interaction_data)
+        try:
+            with get_connection() as conn:
+                s, c, r = load_market_interaction_data(conn, signal, by, int(horizon))
+            result = continuous_interaction(s, c, r)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Interaction coef", f"{result['interaction_coef']:.4f}")
+            col2.metric("p-value", f"{result['interaction_pvalue']:.4f}")
+            col3.metric("n", result["n"])
+            if result["interaction_pvalue"] < 0.05:
+                st.success("Significant interaction — the edge scales with the conditioning variable.")
+            else:
+                st.info("No significant gradient (edge does not vary with the conditioning variable).")
+        except (LookupError, ValueError) as exc:
+            st.error(f"Cannot run interaction test: {exc}")
 
 
 def _render_labels_summary(name: str):

@@ -45,7 +45,8 @@ def _bucketing(tmp_path):
 def test_regime_help_lists_subcommands():
     result = runner.invoke(app, ["regime", "--help"])
     assert result.exit_code == 0
-    for sub in ("define", "list", "show", "compute", "labels", "archive", "export", "import"):
+    for sub in ("define", "list", "show", "compute", "labels", "archive", "export",
+                "import", "interaction"):
         assert sub in result.output
 
 
@@ -115,3 +116,12 @@ def test_backtest_run_has_by_regime_option():
     r = runner.invoke(app, ["backtest", "run", "--help"])
     assert r.exit_code == 0
     assert "--by-regime" in r.output
+
+
+def test_interaction_errors_gracefully_without_data(db_url):
+    """US5 T028: interaction test errors clearly when the signal feature is absent."""
+    r = runner.invoke(app, [
+        "regime", "interaction", "--signal", "no_such_feature", "--by", "also_missing",
+        "--db-url", db_url,
+    ])
+    assert r.exit_code != 0

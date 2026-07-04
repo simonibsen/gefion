@@ -1872,3 +1872,8 @@ class TestRegimeSlicingUI:
         assert "--by-regime" in content
         assert "by_regime" in content
         assert "Per-regime metrics" in content
+
+    def test_regimes_view_has_interaction_panel(self, ui_dir):
+        content = (ui_dir / "views" / "regimes.py").read_text()
+        assert "_render_interaction_panel" in content
+        assert "continuous_interaction" in content

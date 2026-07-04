@@ -22,6 +22,7 @@ REGIME_TOOLS = {
     "regime_archive": ("regime", "archive"),
     "regime_definitions_export": ("regime", "export"),
     "regime_definitions_import": ("regime", "import"),
+    "regime_interaction": ("regime", "interaction"),
 }
 
 

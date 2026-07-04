@@ -11659,6 +11659,32 @@ def regime_labels(
         out.info(f"Label frequencies for '{name}': {freqs}")
 
 
+@regime_app.command("interaction")
+def regime_interaction(
+    signal: str = typer.Option(..., "--signal", help="Signal feature name"),
+    by: str = typer.Option(..., "--by", help="Conditioning variable (feature name)"),
+    horizon_days: int = typer.Option(7, "--horizon-days", help="Forward-return horizon"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Test whether a signal's edge varies continuously with a conditioning variable."""
+    from gefion.regimes.interaction import continuous_interaction, load_market_interaction_data
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            s, c, r = load_market_interaction_data(conn, signal, by, horizon_days)
+        except LookupError as exc:
+            out.error(f"Cannot run interaction test: {exc}")
+            raise typer.Exit(1)
+    result = continuous_interaction(s, c, r)
+    out.success(
+        f"Interaction {signal}×{by}: coef={result['interaction_coef']:.4f} "
+        f"p={result['interaction_pvalue']:.4f} (n={result['n']})"
+    )
+    if out.json_mode:
+        out.json(result)
+
+
 @regime_app.command("archive")
 def regime_archive(
     name: str = typer.Argument(..., help="Regime name"),

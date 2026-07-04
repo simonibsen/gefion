@@ -1020,3 +1020,4 @@ The `regime_*` MCP tools mirror the `gefion regime` CLI (see [REGIMES.md](REGIME
 - `regime_labels` — summarize computed labels (bucket coverage).
 - `regime_archive` — archive a regime definition.
 - `regime_definitions_export` / `regime_definitions_import` — JSON backup/restore.
+- `regime_interaction` — continuous-interaction test (does a signal's edge scale with a conditioning variable?).
