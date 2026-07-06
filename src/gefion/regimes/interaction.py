@@ -47,13 +47,15 @@ def _newey_west_lags(n: int) -> int:
 
 
 def _market_feature_series(cur, feature: str) -> Dict[Any, float]:
-    """Market-level daily mean of a computed feature; {} if the feature is unknown/empty."""
+    """Market-level daily median of a computed feature; robust to cross-sectional
+    outliers (penny-stock vol, bad split returns). Raises LookupError if unknown."""
     cur.execute("SELECT id FROM feature_definitions WHERE name = %s", (feature,))
     found = cur.fetchone()
     if not found:
         raise LookupError(f"feature {feature!r} is not defined")
     cur.execute(
-        "SELECT date, AVG(value) FROM computed_features WHERE feature_id = %s "
+        "SELECT date, percentile_cont(0.5) WITHIN GROUP (ORDER BY value) "
+        "FROM computed_features WHERE feature_id = %s "
         "GROUP BY date ORDER BY date",
         (found[0],),
     )
