@@ -208,7 +208,12 @@ def load_market_feature_series(conn, defn: RegimeDefinition) -> Dict[str, Series
                 if not found:
                     raise LookupError(f"feature {ref!r} is not defined")
                 cur.execute(
-                    """SELECT date, AVG(value) FROM computed_features
+                    # median, not mean: the cross-sectional mean is dominated by
+                    # outliers (penny-stock vol, bad split returns) — found when
+                    # the first production vol regime ranked Oct 2019 above the
+                    # COVID crash
+                    """SELECT date, percentile_cont(0.5) WITHIN GROUP (ORDER BY value)
+                       FROM computed_features
                        WHERE feature_id = %s GROUP BY date ORDER BY date""",
                     (found[0],),
                 )
