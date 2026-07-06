@@ -173,3 +173,44 @@ def test_compute_and_store_writes_labels_with_provenance(conn):
             "SELECT count(*), count(DISTINCT dataset_version) FROM regime_labels")
         cnt, versions = cur.fetchone()
     assert cnt == 6 and versions == 1
+
+
+def test_market_series_uses_median_not_mean(conn):
+    """The market-level conditioning series must be robust to cross-sectional
+    outliers (penny-stock vol, bad split returns): median, not mean (found via
+    the first production regime sanity check — Oct 2019 mean vol > Mar 2020)."""
+    from gefion.regimes.definitions import RegimeDefinition
+    from gefion.regimes.labels import load_market_feature_series
+
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO feature_definitions (name, function_name) "
+                    "VALUES ('vol_test_feat', 'realized_vol') "
+                    "ON CONFLICT (name) DO UPDATE SET function_name=EXCLUDED.function_name "
+                    "RETURNING id")
+        fid = cur.fetchone()[0]
+        sids = []
+        for sym in ("MED1", "MED2", "MED3"):
+            cur.execute("INSERT INTO stocks (symbol) VALUES (%s) "
+                        "ON CONFLICT (symbol) DO UPDATE SET symbol=EXCLUDED.symbol RETURNING id", (sym,))
+            sids.append(cur.fetchone()[0])
+        # two sane values + one absurd outlier on the same date
+        for sid, val in zip(sids, (0.2, 0.3, 99.0)):
+            cur.execute("INSERT INTO computed_features (data_id, date, feature_id, value) "
+                        "VALUES (%s, DATE '2024-01-02', %s, %s) "
+                        "ON CONFLICT (feature_id, data_id, date) DO UPDATE SET value=EXCLUDED.value",
+                        (sid, fid, val))
+
+    defn = RegimeDefinition(
+        name="median-test", scope="market",
+        expression={"leaf": "comparison", "feature": "vol_test_feat",
+                    "cmp": "quantile", "value": "tercile", "scope": "market"},
+        bucketing={"labels": ["a", "b", "c"]},
+    )
+    series = load_market_feature_series(conn, defn)["vol_test_feat"]
+    assert len(series) == 1
+    # median of (0.2, 0.3, 99.0) is 0.3; the mean (33.17) would be outlier-dominated
+    assert abs(series[0][1] - 0.3) < 1e-9
+
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM computed_features WHERE feature_id = %s", (fid,))
+        cur.execute("DELETE FROM feature_definitions WHERE id = %s", (fid,))
