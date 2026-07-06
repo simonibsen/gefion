@@ -186,6 +186,7 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion experiment probation-check` | Re-measure promoted artifacts; auto-demote degradation (also runs on every data-update) |
 | `gefion experiment demote` | Manually demote a promoted artifact (reason required) |
 | `gefion chart experiment-trials` / `experiment-fdr` | Trial scatter / FDR cycle summary charts |
+| `gefion chart regime` | Price with regime-episode bands overlaid (see docs/REGIMES.md) |
 
 ### Backtesting & Strategies
 

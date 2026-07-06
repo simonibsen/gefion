@@ -11743,6 +11743,44 @@ def regime_interaction(
         out.json(result)
 
 
+@chart_app.command("regime")
+def chart_regime(
+    name: str = typer.Argument(..., help="Regime name (must have computed labels)"),
+    symbol: str = typer.Option(..., "--symbol", help="Price symbol to overlay (e.g., SPY)"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", "-s", help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", "-e", help="End date (YYYY-MM-DD)"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open in browser"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output JSON instead of chart"),
+) -> None:
+    """Chart a symbol's price with regime-episode bands overlaid (spec 005)."""
+    from datetime import datetime as _dt
+    from gefion.charts.queries import fetch_regime_chart_data
+    from gefion.charts.d3.renderers import create_regime_chart
+    from gefion.charts.output import save_html_string, open_in_browser, generate_chart_filename
+
+    out = get_output(json_output)
+    start = _dt.strptime(start_date, "%Y-%m-%d").date() if start_date else None
+    end = _dt.strptime(end_date, "%Y-%m-%d").date() if end_date else None
+    try:
+        with _regime_conn(db_url) as conn:
+            payload = fetch_regime_chart_data(conn, name, symbol.upper(), start, end)
+    except LookupError as exc:
+        out.error(f"Cannot chart regime: {exc}")
+        raise typer.Exit(1)
+
+    html = create_regime_chart(payload["price"], payload["episodes"],
+                               regime_name=name, symbol=symbol.upper())
+    path = save_html_string(html, generate_chart_filename(f"regime_{name}_{symbol.upper()}"))
+    out.success(f"Regime chart saved: {path} "
+                f"({len(payload['episodes'])} episodes over {len(payload['price'])} bars)")
+    if out.json_mode:
+        out.json({"path": str(path), "episodes": len(payload["episodes"]),
+                  "bars": len(payload["price"])})
+    if not no_open:
+        open_in_browser(path)
+
+
 @regime_app.command("archive")
 def regime_archive(
     name: str = typer.Argument(..., help="Regime name"),

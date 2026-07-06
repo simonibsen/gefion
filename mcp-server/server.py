@@ -1813,6 +1813,20 @@ async def list_tools() -> List[Tool]:
                 "required": ["signal", "by"],
             },
         ),
+        Tool(
+            name="chart_regime",
+            description="Chart a symbol's price with regime-episode bands overlaid (spec 005 visualization).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Regime name (must have computed labels)"},
+                    "symbol": {"type": "string", "description": "Price symbol to overlay (e.g., SPY)"},
+                    "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                },
+                "required": ["name", "symbol"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -2024,6 +2038,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_definitions_import(arguments)
         elif name == "regime_interaction":
             result = await _regime_interaction(arguments)
+        elif name == "chart_regime":
+            result = await _chart_regime(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -4629,6 +4645,18 @@ async def _regime_interaction(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd = ["regime", "interaction", "--signal", args["signal"], "--by", args["by"]]
         if args.get("horizon_days"):
             cmd.extend(["--horizon-days", str(args["horizon_days"])])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _chart_regime(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Chart a symbol's price with regime-episode bands overlaid."""
+    async def _run():
+        cmd = ["chart", "regime", args["name"], "--symbol", args["symbol"], "--no-open"]
+        if args.get("start_date"):
+            cmd.extend(["--start-date", args["start_date"]])
+        if args.get("end_date"):
+            cmd.extend(["--end-date", args["end_date"]])
         return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
