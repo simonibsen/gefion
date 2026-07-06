@@ -73,3 +73,20 @@ def test_not_low_power_when_threshold_met():
     out = slice_backtest_by_regime(curve, trades, labels, initial_capital=100.0,
                                    min_effective_n=1)
     assert all(not b["low_power"] for b in out["buckets"].values())
+
+
+def test_mean_dwell_is_per_episode_not_total_days():
+    """Regression: filtering the label series by bucket before mean_dwell merged
+    all episodes into one run, so mean_dwell == total day count (spotted in the
+    first production sliced backtest where dwell == days for every bucket)."""
+    d = _dates(10)
+    equity = [{"date": d[i], "equity": 100.0 + i} for i in range(10)]
+    # calm: days 1-2 (2-day episode) and days 6-9 (4-day episode); stressed between
+    labels = {d[1]: "calm", d[2]: "calm",
+              d[3]: "stressed", d[4]: "stressed", d[5]: "stressed",
+              d[6]: "calm", d[7]: "calm", d[8]: "calm", d[9]: "calm"}
+    out = slice_backtest_by_regime(equity, [], labels, initial_capital=100.0,
+                                   min_effective_n=1)
+    calm = out["buckets"]["calm"]
+    assert calm["effective_n"] == 2
+    assert abs(calm["mean_dwell"] - 3.0) < 1e-9  # (2 + 4) / 2, NOT 6

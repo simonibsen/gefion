@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Tuple
 
 from gefion.backtest.metrics import calculate_metrics, calculate_trade_metrics
 from gefion.observability import create_span, set_attributes
-from gefion.regimes.labels import effective_n, is_flicker, mean_dwell
+from gefion.regimes.labels import effective_n, episodes as label_episodes, is_flicker
 
 EquityCurve = List[Dict[str, Any]]
 
@@ -83,7 +83,8 @@ def slice_backtest_by_regime(
                 "trade_count": len(trades_by_label.get(label, [])),
                 "raw_n": len(label_rets),
                 "effective_n": eff_n,
-                "mean_dwell": mean_dwell([ls for ls in label_series if ls[1] == label]),
+                "mean_dwell": (lambda eps: float(sum(e[3] for e in eps) / len(eps)) if eps else 0.0)(
+                    [e for e in label_episodes(label_series) if e[0] == label]),
                 "low_power": eff_n < min_effective_n,
                 "flicker": is_flicker(label_series),
             }
