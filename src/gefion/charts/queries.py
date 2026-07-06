@@ -492,3 +492,59 @@ def fetch_cycle_fdr_for_chart(
         ]
         set_attributes(span, row_count=len(experiments), table="experiments")
         return {"experiments": experiments, "fdr_rate": fdr_rate}
+
+
+def fetch_regime_chart_data(
+    conn: psycopg.Connection,
+    regime_name: str,
+    symbol: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> Dict[str, Any]:
+    """Price series for `symbol` plus the regime's market-scope label episodes.
+
+    Raises LookupError if the regime is unknown or has no computed labels, or
+    the symbol has no price data (honest errors — no silent empty chart).
+    """
+    with create_span("charts.queries.regime", regime=regime_name, symbol=symbol):
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM regime_definitions WHERE name = %s", (regime_name,))
+            row = cur.fetchone()
+            if not row:
+                raise LookupError(f"regime {regime_name!r} is not defined")
+            regime_id = row[0]
+
+            clauses, params = ["rl.regime_id = %s", "rl.entity_id = 0"], [regime_id]
+            if start_date:
+                clauses.append("rl.date >= %s"); params.append(start_date)
+            if end_date:
+                clauses.append("rl.date <= %s"); params.append(end_date)
+            cur.execute(
+                f"SELECT rl.date, rl.label FROM regime_labels rl "
+                f"WHERE {' AND '.join(clauses)} ORDER BY rl.date",
+                params,
+            )
+            labels = cur.fetchall()
+            if not labels:
+                raise LookupError(f"regime {regime_name!r} has no computed labels in range")
+
+            pclauses, pparams = ["s.symbol = %s"], [symbol]
+            if start_date:
+                pclauses.append("o.date >= %s"); pparams.append(start_date)
+            if end_date:
+                pclauses.append("o.date <= %s"); pparams.append(end_date)
+            cur.execute(
+                f"SELECT o.date, o.close FROM stock_ohlcv o JOIN stocks s ON s.id = o.data_id "
+                f"WHERE {' AND '.join(pclauses)} ORDER BY o.date",
+                pparams,
+            )
+            price = [{"date": str(d), "close": float(c)} for d, c in cur.fetchall() if c is not None]
+            if not price:
+                raise LookupError(f"no price data for symbol {symbol!r} in range")
+
+        from gefion.regimes.labels import episodes as label_episodes
+        eps = [
+            {"label": lab, "start": str(s), "end": str(e), "days": length}
+            for lab, s, e, length in label_episodes([(d, l) for d, l in labels])
+        ]
+        return {"regime": regime_name, "symbol": symbol, "price": price, "episodes": eps}

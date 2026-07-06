@@ -70,6 +70,7 @@ gefion regime labels  vol-regime
 gefion backtest run ... --by-regime vol-regime      # per-regime metrics (US2)
 gefion regime interaction --signal momentum --by realized_vol_20   # gradient (US5)
 gefion experiment run --id 1 --by-regime vol-regime # conditional verdicts (US3)
+gefion chart regime vol-regime --symbol SPY         # price with episode bands
 ```
 
 ### Conditional experiment verdicts
