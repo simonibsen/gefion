@@ -237,3 +237,8 @@ def conn():
   log fills in bursts — verify liveness via the DB row counts (or `ps`), not the log.
 - **Remote vs local commands**: when a session mixes ssh and local work, keep each
   Bash call single-target so it's obvious where a command ran.
+- **OTEL span export can exceed gRPC limits on huge jobs**: the 207M-row feature build
+  produced trace batches larger than the OTLP gRPC 4 MB max (`RESOURCE_EXHAUSTED`,
+  spans dropped; data unaffected). For bulk jobs either raise Tempo's
+  `max_recv_msg_size`, shrink the exporter's `max_export_batch_size`, or run with
+  `OTEL_ENABLED=false` and rely on DB-pulse monitoring.
