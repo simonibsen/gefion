@@ -222,3 +222,18 @@ def conn():
   not `cp`.
 - **Stale `.git/index.lock`**: a zero-byte lock with no running git process is leftover
   from an interrupted command — verify with `ps aux | grep git`, then `rm -f`.
+
+### Deployment patterns (added deploying v0.12.0 to prod — see docs/DEPLOYMENT.md)
+
+- **A fresh install is the only honest dependency test.** Long-lived dev machines hide
+  undeclared deps (click arrived transitively) and stale image tags (`tempo:latest`
+  cached at 2.9 vs fresh-pulled 3.x). After dependency or compose changes, sanity-check
+  with a clean venv / fresh pull.
+- **Pin service images in compose files** — `latest` means "whatever was current when
+  this machine last pulled," which diverges silently between hosts.
+- **Ubuntu venv bootstrap**: no `python3.X-venv` package + no sudo →
+  `python3 -m venv --without-pip .venv` then pipe get-pip.py into `.venv/bin/python`.
+- **Long remote jobs**: run in tmux; stdout through a pipe is block-buffered, so the
+  log fills in bursts — verify liveness via the DB row counts (or `ps`), not the log.
+- **Remote vs local commands**: when a session mixes ssh and local work, keep each
+  Bash call single-target so it's obvious where a command ran.
