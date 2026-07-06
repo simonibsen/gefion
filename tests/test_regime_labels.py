@@ -175,16 +175,30 @@ def test_compute_and_store_writes_labels_with_provenance(conn):
     assert cnt == 6 and versions == 1
 
 
-def test_market_series_uses_median_not_mean(conn):
+@pytest.fixture
+def canonical_db():
+    """Earlier destructive suite modules can leave gutted/minimal tables behind
+    (e.g. a stocks table without `sector`). Restore the canonical test DB FIRST,
+    then open a fresh connection — restoring under an open connection breaks it."""
+    if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+        pytest.skip("DB tests disabled")
+    import psycopg
+    from conftest import restore_test_db
+    from gefion.db import schema as dbschema
+    restore_test_db()
+    c = psycopg.connect(dbschema.test_db_url())
+    c.autocommit = True
+    yield c
+    c.close()
+
+
+def test_market_series_uses_median_not_mean(canonical_db):
+    conn = canonical_db
     """The market-level conditioning series must be robust to cross-sectional
     outliers (penny-stock vol, bad split returns): median, not mean (found via
     the first production regime sanity check — Oct 2019 mean vol > Mar 2020)."""
-    from gefion.cli_helpers import init_schema_tables
     from gefion.regimes.definitions import RegimeDefinition
     from gefion.regimes.labels import load_market_feature_series
-
-    # self-sufficient: earlier destructive suite modules may have dropped these
-    init_schema_tables(conn, ["stocks", "feature_definitions", "computed_features"])
 
     with conn.cursor() as cur:
         cur.execute("INSERT INTO feature_definitions (name, function_name) "
