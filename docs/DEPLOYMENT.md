@@ -69,12 +69,21 @@ docker exec gefion-postgres psql -U gefion -d gefion -t -c \
   "SELECT (SELECT count(*) FROM stocks), (SELECT count(*) FROM stock_ohlcv)"
 ```
 
-Rough costs at the premium rate limit (~75 calls/min):
-- **Daily prices, full history**: 1 call/symbol → an exchange of ~4,000 symbols ≈ 1 hour
+Measured costs (first NASDAQ production ingest, premium key):
+- **Daily prices, full history**: 1 call/symbol at ~69 symbols/min sustained →
+  **all of NASDAQ (6,193 symbols, 12.4M bars, 26.7 years) ≈ 90 minutes**, zero errors,
+  2.46 GB with compression enabled
 - **Quarterly financials backfill**: 4–5 calls/symbol → the same universe ≈ days
-- **Feature computation**: no API cost, CPU-bound — the long step after prices land
+- **Feature computation**: no API cost, CPU-bound; `feat-compute --all-features`
+  (note: no `--exchange` flag — scope with `--symbols`/`--listings-file` or run over
+  everything); ~200M rows for the full NASDAQ history ≈ hours
 
 Order: prices → (optionally fundamentals/financials) → `feat-compute` → datasets.
+
+**Universe quality**: an exchange's "Active" listing is bigger than its common-stock
+universe — ETFs, warrants, units, and NASDAQ **test tickers** (ZVZZT, ZWZZT, ZXZZT…)
+all come along. Filter before using it as a research/backtest universe (see the
+exchange-filter backlog item).
 
 ## Remote access
 

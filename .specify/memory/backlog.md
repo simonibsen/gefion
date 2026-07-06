@@ -48,6 +48,17 @@ Systematic hardening of the Streamlit UI assistant view:
 
 ## Future Features
 
+### Universe quality filter (test tickers, asset types)
+**Source**: first production ingest (sloth, 2026-07-06)
+**Priority**: Medium — bites as soon as research runs against the prod universe
+
+The NASDAQ "Active" listing ingested 6,193 symbols including ETFs, warrants, units,
+and NASDAQ test tickers (ZVZZT, ZWZZT, ZXZZT, ZJZZT…). Research/backtest universes
+need a quality filter: exclude test tickers outright; make asset-type (common stock
+vs ETF vs warrant) a first-class selector using `stocks.asset_type`/`stocks.exchange`.
+Follow-up originally noted after issues #29/#30 (exchange filters once
+`stocks.exchange` populates) — production data now makes it concrete.
+
 ### Regime follow-ups (spec 005 shipped 2026-07; spec 006 parked)
 **Source**: specs/005-regime-slicing, specs/006-agentic-regime-discovery
 **Priority**: Medium (006 explicitly parked until production-scale data)
