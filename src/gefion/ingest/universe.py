@@ -9,7 +9,7 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterable, List, Mapping, Optional, Sequence, Tuple, TypeVar
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, TypeVar
 
 import psycopg
 from psycopg import errors
@@ -458,3 +458,39 @@ def ingest_prices_for_symbols(
             fut.result()
 
     return inserted_total
+
+
+def update_listing_metadata(conn: psycopg.Connection,
+                            listings: Iterable[Mapping[str, object]]) -> Dict[str, int]:
+    """Backfill stocks.exchange/asset_type (and missing names) from a listing.
+
+    The LISTING_STATUS payload has always carried exchange/assetType; this
+    writes them onto existing stocks rows so asset-type universe filters
+    (regime discovery FR-121a, research universes) have real data to act on.
+    exchange/asset_type are authoritative from the listing; an existing name
+    is never clobbered. Symbols not present in `stocks` are skipped (this is
+    metadata backfill, not universe expansion).
+    """
+    with create_span("ingest.update_listing_metadata") as span:
+        updated = 0
+        skipped = 0
+        with conn.cursor() as cur:
+            for entry in listings:
+                symbol = entry.get("symbol")
+                if not symbol:
+                    continue
+                cur.execute(
+                    """UPDATE stocks SET
+                           exchange = COALESCE(%s, exchange),
+                           asset_type = COALESCE(%s, asset_type),
+                           name = COALESCE(name, %s)
+                       WHERE symbol = %s""",
+                    (entry.get("exchange"), entry.get("asset_type"),
+                     entry.get("name"), symbol),
+                )
+                if cur.rowcount:
+                    updated += 1
+                else:
+                    skipped += 1
+        set_attributes(span, updated=updated, skipped_unknown=skipped)
+        return {"updated": updated, "skipped_unknown": skipped}

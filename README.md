@@ -136,6 +136,7 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion fundamentals-update` | Update company metadata (sector, industry) from OVERVIEW |
 | `gefion financials-backfill` | Backfill quarterly financials (income, balance sheet, cash flow, earnings) |
 | `gefion data cull` | Delete old data in dependency order |
+| `gefion data listing-meta` | Backfill stocks.exchange/asset_type from the listing |
 
 ### Features
 
