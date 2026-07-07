@@ -521,3 +521,23 @@ Define, compute, and inspect market/sector/asset regimes for conditional evaluat
 - `gefion chart regime <name> --symbol <SYM> [--start-date D] [--end-date D]` — chart a symbol's price with regime-episode bands overlaid.
 
 All commands accept `--json` and `--db-url`.
+
+### Agentic regime discovery (spec 006)
+
+The agent proposes and tests candidate regimes under structural guardrails: nested
+segregation (discovery never sees the outer holdout), a pre-registered bounded search
+space, one flat FDR family that counts every test including the losers, and auditable
+ledgers. See [REGIMES.md](REGIMES.md) § Agentic discovery for the threat model.
+
+- `gefion regime discover start --name <slug> --atoms <atoms.json> [--depth K] [--budget N] [--tier interaction|grammar|expressive]... [--signal-source features] [--grading-scheme walk_forward] [--universe-filter <chain>|passthrough] [--fresh-holdout START:END] [--freeform <asts.json>] [--principles <id,id>] [--reserve-justification TEXT] [--signal <feat>]... [--horizon-days N] [--holdout-weeks N] [--seed N] [--dataset V]` — pre-register and run a bounded discovery. Expect mostly rejections; that is correct behavior. The expressive tier (free-form ASTs via `--freeform`, principle-seeded detectors via `--principles`) requires a declared single-use `--fresh-holdout` reserve; re-declaring a consumed reserve requires `--reserve-justification`.
+- `gefion regime discover list [--status S]` — list runs (status, family size, dataset).
+- `gefion regime discover show <run>` — pre-registration, segregation boundaries, family size, status.
+- `gefion regime discover ledger <run> [--verdict V]` — the candidate ledger: every candidate evaluated, losers included (they are the FDR denominator).
+- `gefion regime discover verdicts <run>` — FDR survivors, always shown with the family size beside them.
+- `gefion regime discover diagnostics <run> [--sample-dependent|--structural]` — the diagnostics ledger: every limit hit, with quantitative reasons.
+- `gefion regime discover grades [<candidate>]` — trust grades (forward folds; fold 1 = probation; descriptive backward slices flagged, never counted).
+- `gefion regime discover grade-fold <candidate> --fold N` — re-test an admitted edge on a forward fold window and record the outcome.
+
+Honest refusals at start: expressive tier without a declared `--fresh-holdout` reserve;
+an unfiltered universe without explicit `passthrough`; a run whose segregation cannot be
+proven is recorded with status `invalid` and produces no verdicts.

@@ -88,3 +88,9 @@ jobs:
 
       - name: Run full test suite (including DB tests)
         run: pytest tests/
+
+      # The discovery feature's own acceptance proof (spec 006, FR-112):
+      # zero survivors in pure noise + planted-regime recovery, named here
+      # for visibility even though the full suite above already ran it.
+      - name: Negative-control suite (SC-101/102)
+        run: pytest tests/test_discovery_negative_control.py -v

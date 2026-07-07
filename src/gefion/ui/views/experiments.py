@@ -173,7 +173,8 @@ def render_list_section():
         type_filter = st.selectbox(
             "Type",
             ["all", "strategy_params", "hyperparameter", "model_comparison",
-             "feature_engineering", "feature_selection", "label_engineering", "pipeline"],
+             "feature_engineering", "feature_selection", "label_engineering",
+             "pipeline", "regime_discovery"],
             help="Filter by experiment type",
         )
 
@@ -311,8 +312,10 @@ def render_propose_section():
     experiment_type = st.selectbox(
         "Experiment Type",
         ["strategy_params", "hyperparameter", "model_comparison",
-         "feature_engineering", "feature_selection", "label_engineering"],
-        help="Type of experiment to run",
+         "feature_engineering", "feature_selection", "label_engineering",
+         "regime_discovery"],
+        help="Type of experiment to run (regime_discovery is high-risk: "
+             "never auto-approved; its results live in the discovery ledgers)",
     )
 
     col1, col2 = st.columns(2)

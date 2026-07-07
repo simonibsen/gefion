@@ -7,6 +7,7 @@
 - [Tables](#tables)
   - [`computed_features`](#computed-features)
   - [`cross_sectional_features`](#cross-sectional-features)
+  - [`discovery_diagnostics`](#discovery-diagnostics)
   - [`experiment_cycles`](#experiment-cycles)
   - [`experiment_trials`](#experiment-trials)
   - [`experiments`](#experiments)
@@ -19,8 +20,11 @@
   - [`prediction_outcomes`](#prediction-outcomes)
   - [`predictions`](#predictions)
   - [`quarterly_financials`](#quarterly-financials)
+  - [`regime_candidates`](#regime-candidates)
   - [`regime_definitions`](#regime-definitions)
+  - [`regime_discovery_runs`](#regime-discovery-runs)
   - [`regime_labels`](#regime-labels)
+  - [`regime_trust_grades`](#regime-trust-grades)
   - [`schema_migrations`](#schema-migrations)
   - [`stock_ohlcv`](#stock-ohlcv)
   - [`stocks`](#stocks)
@@ -63,6 +67,22 @@ Market-relative feature rankings (percentile, z-score) computed across the unive
 | `percentile` | DOUBLE PRECISION | ✓ |  |  |
 | `created_at` | TIMESTAMP | ✓ |  |  |
 | **`comparison_group`** 🔑 | TEXT |  |  |  |
+
+### `discovery_diagnostics`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `run_id` | INTEGER |  |  |  |
+| `kind` | TEXT |  |  |  |
+| `detail` | JSONB |  |  |  |
+| `sample_dependent` | BOOLEAN |  |  |  |
+| `dataset_version` | TEXT |  |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
 
 ### `experiment_cycles`
 
@@ -358,6 +378,24 @@ Quarterly financial statements (income, balance sheet, cash flow, earnings). One
 | `raw` | JSONB | ✓ |  |  |
 | `created_at` | TIMESTAMP | ✓ |  |  |
 
+### `regime_candidates`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `run_id` | INTEGER |  |  |  |
+| `candidate_hash` | TEXT |  |  |  |
+| `expression` | JSONB |  |  |  |
+| `tier` | TEXT |  |  |  |
+| `provenance` | JSONB | ✓ |  |  |
+| `results` | JSONB | ✓ |  |  |
+| `counted_in_family` | BOOLEAN |  |  |  |
+| `verdict` | TEXT | ✓ |  |  |
+
 ### `regime_definitions`
 
 *(no description yet)*
@@ -377,6 +415,26 @@ Primary key: `id`
 | `status` | TEXT |  |  |  |
 | `created_at` | TIMESTAMPTZ |  |  |  |
 
+### `regime_discovery_runs`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `name` | TEXT |  |  |  |
+| `seed` | BIGINT |  |  |  |
+| `search_space` | JSONB |  |  |  |
+| `segregation` | JSONB |  |  |  |
+| `reserve_consumed` | BOOLEAN |  |  |  |
+| `family_size` | INTEGER | ✓ |  |  |
+| `status` | TEXT |  |  |  |
+| `dataset_version` | TEXT |  |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
+| `completed_at` | TIMESTAMPTZ | ✓ |  |  |
+
 ### `regime_labels`
 
 *(no description yet)*
@@ -390,6 +448,22 @@ Primary key: `id`
 | **`entity_id`** 🔑 | INTEGER |  |  |  |
 | `label` | TEXT |  |  |  |
 | `dataset_version` | TEXT |  |  |  |
+
+### `regime_trust_grades`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `candidate_id` | INTEGER |  |  |  |
+| `fold` | INTEGER |  |  |  |
+| `confirmed` | BOOLEAN |  |  |  |
+| `descriptive` | BOOLEAN |  |  |  |
+| `detail` | JSONB | ✓ |  |  |
+| `graded_at` | TIMESTAMPTZ |  |  |  |
 
 ### `schema_migrations`
 

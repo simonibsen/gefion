@@ -906,6 +906,42 @@ def _load_db_function(conn: psycopg.Connection, function_name: str) -> Optional[
         warnings.warn(f"Ignoring feature_function '{function_name}' with unsupported language '{language}'")
         return None
 
+    local_env = _exec_in_sandbox(body, warn_context=f"feature_function '{function_name}'")
+    if local_env is None:
+        return None
+    fn = local_env.get("compute") or local_env.get(function_name)
+    if not callable(fn):
+        warnings.warn(f"feature_function '{function_name}' did not define a callable 'compute'")
+        return None
+    return _wrap_db_function(fn), version
+
+
+class SandboxExecutionError(RuntimeError):
+    """Raised when sandboxed code fails to execute or lacks required callables."""
+
+
+def exec_sandboxed(body: str, *callable_names: str) -> Dict[str, Callable]:
+    """Execute code in the whitelisted-import sandbox; return the named callables.
+
+    The same execution path as AI-generated feature functions — used by the
+    regime-discovery detector runtime (spec 006, R5). Raises
+    SandboxExecutionError on execution failure or a missing callable.
+    """
+    local_env = _exec_in_sandbox(body, warn_context=None)
+    if local_env is None:
+        raise SandboxExecutionError("sandboxed code failed to execute")
+    out: Dict[str, Callable] = {}
+    for name in callable_names:
+        fn = local_env.get(name)
+        if not callable(fn):
+            raise SandboxExecutionError(f"sandboxed code did not define a callable {name!r}")
+        out[name] = fn
+    return out
+
+
+def _exec_in_sandbox(body: str, warn_context: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Exec `body` in the restricted environment; return its locals, or None
+    (with a warning when warn_context is given) on failure."""
     # Create a safe __import__ that only allows whitelisted modules
     SAFE_MODULES = {
         'numpy', 'np', 'pandas', 'pd', 'datetime', 'math', 'statistics',
@@ -1009,13 +1045,10 @@ def _load_db_function(conn: psycopg.Connection, function_name: str) -> Optional[
     try:
         exec(body, safe_globals, local_env)
     except Exception as exc:
-        warnings.warn(f"Failed to exec feature_function '{function_name}': {exc}")
+        if warn_context:
+            warnings.warn(f"Failed to exec {warn_context}: {exc}")
         return None
-    fn = local_env.get("compute") or local_env.get(function_name)
-    if not callable(fn):
-        warnings.warn(f"feature_function '{function_name}' did not define a callable 'compute'")
-        return None
-    return _wrap_db_function(fn), version
+    return local_env
 
 
 def _wrap_db_function(fn: Callable) -> Callable:

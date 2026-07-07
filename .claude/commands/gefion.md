@@ -179,6 +179,32 @@ Regime slicing — conditional evaluation across market/sector/asset states (see
 
 ---
 
+### Mode: `discover <run?>`
+
+Agentic regime discovery — the system proposes and tests candidate regimes under
+structural guardrails (see `docs/REGIMES.md` § Agentic discovery for the threat model).
+
+1. If no run specified, list runs via `regime_discover_list`
+2. Inspect a run with `regime_discover_show` (pre-registration, segregation, family size);
+   read the full story with `regime_discover_ledger` (every candidate, losers included)
+   and `regime_discover_diagnostics` (limits hit: sample-dependent vs structural)
+3. Survivors: `regime_discover_verdicts` — the FDR family size is always part of the
+   sentence ("1 admitted out of a 240-test family")
+4. Trust: `regime_discover_grades` (forward folds; fold 1 = probation); a scheduled
+   re-test is `regime_discover_grade_fold` (mutating — confirm first)
+5. To start a run, `regime_discover_start` — **mutating and potentially long: always
+   confirm with the user before invoking** (same class as experiment runs). Expect
+   mostly/entirely rejections; that is the loop working
+6. An admitted regime is an ordinary machine-origin regime: chart/label/slice it with
+   the normal `regime_*` and `chart_regime` tools
+
+**Honesty rules:** confirm before `regime_discover_start` or `regime_discover_grade_fold`;
+**never present an unadmitted candidate as a finding** — refused and rejected candidates
+are part of the denominator, not discoveries; report survivors only alongside their
+family size; descriptive (backward) grade rows are context, never confirmations.
+
+---
+
 ### Free-Form Request Handling
 
 If the arguments don't match a mode keyword, interpret the user's intent and route to the appropriate MCP tools. Common patterns:
@@ -198,6 +224,9 @@ If the arguments don't match a mode keyword, interpret the user's intent and rou
 | "when does this strategy work" / "slice by regime" | `regime_list` → `backtest_run` with `by_regime` |
 | "does the edge depend on volatility" | `regime_interaction` |
 | "define a market regime" | `regime_define` → `regime_compute` → `regime_labels` |
+| "discover regimes" / "hunt for regimes" | confirm, then `regime_discover_start` → `regime_discover_verdicts` |
+| "what did discovery find" | `regime_discover_ledger` + `regime_discover_diagnostics` (losers included) |
+| "can I trust this discovered regime" | `regime_discover_grades` (forward folds only) |
 
 ---
 

@@ -5,7 +5,7 @@ import os
 import time
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import click
 import psycopg
@@ -11827,6 +11827,424 @@ def regime_import(
     out.success(f"Imported {count} regime(s) from {directory}")
     if out.json_mode:
         out.json({"imported": count, "directory": directory})
+
+
+# --- regime discover (spec 006: agentic regime discovery) --------------------
+
+discover_app = typer.Typer(
+    help="Agentic regime discovery (pre-registered, nested, search-aware; spec 006)")
+regime_app.add_typer(discover_app, name="discover", cls=SortedGroup)
+
+
+def _discovery_run_payload(run: dict) -> dict:
+    """A run row as a JSON-safe payload (dates stringified)."""
+    return {k: (str(v) if hasattr(v, "isoformat") else v) for k, v in run.items()}
+
+
+@discover_app.command("start")
+def regime_discover_start(
+    name: str = typer.Option(..., "--name", help="Run name (kebab-case slug)"),
+    atoms: str = typer.Option(..., "--atoms",
+                              help="Path to atom-library JSON ({\"atoms\": [...]})"),
+    depth: int = typer.Option(2, "--depth", help="Max composition depth K"),
+    budget: int = typer.Option(100, "--budget", help="Per-cycle candidate budget"),
+    tier: List[str] = typer.Option(["interaction"], "--tier",
+                                   help="Tier(s) enabled: interaction|grammar|expressive"),
+    signal_source: str = typer.Option("features", "--signal-source",
+                                      help="Declared signal universe (v1: features)"),
+    grading_scheme: str = typer.Option("walk_forward", "--grading-scheme",
+                                       help="Declared trust-grading scheme"),
+    universe_filter: Optional[str] = typer.Option(
+        None, "--universe-filter",
+        help="Declared filter chain (default: test_tickers,asset_type:common; "
+             "'passthrough' for a deliberately unfiltered run)"),
+    fresh_holdout: Optional[str] = typer.Option(
+        None, "--fresh-holdout", help="Reserve block <start>:<end>; required for expressive tier"),
+    freeform: Optional[str] = typer.Option(
+        None, "--freeform",
+        help="Path to a JSON list of free-form RegimeExpression ASTs (expressive tier)"),
+    principles: Optional[str] = typer.Option(
+        None, "--principles",
+        help="Comma-separated catalog principle ids to seed atoms/detectors from"),
+    reserve_justification: Optional[str] = typer.Option(
+        None, "--reserve-justification",
+        help="Recorded justification for re-declaring a consumed reserve block"),
+    signal: Optional[List[str]] = typer.Option(
+        None, "--signal", help="Signal feature override (default: active feature definitions)"),
+    horizon_days: int = typer.Option(1, "--horizon-days", help="Forward-return horizon"),
+    holdout_weeks: int = typer.Option(6, "--holdout-weeks", help="Outer holdout width"),
+    seed: int = typer.Option(42, "--seed", help="Run seed (reproducibility)"),
+    dataset: str = typer.Option("dev", "--dataset", help="Dataset version tag"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Pre-register and run a bounded discovery: enumerate -> freeze -> evaluate -> FDR.
+
+    Expect mostly (often entirely) rejections — a discovery loop that admits
+    often is broken. Read the full story with `regime discover ledger`.
+    """
+    import json as _json
+    from gefion.regimes.discovery import universe as duniverse
+    from gefion.regimes.discovery.grammar import GrammarError
+    from gefion.regimes.discovery.runner import DiscoveryConfig, DiscoveryError, run_discovery
+    from gefion.regimes.discovery.segregation import SegregationError
+    from gefion.regimes.discovery.signals import load_market_data
+
+    out = get_output(json_output)
+    try:
+        atom_list = _json.loads(Path(atoms).read_text())["atoms"]
+    except (OSError, KeyError, ValueError) as exc:
+        out.error(f"Cannot read atom library {atoms}: {exc}")
+        raise typer.Exit(1)
+
+    reserve = None
+    if fresh_holdout:
+        from datetime import datetime as _dt
+        try:
+            start_s, _, end_s = fresh_holdout.partition(":")
+            reserve = (_dt.strptime(start_s, "%Y-%m-%d").date(),
+                       _dt.strptime(end_s, "%Y-%m-%d").date())
+        except ValueError as exc:
+            out.error(f"Invalid --fresh-holdout (expected START:END dates): {exc}")
+            raise typer.Exit(1)
+    if "expressive" in tier and reserve is None:
+        out.error("expressive tier requires a declared --fresh-holdout reserve block")
+        raise typer.Exit(1)
+
+    freeform_list = []
+    if freeform:
+        try:
+            freeform_list = _json.loads(Path(freeform).read_text())
+        except (OSError, ValueError) as exc:
+            out.error(f"Cannot read freeform expressions {freeform}: {exc}")
+            raise typer.Exit(1)
+
+    try:
+        with _regime_conn(db_url) as conn:
+            chain = duniverse.parse_filter_chain(universe_filter)
+            symbols = None
+            if any(f.kind != "passthrough" for f in chain):
+                with conn.cursor() as cur:
+                    cur.execute("SELECT symbol FROM stocks ORDER BY symbol")
+                    symbols = [r[0] for r in cur.fetchall()]
+                symbols = duniverse.apply_chain(chain, symbols, conn=conn)
+            if signal:
+                signals_list = list(signal)
+            else:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT name FROM feature_definitions WHERE active = true ORDER BY name")
+                    signals_list = [r[0] for r in cur.fetchall()]
+            detector_list = []
+            if principles:
+                from gefion.experiments.principles import load_principles
+                from gefion.regimes.discovery.grammar import seed_atoms_from_principles
+                from gefion.regimes.discovery.detectors import seed_detectors_from_principles
+                wanted = {p.strip() for p in principles.split(",") if p.strip()}
+                catalog = [p for p in load_principles() if p["id"] in wanted]
+                with conn.cursor() as cur:
+                    cur.execute("SELECT name FROM feature_definitions ORDER BY name")
+                    available = [r[0] for r in cur.fetchall()]
+                atom_list = atom_list + seed_atoms_from_principles(catalog, available)
+                if "expressive" in tier:
+                    detector_list = seed_detectors_from_principles(catalog, available)
+            atom_features = sorted(
+                {a.get("feature") for a in atom_list if a.get("feature")}
+                | {d["feature"] for d in detector_list})
+            market = load_market_data(
+                conn, sorted(set(signals_list) | set(atom_features)),
+                horizon_days=horizon_days, dataset_version=dataset,
+                symbols=symbols, optional_features=atom_features)
+            config = DiscoveryConfig(
+                name=name, seed=seed, atoms=atom_list, signals=signals_list,
+                depth=depth, budget=budget, tiers=tuple(tier),
+                signal_source=signal_source, grading_scheme=grading_scheme,
+                universe_filter=universe_filter, horizon_days=horizon_days,
+                holdout_weeks=holdout_weeks, fresh_holdout=reserve,
+                freeform=freeform_list, detectors=detector_list,
+                reserve_justification=reserve_justification,
+                dataset_version=dataset)
+            summary = run_discovery(conn, config, market)
+    except (GrammarError, DiscoveryError, duniverse.UniverseError,
+            SegregationError, LookupError) as exc:
+        out.error(f"Discovery refused: {exc}")
+        raise typer.Exit(1)
+
+    out.success(
+        f"Discovery run '{name}' complete: {summary['n_candidates']} candidates, "
+        f"family size {summary['family_size']}, {summary['n_admitted']} admitted "
+        f"(run id {summary['run_id']})")
+    if out.json_mode:
+        out.json(summary)
+
+
+def _resolve_run(conn, run_ref: str) -> dict:
+    from gefion.regimes.discovery import ledger as dledger
+    ref = int(run_ref) if run_ref.isdigit() else run_ref
+    return dledger.get_run(conn, ref)
+
+
+@discover_app.command("list")
+def regime_discover_list(
+    status: Optional[str] = typer.Option(None, "--status", help="Filter by run status"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """List discovery runs (pre-registration status, family size, dataset)."""
+    from gefion.output import Column
+    from gefion.regimes.discovery import ledger as dledger
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        runs = dledger.list_runs(conn, status=status)
+    payload = [_discovery_run_payload(r) for r in runs]
+    out.table(
+        columns=[Column("id"), Column("name"), Column("status"),
+                 Column("family_size"), Column("dataset_version"), Column("created_at")],
+        rows=[[p["id"], p["name"], p["status"], p["family_size"],
+               p["dataset_version"], p["created_at"]] for p in payload],
+        json_data={"runs": payload},
+    )
+
+
+@discover_app.command("ledger")
+def regime_discover_ledger(
+    run: str = typer.Argument(..., help="Run id or name"),
+    verdict: Optional[str] = typer.Option(
+        None, "--verdict",
+        help="Filter: admitted|rejected|refused_low_power|refused_degenerate|refused_unstable"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """The candidate ledger: every candidate evaluated, losers included.
+
+    The losers are part of the story — they are the FDR family's denominator.
+    """
+    from gefion.output import Column
+    from gefion.regimes.discovery import ledger as dledger
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            run_row = _resolve_run(conn, run)
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+        cands = dledger.list_candidates(conn, run_row["id"], verdict=verdict)
+    out.table(
+        columns=[Column("id"), Column("tier"), Column("hash"),
+                 Column("verdict"), Column("counted"), Column("tests")],
+        rows=[[c["id"], c["tier"], c["candidate_hash"][:24], c["verdict"],
+               c["counted_in_family"],
+               len((c["results"] or {}).get("tests", []))] for c in cands],
+        json_data={"run_id": run_row["id"], "family_size": run_row["family_size"],
+                   "candidates": cands},
+    )
+
+
+@discover_app.command("verdicts")
+def regime_discover_verdicts(
+    run: str = typer.Argument(..., help="Run id or name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """FDR survivors (if any — most runs: none), always shown with the family size."""
+    from gefion.regimes.discovery import ledger as dledger
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            run_row = _resolve_run(conn, run)
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+        cands = dledger.list_candidates(conn, run_row["id"])
+    admitted = [c for c in cands if c["verdict"] == "admitted"]
+    by_verdict: dict = {}
+    for c in cands:
+        by_verdict[c["verdict"]] = by_verdict.get(c["verdict"], 0) + 1
+    out.info(f"Run {run_row['id']} '{run_row['name']}': {len(admitted)} admitted "
+             f"out of {len(cands)} candidates — FDR family size {run_row['family_size']} "
+             f"(every test counted, losers included)")
+    for c in admitted:
+        surviving = [t for t in (c["results"] or {}).get("tests", []) if t.get("survived")]
+        out.info(f"  admitted {c['candidate_hash'][:24]}: "
+                 f"{[(t['signal'], t.get('bucket'), t['pvalue']) for t in surviving]}")
+    if out.json_mode:
+        out.json({"run_id": run_row["id"], "family_size": run_row["family_size"],
+                  "verdict_counts": by_verdict, "admitted": admitted})
+
+
+@discover_app.command("diagnostics")
+def regime_discover_diagnostics(
+    run: str = typer.Argument(..., help="Run id or name"),
+    sample_dependent: bool = typer.Option(
+        False, "--sample-dependent", help="Only sample-dependent limits (re-test on new data)"),
+    structural: bool = typer.Option(
+        False, "--structural", help="Only structural limits (accumulate as data-priority signals)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """The diagnostics ledger: every limit the search hit, with quantitative reasons.
+
+    Sample-dependent diagnostics are re-evaluated on a larger dataset;
+    structural ones accumulate as data-priority / search-design signals.
+    """
+    from gefion.output import Column
+    from gefion.regimes.discovery import ledger as dledger
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    if sample_dependent and structural:
+        out.error("--sample-dependent and --structural are mutually exclusive")
+        raise typer.Exit(1)
+    flag = True if sample_dependent else (False if structural else None)
+    with _regime_conn(db_url) as conn:
+        try:
+            run_row = _resolve_run(conn, run)
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+        rows = dledger.list_diagnostics(conn, run_row["id"], sample_dependent=flag)
+    payload = [{**r, "created_at": str(r["created_at"])} for r in rows]
+    out.table(
+        columns=[Column("id"), Column("kind"), Column("sample_dependent"),
+                 Column("detail")],
+        rows=[[r["id"], r["kind"], r["sample_dependent"], str(r["detail"])[:80]]
+              for r in payload],
+        json_data={"run_id": run_row["id"], "diagnostics": payload},
+    )
+
+
+@discover_app.command("grades")
+def regime_discover_grades(
+    candidate: Optional[str] = typer.Argument(None, help="Candidate id (default: all graded)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Trust grades: forward folds as they accrue (fold 1 = probation window).
+
+    Descriptive rows are backward era-slices — display context only; they can
+    never raise a grade (the regime's fitted boundaries saw that data).
+    """
+    from gefion.output import Column
+    from gefion.regimes.discovery.grading import get_scheme
+    out = get_output(json_output)
+    scheme = get_scheme("walk_forward")
+    with _regime_conn(db_url) as conn:
+        if candidate is None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT DISTINCT c.id, c.candidate_hash, c.run_id
+                       FROM regime_candidates c
+                       JOIN regime_trust_grades g ON g.candidate_id = c.id
+                       ORDER BY c.id""")
+                graded = cur.fetchall()
+            payload = []
+            for cand_id, cand_hash, run_id in graded:
+                grade = scheme.grade(conn, cand_id)
+                payload.append({"candidate_id": cand_id, "run_id": run_id,
+                                "candidate_hash": cand_hash, "grade": grade})
+            out.table(
+                columns=[Column("candidate_id"), Column("run_id"), Column("folds"),
+                         Column("confirmed"), Column("grade"), Column("regime_limited")],
+                rows=[[p["candidate_id"], p["run_id"], p["grade"]["folds"],
+                       p["grade"]["confirmed"], p["grade"]["grade"],
+                       p["grade"]["regime_limited"]] for p in payload],
+                json_data={"graded": payload},
+            )
+            return
+        cand_id = int(candidate)
+        grade = scheme.grade(conn, cand_id)
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT fold, confirmed, descriptive, detail, graded_at
+                   FROM regime_trust_grades WHERE candidate_id = %s
+                   ORDER BY fold, descriptive""", (cand_id,))
+            rows = [{"fold": f, "confirmed": c, "descriptive": d,
+                     "detail": detail, "graded_at": str(at)}
+                    for f, c, d, detail, at in cur.fetchall()]
+    if not out.json_mode:
+        flag = " [REGIME-LIMITED]" if grade["regime_limited"] else ""
+        out.info(f"Candidate {cand_id}: {grade['confirmed']}/{grade['folds']} "
+                 f"forward folds confirmed{flag} "
+                 f"({grade['descriptive_slices']} descriptive slice(s), never graded)")
+        for r in rows:
+            marker = "descriptive" if r["descriptive"] else "forward"
+            out.info(f"  fold {r['fold']} [{marker}]: "
+                     f"{'confirmed' if r['confirmed'] else 'failed'}")
+    if out.json_mode:
+        out.json({"candidate_id": cand_id, "grade": grade, "rows": rows})
+
+
+@discover_app.command("grade-fold")
+def regime_discover_grade_fold(
+    candidate: str = typer.Argument(..., help="Candidate id (must be admitted)"),
+    fold: int = typer.Option(..., "--fold", help="Fold number (1 = probation window)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Re-test an admitted edge on a forward fold window and record the outcome.
+
+    Only data genuinely after the discovery window can confirm — the fold
+    window is derived from the run's recorded holdout end, never the caller.
+    """
+    from gefion.regimes.definitions import iter_leaves
+    from gefion.regimes.discovery.grading import GradingError, get_scheme
+    from gefion.regimes.discovery.signals import load_market_data
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            cand_id = int(candidate)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT c.expression, c.results, r.search_space
+                       FROM regime_candidates c
+                       JOIN regime_discovery_runs r ON r.id = c.run_id
+                       WHERE c.id = %s""", (cand_id,))
+                row = cur.fetchone()
+            if row is None:
+                out.error(f"candidate {candidate} not found")
+                raise typer.Exit(1)
+            expression, results, space = row
+            signals = sorted({t["signal"] for t in (results or {}).get("tests", [])})
+            refs = sorted({leaf["feature"] for leaf in iter_leaves(expression)
+                           if leaf.get("feature")})
+            market = load_market_data(
+                conn, sorted(set(signals) | set(refs)),
+                horizon_days=int(space.get("horizon_days", 1)),
+                dataset_version=space.get("dataset", "dev"))
+            outcome = get_scheme("walk_forward").evaluate_fold(
+                conn, market, cand_id, fold=fold)
+        except (GradingError, LookupError) as exc:
+            out.error(f"Fold evaluation refused: {exc}")
+            raise typer.Exit(1)
+    out.success(f"Fold {fold}: {'confirmed' if outcome['confirmed'] else 'failed'} "
+                f"(recorded as a forward result)")
+    if out.json_mode:
+        out.json(outcome)
+
+
+@discover_app.command("show")
+def regime_discover_show(
+    run: str = typer.Argument(..., help="Run id or name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Inspect a run: pre-registration, segregation boundaries, family size, status."""
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            payload = _discovery_run_payload(_resolve_run(conn, run))
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+    if out.json_mode:
+        out.json(payload)
+    else:
+        out.info(f"Run {payload['id']} '{payload['name']}' — status {payload['status']}, "
+                 f"seed {payload['seed']}, family size {payload['family_size']}")
+        out.info(f"Search space: {payload['search_space']}")
+        out.info(f"Segregation: {payload['segregation']}")
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper

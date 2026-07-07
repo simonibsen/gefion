@@ -1827,6 +1827,133 @@ async def list_tools() -> List[Tool]:
                 "required": ["name", "symbol"],
             },
         ),
+        Tool(
+            name="regime_discover_start",
+            description=(
+                "Pre-register and run an agentic regime-discovery run (spec 006): "
+                "enumerate a bounded atom grammar, freeze the candidate set, evaluate "
+                "conditional edges on the outer holdout, one flat FDR family. MUTATING "
+                "and potentially long — confirm with the user before invoking; expect "
+                "mostly/entirely rejections (that is correct behavior)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Run name (kebab-case slug)"},
+                    "atoms": {"type": "string", "description": "Path to atom-library JSON"},
+                    "depth": {"type": "integer", "description": "Max composition depth K", "default": 2},
+                    "budget": {"type": "integer", "description": "Per-cycle candidate budget", "default": 100},
+                    "tiers": {"type": "array", "items": {"type": "string"},
+                              "description": "Tiers enabled: interaction|grammar|expressive"},
+                    "signal_source": {"type": "string", "description": "Declared signal universe (v1: features)"},
+                    "grading_scheme": {"type": "string", "description": "Declared grading scheme (v1: walk_forward)"},
+                    "universe_filter": {"type": "string",
+                                        "description": "Declared filter chain; 'passthrough' for unfiltered"},
+                    "fresh_holdout": {"type": "string",
+                                      "description": "Reserve block START:END (required for expressive tier)"},
+                    "freeform": {"type": "string",
+                                 "description": "Path to JSON list of free-form ASTs (expressive tier)"},
+                    "principles": {"type": "string",
+                                   "description": "Comma-separated principle ids to seed atoms/detectors"},
+                    "reserve_justification": {"type": "string",
+                                              "description": "Recorded justification for re-declaring a consumed reserve"},
+                    "seed": {"type": "integer", "description": "Run seed"},
+                    "dataset": {"type": "string", "description": "Dataset version tag"},
+                },
+                "required": ["name", "atoms"],
+            },
+        ),
+        Tool(
+            name="regime_discover_list",
+            description="List regime-discovery runs (status, family size, dataset).",
+            inputSchema={
+                "type": "object",
+                "properties": {"status": {"type": "string", "description": "Filter by run status"}},
+            },
+        ),
+        Tool(
+            name="regime_discover_show",
+            description="Inspect a discovery run: pre-registration, segregation boundaries, family size, status.",
+            inputSchema={
+                "type": "object",
+                "properties": {"run": {"type": "string", "description": "Run id or name"}},
+                "required": ["run"],
+            },
+        ),
+        Tool(
+            name="regime_discover_ledger",
+            description=(
+                "The candidate ledger of a discovery run: every candidate evaluated, "
+                "losers included — they are the FDR family's denominator."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run": {"type": "string", "description": "Run id or name"},
+                    "verdict": {"type": "string",
+                                "description": "Filter: admitted|rejected|refused_low_power|"
+                                               "refused_degenerate|refused_unstable"},
+                },
+                "required": ["run"],
+            },
+        ),
+        Tool(
+            name="regime_discover_verdicts",
+            description=(
+                "FDR survivors of a discovery run (most runs: none), always with the "
+                "family size beside them. Never present an unadmitted candidate as a finding."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"run": {"type": "string", "description": "Run id or name"}},
+                "required": ["run"],
+            },
+        ),
+        Tool(
+            name="regime_discover_diagnostics",
+            description=(
+                "The diagnostics ledger of a discovery run: every limit the search hit "
+                "(budget/depth exhaustion, min-sample refusals, uncomputable proposals), "
+                "tagged sample-dependent (re-test on new data) vs structural (accumulate)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run": {"type": "string", "description": "Run id or name"},
+                    "kind": {"type": "string",
+                             "description": "Filter: sample_dependent | structural"},
+                },
+                "required": ["run"],
+            },
+        ),
+        Tool(
+            name="regime_discover_grades",
+            description=(
+                "Trust grades for admitted edges: forward folds as they accrue "
+                "(fold 1 = probation). Descriptive rows are backward era-slices — "
+                "display context only, never counted toward the grade."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"candidate": {"type": "string",
+                                             "description": "Candidate id (omit for all graded)"}},
+            },
+        ),
+        Tool(
+            name="regime_discover_grade_fold",
+            description=(
+                "Re-test an admitted edge on a forward fold window and record the "
+                "outcome (MUTATING — appends a trust-grade row; confirm with the user)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "candidate": {"type": "string", "description": "Candidate id"},
+                    "fold": {"type": "integer", "description": "Fold number (1 = probation)"},
+                },
+                "required": ["candidate", "fold"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -2040,6 +2167,22 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_interaction(arguments)
         elif name == "chart_regime":
             result = await _chart_regime(arguments)
+        elif name == "regime_discover_start":
+            result = await _regime_discover_start(arguments)
+        elif name == "regime_discover_list":
+            result = await _regime_discover_list(arguments)
+        elif name == "regime_discover_show":
+            result = await _regime_discover_show(arguments)
+        elif name == "regime_discover_ledger":
+            result = await _regime_discover_ledger(arguments)
+        elif name == "regime_discover_verdicts":
+            result = await _regime_discover_verdicts(arguments)
+        elif name == "regime_discover_diagnostics":
+            result = await _regime_discover_diagnostics(arguments)
+        elif name == "regime_discover_grades":
+            result = await _regime_discover_grades(arguments)
+        elif name == "regime_discover_grade_fold":
+            result = await _regime_discover_grade_fold(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -4658,6 +4801,104 @@ async def _chart_regime(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get("end_date"):
             cmd.extend(["--end-date", args["end_date"]])
         return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_start(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Pre-register and run an agentic regime-discovery run (mutating, long)."""
+    async def _run():
+        cmd = ["regime", "discover", "start",
+               "--name", args["name"], "--atoms", args["atoms"]]
+        if args.get("depth") is not None:
+            cmd.extend(["--depth", str(args["depth"])])
+        if args.get("budget") is not None:
+            cmd.extend(["--budget", str(args["budget"])])
+        for tier in args.get("tiers") or []:
+            cmd.extend(["--tier", tier])
+        if args.get("signal_source"):
+            cmd.extend(["--signal-source", args["signal_source"]])
+        if args.get("grading_scheme"):
+            cmd.extend(["--grading-scheme", args["grading_scheme"]])
+        if args.get("universe_filter"):
+            cmd.extend(["--universe-filter", args["universe_filter"]])
+        if args.get("fresh_holdout"):
+            cmd.extend(["--fresh-holdout", args["fresh_holdout"]])
+        if args.get("freeform"):
+            cmd.extend(["--freeform", args["freeform"]])
+        if args.get("principles"):
+            cmd.extend(["--principles", args["principles"]])
+        if args.get("reserve_justification"):
+            cmd.extend(["--reserve-justification", args["reserve_justification"]])
+        if args.get("seed") is not None:
+            cmd.extend(["--seed", str(args["seed"])])
+        if args.get("dataset"):
+            cmd.extend(["--dataset", args["dataset"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List regime-discovery runs."""
+    async def _run():
+        cmd = ["regime", "discover", "list"]
+        if args.get("status"):
+            cmd.extend(["--status", args["status"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_show(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Inspect a discovery run's pre-registration, segregation, and status."""
+    async def _run():
+        return await GefionExecutor().run("regime", "discover", "show", args["run"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_ledger(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Candidate ledger of a discovery run (losers included)."""
+    async def _run():
+        cmd = ["regime", "discover", "ledger", args["run"]]
+        if args.get("verdict"):
+            cmd.extend(["--verdict", args["verdict"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_verdicts(args: Dict[str, Any]) -> Dict[str, Any]:
+    """FDR survivors of a discovery run, with the family size beside them."""
+    async def _run():
+        return await GefionExecutor().run("regime", "discover", "verdicts", args["run"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_diagnostics(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Diagnostics ledger of a discovery run (sample-dependent vs structural)."""
+    async def _run():
+        cmd = ["regime", "discover", "diagnostics", args["run"]]
+        if args.get("kind") == "sample_dependent":
+            cmd.append("--sample-dependent")
+        elif args.get("kind") == "structural":
+            cmd.append("--structural")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_grades(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Trust grades: forward folds; descriptive rows flagged."""
+    async def _run():
+        cmd = ["regime", "discover", "grades"]
+        if args.get("candidate"):
+            cmd.append(str(args["candidate"]))
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_grade_fold(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Re-test an admitted edge on a forward fold (mutating)."""
+    async def _run():
+        return await GefionExecutor().run(
+            "regime", "discover", "grade-fold", str(args["candidate"]),
+            "--fold", str(args["fold"]))
     return await _execute_with_health_check(['postgres'], _run)
 
 
