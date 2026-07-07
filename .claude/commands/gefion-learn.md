@@ -67,7 +67,7 @@ Checkpoint: learner explains why win_rate counts only closed trades.
 
 **Module 5 — Charts & observability**
 Concepts: D3 chart pipeline (CLI writes HTML to `~/.gefion/charts/`), OTEL spans → Tempo → Grafana, `span-check`.
-Do: `gefion chart price AAPL --no-open`; `gefion chart experiment-trials <id> --no-open`; run any CLI command with `OTEL_ENABLED=true` then `gefion span-check`; open Grafana (localhost:3000).
+Do: `gefion chart price AAPL --no-open`; `gefion chart experiment-trials <id> --no-open`; if a regime is computed, `gefion chart regime <name> --symbol SPY --no-open` (also on the UI Regimes page, per-regime Chart action); run any CLI command with `OTEL_ENABLED=true` then `gefion span-check`; open Grafana (localhost:3000).
 Checkpoint: learner traces one command's span tree and names the slowest span.
 
 **Module 6 — Experiments I: the statistical gate (concepts)**

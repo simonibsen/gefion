@@ -76,6 +76,7 @@ def render_regimes():
                         "descriptive_metadata": chosen.descriptive_metadata,
                     })
                     _render_labels_summary(chosen.name)
+                    _render_regime_chart(chosen.name)
 
         with tab_new:
             _render_new_regime_form()
@@ -135,6 +136,29 @@ def _render_labels_summary(name: str):
             st.caption("Not computed yet — run `gefion regime compute " + name + "`.")
     except Exception:  # pragma: no cover - defensive
         st.caption("Label summary unavailable.")
+
+
+def _render_regime_chart(name: str):
+    """Chart a symbol's price with this regime's episode bands (mirrors `gefion chart regime`)."""
+    import streamlit.components.v1 as components
+
+    st.markdown("**Chart** — price with regime-episode bands")
+    with st.form(f"regime_chart_{name}"):
+        symbol = st.text_input("Symbol to overlay", value="SPY")
+        submitted = st.form_submit_button("Chart regime")
+    if submitted:
+        from gefion.ui.components.database import get_connection
+        from gefion.charts.queries import fetch_regime_chart_data
+        from gefion.charts.d3.renderers import create_regime_chart
+        try:
+            with create_span("ui.regimes.chart", regime=name, symbol=symbol):
+                with get_connection() as conn:
+                    payload = fetch_regime_chart_data(conn, name, symbol.strip().upper())
+                html = create_regime_chart(payload["price"], payload["episodes"],
+                                           regime_name=name, symbol=symbol.strip().upper())
+                components.html(html, height=650, scrolling=False)
+        except LookupError as exc:
+            st.error(f"Cannot chart regime: {exc}")
 
 
 def _render_new_regime_form():
