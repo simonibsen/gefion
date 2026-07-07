@@ -60,8 +60,18 @@ def test_start_declares_contract_options():
                 "--fresh-holdout", "--seed", "--dataset", "--json",
                 # expressive tier (US3): freeform ASTs, principle seeding,
                 # recorded justification for reserve re-declaration
-                "--freeform", "--principles", "--reserve-justification"):
+                "--freeform", "--principles", "--reserve-justification",
+                # T047 learning 1: the effective-N floor is declared config —
+                # slow regimes in a narrow holdout need a declarable floor
+                "--min-effective-n"):
         assert opt in result.output, f"contract option {opt} missing on start"
+
+
+def test_mcp_start_threads_min_effective_n():
+    server = (REPO / "mcp-server" / "server.py").read_text()
+    start = server.index("async def _regime_discover_start(")
+    body = server[start:server.index("\nasync def ", start + 1)]
+    assert "--min-effective-n" in body
 
 
 def test_start_refuses_expressive_without_reserve(tmp_path):

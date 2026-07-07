@@ -11575,6 +11575,47 @@ def data_cull(
 from gefion.output import get_output  # noqa: E402
 
 
+@data_app.command("listing-meta")
+def data_listing_meta(
+    file: Optional[str] = typer.Option(
+        None, "--file",
+        help="Listing CSV/JSON file (default: fetch LISTING_STATUS from AlphaVantage)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Backfill stocks.exchange/asset_type (and missing names) from the listing.
+
+    The listing payload has always carried these fields; this writes them onto
+    existing stocks rows so asset-type universe filters (regime discovery,
+    research universes) have real data. Never expands the universe and never
+    clobbers an existing name.
+    """
+    from gefion.ingest.universe import (
+        fetch_listings,
+        load_listings_from_file,
+        update_listing_metadata,
+    )
+    out = get_output(json_output)
+    try:
+        if file:
+            listings = load_listings_from_file(Path(file))
+        else:
+            from gefion.alphavantage.client import AlphaVantageClient
+            listings = fetch_listings(
+                AlphaVantageClient(api_key=SETTINGS.alphavantage_api_key))
+    except (OSError, ValueError) as exc:
+        out.error(f"Cannot load listings: {exc}")
+        raise typer.Exit(1)
+    if not listings:
+        out.error("Listing source produced no rows — nothing to backfill")
+        raise typer.Exit(1)
+    with _regime_conn(db_url) as conn:
+        counts = update_listing_metadata(conn, listings)
+    out.success(f"Listing metadata: {counts['updated']} stocks updated, "
+                f"{counts['skipped_unknown']} listing rows without a matching stock",
+                data=counts)
+
+
 def _regime_conn(db_url: Optional[str]):
     """Open a connection to the given db_url (or the configured default)."""
     import psycopg
@@ -11873,6 +11914,10 @@ def regime_discover_start(
         None, "--signal", help="Signal feature override (default: active feature definitions)"),
     horizon_days: int = typer.Option(1, "--horizon-days", help="Forward-return horizon"),
     holdout_weeks: int = typer.Option(6, "--holdout-weeks", help="Outer holdout width"),
+    min_effective_n: int = typer.Option(
+        20, "--min-effective-n",
+        help="Episode-based effective-sample floor per bucket (declared; slow "
+             "regimes in a narrow holdout need a floor the window can hold)"),
     seed: int = typer.Option(42, "--seed", help="Run seed (reproducibility)"),
     dataset: str = typer.Option("dev", "--dataset", help="Dataset version tag"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
@@ -11960,7 +12005,8 @@ def regime_discover_start(
                 depth=depth, budget=budget, tiers=tuple(tier),
                 signal_source=signal_source, grading_scheme=grading_scheme,
                 universe_filter=universe_filter, horizon_days=horizon_days,
-                holdout_weeks=holdout_weeks, fresh_holdout=reserve,
+                holdout_weeks=holdout_weeks, min_effective_n=min_effective_n,
+                fresh_holdout=reserve,
                 freeform=freeform_list, detectors=detector_list,
                 reserve_justification=reserve_justification,
                 dataset_version=dataset)
