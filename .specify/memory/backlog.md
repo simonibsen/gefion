@@ -59,9 +59,13 @@ everything downstream (discovery atoms, `regime define` expressions,
 `regime interaction --by macro_vix`, principle seeding's `vix` stem match) then works
 with zero further code. Plan:
 
-1. **Provider client** (the real new work): AlphaVantage doesn't serve VIX; add a small
-   client for a source that does (FRED `VIXCLS` is free and daily), mirroring the
-   `alphavantage/` module shape — rate limiting, parser, spans, TDD.
+1. **Provider**: AlphaVantage serves VIX via `INDEX_DATA&symbol=VIX`
+   (daily/weekly/monthly OHLC, decades of history — a **premium** endpoint;
+   the existing key's ~68 calls/min rate implies a premium plan, so it should
+   already be unlocked — verify with one live call first). Reuse the existing
+   `alphavantage/` client: one fetch method + a `catalog.py` parser, TDD.
+   Fallback if the plan lacks index data: FRED `VIXCLS` (free, close-only)
+   via a small new client.
 2. **Storage**: start with the zero-schema-change path — pseudo-symbol row in `stocks`
    (`symbol='^VIX'`, `asset_type='Index'`) + closes in `stock_ohlcv`. Universe filters
    already exclude Index from tradable/discovery symbol universes, so VIX becomes
