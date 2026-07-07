@@ -1882,3 +1882,16 @@ class TestRegimeSlicingUI:
         content = (ui_dir / "views" / "experiments.py").read_text()
         assert "_render_by_regime_verdicts" in content
         assert "Per-regime holdout verdicts" in content
+
+    def test_regimes_view_has_chart_action(self, ui_dir):
+        """Backlog 2026-07-06: `chart regime` shipped CLI+MCP but no UI door —
+        the Regimes page must offer a per-regime chart action."""
+        content = (ui_dir / "views" / "regimes.py").read_text()
+        assert "_render_regime_chart" in content
+        assert "fetch_regime_chart_data" in content
+        assert "create_regime_chart" in content
+
+    def test_learn_curriculum_mentions_chart_regime(self):
+        """The charts module of the learning path must mention `chart regime`."""
+        learn = Path(__file__).parent.parent / ".claude" / "commands" / "gefion-learn.md"
+        assert "chart regime" in learn.read_text()
