@@ -148,10 +148,13 @@ def record_candidates(conn, run_id: int, candidates: List[Dict[str, Any]]) -> Li
         return ids
 
 
-def record_result(conn, candidate_id: int, results: Dict[str, Any], verdict: str) -> None:
+def record_result(conn, candidate_id: int, results: Dict[str, Any], verdict: str,
+                  in_family: Optional[bool] = None) -> None:
     """Record a candidate's evaluation. Only legal after the freeze; the
-    counted_in_family flag is derived from the verdict here — callers cannot
-    un-count an evaluated candidate (FR-104)."""
+    counted_in_family flag is invariant-checked here so a caller cannot
+    un-count an outer-evaluated candidate (FR-104): refusals are never in the
+    family, admitted candidates always are, and only a rejection that spent
+    NO outer test (inner-screen rejection) may declare in_family=False."""
     with create_span("discovery.ledger.record_result",
                      candidate_id=candidate_id, verdict=verdict):
         with conn.cursor() as cur:
@@ -163,7 +166,16 @@ def record_result(conn, candidate_id: int, results: Dict[str, Any], verdict: str
         if status not in ("enumerated", "evaluated"):
             raise LedgerError(
                 f"results may only be recorded after the candidate freeze (run is {status!r})")
-        counted = verdict not in _REFUSAL_VERDICTS
+        if verdict in _REFUSAL_VERDICTS:
+            if in_family:
+                raise LedgerError("a refused candidate can never be counted in the family")
+            counted = False
+        elif verdict == "admitted":
+            if in_family is False:
+                raise LedgerError("an admitted candidate is always counted in the family")
+            counted = True
+        else:  # rejected — outer-evaluated by default; inner-screen-outs opt out
+            counted = True if in_family is None else bool(in_family)
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE regime_candidates SET results = %s, verdict = %s, "

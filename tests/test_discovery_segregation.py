@@ -73,6 +73,20 @@ def test_boundaries_recorded_for_preregistration():
         b["holdout_start"])
 
 
+def test_inner_market_is_a_market_view_ending_at_the_boundary():
+    """Discovery-phase screening runs the same edge tests on inner data only —
+    the context must expose a MarketData view that provably stops at the
+    boundary."""
+    ctx, u, holdout = _context()
+    inner = ctx.inner_market()
+    assert isinstance(inner, segregation.MarketData)
+    assert set(inner.features) == set(u.features)
+    for series in inner.features.values():
+        assert max(d for d, _ in series) <= holdout.get_max_training_date()
+    assert max(d for d, _ in inner.forward_returns) <= holdout.get_max_training_date()
+    assert inner.dataset_version == "synth-test"
+
+
 def test_context_requires_data_before_the_holdout():
     """A dataset that is ALL holdout cannot prove segregation — refuse."""
     market, u = _market(n_days=20)

@@ -74,6 +74,15 @@ class DiscoveryDataContext:
     def inner_returns(self) -> Series:
         return [(d, v) for d, v in self._market.forward_returns if d <= self.inner_end]
 
+    def inner_market(self) -> MarketData:
+        """The inner window as a MarketData view — the ONLY market object the
+        discovery/screening phase may hold; every series stops at the boundary."""
+        return MarketData(
+            features={name: self.inner_feature(name) for name in self._market.features},
+            forward_returns=self.inner_returns(),
+            dataset_version=self._market.dataset_version,
+        )
+
     # -- guards ---------------------------------------------------------------
 
     def check_dates(self, dates) -> None:

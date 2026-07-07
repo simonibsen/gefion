@@ -27,7 +27,13 @@ from gefion.regimes.discovery.signals import FeatureSignalSource
 # Discovery admits at a stricter rate than standard experiments (0.10): a
 # discovered regime is a *claim mill* — its search volume is the risk — so the
 # hard gate leans conservative (documented in docs/REGIMES.md).
-DISCOVERY_FDR_RATE = 0.05
+DISCOVERY_FDR_RATE = 0.01
+
+# Inner-screen threshold: a candidate must show this much evidence on INNER
+# data before it is allowed to spend the outer holdout. The conjunction
+# (inner screen AND outer FDR survival, on disjoint data) is what makes the
+# zero-survivors-in-noise guarantee structural rather than seed luck.
+INNER_SCREEN_PVALUE = 0.05
 
 VALID_TIERS = ("interaction", "grammar", "expressive")
 
@@ -52,6 +58,7 @@ class DiscoveryConfig:
     universe_filter: Optional[str] = None  # None -> default quality chain
     horizon_days: int = 1
     fdr_rate: float = DISCOVERY_FDR_RATE
+    inner_screen: float = INNER_SCREEN_PVALUE
     min_effective_n: int = 20
     holdout_weeks: int = 6
     label_window: int = 60
@@ -91,6 +98,7 @@ def run_discovery(conn, config: DiscoveryConfig, market: MarketData) -> Dict[str
             "signals": list(config.signals),
             "horizon_days": config.horizon_days,
             "fdr_rate": config.fdr_rate,
+            "inner_screen": config.inner_screen,
             "min_effective_n": config.min_effective_n,
             "label_window": config.label_window,
             "align_window": config.align_window,
@@ -182,21 +190,38 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
     cand_ids = ledger.record_candidates(conn, run_id, candidates)
     ledger.set_status(conn, run_id, "enumerated")  # FREEZE (T4 guard)
 
-    # -- evaluate on the outer holdout only ------------------------------------
+    # -- Stage A: DISCOVERY — screen on inner data only (the nested step) ------
+    # A candidate must show evidence on the inner window (p <= inner_screen)
+    # before it may spend the outer holdout. Selection uses data disjoint from
+    # the judge, so it costs the outer test nothing; the conjunction is what
+    # makes zero-survivors-in-noise structural.
+    inner_market = ctx.inner_market()
+    inner_src = FeatureSignalSource(inner_market, config.signals,
+                                    align_window=config.align_window)
+    inner_results: List[List[Dict[str, Any]]] = []
+    selected: List[bool] = []
+    for cand, spec in zip(candidates, eval_specs):
+        tests = _candidate_tests(conn, run_id, config, inner_src, cand, spec,
+                                 inner_market, start=None, end=None, stage="inner")
+        inner_results.append(tests)
+        pvalued = [t for t in tests if t["pvalue"] is not None]
+        selected.append(any(t["pvalue"] <= config.inner_screen for t in pvalued))
+
+    # -- Stage B: CONFIRMATION — outer holdout, selected candidates only -------
     src = FeatureSignalSource(market, config.signals,
                               align_window=config.align_window)
     all_tests: List[Dict[str, Any]] = []      # flat family, in deterministic order
     per_candidate: List[List[Dict[str, Any]]] = []
-    for cand, spec in zip(candidates, eval_specs):
-        if cand["tier"] == "interaction":
-            tests = _evaluate_interaction(conn, run_id, config, src, cand, holdout)
-        else:  # grammar: causal bucket labels through the conditional gate
-            tests = _evaluate_grammar(conn, run_id, config, src, cand, spec,
-                                      market, holdout)
+    for cand, spec, sel in zip(candidates, eval_specs, selected):
+        tests: List[Dict[str, Any]] = []
+        if sel:
+            tests = _candidate_tests(conn, run_id, config, src, cand, spec, market,
+                                     start=holdout.holdout_start_date,
+                                     end=holdout.holdout_end_date, stage="outer")
         per_candidate.append(tests)
         all_tests.extend(tests)
 
-    # -- ONE flat FDR family over every p-valued test (FR-104/108) -------------
+    # -- ONE flat FDR family over every outer p-valued test (FR-104/108) -------
     valid = [t for t in all_tests if t["pvalue"] is not None]
     mask = apply_fdr([t["pvalue"] for t in valid], config.fdr_rate)
     for t, survived in zip(valid, mask):
@@ -208,16 +233,26 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
 
     # -- verdicts + definitions -------------------------------------------------
     admitted: List[Dict[str, Any]] = []
-    for cand, cand_id, tests in zip(candidates, cand_ids, per_candidate):
-        if all(t["pvalue"] is None for t in tests):
+    for cand, cand_id, sel, inner, tests in zip(
+            candidates, cand_ids, selected, inner_results, per_candidate):
+        results = {"inner": inner, "selected": sel, "tests": tests,
+                   "inner_screen": config.inner_screen, "fdr_rate": config.fdr_rate}
+        in_family = None
+        if not sel:
+            # discovery found nothing on inner data: no outer test was spent
+            if all(t["pvalue"] is None for t in inner):
+                verdict = "refused_low_power"
+                in_family = False
+            else:
+                verdict, in_family = "rejected", False
+        elif all(t["pvalue"] is None for t in tests):
             verdict = "refused_low_power"
         elif any(t["survived"] for t in tests):
             verdict = "admitted"
         else:
             verdict = "rejected"
-        ledger.record_result(conn, cand_id,
-                             results={"tests": tests, "fdr_rate": config.fdr_rate},
-                             verdict=verdict)
+        ledger.record_result(conn, cand_id, results=results, verdict=verdict,
+                             in_family=in_family)
         if verdict == "admitted":
             name = _store_admitted(conn, run_id, config, cand)
             admitted.append({"candidate_id": cand_id,
@@ -230,52 +265,52 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
         "run_id": run_id,
         "status": "complete",
         "n_candidates": len(candidates),
+        "n_selected": sum(selected),
         "family_size": family_size,
         "n_admitted": len(admitted),
         "admitted": admitted,
     }
 
 
-def _evaluate_interaction(conn, run_id, config, src, cand, holdout):
-    """Tier 1: one HAC interaction test per signal (the gradient question)."""
+def _candidate_tests(conn, run_id, config, src, cand, spec, market,
+                     start, end, stage: str) -> List[Dict[str, Any]]:
+    """All edge tests for one candidate over [start, end] on the given market
+    view — tier-1 HAC interaction or tier-2 bucket tests. Refusals are
+    recorded as sample-dependent diagnostics with their stage."""
     tests: List[Dict[str, Any]] = []
-    for signal in config.signals:
-        test = edges.tier1_interaction_test(
-            src, signal=signal,
-            conditioning_feature=cand["provenance"]["atom_features"][0],
-            start=holdout.holdout_start_date, end=holdout.holdout_end_date)
-        test["candidate_hash"] = cand["candidate_hash"]
-        tests.append(test)
-        if test["pvalue"] is None:
-            ledger.record_diagnostic(
-                conn, run_id, kind="min_sample_refusal",
-                detail={"signal": signal, "candidate_hash": cand["candidate_hash"],
-                        "n": test["n"], "floor": edges.MIN_INTERACTION_N},
-                sample_dependent=True)
-    return tests
-
-
-def _evaluate_grammar(conn, run_id, config, src, cand, spec, market, holdout):
-    """Tier 2: causal bucket labels over the full timeline (labels at t use
-    data <= t only), edge tests restricted to the outer holdout."""
-    labels = edges.causal_labels(spec, market, window=config.label_window)
-    tests: List[Dict[str, Any]] = []
-    for signal in config.signals:
-        bucket_tests = edges.tier2_bucket_tests(
-            src, signal=signal, labels_by_date=labels,
-            start=holdout.holdout_start_date, end=holdout.holdout_end_date,
-            min_effective_n=config.min_effective_n)
-        for test in bucket_tests:
+    if cand["tier"] == "interaction":
+        for signal in config.signals:
+            test = edges.tier1_interaction_test(
+                src, signal=signal,
+                conditioning_feature=cand["provenance"]["atom_features"][0],
+                start=start, end=end)
             test["candidate_hash"] = cand["candidate_hash"]
             tests.append(test)
             if test["pvalue"] is None:
                 ledger.record_diagnostic(
                     conn, run_id, kind="min_sample_refusal",
-                    detail={"signal": signal, "bucket": test["bucket"],
+                    detail={"stage": stage, "signal": signal,
                             "candidate_hash": cand["candidate_hash"],
-                            "effective_n": test["effective_n"],
-                            "floor": config.min_effective_n},
+                            "n": test["n"], "floor": edges.MIN_INTERACTION_N},
                     sample_dependent=True)
+    else:  # grammar: causal labels over this market view, tests in range
+        labels = edges.causal_labels(spec, market, window=config.label_window)
+        for signal in config.signals:
+            for test in edges.tier2_bucket_tests(
+                    src, signal=signal, labels_by_date=labels,
+                    start=start, end=end,
+                    min_effective_n=config.min_effective_n):
+                test["candidate_hash"] = cand["candidate_hash"]
+                tests.append(test)
+                if test["pvalue"] is None:
+                    ledger.record_diagnostic(
+                        conn, run_id, kind="min_sample_refusal",
+                        detail={"stage": stage, "signal": signal,
+                                "bucket": test["bucket"],
+                                "candidate_hash": cand["candidate_hash"],
+                                "effective_n": test["effective_n"],
+                                "floor": config.min_effective_n},
+                        sample_dependent=True)
     return tests
 
 

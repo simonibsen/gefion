@@ -172,15 +172,34 @@ def test_losers_are_persisted_and_visible(conn):
 
 
 def test_counted_in_family_invariants(conn):
-    """Refusals never enter the family; evaluated candidates always do."""
+    """Refusals never enter the family; outer-evaluated candidates always do;
+    an inner-screen rejection (no outer test spent) may opt out — but
+    admitted/refused flags can never be overridden."""
     run_id = _run(conn)
-    ids = ledger.record_candidates(conn, run_id, CANDS)
+    ids = ledger.record_candidates(conn, run_id, CANDS + [
+        {"candidate_hash": "ccc3", "expression": {"leaf": "comparison"},
+         "tier": "grammar", "provenance": None},
+        {"candidate_hash": "ddd4", "expression": {"leaf": "comparison"},
+         "tier": "grammar", "provenance": None},
+    ])
     ledger.set_status(conn, run_id, "enumerated")
     ledger.record_result(conn, ids[0], results={}, verdict="rejected")
     ledger.record_result(conn, ids[1], results={}, verdict="refused_degenerate")
+    # inner-screen rejection: discovery chose not to spend the holdout on it
+    ledger.record_result(conn, ids[2], results={"selected": False},
+                         verdict="rejected", in_family=False)
+    ledger.record_result(conn, ids[3], results={}, verdict="admitted")
     rows = {r["candidate_hash"]: r for r in ledger.list_candidates(conn, run_id)}
     assert rows["aaa1"]["counted_in_family"] is True
     assert rows["bbb2"]["counted_in_family"] is False
+    assert rows["ccc3"]["counted_in_family"] is False
+    assert rows["ddd4"]["counted_in_family"] is True
+    # forced flags cannot be overridden
+    with pytest.raises(ledger.LedgerError):
+        ledger.record_result(conn, ids[3], results={}, verdict="admitted", in_family=False)
+    with pytest.raises(ledger.LedgerError):
+        ledger.record_result(conn, ids[1], results={}, verdict="refused_degenerate",
+                             in_family=True)
 
 
 def test_family_size_recorded(conn):
@@ -264,17 +283,23 @@ def test_runner_end_to_end_on_noise(conn):
     assert space["tiers"] == ["interaction"]
     assert space["depth"] == 1 and space["budget"] == 10
     assert space["fdr_rate"] == runner.DISCOVERY_FDR_RATE
+    assert space["inner_screen"] == runner.INNER_SCREEN_PVALUE
     assert len(space["atoms"]) == 2
     # segregation boundaries recorded
     assert run["segregation"]["holdout_start"] > run["segregation"]["inner_end"]
 
-    # every candidate persisted with results and a verdict
+    # every candidate persisted with results (inner screen + selection) and a verdict
     cands = ledger.list_candidates(conn, summary["run_id"])
     assert len(cands) == 2 and all(c["tier"] == "interaction" for c in cands)
-    assert all(c["verdict"] is not None and c["results"] is not None for c in cands)
+    for c in cands:
+        assert c["verdict"] is not None
+        assert "inner" in c["results"] and "selected" in c["results"]
 
-    # family size = number of p-valued tests = candidates x signals here
-    assert run["family_size"] == summary["family_size"] == 2
+    # family = outer tests actually spent (selected candidates only)
+    outer_pvalued = sum(1 for c in cands for t in c["results"]["tests"]
+                        if t["pvalue"] is not None)
+    assert run["family_size"] == summary["family_size"] == outer_pvalued
+    assert summary["n_selected"] == sum(1 for c in cands if c["results"]["selected"])
     assert summary["n_admitted"] == 0  # pure noise
 
 
@@ -362,10 +387,14 @@ def test_runner_tier2_family_counts_every_bucket_test(conn):
 
     all_tests = [t for c in cands for t in c["results"]["tests"]]
     pvalued = [t for t in all_tests if t["pvalue"] is not None]
-    refused = [t for t in all_tests if t["pvalue"] is None]
     assert run["family_size"] == len(pvalued)
-    # boolean candidates have 2 buckets each; every evaluation reported
-    assert len(all_tests) == len(pvalued) + len(refused) >= 8
+    # every candidate carries its inner-screen evidence (2 buckets per
+    # boolean candidate), selected or not — nothing dropped
+    for c in cands:
+        assert len(c["results"]["inner"]) >= 2
+        if not c["results"]["selected"]:
+            assert c["results"]["tests"] == []       # no outer test spent
+            assert c["counted_in_family"] is False   # and none counted
     # zero survivors on pure noise for this seed; losers all persisted
     assert summary["n_admitted"] == 0
     assert all(c["verdict"] in ("rejected", "refused_low_power") for c in cands)

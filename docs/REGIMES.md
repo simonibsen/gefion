@@ -112,6 +112,11 @@ making the failure modes *structurally impossible*, not merely discouraged.
 1. **Nested segregation** (T1/T3): discovery and fitting see **inner-window data only** —
    the `DiscoveryDataContext` is the sole data path and raises on any outer-holdout touch.
    Detectors then label the holdout *causally* (labels at *t* use data ≤ *t* only).
+   Discovery is a real selection step, not a formality: a candidate must first show
+   evidence on the inner window (p ≤ the declared `inner_screen`, default 0.05) before it
+   is allowed to *spend* the outer holdout at all. Because selection and judgment use
+   disjoint data, the conjunction multiplies the false-admission probability down
+   (≈ P(inner pass) × FDR rate) instead of leaving it at the FDR rate alone.
 2. **Pre-registration** (T2/T5): the search space — atom library, depth cap *K*, budget, and
    the three declared seams (`signal_source`, `grading_scheme`, `universe_filter`) — is
    written to the run row **before** anything is evaluated. The universe filter chain is
@@ -120,10 +125,12 @@ making the failure modes *structurally impossible*, not merely discouraged.
    `pre_registered → enumerated → evaluated → complete` (or `invalid`); evaluation is
    API-impossible before the candidate set is frozen at `enumerated`.
 4. **One flat FDR family that counts the losers** (T2/T4/T5): every
-   (signal × candidate × bucket) test actually run enters a single Benjamini-Hochberg call;
-   the realized `family_size` is recorded on the run. Refused tests (low power, degenerate)
-   get **no p-value and cannot survive** (fail-closed). Discovery's gate runs at a stricter
-   FDR rate (0.05) than standard experiments (0.10) — search volume is the risk.
+   (signal × candidate × bucket) test actually spent on the outer holdout enters a single
+   Benjamini-Hochberg call; the realized `family_size` is recorded on the run. Candidates
+   screened out on inner data spent no outer test (their inner evidence is still ledgered);
+   refused tests (low power, degenerate) get **no p-value and cannot survive**
+   (fail-closed). Discovery's gate runs at a much stricter FDR rate (0.01) than standard
+   experiments (0.10) — search volume is the risk.
 5. **Seeded, auditable runs** (T6): every run records its seed and full candidate +
    diagnostics ledgers; identical inputs reproduce identical verdicts.
 
@@ -167,8 +174,27 @@ When reading `verdicts`, the family size is always shown beside the survivors: "
 admitted out of a 240-test family" and "1 admitted out of 3 tests" are very different
 claims.
 
-**Expect mostly (often entirely) rejections.** A discovery loop that admits often is broken;
-the CI negative-control suite proves this loop admits nothing in pure noise. An admitted
+**Expect mostly (often entirely) rejections.** A discovery loop that admits often is broken.
+
+### The standing negative control (CI)
+
+`tests/test_discovery_negative_control.py` runs the FULL pipeline in CI, every PR:
+
+- **SC-101**: pure-noise data, both tiers, 20 fixed seeds → **zero** admissions, with the
+  ledgers audited (family recorded, losers persisted and counted).
+- **SC-102**: an edge planted in exactly one regime (cancellation design: concentrated
+  inside, anti-edge outside, flat overall) among decoys → exact recovery in ≥ 95% of 20
+  seeded runs (measured: 40/40 on a wider scan).
+
+Read the fine print honestly: the seed sets were fixed a priori and runs are
+deterministic, so CI proves the *machinery* (segregation, freeze, counting, fail-closed)
+as a stable regression guarantee. The measured false-admission rate at v1 defaults over a
+wider 100-seed noise scan was **1/100** — that ~1% is the configured error rate working
+as specified, not a defect; no gate with a nonzero admission rate is zero everywhere.
+The Reality-Check/SPA bootstrap fast-follow (FR-108) must land before per-cycle search
+budgets are raised beyond v1 defaults.
+
+An admitted
 candidate becomes an ordinary `regime_definitions` row (`origin='machine'`) with full 005
 affordances (labels, chart, slicing). Structural limits the search hits (missing inputs,
 budget/depth exhaustion) and sample-dependent refusals are recorded in the diagnostics
