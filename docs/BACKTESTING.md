@@ -1088,3 +1088,20 @@ This approach is being implemented as `MLFilterStrategy` - see strategy registry
 - Data loader: `src/gefion/backtest/data_loader.py`
 - Metrics calculation: `src/gefion/backtest/metrics.py`
 - Tests: `tests/test_backtest_engine.py`, `tests/test_backtest_cli.py`
+
+## Regime-sliced metrics (spec 005)
+
+Add `--by-regime <name>` to `gefion backtest run` (or the `by_regime` arg on the
+`backtest_run` MCP tool, or the "Slice by regime" selector on the Backtesting UI page) to
+get **per-regime** metrics alongside the aggregate. See [REGIMES.md](REGIMES.md).
+
+- **How it works** — each dated equity point and trade is attributed to the regime label
+  active that day; per-regime return/Sharpe/drawdown/win-rate/profit-factor are computed with
+  the same metric functions as the aggregate. Slicing is read-only over backtest output; a run
+  without `--by-regime` is unchanged.
+- **Reconciliation** — per-regime results reconcile to the aggregate: the product of each
+  bucket's growth factor equals the full curve's growth, and per-bucket trade counts sum to the
+  total. The report shows a reconciliation indicator.
+- **Low-power flagging** — each bucket carries a raw and an **effective** (independent-episode)
+  sample size; buckets below the effective-sample floor are flagged low-power and must not be
+  read as findings. A great-looking Sharpe on a handful of episodes means nothing.

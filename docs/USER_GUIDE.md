@@ -503,3 +503,21 @@ The **AI Actions** page (second item in the sidebar) is the primary interaction 
 
 ## Verification
 - Run tests: `make test` (DB tests skipped) or `ENABLE_DB_TESTS=1 make test-db` with the DB running.
+
+## Regimes (spec 005)
+
+Define, compute, and inspect market/sector/asset regimes for conditional evaluation. See
+[REGIMES.md](REGIMES.md) for concepts.
+
+- `gefion regime define --name <slug> --scope market|sector|industry|asset --expression <ast.json> --bucketing <buckets.json> [--min-dwell N]` — define and store a regime.
+- `gefion regime list [--scope S] [--status active|archived]` — list definitions.
+- `gefion regime show <name>` — show a definition (AST, bucketing, persistence, metadata).
+- `gefion regime compute <name> [--dataset V] [--window N]` — compute causal labels from referenced features.
+- `gefion regime labels <name>` — summarize computed labels (bucket coverage).
+- `gefion regime archive <name>` — archive a definition.
+- `gefion regime export <dir>` / `gefion regime import <dir>` — JSON backup/restore of definitions.
+- `gefion regime interaction --signal <feat> --by <feat> [--horizon-days N]` — continuous-interaction test (does a signal's edge scale with a conditioning variable?).
+- `gefion experiment run --id N --by-regime <name>` — conditional holdout verdicts: a p-value per regime bucket, all entered into one flat Benjamini-Hochberg family (fail-closed on low-power buckets).
+- `gefion chart regime <name> --symbol <SYM> [--start-date D] [--end-date D]` — chart a symbol's price with regime-episode bands overlaid.
+
+All commands accept `--json` and `--db-url`.

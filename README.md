@@ -3,7 +3,7 @@
 [![CI](https://github.com/simonibsen/gefion/actions/workflows/ci.yml/badge.svg)](https://github.com/simonibsen/gefion/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/simonibsen/gefion)](https://github.com/simonibsen/gefion/releases)
 
-**Database-first ML platform for quantitative stock analysis.** Ingests price and fundamental data, computes features, trains models, runs autonomous experiments, and backtests trading strategies.
+**Autonomous ML research system for quantitative trading.** Ingests price and fundamental data, generates its own hypotheses, engineers features, trains models, and backtests strategies — keeping only what survives statistical validation.
 
 Alpha, actively developed. Releases are cut automatically from
 [Conventional Commits](https://www.conventionalcommits.org/) — see the
@@ -186,6 +186,7 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion experiment probation-check` | Re-measure promoted artifacts; auto-demote degradation (also runs on every data-update) |
 | `gefion experiment demote` | Manually demote a promoted artifact (reason required) |
 | `gefion chart experiment-trials` / `experiment-fdr` | Trial scatter / FDR cycle summary charts |
+| `gefion chart regime` | Price with regime-episode bands overlaid (see docs/REGIMES.md) |
 
 ### Backtesting & Strategies
 
@@ -195,6 +196,22 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion backtest compare` | Compare multiple strategies side-by-side |
 | `gefion strategy list` | List registered strategies |
 | `gefion strategy create-config` | Create a strategy configuration |
+
+### Regimes
+
+Describe the state of the market/sector/asset as a causal, persistent dimension and evaluate
+signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
+
+| Command | Description |
+|---------|-------------|
+| `gefion regime define` | Define a regime (expression AST + bucketing) |
+| `gefion regime list` | List regime definitions |
+| `gefion regime show` | Show a regime definition |
+| `gefion regime compute` | Compute causal labels for a regime |
+| `gefion regime labels` | Summarize computed labels (bucket coverage) |
+| `gefion regime archive` | Archive a regime definition |
+| `gefion regime export` | Export regime definitions to JSON |
+| `gefion regime import` | Import regime definitions from JSON |
 
 ### System
 

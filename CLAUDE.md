@@ -142,6 +142,8 @@ Before exiting plan mode, verify:
 - JSONL files in `~/.gefion/` (conversation history, error log); PostgreSQL (system state queries) (001-ui-reliability)
 - Python 3.10+ (existing codebase) + scikit-learn, XGBoost, LightGBM, optuna (Bayesian search), psycopg, typer (CLI), streamlit (UI), jinja2 (D3 templates) (004-autonomous-experiments)
 - PostgreSQL with TimescaleDB (existing); principles catalog as YAML files in repo (004-autonomous-experiments)
+- Python 3.10+ + psycopg (DB), numpy / pandas / scipy / statsmodels (effective-N, (005-regime-slicing)
+- PostgreSQL + TimescaleDB. New `regime_definitions` (relational) and `regime_labels` (005-regime-slicing)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)

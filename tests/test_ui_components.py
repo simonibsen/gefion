@@ -54,11 +54,20 @@ class TestUIStructure:
             "experiments.py",
             "documentation.py",
             "settings.py",
+            "regimes.py",
         ]
 
         assert views_dir.exists()
         for view in expected_views:
             assert (views_dir / view).exists(), f"View {view} not found"
+
+    def test_regimes_has_render_function(self, ui_dir):
+        """Regimes view should have a render_regimes function and register in app.py."""
+        content = (ui_dir / "views" / "regimes.py").read_text()
+        assert "def render_regimes(" in content
+        app_content = (ui_dir / "app.py").read_text()
+        assert "render_regimes" in app_content
+        assert "Regimes" in app_content
 
     def test_all_ui_views_compile(self, ui_dir):
         """Every UI view module must be valid Python (no syntax errors)."""
@@ -1849,3 +1858,27 @@ class TestChartsPageLayout:
         assert ctx["page_name"] == "Charts"
         # Should have summary
         assert "summary" in ctx
+
+
+class TestRegimeSlicingUI:
+    """US2 T024: backtest view supports regime slicing."""
+
+    @pytest.fixture
+    def ui_dir(self):
+        return Path(__file__).parent.parent / "src" / "gefion" / "ui"
+
+    def test_backtest_view_supports_by_regime(self, ui_dir):
+        content = (ui_dir / "views" / "backtest.py").read_text()
+        assert "--by-regime" in content
+        assert "by_regime" in content
+        assert "Per-regime metrics" in content
+
+    def test_regimes_view_has_interaction_panel(self, ui_dir):
+        content = (ui_dir / "views" / "regimes.py").read_text()
+        assert "_render_interaction_panel" in content
+        assert "continuous_interaction" in content
+
+    def test_experiments_view_renders_by_regime_verdicts(self, ui_dir):
+        content = (ui_dir / "views" / "experiments.py").read_text()
+        assert "_render_by_regime_verdicts" in content
+        assert "Per-regime holdout verdicts" in content

@@ -469,6 +469,27 @@ def _render_backtest_results(data: dict) -> None:
                     }
                 )
 
+    # Regime slicing (spec 005) — per-regime metric blocks
+    by_regime = data.get("by_regime")
+    if by_regime and by_regime.get("buckets"):
+        st.subheader(":material/insights: Per-regime metrics")
+        recon = by_regime.get("reconciliation_ok")
+        st.caption(f"Reconciles to aggregate: {'✅' if recon else '⚠️ NO'}")
+        rows = []
+        for label, m in by_regime["buckets"].items():
+            flag = " ⚠️ low-power" if m.get("low_power") else ""
+            rows.append({
+                "regime": label + flag,
+                "total_return": f"{m['total_return']:.2%}",
+                "sharpe": f"{m['sharpe_ratio']:.2f}",
+                "max_drawdown": f"{m['max_drawdown']:.2%}",
+                "trades": m["trade_count"],
+                "effective_n": m["effective_n"],
+            })
+        st.dataframe(rows, width="stretch")
+        st.caption("Trust only buckets above the effective-sample floor — low-power buckets "
+                   "are flagged, not findings.")
+
 
 def render_backtest():
     """Render the backtesting page."""
@@ -815,6 +836,20 @@ def render_run_section():
     if symbol_mode == "Selected" and not selected_symbols:
         st.warning("⚠️ Please select at least one symbol to backtest.")
 
+    # Regime slicing (spec 005) — optionally slice results by a regime
+    regime_choice = "(none)"
+    try:
+        from gefion.ui.components.database import get_connection
+        from gefion.regimes.definitions import list_definitions
+        with get_connection() as _conn:
+            _regime_names = [d.name for d in list_definitions(_conn, status="active")]
+        if _regime_names:
+            regime_choice = st.selectbox(
+                "Slice by regime (optional)", ["(none)"] + _regime_names,
+                help="Adds per-regime metrics to the results (spec 005)")
+    except Exception:
+        pass
+
     if st.button("Run Backtest", type="primary", width="stretch"):
         # Validate before running
         if symbol_mode == "Selected" and not selected_symbols:
@@ -931,6 +966,10 @@ def render_run_section():
             cmd.extend(["--symbols", ",".join(selected_symbols)])
         else:
             cmd.extend(["--exchange", exchange, "--limit", str(bt_limit)])
+
+        # Regime slicing (spec 005) — additive per-regime metrics
+        if regime_choice and regime_choice != "(none)":
+            cmd.extend(["--by-regime", regime_choice])
 
         # Show equivalent CLI command (skip "python -m gefion.cli" prefix)
         cli_args = cmd[3:]  # Skip [python, -m, gefion.cli]

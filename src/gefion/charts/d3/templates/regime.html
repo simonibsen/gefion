@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{{ theme_css }}
+.price-line { fill: none; stroke: var(--color-price); stroke-width: 1.5; }
+.regime-band { opacity: 0.28; }
+.legend-item { font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="chart-container" id="chart"></div>
+{{ d3_script }}
+<script>
+{% include 'utils.js' %}
+
+const data = {{ data_json }};
+const config = {{ config_json }};
+const TOTAL_WIDTH = {{ width }};
+const TOTAL_HEIGHT = {{ height }};
+
+const price = data.price;
+const episodes = data.episodes;
+price.forEach(d => { d._date = new Date(d.date); });
+episodes.forEach(e => { e._start = new Date(e.start); e._end = new Date(e.end); });
+
+const margin = {top: 48, right: 40, bottom: 30, left: 70};
+const innerWidth = TOTAL_WIDTH - margin.left - margin.right;
+const innerHeight = TOTAL_HEIGHT - margin.top - margin.bottom;
+
+const container = d3.select("#chart");
+const tooltip = createTooltip(container);
+
+container.insert("div", ":first-child")
+    .attr("class", "chart-title")
+    .text(config.title);
+
+const svg = container.append("svg")
+    .attr("width", TOTAL_WIDTH)
+    .attr("height", TOTAL_HEIGHT);
+const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+const x = d3.scaleTime()
+    .domain(d3.extent(price, d => d._date))
+    .range([0, innerWidth]);
+const y = d3.scaleLinear()
+    .domain([d3.min(price, d => d.close) * 0.97, d3.max(price, d => d.close) * 1.03])
+    .range([innerHeight, 0]);
+
+// Regime episode bands (behind the price line)
+const bandColor = d3.scaleOrdinal()
+    .domain(config.bucket_order)
+    .range(config.band_colors);
+
+g.selectAll(".regime-band")
+    .data(episodes)
+    .enter().append("rect")
+    .attr("class", "regime-band")
+    .attr("x", e => Math.max(0, x(e._start)))
+    .attr("width", e => Math.max(0, Math.min(innerWidth, x(e._end)) - Math.max(0, x(e._start))))
+    .attr("y", 0)
+    .attr("height", innerHeight)
+    .attr("fill", e => bandColor(e.label))
+    .on("mousemove", (event, e) => {
+        tooltip.style("opacity", 1)
+            .html(`<b>${e.label}</b><br>${e.start} → ${e.end}<br>${e.days} days`)
+            .style("left", (event.pageX + 12) + "px")
+            .style("top", (event.pageY - 20) + "px");
+    })
+    .on("mouseleave", () => tooltip.style("opacity", 0));
+
+// Price line
+g.append("path")
+    .datum(price)
+    .attr("class", "price-line")
+    .attr("d", d3.line().x(d => x(d._date)).y(d => y(d.close)));
+
+// Axes
+g.append("g").attr("transform", `translate(0,${innerHeight})`).call(d3.axisBottom(x).ticks(8));
+g.append("g").call(d3.axisLeft(y));
+
+// Legend
+const legend = svg.append("g").attr("transform", `translate(${margin.left},18)`);
+config.bucket_order.forEach((label, i) => {
+    const lg = legend.append("g").attr("transform", `translate(${i * 110},0)`);
+    lg.append("rect").attr("width", 14).attr("height", 14)
+        .attr("fill", bandColor(label)).attr("opacity", 0.5);
+    lg.append("text").attr("class", "legend-item")
+        .attr("x", 20).attr("y", 11).text(label);
+});
+</script>
+</body>
+</html>

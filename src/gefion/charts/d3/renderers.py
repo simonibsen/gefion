@@ -545,3 +545,43 @@ def create_experiment_features(
     """Feature importance before/after: grouped bar chart."""
     config = {"title": title or "Feature Importance: Before vs After"}
     return render_d3_chart("experiment_features.html", features, config, width, height)
+
+
+def create_regime_chart(
+    price_data: List[Dict],
+    episodes: List[Dict],
+    regime_name: str,
+    symbol: str,
+    title: Optional[str] = None,
+    width: int = 1000,
+    height: int = 500,
+) -> str:
+    """Price line with colored regime-episode bands (spec 005 visualization).
+
+    Args:
+        price_data: [{date, close}, ...] sorted by date
+        episodes: [{label, start, end, days?}, ...] contiguous regime episodes
+        regime_name: the RegimeDefinition name (for the title/legend)
+        symbol: the price symbol overlaid
+    """
+    with create_span("charts.d3.regime", regime=regime_name, symbol=symbol,
+                     n_episodes=len(episodes)):
+        if not price_data:
+            raise ValueError("price_data is empty — nothing to chart")
+        # stable bucket order: first-seen order across episodes
+        bucket_order: List[str] = []
+        for e in episodes:
+            e.setdefault("days", "")
+            if e["label"] not in bucket_order:
+                bucket_order.append(e["label"])
+        config = {
+            "title": title or f"{symbol} — {regime_name} episodes",
+            "bucket_order": bucket_order,
+            # calm greens → stressed reds; falls back to palette for extra buckets
+            "band_colors": (["#2e7d32", "#f9a825", "#c62828"] + CHART_PALETTE)[:max(3, len(bucket_order))],
+        }
+        return render_d3_chart(
+            "regime.html",
+            {"price": price_data, "episodes": episodes},
+            config, width, height,
+        )

@@ -1,8 +1,19 @@
-# g2 Project Status
+# Gefion Project Status
 
-**Last Updated**: 2026-03-15
+**Last Updated**: 2026-07-04
 
 ## Current Capabilities
+
+### Regime Slicing (spec 005 — new)
+- First-class regimes: named, causal, persistent market/sector/asset states
+  (`regime_definitions` + `regime_labels` hypertable; declarative expression AST)
+- `gefion regime` CLI group (define/compute/list/show/labels/interaction/archive/export/import),
+  mirrored `regime_*` MCP tools, and a UI Regimes page
+- Regime-sliced backtests: `backtest run --by-regime` → per-regime metrics that reconcile
+  to the aggregate, with effective-sample low-power flags
+- Continuous-interaction test (OLS + Newey-West HAC): does an edge scale with a variable?
+- Conditional experiment verdicts: per-regime holdout p-values entered into one flat
+  Benjamini-Hochberg family; fail-closed on low-power/undefined buckets
 
 ### Data Infrastructure
 - 5,600+ NASDAQ stocks tracked daily

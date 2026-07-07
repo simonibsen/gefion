@@ -11,6 +11,7 @@ license = {text = "Elastic-2.0"}
 requires-python = ">=3.10"
 dependencies = [
     "typer>=0.12",
+    "click>=8.1",
     "requests>=2.31",
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.1",
@@ -41,6 +42,7 @@ ml_extended = [
 ]
 charts = [
     "plotly>=5.18",
+    "jinja2>=3.1",
 ]
 ui = [
     "streamlit>=1.57",

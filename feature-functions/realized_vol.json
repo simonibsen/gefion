@@ -1,0 +1,10 @@
+{
+  "name": "realized_vol",
+  "version": "1.0",
+  "language": "python",
+  "description": "Annualized realized volatility: rolling sample stddev of daily returns over `period` days, scaled by sqrt(252). Causal \u2014 the value at t uses only the trailing window ending at t. Primary conditioning variable for volatility regimes (docs/REGIMES.md).",
+  "status": "active",
+  "enabled": true,
+  "created_by": "gefion",
+  "function_body": "import pandas as pd\nimport numpy as np\n\n\ndef compute(rows, specs):\n    \"\"\"Annualized realized volatility: rolling stddev of daily returns.\n\n    Causal by construction: the value at date t uses only returns from the\n    trailing `period` window ending at t (sqrt(252)-annualized, sample stddev).\n\n    Args:\n        rows: Price data with 'date' and 'close' or 'adjusted_close'\n        specs: List of specs with 'period' (default 20) and 'column'\n\n    Returns:\n        List of {date, <column>: value} dicts; warm-up rows omitted.\n    \"\"\"\n    if not rows:\n        return []\n\n    df = pd.DataFrame(rows)\n    if df.empty:\n        return []\n    df = df.sort_values(\"date\").reset_index(drop=True)\n\n    close_col = (\n        \"adjusted_close\"\n        if \"adjusted_close\" in df.columns and df[\"adjusted_close\"].notna().any()\n        else \"close\"\n    )\n    close = pd.to_numeric(df[close_col], errors=\"coerce\")\n    returns = close.pct_change()\n\n    results = []\n    cols = {}\n    for spec in specs:\n        period = int(spec.get(\"period\", 20))\n        col_name = spec.get(\"column\", f\"realized_vol_{period}\")\n        # rolling sample stddev of returns, annualized\n        cols[col_name] = returns.rolling(window=period, min_periods=period).std(\n            ddof=1\n        ) * np.sqrt(252.0)\n\n    for i in range(len(df)):\n        result = {\"date\": df.at[i, \"date\"]}\n        for col_name, series in cols.items():\n            val = series.iloc[i]\n            if pd.notna(val):\n                result[col_name] = float(val)\n        if len(result) > 1:\n            results.append(result)\n\n    return results\n"
+}
