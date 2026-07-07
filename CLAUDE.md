@@ -144,6 +144,8 @@ Before exiting plan mode, verify:
 - PostgreSQL with TimescaleDB (existing); principles catalog as YAML files in repo (004-autonomous-experiments)
 - Python 3.10+ + psycopg (DB), numpy / pandas / scipy / statsmodels (effective-N, (005-regime-slicing)
 - PostgreSQL + TimescaleDB. New `regime_definitions` (relational) and `regime_labels` (005-regime-slicing)
+- Python 3.10+ + numpy/scipy (tests + enumeration), psycopg (ledgers), existing gefion (006-agentic-regime-discovery)
+- PostgreSQL + TimescaleDB. New tables — `regime_discovery_runs`, (006-agentic-regime-discovery)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)
