@@ -1857,6 +1857,8 @@ async def list_tools() -> List[Tool]:
                                    "description": "Comma-separated principle ids to seed atoms/detectors"},
                     "reserve_justification": {"type": "string",
                                               "description": "Recorded justification for re-declaring a consumed reserve"},
+                    "min_effective_n": {"type": "integer",
+                                        "description": "Episode-based effective-sample floor per bucket (default 20)"},
                     "seed": {"type": "integer", "description": "Run seed"},
                     "dataset": {"type": "string", "description": "Dataset version tag"},
                 },
@@ -4829,6 +4831,8 @@ async def _regime_discover_start(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--principles", args["principles"]])
         if args.get("reserve_justification"):
             cmd.extend(["--reserve-justification", args["reserve_justification"]])
+        if args.get("min_effective_n") is not None:
+            cmd.extend(["--min-effective-n", str(args["min_effective_n"])])
         if args.get("seed") is not None:
             cmd.extend(["--seed", str(args["seed"])])
         if args.get("dataset"):
