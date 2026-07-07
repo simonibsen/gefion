@@ -191,11 +191,19 @@ structural guardrails (see `docs/REGIMES.md` § Agentic discovery for the threat
 3. Survivors: `regime_discover_verdicts` — the FDR family size is always part of the
    sentence ("1 admitted out of a 240-test family")
 4. Trust: `regime_discover_grades` (forward folds; fold 1 = probation); a scheduled
-   re-test is `regime_discover_grade_fold` (mutating — confirm first)
-5. To start a run, `regime_discover_start` — **mutating and potentially long: always
+   re-test is `regime_discover_grade_fold` (mutating — confirm first). A re-test can
+   come back **no evidence** (power-refused): recorded, never counted, never a
+   regime-limited trigger — do not read it as a failure. The fold grid can be
+   re-declared with `regime_discover_register` (mutating) only until real evidence
+   exists; after the first confirmed/failed fold it is locked
+5. Deep validation: pass `max_date` to `regime_discover_start` to discover as of a
+   past vintage (procedure evidence — never a grade confirmation); `half:a`/`half:b`
+   in the universe chain give a split-half robustness check (robustness, NOT
+   independent validation, at market scope)
+6. To start a run, `regime_discover_start` — **mutating and potentially long: always
    confirm with the user before invoking** (same class as experiment runs). Expect
    mostly/entirely rejections; that is the loop working
-6. An admitted regime is an ordinary machine-origin regime: chart/label/slice it with
+7. An admitted regime is an ordinary machine-origin regime: chart/label/slice it with
    the normal `regime_*` and `chart_regime` tools
 
 **Honesty rules:** confirm before `regime_discover_start` or `regime_discover_grade_fold`;
