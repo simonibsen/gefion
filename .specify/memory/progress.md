@@ -26,6 +26,20 @@
   auto-approved); Module 10 in the learning curriculum
 - **Follow-up filed**: Reality-Check/SPA bootstrap must land before per-cycle
   search budgets are raised beyond v1 defaults (backlog)
+- **T047 first real-data run (sloth, 2026-07-07, run id 1 `first-hunt-prod`)**:
+  bounded tier-1+2 discovery vs the 26.7-year dataset (18 candidates from 6
+  atoms, 6 signals, depth 2, seed 42, `test_tickers` chain). Outcome: 6 grammar
+  candidates showed genuine inner evidence (best inner p 0.005–0.015 over ~25y),
+  **0 admitted, family size 0** — every outer bucket test refused at the
+  effective-N floor (84 min-sample refusals, effective_n≈1 vs floor 20), all
+  ledgered sample-dependent with quantitative reasons. Mostly/entirely
+  rejections was the success criterion; the loop behaved exactly as designed.
+  Learnings: (a) a 26-week outer holdout cannot hold 20 independent episodes of
+  slow market regimes — future runs need a wider declared holdout or a declared
+  lower floor, and `--min-effective-n` is not yet exposed on the CLI (small
+  follow-up); (b) `stocks.asset_type` is entirely NULL on prod, so the default
+  quality universe chain refuses — the run declared `test_tickers` explicitly;
+  unblocks when the universe-quality backlog item populates asset types.
 
 ### Regime Slicing (spec 005)
 - First-class regimes: named, causal, persistent market/sector/asset states
