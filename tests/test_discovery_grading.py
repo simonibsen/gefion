@@ -46,7 +46,7 @@ def _market_from(u):
                                   dataset_version="synth-test")
 
 
-def _admitted_run(conn, name, effect_through=None, seed=8):
+def _admitted_run(conn, name, effect_through=None, seed=8, fold_length_days=150):
     """Discovery on the first 500 days of an 800-day universe; the later 300
     days are the forward folds' future."""
     full = plant_regime_edge(
@@ -60,7 +60,7 @@ def _admitted_run(conn, name, effect_through=None, seed=8):
         holdout_weeks=26, min_effective_n=3, universe_filter="passthrough",
         # a fold must hold enough 10-day regime episodes to clear the
         # effective-N floor — fold width is declared, not guessed
-        fold_length_days=150)
+        fold_length_days=fold_length_days)
     summary = runner.run_discovery(conn, cfg, _market_from(truncate_universe(full, 500)))
     admitted = ledger.list_candidates(conn, summary["run_id"], verdict="admitted")
     assert len(admitted) == 1, "grading tests need one admitted edge"
@@ -159,3 +159,71 @@ def test_evaluate_fold_refuses_windows_without_future_data(conn):
     truncated = _market_from(truncate_universe(full, 500))  # nothing after discovery
     with pytest.raises(grading.GradingError):
         scheme.evaluate_fold(conn, truncated, cand["id"], fold=1)
+
+
+# --- issue #67: no evidence is not failure ------------------------------------
+
+def test_power_refused_fold_records_no_evidence_not_failure(conn):
+    """A 30-day fold holds ~1 episode of a 10-day-cycle regime — the re-test
+    refuses at the floor. That is absent evidence, not contradicting evidence:
+    it must not count as a fold, must not fail the grade, and must not flag
+    regime-limited (issue #67)."""
+    full, _, cand = _admitted_run(conn, "gradetest-refused", fold_length_days=30)
+    scheme = grading.get_scheme("walk_forward")
+    outcome = scheme.evaluate_fold(conn, _market_from(full), cand["id"], fold=1)
+    assert outcome["refused"] is True
+    assert outcome["confirmed"] is None
+    g = scheme.grade(conn, cand["id"])
+    assert g["folds"] == 0                 # no evidence entered the denominator
+    assert g["no_evidence"] == 1           # …but the refusal is visible
+    assert g["regime_limited"] is False    # absent evidence is not weakness
+    assert g["grade"] is None
+
+
+def test_genuine_fold_failure_still_fails(conn):
+    """The fix must not soften real contradictions: an evaluable fold with no
+    edge still records confirmed=False and flags regime-limited."""
+    full, _, cand = _admitted_run(conn, "gradetest-realfail", effect_through=500)
+    scheme = grading.get_scheme("walk_forward")
+    outcome = scheme.evaluate_fold(conn, _market_from(full), cand["id"], fold=1)
+    assert outcome["refused"] is False
+    assert outcome["confirmed"] is False
+    g = scheme.grade(conn, cand["id"])
+    assert g["folds"] == 1 and g["regime_limited"] is True
+
+
+def test_regrading_widens_the_grid_and_replaces_no_evidence_rows(conn):
+    """Grading config is a forward-looking declaration: it may be re-declared
+    for an admitted edge UNTIL real evidence exists. Re-registration with a
+    wider fold replaces a no-evidence row; the durable edge then confirms."""
+    full, _, cand = _admitted_run(conn, "gradetest-regrid", fold_length_days=30)
+    scheme = grading.get_scheme("walk_forward")
+    refused = scheme.evaluate_fold(conn, _market_from(full), cand["id"], fold=1)
+    assert refused["refused"] is True
+    # widen the grid — the prod scenario (run 2's regimes froze 30-day folds)
+    scheme.register(conn, cand["id"], fold_length_days=150)
+    outcome = scheme.evaluate_fold(conn, _market_from(full), cand["id"], fold=1)
+    assert outcome["refused"] is False and outcome["confirmed"] is True
+    g = scheme.grade(conn, cand["id"])
+    assert g["folds"] == 1 and g["confirmed"] == 1
+    assert g["no_evidence"] == 0           # the placeholder was replaced
+
+
+def test_regrading_locked_once_evidence_exists(conn):
+    """Once a non-refused forward row exists the grid is immutable — moving
+    the fold boundaries after seeing outcomes would be selection."""
+    _, _, cand = _admitted_run(conn, "gradetest-lock")
+    scheme = grading.get_scheme("walk_forward")
+    scheme.record_forward_result(conn, cand["id"], fold=1, confirmed=True)
+    with pytest.raises(grading.GradingError):
+        scheme.register(conn, cand["id"], fold_length_days=60)
+
+
+def test_evidence_rows_are_immutable(conn):
+    """A confirmed/failed fold row can never be overwritten — only
+    no-evidence placeholders are replaceable."""
+    _, _, cand = _admitted_run(conn, "gradetest-immutable")
+    scheme = grading.get_scheme("walk_forward")
+    scheme.record_forward_result(conn, cand["id"], fold=1, confirmed=True)
+    with pytest.raises(grading.GradingError):
+        scheme.record_forward_result(conn, cand["id"], fold=1, confirmed=False)

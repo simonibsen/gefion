@@ -179,7 +179,14 @@ and it can only accrue **forward**:
   (`gefion regime discover grade-fold <candidate> --fold N`) re-runs the edge's
   surviving tests on a window derived from the run's recorded holdout end — data
   genuinely after the discovery window, enforced by the interface, not caller
-  discipline. A low-power fold fails closed (no evidence is not evidence).
+  discipline.
+- **Absent evidence is not weakness.** A fold too narrow to power a single re-test
+  records a *no-evidence* row: visible in every surface, never counted in the grade's
+  denominator, never a trigger for the regime-limited flag (only *contradicting*
+  evidence is). No-evidence rows are the one replaceable kind of grade row: the fold
+  grid may be re-declared (wider folds) for an admitted edge **until** real evidence
+  exists — after the first confirmed/failed fold, the grid is locked, because moving
+  fold boundaries after seeing outcomes would be selection.
 - **Backward era-slices can never raise a grade.** The regime's fitted boundaries saw
   that data, so backward applications are stored `descriptive=true` — visible in every
   surface as display context, structurally excluded from `grade()`. There is no API

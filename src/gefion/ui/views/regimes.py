@@ -326,14 +326,16 @@ def _render_discovery_grades(run: dict):
                             f"{flag}")
                 with conn.cursor() as cur:
                     cur.execute(
-                        """SELECT fold, confirmed, descriptive FROM regime_trust_grades
+                        """SELECT fold, confirmed, descriptive,
+                                  COALESCE(detail->>'refused', 'false') = 'true'
+                           FROM regime_trust_grades
                            WHERE candidate_id = %s ORDER BY fold, descriptive""",
                         (cand["id"],))
                     timeline = cur.fetchall()
                 if timeline:
                     line = []
-                    for fold, ok, descriptive in timeline:
-                        mark = "✓" if ok else "✗"
+                    for fold, ok, descriptive, refused in timeline:
+                        mark = "– no evidence" if refused else ("✓" if ok else "✗")
                         if descriptive:
                             # visually distinct: parenthesized, labeled, never graded
                             line.append(f"(fold {fold}: {mark} descriptive)")

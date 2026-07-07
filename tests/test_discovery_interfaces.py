@@ -74,6 +74,17 @@ def test_mcp_start_threads_min_effective_n():
     assert "--min-effective-n" in body
 
 
+def test_grading_grid_redeclaration_has_operator_doors():
+    """Issue #67: the fold grid must be re-declarable for an admitted edge
+    (until evidence exists) — CLI + MCP doors."""
+    result = runner.invoke(app, ["regime", "discover", "register", "--help"])
+    assert result.exit_code == 0
+    assert "--fold-length-days" in result.output
+    server = (REPO / "mcp-server" / "server.py").read_text()
+    assert 'name="regime_discover_register"' in server
+    assert 'name == "regime_discover_register"' in server
+
+
 def test_start_refuses_expressive_without_reserve(tmp_path):
     atoms = tmp_path / "atoms.json"
     atoms.write_text('{"atoms": [{"feature": "x", "form": "tercile"}]}')

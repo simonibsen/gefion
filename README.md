@@ -221,6 +221,7 @@ signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
 | `gefion regime discover diagnostics` | Limits hit (sample-dependent vs structural) |
 | `gefion regime discover grades` | Forward-accruing trust grades per admitted edge |
 | `gefion regime discover grade-fold` | Re-test an admitted edge on a forward fold |
+| `gefion regime discover register` | Re-declare an admitted edge's grading grid (until evidence exists) |
 
 ### System
 

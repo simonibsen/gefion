@@ -1942,6 +1942,23 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="regime_discover_register",
+            description=(
+                "Re-declare an admitted edge's grading grid (fold width). Allowed only "
+                "until real evidence exists — after the first confirmed/failed fold the "
+                "grid is locked. MUTATING; confirm with the user."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "candidate": {"type": "string", "description": "Candidate id"},
+                    "fold_length_days": {"type": "integer",
+                                         "description": "Declared fold width in days"},
+                },
+                "required": ["candidate", "fold_length_days"],
+            },
+        ),
+        Tool(
             name="regime_discover_grade_fold",
             description=(
                 "Re-test an admitted edge on a forward fold window and record the "
@@ -2183,6 +2200,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_diagnostics(arguments)
         elif name == "regime_discover_grades":
             result = await _regime_discover_grades(arguments)
+        elif name == "regime_discover_register":
+            result = await _regime_discover_register(arguments)
         elif name == "regime_discover_grade_fold":
             result = await _regime_discover_grade_fold(arguments)
         else:
@@ -4894,6 +4913,15 @@ async def _regime_discover_grades(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get("candidate"):
             cmd.append(str(args["candidate"]))
         return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_register(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Re-declare an admitted edge's grading grid (mutating; locked once evidence exists)."""
+    async def _run():
+        return await GefionExecutor().run(
+            "regime", "discover", "register", str(args["candidate"]),
+            "--fold-length-days", str(args["fold_length_days"]))
     return await _execute_with_health_check(['postgres'], _run)
 
 
