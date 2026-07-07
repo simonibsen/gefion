@@ -76,6 +76,53 @@ because it looks rigorous.
      fresh-holdout validation is prohibited, because no correction can rescue an unbounded,
      data-reusing search.
 
+## Clarifications
+
+### Session 2026-07-06
+
+- Q: Is the Reality-Check/SPA bootstrap required for v1, or is flat FDR over the full
+  realized family sufficient with the bootstrap as a fast-follow? → A: **FDR-over-full-family
+  for v1; bootstrap as fast-follow.** Pre-registration + counting every candidate (including
+  losers) is already honest and conservative at v1's capped search volumes; the bootstrap
+  must land before search budgets are raised. Mirrors 005's flat-BH-first decision.
+- Q: Which signals does discovery test conditional edges against in v1? → A: **Active
+  feature signals now, with `signal_source` a declared, pluggable field of the
+  pre-registered search space** (option D). The three sources form a maturity ladder —
+  features (v1, cheap, enumerable, works with flat FDR) → model prediction edges (once a
+  production model exists; native to the conditional core) → strategy backtests (only
+  after the bootstrap fast-follow lands, since equity-curve inference needs it). Each
+  rung is configuration, not redesign, and the declared source cannot become a hidden
+  researcher degree of freedom.
+- Q: How are "eras" defined for cross-era trust grading? → A: **Walk-forward folds,
+  pluggable** — the grading scheme is a declared `grading_scheme` field of the discovery
+  configuration (same pattern as `signal_source`), with walk-forward temporal folds as the
+  v1 default and declared market-structure eras / hybrids as swappable alternatives. One
+  rule is enforced by the grading INTERFACE, not left to implementations: **only data
+  genuinely after the discovery window counts as confirmation** (the probation window is
+  the first walk-forward fold; the grade accrues as scheduled re-tests pass). Backward
+  era-slices are permitted but labeled *descriptive* — the regime's boundaries saw that
+  data, so they can never inflate the trust grade. Honest per-fold re-discovery (full
+  nested walk-forward) is an optional deep-validation mode, not the default.
+- Q: Is the universe-quality filter (test tickers, asset types) in 006's scope? → A:
+  **Pluggable filter interface; not a blocker** — 006 defines a `universe_filter`
+  interface that accepts new filter types over time, and ships the minimal built-ins
+  (exchange test-ticker exclusion + `stocks.asset_type` selection) so real-data discovery
+  is never blocked waiting on the full universe-quality feature. Richer filter types
+  (liquidity tiers, market-cap floors, listing age) land later as plug-ins through the
+  same interface — including an explicit `passthrough` (identity) filter for
+  deliberately unfiltered runs. The chosen filter chain is always recorded in the
+  search-space pre-registration: the universe can never be a hidden researcher degree
+  of freedom. The default chain is the minimal quality filters; passthrough is a
+  declared, recorded choice, never a silent fallback.
+- Q: Which expressiveness tiers ship in v1? → A: **All three tiers** — continuous-
+  interaction, bounded grammar, AND the expressive tier (free-form expressions and
+  sandboxed detector-function candidates such as HMM/clustering) gated by fresh-holdout
+  validation. Consequence accepted: v1 builds the detector-leaf sandbox runtime, the
+  fresh-holdout data-reserve machinery, degeneracy/stability checks, and fitted-parameter
+  (T3) accounting. The plan MUST sequence the tiers as independently shippable increments
+  (interaction → grammar → expressive) so the guardrail core is validated before the
+  most dangerous tier activates.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Nested Discovery That Cannot See the Holdout (Priority: P1)
@@ -283,10 +330,18 @@ regime is recorded as a sample-dependent (re-testable) diagnostic, not a structu
   verdict).
 - **FR-107**: The system MUST honor fail-closed: no valid disjoint-data p-value, or a
   low-power/degenerate bucket, MUST yield no survival.
-- **FR-108**: The design MUST support a data-snooping-robust selection check over the full
-  candidate set (e.g. Reality Check / SPA-style bootstrap) where feasible, in addition to
-  FDR, when discovery search volume is large. [NEEDS CLARIFICATION: required for v1, or
-  FDR-over-full-family sufficient for v1 with the bootstrap as a fast-follow?]
+- **FR-108**: v1 error control is **FDR over the full realized family** (every candidate
+  counted, including losers), which pre-registration and bounded budgets make honest. A
+  data-snooping-robust selection check (Reality Check / SPA-style bootstrap over the full
+  candidate set) is a REQUIRED fast-follow that MUST land before per-cycle search budgets
+  are raised beyond v1 defaults; the design MUST leave a seam for it (the candidate ledger
+  already retains everything the bootstrap needs).
+- **FR-108a**: The conditional-edge **signal universe** MUST be a declared, pre-registered
+  field of the search space (`signal_source`). v1 ships `features` (active feature
+  signals — cheap, enumerable, flat-FDR-compatible); `model_predictions` (requires a
+  trained production model; consumes the 005 conditional core natively) and
+  `strategy_backtests` (requires the FR-108 bootstrap; equity-curve inference is not a
+  clean paired test) are later rungs enabled by configuration, in that order.
 - **FR-109**: Agentic proposal MUST be a first-class experiment type (`regime_discovery`)
   reusing the existing sandboxed codegen (whitelisted imports only) and the discovery step.
 - **FR-110**: Discovered/generated `RegimeDefinition`s MUST be stored in the DB and exported
@@ -310,6 +365,13 @@ regime is recorded as a sample-dependent (re-testable) diagnostic, not a structu
   the default gradient mechanism**; **bounded compositional grammar** (pre-registered
   primitive library of size *M*, max composition depth *K*) for structural search; and
   **free-form expressions only when validated on a fresh, purged, independent holdout**.
+- **FR-118a**: All three tiers ship in v1, sequenced as independently shippable increments
+  (interaction → grammar → expressive). The expressive tier comprises free-form
+  expressions AND sandboxed detector-function candidates (HMM, clustering — the 005
+  FR-019a leaf, whose execution runtime this feature builds), both admissible only under
+  fresh-holdout validation. The fresh-holdout reserve MUST be a declared, budgeted data
+  block recorded in the run's pre-registration and never reused across runs without
+  re-declaration.
 - **FR-119**: Free-form agentic expressions without fresh-holdout validation MUST be
   prohibited; the framework MUST NOT emit a p-value for an unbounded, data-reusing search.
 - **FR-120**: Composition depth *K* and the realized search-space size MUST be capped,
@@ -317,9 +379,26 @@ regime is recorded as a sample-dependent (re-testable) diagnostic, not a structu
 - **FR-121**: Regime proposals whose inputs are unavailable in the target dataset MUST be
   rejected at proposal time using the spec-004 data-availability inventory, and recorded as
   structural diagnostics rather than attempted.
+- **FR-121a**: The discovery symbol universe MUST be selected through a **pluggable
+  `universe_filter` interface** that accepts new filter types over time. v1 ships minimal
+  built-in filters — exchange test-ticker exclusion (e.g. the NASDAQ ZVZZT family) and
+  `stocks.asset_type` selection (common stock by default) — so real-data discovery is not
+  blocked on the full universe-quality feature; liquidity, market-cap, and listing-age
+  filters are later plug-ins through the same interface, and an explicit `passthrough`
+  filter type permits deliberately unfiltered runs. The active filter chain MUST be
+  recorded in the search-space pre-registration; the minimal quality chain is the default,
+  and passthrough MUST be an explicit declaration, never a silent fallback.
 - **FR-122**: Promotion MUST be two-tier — a single hard, fail-closed, out-of-sample holdout
   gate decides admit/reject; **cross-era and cross-dataset survival grades trust/rank among
   admitted edges only** and MUST NOT relax the hard gate.
+- **FR-122a**: The trust-grading scheme MUST be a declared, pluggable field of the discovery
+  configuration (`grading_scheme`), defaulting to **walk-forward temporal folds** in v1.
+  The grading interface MUST enforce, for every scheme: (a) only data genuinely after the
+  discovery window counts as confirmation — the probation window is the first fold and the
+  grade accrues via scheduled re-tests; (b) backward applications of a discovered regime
+  are recorded as descriptive only, never as confirmations (the regime's fitted boundaries
+  saw that data); (c) fold length / era boundaries are declared, versioned configuration.
+  Full nested per-fold re-discovery is an optional deep-validation mode.
 - **FR-123**: An admitted edge that is cross-era-weak MUST be flagged regime-limited/decaying
   and placed on tighter probation (reusing the existing probation mechanism), so transient
   alpha is captured but not trusted as durable.
@@ -336,14 +415,20 @@ regime is recorded as a sample-dependent (re-testable) diagnostic, not a structu
 
 - **RegimeSearchSpace**: the declared, bounded universe of candidate regimes a discovery run
   may explore — the primitive library (size *M*), the max composition depth (*K*), the
-  expressiveness tier in use, and the per-cycle budget. Pins down the denominator of error
-  control.
+  expressiveness tier in use, the **signal_source** (which signal universe conditional
+  edges are tested against: `features` in v1; `model_predictions` and `strategy_backtests`
+  as later rungs), the **universe_filter** (declared symbol-universe selection: v1 excludes
+  test tickers and filters by asset type; richer filters plug in later), and the per-cycle
+  budget. Pins down the denominator of error control.
 - **DiscoveryDiagnostics**: the ledger of limits the search hit — budget/depth exhaustion,
   min-sample refusals, uncomputable proposals — each tagged sample-dependent vs structural
   with a quantitative reason and dataset provenance. The negative-space learning signal.
 - **TrustGrade**: the cross-era / cross-dataset survival grade attached to an admitted edge
   (distinct from the hard admit/reject gate), including the regime-limited/decaying flag and
-  probation tightness.
+  probation tightness. Computed by a pluggable **GradingScheme** (declared per run;
+  v1 default: walk-forward temporal folds). The grade ACCRUES from forward-in-time
+  confirmations (probation window = first fold; scheduled re-tests = later folds);
+  backward era-slices are stored as descriptive context only and never counted.
 - **DiscoveredRegime**: a `RegimeDefinition` (from 005) whose computation is machine-
   generated (Level 2/3), carrying provenance (seeding principle or method), fitted
   parameters, and the training folds it was fit on.
