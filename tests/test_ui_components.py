@@ -1895,3 +1895,31 @@ class TestRegimeSlicingUI:
         """The charts module of the learning path must mention `chart regime`."""
         learn = Path(__file__).parent.parent / ".claude" / "commands" / "gefion-learn.md"
         assert "chart regime" in learn.read_text()
+
+
+class TestRegimeDiscoveryUI:
+    """006 T018 (US1): the Regimes page gains a Discovery tab — runs table,
+    run detail (pre-registration, segregation, status), new-run form."""
+
+    @pytest.fixture
+    def regimes_view(self):
+        path = Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views" / "regimes.py"
+        return path.read_text()
+
+    def test_discovery_tab_exists(self, regimes_view):
+        assert "_render_discovery_tab" in regimes_view
+        assert "Discovery" in regimes_view
+
+    def test_run_detail_shows_the_honest_story(self, regimes_view):
+        assert "_render_discovery_run_detail" in regimes_view
+        # pre-registration and segregation are displayed, and invalid runs
+        # are called out explicitly (honesty rules, contracts/ui.md)
+        assert "search_space" in regimes_view
+        assert "segregation" in regimes_view
+        assert "invalid" in regimes_view
+
+    def test_new_run_form_exists(self, regimes_view):
+        assert "_render_discovery_start" in regimes_view
+        # the three declared seams are visible choices, not hidden defaults
+        for seam in ("signal_source", "grading_scheme", "universe_filter"):
+            assert seam in regimes_view

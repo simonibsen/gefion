@@ -139,3 +139,86 @@ def test_causal_labels_boolean_composite():
     composite = next(c for c in cands if c.depth == 2)
     labels = edges.causal_labels(composite, _market(u), window=60)
     assert set(labels.values()) <= {"true", "false"}
+
+
+# --- load_market_data: the real-run data path (DB) ---------------------------
+
+def _conn():
+    import os
+    import psycopg
+    from gefion.db import schema as dbschema
+    if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+        pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
+    try:
+        c = psycopg.connect(dbschema.test_db_url())
+        c.autocommit = True
+        return c
+    except psycopg.OperationalError as exc:
+        pytest.skip(f"DB not available: {exc}")
+
+
+@pytest.fixture
+def seeded_conn():
+    import datetime
+    c = _conn()
+    with c.cursor() as cur:
+        cur.execute("DELETE FROM stocks WHERE symbol LIKE 'EDGT%'")
+        cur.execute("DELETE FROM feature_definitions WHERE name = 'edgetest_feat'")
+        cur.execute(
+            """INSERT INTO stocks (symbol, name, asset_type) VALUES
+               ('EDGT1', 'A', 'Common Stock'), ('EDGT2', 'B', 'ETF')
+               RETURNING id"""
+        )
+        ids = [r[0] for r in cur.fetchall()]
+        cur.execute(
+            "INSERT INTO feature_definitions (name, function_name) "
+            "VALUES ('edgetest_feat', 'indicator') RETURNING id"
+        )
+        feat_id = cur.fetchone()[0]
+        base = datetime.date(2024, 1, 1)
+        for i in range(5):
+            d = base + datetime.timedelta(days=i)
+            for j, sid in enumerate(ids):
+                close = 100.0 + i + 10 * j
+                cur.execute(
+                    """INSERT INTO stock_ohlcv (data_id, date, open, high, low, close, volume)
+                       VALUES (%s, %s, %s, %s, %s, %s, 1000)
+                       ON CONFLICT DO NOTHING""",
+                    (sid, d, close, close, close, close),
+                )
+                cur.execute(
+                    """INSERT INTO computed_features (data_id, date, feature_id, value)
+                       VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                    (sid, d, feat_id, float(j)),  # EDGT1 -> 0.0, EDGT2 -> 1.0
+                )
+    yield c
+    with c.cursor() as cur:
+        cur.execute("DELETE FROM computed_features WHERE feature_id = "
+                    "(SELECT id FROM feature_definitions WHERE name = 'edgetest_feat')")
+        cur.execute("DELETE FROM stock_ohlcv WHERE data_id IN "
+                    "(SELECT id FROM stocks WHERE symbol LIKE 'EDGT%')")
+        cur.execute("DELETE FROM feature_definitions WHERE name = 'edgetest_feat'")
+        cur.execute("DELETE FROM stocks WHERE symbol LIKE 'EDGT%'")
+    c.close()
+
+
+def test_load_market_data_respects_symbol_universe(seeded_conn):
+    market_all = signals.load_market_data(seeded_conn, ["edgetest_feat"], symbols=None)
+    market_one = signals.load_market_data(
+        seeded_conn, ["edgetest_feat"], symbols=["EDGT1"])
+    # both stocks: median of {0.0, 1.0} = 0.5; EDGT1 only: 0.0
+    assert market_all.features["edgetest_feat"][0][1] == pytest.approx(0.5)
+    assert market_one.features["edgetest_feat"][0][1] == pytest.approx(0.0)
+    assert market_one.forward_returns  # LEAD-based forward returns exist
+
+
+def test_load_market_data_unknown_feature_raises(seeded_conn):
+    with pytest.raises(LookupError):
+        signals.load_market_data(seeded_conn, ["definitely_not_a_feature"])
+
+
+def test_load_market_data_optional_features_skipped(seeded_conn):
+    market = signals.load_market_data(
+        seeded_conn, ["edgetest_feat", "vix_level"], optional_features=["vix_level"])
+    assert "vix_level" not in market.features
+    assert "edgetest_feat" in market.features

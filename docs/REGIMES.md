@@ -86,7 +86,78 @@ a verdict.
 
 Every operation is reachable via CLI, MCP (`regime_*` tools), and the UI **Regimes** page.
 
+## Agentic discovery (spec 006)
+
+Spec 005 lets a **human** specify a regime; discovery lets the **agent** propose and test
+regimes itself. Done naively this is a false-positive machine — the entire design is about
+making the failure modes *structurally impossible*, not merely discouraged.
+
+### The six traps
+
+- **T1 — Double-dipping / outcome leakage.** Fitting a regime on the data that then judges
+  its edge fits the regime *to the outcome*. Invisible in the result; the most dangerous trap.
+- **T2 — Unbounded search.** "Search until something conditions well" guarantees false
+  positives unless the *full* search — including every loser — is counted in the correction.
+- **T3 — Fitted-boundary degrees of freedom.** Thresholds/HMM parameters/cluster boundaries
+  are themselves fitted; ignoring that under-charges for complexity.
+- **T4 — Selection after peeking.** Choosing which regime or bucket to report after seeing
+  results invalidates naive p-values.
+- **T5 — Silent survivorship.** Dropping failed candidates shrinks the correction's
+  denominator below the true search size.
+- **T6 — Non-reproducible search.** If a run can't be reproduced, its accounting can't be
+  audited, so its verdicts can't be trusted.
+
+### The defense stack
+
+1. **Nested segregation** (T1/T3): discovery and fitting see **inner-window data only** —
+   the `DiscoveryDataContext` is the sole data path and raises on any outer-holdout touch.
+   Detectors then label the holdout *causally* (labels at *t* use data ≤ *t* only).
+2. **Pre-registration** (T2/T5): the search space — atom library, depth cap *K*, budget, and
+   the three declared seams (`signal_source`, `grading_scheme`, `universe_filter`) — is
+   written to the run row **before** anything is evaluated. The universe filter chain is
+   always declared; an unfiltered run requires explicit `passthrough`, never a silent fallback.
+3. **Candidate freeze** (T4): the run lifecycle is
+   `pre_registered → enumerated → evaluated → complete` (or `invalid`); evaluation is
+   API-impossible before the candidate set is frozen at `enumerated`.
+4. **One flat FDR family that counts the losers** (T2/T4/T5): every
+   (signal × candidate × bucket) test actually run enters a single Benjamini-Hochberg call;
+   the realized `family_size` is recorded on the run. Refused tests (low power, degenerate)
+   get **no p-value and cannot survive** (fail-closed). Discovery's gate runs at a stricter
+   FDR rate (0.05) than standard experiments (0.10) — search volume is the risk.
+5. **Seeded, auditable runs** (T6): every run records its seed and full candidate +
+   diagnostics ledgers; identical inputs reproduce identical verdicts.
+
+### Expressiveness tiers (scale with data, not a free-for-all)
+
+- **interaction** (default): the gradient question — one HAC interaction coefficient per
+  (signal × candidate); cheap, honest, no bucket search.
+- **grammar**: compositions from the pre-registered atom library up to depth *K* (hard cap
+  2 in v1; raising it is gated on the data-snooping-robust bootstrap fast-follow). The
+  enumeration is deterministic and exact, so the FDR denominator is exact.
+- **expressive**: free-form expressions and sandboxed detector functions (HMM/clustering) —
+  admissible **only** against a declared, single-use fresh-holdout reserve.
+
+### Reading a run
+
+```bash
+gefion regime discover start --name first-hunt --atoms atoms.json \
+  --depth 1 --budget 50 --tier interaction --seed 42
+gefion regime discover list                  # runs, status, family size
+gefion regime discover show first-hunt       # pre-registration + segregation
+```
+
+**Expect mostly (often entirely) rejections.** A discovery loop that admits often is broken;
+the CI negative-control suite proves this loop admits nothing in pure noise. An admitted
+candidate becomes an ordinary `regime_definitions` row (`origin='machine'`) with full 005
+affordances (labels, chart, slicing). Structural limits the search hits (missing inputs,
+budget/depth exhaustion) and sample-dependent refusals are recorded in the diagnostics
+ledger — the negative space is a learning signal, not noise.
+
+Every discovery operation is reachable via CLI (`gefion regime discover …`), MCP
+(`regime_discover_*` tools), and the UI **Regimes → Discovery** tab.
+
 ## See also
 
 - Spec: [specs/005-regime-slicing/](../specs/005-regime-slicing/)
+- Discovery spec: [specs/006-agentic-regime-discovery/](../specs/006-agentic-regime-discovery/)
 - Backtesting metrics: [docs/BACKTESTING.md](BACKTESTING.md)

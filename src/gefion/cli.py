@@ -5,7 +5,7 @@ import os
 import time
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import click
 import psycopg
@@ -11827,6 +11827,173 @@ def regime_import(
     out.success(f"Imported {count} regime(s) from {directory}")
     if out.json_mode:
         out.json({"imported": count, "directory": directory})
+
+
+# --- regime discover (spec 006: agentic regime discovery) --------------------
+
+discover_app = typer.Typer(
+    help="Agentic regime discovery (pre-registered, nested, search-aware; spec 006)")
+regime_app.add_typer(discover_app, name="discover", cls=SortedGroup)
+
+
+def _discovery_run_payload(run: dict) -> dict:
+    """A run row as a JSON-safe payload (dates stringified)."""
+    return {k: (str(v) if hasattr(v, "isoformat") else v) for k, v in run.items()}
+
+
+@discover_app.command("start")
+def regime_discover_start(
+    name: str = typer.Option(..., "--name", help="Run name (kebab-case slug)"),
+    atoms: str = typer.Option(..., "--atoms",
+                              help="Path to atom-library JSON ({\"atoms\": [...]})"),
+    depth: int = typer.Option(2, "--depth", help="Max composition depth K"),
+    budget: int = typer.Option(100, "--budget", help="Per-cycle candidate budget"),
+    tier: List[str] = typer.Option(["interaction"], "--tier",
+                                   help="Tier(s) enabled: interaction|grammar|expressive"),
+    signal_source: str = typer.Option("features", "--signal-source",
+                                      help="Declared signal universe (v1: features)"),
+    grading_scheme: str = typer.Option("walk_forward", "--grading-scheme",
+                                       help="Declared trust-grading scheme"),
+    universe_filter: Optional[str] = typer.Option(
+        None, "--universe-filter",
+        help="Declared filter chain (default: test_tickers,asset_type:common; "
+             "'passthrough' for a deliberately unfiltered run)"),
+    fresh_holdout: Optional[str] = typer.Option(
+        None, "--fresh-holdout", help="Reserve block <start>:<end>; required for expressive tier"),
+    signal: Optional[List[str]] = typer.Option(
+        None, "--signal", help="Signal feature override (default: active feature definitions)"),
+    horizon_days: int = typer.Option(1, "--horizon-days", help="Forward-return horizon"),
+    holdout_weeks: int = typer.Option(6, "--holdout-weeks", help="Outer holdout width"),
+    seed: int = typer.Option(42, "--seed", help="Run seed (reproducibility)"),
+    dataset: str = typer.Option("dev", "--dataset", help="Dataset version tag"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Pre-register and run a bounded discovery: enumerate -> freeze -> evaluate -> FDR.
+
+    Expect mostly (often entirely) rejections — a discovery loop that admits
+    often is broken. Read the full story with `regime discover ledger`.
+    """
+    import json as _json
+    from gefion.regimes.discovery import universe as duniverse
+    from gefion.regimes.discovery.grammar import GrammarError
+    from gefion.regimes.discovery.runner import DiscoveryConfig, DiscoveryError, run_discovery
+    from gefion.regimes.discovery.segregation import SegregationError
+    from gefion.regimes.discovery.signals import load_market_data
+
+    out = get_output(json_output)
+    try:
+        atom_list = _json.loads(Path(atoms).read_text())["atoms"]
+    except (OSError, KeyError, ValueError) as exc:
+        out.error(f"Cannot read atom library {atoms}: {exc}")
+        raise typer.Exit(1)
+
+    reserve = None
+    if fresh_holdout:
+        from datetime import datetime as _dt
+        try:
+            start_s, _, end_s = fresh_holdout.partition(":")
+            reserve = (_dt.strptime(start_s, "%Y-%m-%d").date(),
+                       _dt.strptime(end_s, "%Y-%m-%d").date())
+        except ValueError as exc:
+            out.error(f"Invalid --fresh-holdout (expected START:END dates): {exc}")
+            raise typer.Exit(1)
+    if "expressive" in tier and reserve is None:
+        out.error("expressive tier requires a declared --fresh-holdout reserve block")
+        raise typer.Exit(1)
+
+    try:
+        with _regime_conn(db_url) as conn:
+            chain = duniverse.parse_filter_chain(universe_filter)
+            symbols = None
+            if any(f.kind != "passthrough" for f in chain):
+                with conn.cursor() as cur:
+                    cur.execute("SELECT symbol FROM stocks ORDER BY symbol")
+                    symbols = [r[0] for r in cur.fetchall()]
+                symbols = duniverse.apply_chain(chain, symbols, conn=conn)
+            if signal:
+                signals_list = list(signal)
+            else:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT name FROM feature_definitions WHERE active = true ORDER BY name")
+                    signals_list = [r[0] for r in cur.fetchall()]
+            atom_features = sorted({a.get("feature") for a in atom_list if a.get("feature")})
+            market = load_market_data(
+                conn, sorted(set(signals_list) | set(atom_features)),
+                horizon_days=horizon_days, dataset_version=dataset,
+                symbols=symbols, optional_features=atom_features)
+            config = DiscoveryConfig(
+                name=name, seed=seed, atoms=atom_list, signals=signals_list,
+                depth=depth, budget=budget, tiers=tuple(tier),
+                signal_source=signal_source, grading_scheme=grading_scheme,
+                universe_filter=universe_filter, horizon_days=horizon_days,
+                holdout_weeks=holdout_weeks, fresh_holdout=reserve,
+                dataset_version=dataset)
+            summary = run_discovery(conn, config, market)
+    except (GrammarError, DiscoveryError, duniverse.UniverseError,
+            SegregationError, LookupError) as exc:
+        out.error(f"Discovery refused: {exc}")
+        raise typer.Exit(1)
+
+    out.success(
+        f"Discovery run '{name}' complete: {summary['n_candidates']} candidates, "
+        f"family size {summary['family_size']}, {summary['n_admitted']} admitted "
+        f"(run id {summary['run_id']})")
+    if out.json_mode:
+        out.json(summary)
+
+
+def _resolve_run(conn, run_ref: str) -> dict:
+    from gefion.regimes.discovery import ledger as dledger
+    ref = int(run_ref) if run_ref.isdigit() else run_ref
+    return dledger.get_run(conn, ref)
+
+
+@discover_app.command("list")
+def regime_discover_list(
+    status: Optional[str] = typer.Option(None, "--status", help="Filter by run status"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """List discovery runs (pre-registration status, family size, dataset)."""
+    from gefion.output import Column
+    from gefion.regimes.discovery import ledger as dledger
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        runs = dledger.list_runs(conn, status=status)
+    payload = [_discovery_run_payload(r) for r in runs]
+    out.table(
+        columns=[Column("id"), Column("name"), Column("status"),
+                 Column("family_size"), Column("dataset_version"), Column("created_at")],
+        rows=[[p["id"], p["name"], p["status"], p["family_size"],
+               p["dataset_version"], p["created_at"]] for p in payload],
+        json_data={"runs": payload},
+    )
+
+
+@discover_app.command("show")
+def regime_discover_show(
+    run: str = typer.Argument(..., help="Run id or name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Inspect a run: pre-registration, segregation boundaries, family size, status."""
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            payload = _discovery_run_payload(_resolve_run(conn, run))
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+    if out.json_mode:
+        out.json(payload)
+    else:
+        out.info(f"Run {payload['id']} '{payload['name']}' — status {payload['status']}, "
+                 f"seed {payload['seed']}, family size {payload['family_size']}")
+        out.info(f"Search space: {payload['search_space']}")
+        out.info(f"Segregation: {payload['segregation']}")
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper

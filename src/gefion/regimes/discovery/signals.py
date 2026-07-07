@@ -69,37 +69,74 @@ class FeatureSignalSource:
             return out
 
 
+def _feature_series(cur, name: str, symbols: Optional[List[str]]) -> Series:
+    """Market-level daily median of a feature, optionally over a declared
+    symbol universe. Raises LookupError on an unknown feature."""
+    cur.execute("SELECT id FROM feature_definitions WHERE name = %s", (name,))
+    found = cur.fetchone()
+    if not found:
+        raise LookupError(f"feature {name!r} is not defined")
+    if symbols is None:
+        cur.execute(
+            "SELECT date, percentile_cont(0.5) WITHIN GROUP (ORDER BY value) "
+            "FROM computed_features WHERE feature_id = %s GROUP BY date ORDER BY date",
+            (found[0],),
+        )
+    else:
+        cur.execute(
+            """SELECT cf.date, percentile_cont(0.5) WITHIN GROUP (ORDER BY cf.value)
+               FROM computed_features cf JOIN stocks s ON s.id = cf.data_id
+               WHERE cf.feature_id = %s AND s.symbol = ANY(%s)
+               GROUP BY cf.date ORDER BY cf.date""",
+            (found[0], symbols),
+        )
+    return [(d, float(v)) for d, v in cur.fetchall() if v is not None]
+
+
 def load_market_data(conn, feature_names: List[str], horizon_days: int = 1,
-                     dataset_version: str = "dev") -> MarketData:
+                     dataset_version: str = "dev",
+                     symbols: Optional[List[str]] = None,
+                     optional_features: Optional[List[str]] = None) -> MarketData:
     """Load market-level series from the DB for a real discovery run.
 
     Features are the cross-sectional daily median (robust to outliers — the
     005 lesson); forward returns are the market mean of each stock's
-    close-to-close return `horizon_days` rows ahead. Raises LookupError on
-    unknown/empty features (honest error, no silent empty run).
+    close-to-close return `horizon_days` rows ahead. `symbols` restricts both
+    to the declared universe-filter chain's survivors (FR-121a). Features in
+    `optional_features` that are unknown/empty are skipped — the runner
+    records them as uncomputable-proposal diagnostics; everything else raises
+    LookupError (honest error, no silent empty run).
     """
-    from gefion.regimes.interaction import _market_feature_series
-
+    optional = set(optional_features or [])
     with create_span("discovery.signals.load_market_data",
                      n_features=len(feature_names), horizon_days=horizon_days):
         features: Dict[str, Series] = {}
         with conn.cursor() as cur:
             for name in feature_names:
-                by_date = _market_feature_series(cur, name)
-                if not by_date:
+                try:
+                    series = _feature_series(cur, name, symbols)
+                except LookupError:
+                    if name in optional:
+                        continue
+                    raise
+                if not series:
+                    if name in optional:
+                        continue
                     raise LookupError(f"feature {name!r} has no computed data")
-                features[name] = sorted(by_date.items())
+                features[name] = series
+            symbol_clause = "" if symbols is None else "JOIN stocks s ON s.id = o.data_id"
+            where = "" if symbols is None else "WHERE s.symbol = ANY(%(symbols)s)"
             cur.execute(
-                """
+                f"""
                 SELECT date, AVG(fwd) FROM (
-                    SELECT date, close,
-                           LEAD(close, %s) OVER (PARTITION BY data_id ORDER BY date)
-                               / NULLIF(close, 0) - 1 AS fwd
-                    FROM stock_ohlcv
+                    SELECT o.date, o.close,
+                           LEAD(o.close, %(horizon)s) OVER (PARTITION BY o.data_id ORDER BY o.date)
+                               / NULLIF(o.close, 0) - 1 AS fwd
+                    FROM stock_ohlcv o {symbol_clause} {where}
                 ) t
                 WHERE fwd IS NOT NULL GROUP BY date ORDER BY date
                 """,
-                (horizon_days,),
+                {"horizon": horizon_days, "symbols": symbols},
             )
             fwd = [(d, float(v)) for d, v in cur.fetchall() if v is not None]
         if not fwd:

@@ -1022,3 +1022,16 @@ The `regime_*` MCP tools mirror the `gefion regime` CLI (see [REGIMES.md](REGIME
 - `regime_definitions_export` / `regime_definitions_import` — JSON backup/restore.
 - `regime_interaction` — continuous-interaction test (does a signal's edge scale with a conditioning variable?).
 - `chart_regime` — chart a symbol's price with regime-episode bands overlaid.
+
+## Agentic regime discovery tools (spec 006)
+
+The `regime_discover_*` tools mirror `gefion regime discover` (see
+[REGIMES.md](REGIMES.md) § Agentic discovery for the threat model and guardrails):
+
+- `regime_discover_start` — pre-register and run a bounded discovery run. **Mutating and
+  potentially long**: excluded from read-only allowlists; confirm with the user before
+  invoking (same class as experiment runs). Expect mostly/entirely rejections — that is
+  the loop working, not failing.
+- `regime_discover_list` — list discovery runs (status, FDR family size, dataset).
+- `regime_discover_show` — inspect a run: pre-registration (search space + declared
+  seams), segregation boundaries, family size, status.

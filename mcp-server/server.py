@@ -1827,6 +1827,53 @@ async def list_tools() -> List[Tool]:
                 "required": ["name", "symbol"],
             },
         ),
+        Tool(
+            name="regime_discover_start",
+            description=(
+                "Pre-register and run an agentic regime-discovery run (spec 006): "
+                "enumerate a bounded atom grammar, freeze the candidate set, evaluate "
+                "conditional edges on the outer holdout, one flat FDR family. MUTATING "
+                "and potentially long — confirm with the user before invoking; expect "
+                "mostly/entirely rejections (that is correct behavior)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Run name (kebab-case slug)"},
+                    "atoms": {"type": "string", "description": "Path to atom-library JSON"},
+                    "depth": {"type": "integer", "description": "Max composition depth K", "default": 2},
+                    "budget": {"type": "integer", "description": "Per-cycle candidate budget", "default": 100},
+                    "tiers": {"type": "array", "items": {"type": "string"},
+                              "description": "Tiers enabled: interaction|grammar|expressive"},
+                    "signal_source": {"type": "string", "description": "Declared signal universe (v1: features)"},
+                    "grading_scheme": {"type": "string", "description": "Declared grading scheme (v1: walk_forward)"},
+                    "universe_filter": {"type": "string",
+                                        "description": "Declared filter chain; 'passthrough' for unfiltered"},
+                    "fresh_holdout": {"type": "string",
+                                      "description": "Reserve block START:END (required for expressive tier)"},
+                    "seed": {"type": "integer", "description": "Run seed"},
+                    "dataset": {"type": "string", "description": "Dataset version tag"},
+                },
+                "required": ["name", "atoms"],
+            },
+        ),
+        Tool(
+            name="regime_discover_list",
+            description="List regime-discovery runs (status, family size, dataset).",
+            inputSchema={
+                "type": "object",
+                "properties": {"status": {"type": "string", "description": "Filter by run status"}},
+            },
+        ),
+        Tool(
+            name="regime_discover_show",
+            description="Inspect a discovery run: pre-registration, segregation boundaries, family size, status.",
+            inputSchema={
+                "type": "object",
+                "properties": {"run": {"type": "string", "description": "Run id or name"}},
+                "required": ["run"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -2040,6 +2087,12 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_interaction(arguments)
         elif name == "chart_regime":
             result = await _chart_regime(arguments)
+        elif name == "regime_discover_start":
+            result = await _regime_discover_start(arguments)
+        elif name == "regime_discover_list":
+            result = await _regime_discover_list(arguments)
+        elif name == "regime_discover_show":
+            result = await _regime_discover_show(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -4658,6 +4711,50 @@ async def _chart_regime(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get("end_date"):
             cmd.extend(["--end-date", args["end_date"]])
         return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_start(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Pre-register and run an agentic regime-discovery run (mutating, long)."""
+    async def _run():
+        cmd = ["regime", "discover", "start",
+               "--name", args["name"], "--atoms", args["atoms"]]
+        if args.get("depth") is not None:
+            cmd.extend(["--depth", str(args["depth"])])
+        if args.get("budget") is not None:
+            cmd.extend(["--budget", str(args["budget"])])
+        for tier in args.get("tiers") or []:
+            cmd.extend(["--tier", tier])
+        if args.get("signal_source"):
+            cmd.extend(["--signal-source", args["signal_source"]])
+        if args.get("grading_scheme"):
+            cmd.extend(["--grading-scheme", args["grading_scheme"]])
+        if args.get("universe_filter"):
+            cmd.extend(["--universe-filter", args["universe_filter"]])
+        if args.get("fresh_holdout"):
+            cmd.extend(["--fresh-holdout", args["fresh_holdout"]])
+        if args.get("seed") is not None:
+            cmd.extend(["--seed", str(args["seed"])])
+        if args.get("dataset"):
+            cmd.extend(["--dataset", args["dataset"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List regime-discovery runs."""
+    async def _run():
+        cmd = ["regime", "discover", "list"]
+        if args.get("status"):
+            cmd.extend(["--status", args["status"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_show(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Inspect a discovery run's pre-registration, segregation, and status."""
+    async def _run():
+        return await GefionExecutor().run("regime", "discover", "show", args["run"])
     return await _execute_with_health_check(['postgres'], _run)
 
 

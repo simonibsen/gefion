@@ -31,7 +31,11 @@ _SCANNED_DOCS = [
 
 
 def _cli_surface():
-    """(top_level_commands, {group: subcommands}) from the real typer app."""
+    """(top_level_commands, {group: subcommands}) from the real typer app.
+
+    Nested sub-groups (e.g. `regime discover`) count as valid subtokens of
+    their parent group — the scanner's regex only sees two tokens deep.
+    """
     from gefion.cli import app
 
     top = {c.name for c in app.registered_commands if c.name}
@@ -39,7 +43,7 @@ def _cli_surface():
     for g in app.registered_groups:
         groups[g.name] = {
             c.name for c in g.typer_instance.registered_commands if c.name
-        }
+        } | {sub.name for sub in g.typer_instance.registered_groups if sub.name}
     return top, groups
 
 
@@ -94,7 +98,8 @@ class TestMcpToolsDocumented:
 
     def test_experiment_and_docs_tools_documented(self):
         server = (REPO / "mcp-server" / "server.py").read_text()
-        tool_names = re.findall(r'name="((?:experiment_|docs_)[a-z_]+)"', server)
+        tool_names = re.findall(
+            r'name="((?:experiment_|docs_|regime_discover_)[a-z_]+)"', server)
         corpus = (REPO / "docs" / "MCP_WORKFLOWS.md").read_text()
 
         missing = sorted({t for t in tool_names if t not in corpus})
