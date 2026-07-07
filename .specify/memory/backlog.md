@@ -59,6 +59,15 @@ vs ETF vs warrant) a first-class selector using `stocks.asset_type`/`stocks.exch
 Follow-up originally noted after issues #29/#30 (exchange filters once
 `stocks.exchange` populates) — production data now makes it concrete.
 
+### chart regime: missing UI door + curriculum mention (audit finding 2026-07-06)
+**Source**: three-axis audit (interfaces/docs/learning)
+**Priority**: Small, quick
+
+`gefion chart regime` (#56) shipped CLI + MCP + docs but no UI access (add a "Chart"
+action per regime on the UI Regimes page) and no curriculum mention (one line in the
+gefion-learn charts/regime material). The plan-template now makes these axes mandatory
+so this class of gap is caught at planning time.
+
 ### Regime follow-ups (spec 005 shipped 2026-07; spec 006 parked)
 **Source**: specs/005-regime-slicing, specs/006-agentic-regime-discovery
 **Priority**: Medium (006 explicitly parked until production-scale data)

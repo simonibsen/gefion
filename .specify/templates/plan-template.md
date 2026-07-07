@@ -94,6 +94,21 @@ ios/ or android/
 **Structure Decision**: [Document the selected structure and reference the real
 directories captured above]
 
+## Interfaces, Documentation & Learning Impact *(mandatory)*
+
+<!--
+  First-class plan objects — never afterthoughts (owner requirement):
+  fill each; write "N/A + why" only when genuinely inapplicable.
+-->
+
+- **Three interfaces (FR-042 / Constitution III)**: how each user-facing operation is
+  reachable via CLI, MCP, and UI — reference or include a parity matrix
+- **Documentation**: which of README / docs/USER_GUIDE / docs/MCP_WORKFLOWS / concept docs /
+  DATA_DICTIONARY (regen after schema changes) / operator skill this feature updates
+- **Learning materials**: what changes in `.claude/commands/gefion-learn.md` (new module,
+  aside, or checkpoint) if the learning path is affected
+- **Delivery rule**: surfaces + docs land per increment with the code, not as a final phase
+
 ## Complexity Tracking
 
 > **Fill ONLY if Constitution Check has violations that must be justified**
