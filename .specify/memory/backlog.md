@@ -48,6 +48,34 @@ Systematic hardening of the Streamlit UI assistant view:
 
 ## Future Features
 
+### VIX (macro series) ingestion as a regime input
+**Source**: T047 discovery diagnostics (2026-07-07); `regime-detection-hmm` principle
+declares `macro.vix` in data_requirements and discovery records it as an
+`uncomputable_proposal` structural diagnostic — the ledger is literally asking for it
+**Priority**: Medium — first concrete "negative-space" signal from the diagnostics ledger
+
+Regimes consume features, so the goal is a `macro_vix` series in `computed_features`;
+everything downstream (discovery atoms, `regime define` expressions,
+`regime interaction --by macro_vix`, principle seeding's `vix` stem match) then works
+with zero further code. Plan:
+
+1. **Provider client** (the real new work): AlphaVantage doesn't serve VIX; add a small
+   client for a source that does (FRED `VIXCLS` is free and daily), mirroring the
+   `alphavantage/` module shape — rate limiting, parser, spans, TDD.
+2. **Storage**: start with the zero-schema-change path — pseudo-symbol row in `stocks`
+   (`symbol='^VIX'`, `asset_type='Index'`) + closes in `stock_ohlcv`. Universe filters
+   already exclude Index from tradable/discovery symbol universes, so VIX becomes
+   conditioning data without becoming a candidate stock. If a macro family follows
+   (rates; CPI is already parsed in `alphavantage/catalog.py`; dollar index), propose a
+   first-class `macro_series` table instead (owner approval, two-file rule, data
+   dictionary).
+3. **Feature definition**: `macro_vix` passthrough row in `feature_definitions` so the
+   series lands in `computed_features` (market-level median of a single entity is the
+   value itself).
+4. **Done means**: ingest command on CLI (+ MCP/UI if recurring), docs, data-layer
+   learning-module line — and write the generic "add a data source" recipe into
+   `docs/DEVELOPMENT.md` while doing it (no such recipe exists today).
+
 ### Universe quality filter (test tickers, asset types)
 **Source**: first production ingest (sloth, 2026-07-06)
 **Priority**: Medium — bites as soon as research runs against the prod universe
