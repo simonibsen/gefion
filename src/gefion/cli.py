@@ -11860,6 +11860,15 @@ def regime_discover_start(
              "'passthrough' for a deliberately unfiltered run)"),
     fresh_holdout: Optional[str] = typer.Option(
         None, "--fresh-holdout", help="Reserve block <start>:<end>; required for expressive tier"),
+    freeform: Optional[str] = typer.Option(
+        None, "--freeform",
+        help="Path to a JSON list of free-form RegimeExpression ASTs (expressive tier)"),
+    principles: Optional[str] = typer.Option(
+        None, "--principles",
+        help="Comma-separated catalog principle ids to seed atoms/detectors from"),
+    reserve_justification: Optional[str] = typer.Option(
+        None, "--reserve-justification",
+        help="Recorded justification for re-declaring a consumed reserve block"),
     signal: Optional[List[str]] = typer.Option(
         None, "--signal", help="Signal feature override (default: active feature definitions)"),
     horizon_days: int = typer.Option(1, "--horizon-days", help="Forward-return horizon"),
@@ -11902,6 +11911,14 @@ def regime_discover_start(
         out.error("expressive tier requires a declared --fresh-holdout reserve block")
         raise typer.Exit(1)
 
+    freeform_list = []
+    if freeform:
+        try:
+            freeform_list = _json.loads(Path(freeform).read_text())
+        except (OSError, ValueError) as exc:
+            out.error(f"Cannot read freeform expressions {freeform}: {exc}")
+            raise typer.Exit(1)
+
     try:
         with _regime_conn(db_url) as conn:
             chain = duniverse.parse_filter_chain(universe_filter)
@@ -11918,7 +11935,22 @@ def regime_discover_start(
                     cur.execute(
                         "SELECT name FROM feature_definitions WHERE active = true ORDER BY name")
                     signals_list = [r[0] for r in cur.fetchall()]
-            atom_features = sorted({a.get("feature") for a in atom_list if a.get("feature")})
+            detector_list = []
+            if principles:
+                from gefion.experiments.principles import load_principles
+                from gefion.regimes.discovery.grammar import seed_atoms_from_principles
+                from gefion.regimes.discovery.detectors import seed_detectors_from_principles
+                wanted = {p.strip() for p in principles.split(",") if p.strip()}
+                catalog = [p for p in load_principles() if p["id"] in wanted]
+                with conn.cursor() as cur:
+                    cur.execute("SELECT name FROM feature_definitions ORDER BY name")
+                    available = [r[0] for r in cur.fetchall()]
+                atom_list = atom_list + seed_atoms_from_principles(catalog, available)
+                if "expressive" in tier:
+                    detector_list = seed_detectors_from_principles(catalog, available)
+            atom_features = sorted(
+                {a.get("feature") for a in atom_list if a.get("feature")}
+                | {d["feature"] for d in detector_list})
             market = load_market_data(
                 conn, sorted(set(signals_list) | set(atom_features)),
                 horizon_days=horizon_days, dataset_version=dataset,
@@ -11929,6 +11961,8 @@ def regime_discover_start(
                 signal_source=signal_source, grading_scheme=grading_scheme,
                 universe_filter=universe_filter, horizon_days=horizon_days,
                 holdout_weeks=holdout_weeks, fresh_holdout=reserve,
+                freeform=freeform_list, detectors=detector_list,
+                reserve_justification=reserve_justification,
                 dataset_version=dataset)
             summary = run_discovery(conn, config, market)
     except (GrammarError, DiscoveryError, duniverse.UniverseError,

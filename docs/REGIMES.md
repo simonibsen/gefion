@@ -144,6 +144,39 @@ making the failure modes *structurally impossible*, not merely discouraged.
 - **expressive**: free-form expressions and sandboxed detector functions (HMM/clustering) —
   admissible **only** against a declared, single-use fresh-holdout reserve.
 
+### The fresh-holdout reserve (expressive tier)
+
+Free-form search is unbounded, and no correction can rescue an unbounded, data-reusing
+search — so expressive candidates are judged on a **reserve**: a declared, dated block,
+distinct from the outer holdout and *excluded from the inner window* (the
+`DiscoveryDataContext` refuses reserve dates during discovery). Reserve honesty is
+entirely about non-reuse:
+
+- A block is **single-use**: consumption is recorded on the run
+  (`reserve_consumed`), and re-declaring a consumed (or overlapping) block is refused.
+- The only escape is an **explicit, recorded justification**
+  (`--reserve-justification`), stored in the new run's pre-registration with the run
+  ids it overrides — auditable, never silent.
+- Detector candidates run in the same whitelisted-import sandbox as AI-generated
+  features, fit strictly on inner data (fitted parameters are ledgered — T3's degrees
+  of freedom are recorded), and face three screens before any reserve data is spent:
+  **degeneracy** (a bucket holding >90% or <2%), **instability** (seeded refits that
+  disagree), and **non-causality** (labels that change when the future is truncated
+  away). Refusals are verdicts and diagnostics, not silent drops.
+- An admitted detector becomes a `feature_functions` row plus a `RegimeDefinition`
+  with a `detector_function` leaf — the 005 FR-019a gated escape hatch, whose runtime
+  this feature provides.
+
+### Discovery inside experiment cycles
+
+`gefion experiment propose --type regime_discovery` runs discovery under cycle budgets
+(the cycle budget maps to the candidate budget). Risk class **high** — cycles never
+auto-approve it — and the experiment earns no cycle-level holdout p-value (NULL fails
+closed); the honest verdicts live in the run's own ledgers. Principle seeding
+(`--principles hurst-exponent-regime,regime-detection-hmm`, or `principle_ids` in the
+experiment config) builds atom libraries and detector candidates from the catalog,
+each carrying provenance to its seeding principle.
+
 ### Reading a run
 
 ```bash

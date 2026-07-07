@@ -184,6 +184,28 @@ def record_result(conn, candidate_id: int, results: Dict[str, Any], verdict: str
             )
 
 
+def update_provenance(conn, run_id: int, candidate_hash: str,
+                      patch: Dict[str, Any]) -> None:
+    """Merge keys into a candidate's provenance during evaluation — used to
+    record fitted detector parameters (T3 accounting). Only legal after the
+    freeze and only ADDS provenance; the expression/hash never change."""
+    with create_span("discovery.ledger.update_provenance", run_id=run_id):
+        status = get_run(conn, run_id)["status"]
+        if status not in ("enumerated", "evaluated"):
+            raise LedgerError(
+                f"provenance may only be extended during evaluation (run is {status!r})")
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE regime_candidates
+                   SET provenance = COALESCE(provenance, '{}'::jsonb) || %s::jsonb
+                   WHERE run_id = %s AND candidate_hash = %s""",
+                (Json(patch), run_id, candidate_hash),
+            )
+            if cur.rowcount == 0:
+                raise LedgerError(
+                    f"candidate {candidate_hash!r} not found in run {run_id}")
+
+
 def list_candidates(conn, run_id: int, verdict: Optional[str] = None) -> List[Dict[str, Any]]:
     cols = ("id", "run_id", "candidate_hash", "expression", "tier", "provenance",
             "results", "counted_in_family", "verdict")

@@ -25,6 +25,7 @@ _RISK_LEVELS = {
     "label_engineering": "high",
     "strategy_params": "low",
     "pipeline": "high",
+    "regime_discovery": "high",  # a claim mill — never auto-approved (006 FR-109)
 }
 
 
@@ -565,6 +566,13 @@ class ExperimentRunner:
                     dataset_uri=config.get("dataset_uri"),
                     horizon_days=config.get("horizon_days", 7),
                     quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
+                )
+            elif experiment["experiment_type"] == "regime_discovery":
+                from gefion.experiments.types.regime_discovery import RegimeDiscoveryExperiment
+                evaluator = RegimeDiscoveryExperiment(
+                    name=experiment["name"],
+                    config=config,
+                    db_url=self.db_url,
                 )
             else:
                 raise ValueError(f"Unknown experiment type: {experiment['experiment_type']}")

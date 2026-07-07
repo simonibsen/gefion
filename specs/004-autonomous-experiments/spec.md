@@ -315,3 +315,17 @@ When experiments confirm or contradict principles from the catalog, the results 
 - **SC-008**: The principles catalog covers all 5 domain areas (statistical foundations, ML for finance, factor models, risk/portfolio, microstructure) with at least 5 actionable principles per area
 - **SC-009**: Users can review any experiment's full lineage: discovery context, motivating principle, hypothesis, holdout results, FDR status, and promotion decision
 - **SC-010**: Experiment results render as D3 charts in the UI, including at minimum: trial performance scatter, FDR cycle summary with threshold line, and feature importance comparison
+
+## Cross-references (added later)
+
+- **`regime_discovery` experiment type (spec 006, 2026-07)** — agentic regime discovery
+  runs inside the cycle framework as a first-class experiment type, but with a
+  deliberately STRICTER gate than standard experiments: risk class **high** and never
+  auto-approved by `cycle_runner` (a human owns discovery's gate); the cycle's budget
+  maps onto the run's per-cycle *candidate* budget; and the experiment earns **no
+  cycle-level holdout p-value** (it stays NULL, failing closed at the cycle level) —
+  its honest verdicts live in the discovery run's own ledgers, behind nested
+  segregation, an inner evidence screen, and one flat FDR family at 0.01 that counts
+  every candidate including the losers. See
+  [specs/006-agentic-regime-discovery/](../006-agentic-regime-discovery/) and
+  docs/REGIMES.md § Agentic discovery.

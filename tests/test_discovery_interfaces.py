@@ -55,8 +55,21 @@ def test_start_declares_contract_options():
     result = runner.invoke(app, ["regime", "discover", "start", "--help"])
     for opt in ("--name", "--atoms", "--depth", "--budget", "--tier",
                 "--signal-source", "--grading-scheme", "--universe-filter",
-                "--fresh-holdout", "--seed", "--dataset", "--json"):
+                "--fresh-holdout", "--seed", "--dataset", "--json",
+                # expressive tier (US3): freeform ASTs, principle seeding,
+                # recorded justification for reserve re-declaration
+                "--freeform", "--principles", "--reserve-justification"):
         assert opt in result.output, f"contract option {opt} missing on start"
+
+
+def test_start_refuses_expressive_without_reserve(tmp_path):
+    atoms = tmp_path / "atoms.json"
+    atoms.write_text('{"atoms": [{"feature": "x", "form": "tercile"}]}')
+    result = runner.invoke(app, [
+        "regime", "discover", "start", "--name", "x", "--atoms", str(atoms),
+        "--tier", "expressive"])
+    assert result.exit_code != 0
+    assert "fresh-holdout" in result.output.lower()
 
 
 def test_mcp_start_is_not_read_only():
@@ -145,6 +158,58 @@ def test_discover_ledger_shows_losers(db_url, completed_run):
     assert result.exit_code == 0
     filtered = json.loads(result.output)["data"]["candidates"]
     assert all(r["verdict"] == "admitted" for r in filtered)
+
+
+# --- experiment-type integration (T032, US3) ---------------------------------
+
+def test_regime_discovery_risk_class_is_high():
+    from gefion.experiments.core import classify_risk_level
+    assert classify_risk_level("regime_discovery") == "high"
+
+
+def test_regime_discovery_dispatch_exists():
+    core_src = (REPO / "src" / "gefion" / "experiments" / "core.py").read_text()
+    assert '"regime_discovery"' in core_src
+    assert "RegimeDiscoveryExperiment" in core_src
+
+
+def test_regime_discovery_never_auto_approved():
+    """FR-109: cycles may budget and run discovery, but a human approves it."""
+    runner_src = (REPO / "src" / "gefion" / "experiments" / "cycle_runner.py").read_text()
+    assert "regime_discovery" in runner_src, (
+        "cycle auto-approve must exclude regime_discovery")
+
+
+def test_regime_discovery_evaluator_maps_cycle_budget_to_candidate_budget():
+    from gefion.experiments.types.regime_discovery import RegimeDiscoveryExperiment
+    ev = RegimeDiscoveryExperiment(
+        name="itest", db_url="postgresql://unused/unused",
+        config={"candidate_budget": 7,
+                "atoms": [{"feature": "x", "form": "tercile"}],
+                "signals": ["y"], "tiers": ["grammar"]})
+    cfg = ev.discovery_config(seed=3)
+    assert cfg.budget == 7
+    assert cfg.seed == 3
+    assert cfg.name.startswith("itest")
+    assert tuple(cfg.tiers) == ("grammar",)
+
+
+def test_regime_discovery_evaluator_seeds_from_principles():
+    """US3 acceptance: a principle-seeded proposal yields bounded,
+    provenance-carrying candidates."""
+    from gefion.experiments.types.regime_discovery import RegimeDiscoveryExperiment
+    ev = RegimeDiscoveryExperiment(
+        name="itest-seeded", db_url="postgresql://unused/unused",
+        config={"principle_ids": ["hurst-exponent-regime"],
+                "signals": ["momentum_20"]})
+    atoms = ev.resolve_atoms(available_features=["indicator_rsi_14", "momentum_20"])
+    assert atoms, "principle should seed at least one atom"
+    assert all(a["provenance"]["principle_id"] == "hurst-exponent-regime" for a in atoms)
+
+
+def test_experiments_ui_offers_regime_discovery():
+    view = (REPO / "src" / "gefion" / "ui" / "views" / "experiments.py").read_text()
+    assert "regime_discovery" in view
 
 
 def test_discover_verdicts_shows_family_size_beside_survivors(db_url, completed_run):

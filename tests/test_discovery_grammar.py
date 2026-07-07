@@ -124,3 +124,45 @@ def test_depth_beyond_hard_cap_refused():
 def test_depth_must_be_positive():
     with pytest.raises(grammar.GrammarError):
         grammar.enumerate_candidates(LIBRARY, depth=0)
+
+
+# --- principle seeding (T031, US3) -------------------------------------------
+
+PRINCIPLES = [
+    {"id": "hurst-exponent-regime",
+     "data_requirements": ["ohlcv.close", "features.rsi", "features.macd"]},
+    {"id": "low-volatility-anomaly",
+     "data_requirements": ["close", "features.volatility_realized"]},
+]
+
+AVAILABLE = ["indicator_rsi_14", "realized_vol_20", "volume_zscore"]
+
+
+def test_seed_atoms_from_principles_matches_available_features():
+    atoms = grammar.seed_atoms_from_principles(PRINCIPLES, AVAILABLE)
+    by_feature = {a["feature"]: a for a in atoms}
+    # features.rsi -> indicator_rsi_14; features.volatility_realized -> realized_vol_20
+    assert "indicator_rsi_14" in by_feature
+    assert "realized_vol_20" in by_feature
+    # non-feature requirements (ohlcv.close) and unmatched refs produce nothing
+    assert "volume_zscore" not in by_feature
+    # every seeded atom carries provenance to its principle
+    assert by_feature["indicator_rsi_14"]["provenance"]["principle_id"] == \
+        "hurst-exponent-regime"
+    assert by_feature["realized_vol_20"]["provenance"]["principle_id"] == \
+        "low-volatility-anomaly"
+
+
+def test_seeded_atoms_are_valid_and_deterministic():
+    atoms = grammar.seed_atoms_from_principles(PRINCIPLES, AVAILABLE)
+    assert grammar.validate_atoms(atoms) == grammar.validate_atoms(
+        grammar.seed_atoms_from_principles(PRINCIPLES, AVAILABLE))
+    assert atoms  # bounded but non-empty on matching inputs
+
+
+def test_candidates_carry_principle_provenance():
+    atoms = grammar.seed_atoms_from_principles(PRINCIPLES, AVAILABLE)
+    cands = grammar.enumerate_candidates(atoms, depth=1)
+    assert all(c.principles for c in cands)
+    rsi = next(c for c in cands if c.atom_features == ("indicator_rsi_14",))
+    assert rsi.principles == ("hurst-exponent-regime",)

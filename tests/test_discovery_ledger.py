@@ -449,6 +449,93 @@ def test_runner_verdicts_derive_only_from_the_recorded_family(conn):
             assert "survived" in t
 
 
+# --- US3 (T033): expressive tier — reserve-gated freeform + detectors
+
+
+FREEFORM_PLANTED = {"leaf": "comparison", "feature": "planted_cond",
+                    "cmp": ">", "value": 0.0, "scope": "market"}
+
+DETECTOR_CODE = '''
+import numpy as np
+
+def fit(series, seed=0):
+    values = [v for _, v in series]
+    return {"cut": float(np.median(values))}
+
+def label(series, params):
+    return [(d, "high" if v > params["cut"] else "low") for d, v in series]
+'''
+
+
+def _expressive_cfg(u, name, justification=None):
+    return runner.DiscoveryConfig(
+        name=name, seed=8,
+        atoms=[{"feature": "noise_1", "cmp": ">", "value": 0.0}],
+        signals=["noise_0"], depth=1, budget=20, tiers=("expressive",),
+        holdout_weeks=13, min_effective_n=3, universe_filter="passthrough",
+        fresh_holdout=(u.dates[300], u.dates[380]),
+        freeform=[FREEFORM_PLANTED],
+        detectors=[{"name": "det-planted", "code": DETECTOR_CODE,
+                    "feature": "planted_cond",
+                    "provenance": {"principle_id": "regime-detection-hmm"}}],
+        reserve_justification=justification,
+    )
+
+
+def test_expressive_tier_requires_a_reserve(conn):
+    u = make_universe(seed=8, n_days=500, n_features=2)
+    cfg = _expressive_cfg(u, "ledgertest-exp-noreserve")
+    cfg.fresh_holdout = None
+    with pytest.raises(runner.DiscoveryError):
+        runner.run_discovery(conn, cfg, _market_from(u))
+
+
+def test_expressive_run_consumes_reserve_and_ledgers_everything(conn):
+    u = plant_regime_edge(make_universe(seed=8, n_days=500, n_features=3),
+                          "noise_0", episode_len=10, cancel=True)
+    cfg = _expressive_cfg(u, "ledgertest-exp")
+    summary = runner.run_discovery(conn, cfg, _market_from(u))
+    run = ledger.get_run(conn, summary["run_id"])
+    assert run["reserve_consumed"] is True
+    assert run["segregation"]["reserve"]["start"] == str(u.dates[300])
+    cands = ledger.list_candidates(conn, summary["run_id"])
+    assert all(c["tier"] == "expressive" for c in cands)
+    assert len(cands) == 2  # freeform + detector
+    # the planted freeform expression is admitted on the reserve block
+    admitted = [c for c in cands if c["verdict"] == "admitted"]
+    assert admitted, "planted conditional edge should be admitted on the reserve"
+    # detector candidates carry fitted params in provenance (T3 accounting)
+    det = next(c for c in cands if c["provenance"].get("detector"))
+    assert "fitted_params" in det["provenance"]
+    for row in summary["admitted"]:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM regime_definitions WHERE name = %s",
+                        (row["definition"],))
+
+
+def test_consumed_reserve_refused_without_justification(conn):
+    u = plant_regime_edge(make_universe(seed=8, n_days=500, n_features=3),
+                          "noise_0", episode_len=10, cancel=True)
+    from gefion.regimes.discovery.freshhold import ReserveError
+    summary = runner.run_discovery(conn, _expressive_cfg(u, "ledgertest-exp-a"),
+                                   _market_from(u))
+    with pytest.raises(ReserveError):
+        runner.run_discovery(conn, _expressive_cfg(u, "ledgertest-exp-b"),
+                             _market_from(u))
+    # …but an explicit, recorded justification re-opens it
+    summary2 = runner.run_discovery(
+        conn, _expressive_cfg(u, "ledgertest-exp-c",
+                              justification="synthetic test rerun"),
+        _market_from(u))
+    run2 = ledger.get_run(conn, summary2["run_id"])
+    assert run2["segregation"]["reserve"]["justification"] == "synthetic test rerun"
+    for s in (summary, summary2):
+        for row in s["admitted"]:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM regime_definitions WHERE name = %s",
+                            (row["definition"],))
+
+
 def test_runner_refuses_all_holdout_data(conn):
     """US1 acceptance 3: a run that cannot prove segregation produces no
     verdicts — it is recorded and marked invalid."""

@@ -43,6 +43,7 @@ class Candidate:
     bucketing: Dict[str, Any]
     depth: int
     atom_features: tuple  # conditioning features used (entanglement/availability checks)
+    principles: tuple = ()  # seeding principle ids (provenance, FR-106)
 
 
 # --- atom library -----------------------------------------------------------
@@ -138,7 +139,8 @@ def enumerate_candidates(atoms: List[Dict[str, Any]], depth: int) -> List[Candid
                          if atom_is_boolean(atom)
                          else {"labels": list(TERCILE_LABELS), "method": "tercile"})
             out.append(Candidate(expression=atom_leaf(atom), bucketing=bucketing,
-                                 depth=1, atom_features=(atom["feature"],)))
+                                 depth=1, atom_features=(atom["feature"],),
+                                 principles=_atom_principles(atom)))
 
         if depth >= 2:
             booleans = [a for a in ordered if atom_is_boolean(a)]
@@ -151,10 +153,58 @@ def enumerate_candidates(atoms: List[Dict[str, Any]], depth: int) -> List[Candid
                         bucketing={"labels": list(BOOLEAN_LABELS), "method": "comparison"},
                         depth=2,
                         atom_features=tuple(sorted({a["feature"], b["feature"]})),
+                        principles=tuple(sorted(set(_atom_principles(a)
+                                                    + _atom_principles(b)))),
                     ))
 
         set_attributes(span, n_candidates=len(out))
         return out
+
+
+def _atom_principles(atom: Dict[str, Any]) -> tuple:
+    pid = (atom.get("provenance") or {}).get("principle_id")
+    return (pid,) if pid else ()
+
+
+# --- principle seeding (T031) -------------------------------------------------
+
+def match_features(requirement: str, available: List[str]) -> List[str]:
+    """Feature names matching a principle data-requirement token.
+
+    A requirement like ``volatility_realized`` matches ``realized_vol_20``:
+    every underscore-part's 3-char stem must appear in the feature name.
+    Deterministic (sorted) and deliberately conservative — an unmatched
+    requirement seeds nothing (the availability inventory rejects fabrication).
+    """
+    stems = [part[:3] for part in requirement.lower().split("_") if part]
+    return sorted(f for f in available if all(stem in f.lower() for stem in stems))
+
+
+def seed_atoms_from_principles(principles: List[Dict[str, Any]],
+                               available_features: List[str]) -> List[Dict[str, Any]]:
+    """Build a bounded atom library from catalog principles (US3).
+
+    Only `features.*` data requirements seed atoms, and only when they match
+    a feature that actually exists — uncomputable proposals are rejected at
+    the source (FR-121). Each atom carries provenance to its principle.
+    """
+    with create_span("discovery.grammar.seed_from_principles",
+                     n_principles=len(principles)) as span:
+        atoms: List[Dict[str, Any]] = []
+        seeded: set = set()
+        for principle in principles:
+            for requirement in principle.get("data_requirements", []):
+                if not str(requirement).startswith("features."):
+                    continue
+                token = str(requirement).split(".", 1)[1]
+                for feature in match_features(token, available_features):
+                    if feature in seeded:
+                        continue
+                    seeded.add(feature)
+                    atoms.append({"feature": feature, "form": "tercile",
+                                  "provenance": {"principle_id": principle["id"]}})
+        set_attributes(span, n_atoms=len(atoms))
+        return atoms
 
 
 def search_space_size(atoms: List[Dict[str, Any]], depth: int) -> int:

@@ -1851,6 +1851,12 @@ async def list_tools() -> List[Tool]:
                                         "description": "Declared filter chain; 'passthrough' for unfiltered"},
                     "fresh_holdout": {"type": "string",
                                       "description": "Reserve block START:END (required for expressive tier)"},
+                    "freeform": {"type": "string",
+                                 "description": "Path to JSON list of free-form ASTs (expressive tier)"},
+                    "principles": {"type": "string",
+                                   "description": "Comma-separated principle ids to seed atoms/detectors"},
+                    "reserve_justification": {"type": "string",
+                                              "description": "Recorded justification for re-declaring a consumed reserve"},
                     "seed": {"type": "integer", "description": "Run seed"},
                     "dataset": {"type": "string", "description": "Dataset version tag"},
                 },
@@ -4766,6 +4772,12 @@ async def _regime_discover_start(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--universe-filter", args["universe_filter"]])
         if args.get("fresh_holdout"):
             cmd.extend(["--fresh-holdout", args["fresh_holdout"]])
+        if args.get("freeform"):
+            cmd.extend(["--freeform", args["freeform"]])
+        if args.get("principles"):
+            cmd.extend(["--principles", args["principles"]])
+        if args.get("reserve_justification"):
+            cmd.extend(["--reserve-justification", args["reserve_justification"]])
         if args.get("seed") is not None:
             cmd.extend(["--seed", str(args["seed"])])
         if args.get("dataset"):

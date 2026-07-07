@@ -87,6 +87,25 @@ def test_inner_market_is_a_market_view_ending_at_the_boundary():
     assert inner.dataset_version == "synth-test"
 
 
+def test_reserve_block_is_excluded_from_inner():
+    """A declared fresh-holdout reserve is NOT discovery data: inner accessors
+    must exclude it and check_dates must refuse its dates (FR-118a)."""
+    market, u = _market(n_days=400)
+    holdout = HoldoutManager(max_date=u.dates[-1], holdout_weeks=6)
+    reserve = (u.dates[200], u.dates[260])
+    ctx = segregation.DiscoveryDataContext(market, holdout, reserve=reserve)
+
+    inner_dates = {d for d, _ in ctx.inner_feature("noise_0")}
+    reserved = {d for d in u.dates if reserve[0] <= d <= reserve[1]}
+    assert reserved and not (inner_dates & reserved)
+    assert not ({d for d, _ in ctx.inner_returns()} & reserved)
+    assert not ({d for d, _ in ctx.inner_market().forward_returns} & reserved)
+    with pytest.raises(segregation.SegregationError):
+        ctx.check_dates([u.dates[230]])
+    assert ctx.boundaries()["reserve"] == {"start": str(reserve[0]),
+                                           "end": str(reserve[1])}
+
+
 def test_context_requires_data_before_the_holdout():
     """A dataset that is ALL holdout cannot prove segregation — refuse."""
     market, u = _market(n_days=20)

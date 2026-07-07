@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from gefion.experiments.holdout import HoldoutManager
 from gefion.observability import create_span, set_attributes
@@ -42,16 +42,23 @@ class MarketData:
 
 
 class DiscoveryDataContext:
-    """Inner-window-only view of the market data (discovery/fitting phase)."""
+    """Inner-window-only view of the market data (discovery/fitting phase).
 
-    def __init__(self, market: MarketData, holdout: HoldoutManager):
+    When a fresh-holdout `reserve` block is declared (expressive tier), its
+    dates are excluded from the inner window too — the reserve is validation
+    data, never discovery data (FR-118a).
+    """
+
+    def __init__(self, market: MarketData, holdout: HoldoutManager,
+                 reserve: Optional[Tuple[datetime.date, datetime.date]] = None):
         with create_span("discovery.segregation.context") as span:
             self._market = market
             self.inner_end = holdout.get_max_training_date()
             self.holdout_start = holdout.holdout_start_date
             self.holdout_end = holdout.holdout_end_date
+            self.reserve = reserve
 
-            inner_dates = [d for d in market.dates() if d <= self.inner_end]
+            inner_dates = [d for d in market.dates() if self._is_inner(d)]
             if not inner_dates:
                 raise SegregationError(
                     "no data before the outer holdout — segregation cannot be proven "
@@ -61,6 +68,13 @@ class DiscoveryDataContext:
             set_attributes(span, inner_days=len(inner_dates),
                            inner_end=str(self.inner_end))
 
+    def _is_inner(self, d: datetime.date) -> bool:
+        if d > self.inner_end:
+            return False
+        if self.reserve and self.reserve[0] <= d <= self.reserve[1]:
+            return False
+        return True
+
     # -- inner-only accessors -------------------------------------------------
 
     def feature_names(self) -> List[str]:
@@ -69,10 +83,10 @@ class DiscoveryDataContext:
     def inner_feature(self, name: str) -> Series:
         if name not in self._market.features:
             raise LookupError(f"feature {name!r} not in market data")
-        return [(d, v) for d, v in self._market.features[name] if d <= self.inner_end]
+        return [(d, v) for d, v in self._market.features[name] if self._is_inner(d)]
 
     def inner_returns(self) -> Series:
-        return [(d, v) for d, v in self._market.forward_returns if d <= self.inner_end]
+        return [(d, v) for d, v in self._market.forward_returns if self._is_inner(d)]
 
     def inner_market(self) -> MarketData:
         """The inner window as a MarketData view — the ONLY market object the
@@ -86,20 +100,24 @@ class DiscoveryDataContext:
     # -- guards ---------------------------------------------------------------
 
     def check_dates(self, dates) -> None:
-        """Raise if any date lies in the outer holdout (FR-101)."""
-        touched = [d for d in dates if d > self.inner_end]
+        """Raise if any date lies in the outer holdout or the reserve (FR-101)."""
+        touched = [d for d in dates if not self._is_inner(d)]
         if touched:
             raise SegregationError(
-                f"discovery touched {len(touched)} outer-holdout date(s), "
-                f"first: {min(touched)} (inner window ends {self.inner_end})")
+                f"discovery touched {len(touched)} non-inner date(s) "
+                f"(outer holdout or reserve), first: {min(touched)} "
+                f"(inner window ends {self.inner_end})")
 
     # -- pre-registration record ------------------------------------------------
 
     def boundaries(self) -> Dict[str, Any]:
         """Segregation boundaries as recorded in the run row (FR-102)."""
-        return {
+        out = {
             "inner_start": str(self.inner_start),
             "inner_end": str(self.inner_end),
             "holdout_start": str(self.holdout_start),
             "holdout_end": str(self.holdout_end),
         }
+        if self.reserve:
+            out["reserve"] = {"start": str(self.reserve[0]), "end": str(self.reserve[1])}
+        return out

@@ -502,6 +502,13 @@ class CycleRunner:
             if auto_approve:
                 for exp_id in proposed_ids:
                     try:
+                        # regime_discovery is never auto-approved (006 FR-109):
+                        # discovery is a claim mill and a human owns its gate.
+                        if self.runner.get(exp_id)["experiment_type"] == "regime_discovery":
+                            _emit("approving",
+                                  f"Experiment {exp_id} (regime_discovery) requires "
+                                  "manual approval — skipped auto-approve")
+                            continue
                         self.runner.approve(exp_id, approver="cycle_runner")
                     except Exception as e:
                         logger.warning(f"Failed to approve experiment {exp_id}: {e}")
