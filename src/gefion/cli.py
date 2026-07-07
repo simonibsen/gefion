@@ -11972,6 +11972,74 @@ def regime_discover_list(
     )
 
 
+@discover_app.command("ledger")
+def regime_discover_ledger(
+    run: str = typer.Argument(..., help="Run id or name"),
+    verdict: Optional[str] = typer.Option(
+        None, "--verdict",
+        help="Filter: admitted|rejected|refused_low_power|refused_degenerate|refused_unstable"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """The candidate ledger: every candidate evaluated, losers included.
+
+    The losers are part of the story — they are the FDR family's denominator.
+    """
+    from gefion.output import Column
+    from gefion.regimes.discovery import ledger as dledger
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            run_row = _resolve_run(conn, run)
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+        cands = dledger.list_candidates(conn, run_row["id"], verdict=verdict)
+    out.table(
+        columns=[Column("id"), Column("tier"), Column("hash"),
+                 Column("verdict"), Column("counted"), Column("tests")],
+        rows=[[c["id"], c["tier"], c["candidate_hash"][:24], c["verdict"],
+               c["counted_in_family"],
+               len((c["results"] or {}).get("tests", []))] for c in cands],
+        json_data={"run_id": run_row["id"], "family_size": run_row["family_size"],
+                   "candidates": cands},
+    )
+
+
+@discover_app.command("verdicts")
+def regime_discover_verdicts(
+    run: str = typer.Argument(..., help="Run id or name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """FDR survivors (if any — most runs: none), always shown with the family size."""
+    from gefion.regimes.discovery import ledger as dledger
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            run_row = _resolve_run(conn, run)
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+        cands = dledger.list_candidates(conn, run_row["id"])
+    admitted = [c for c in cands if c["verdict"] == "admitted"]
+    by_verdict: dict = {}
+    for c in cands:
+        by_verdict[c["verdict"]] = by_verdict.get(c["verdict"], 0) + 1
+    out.info(f"Run {run_row['id']} '{run_row['name']}': {len(admitted)} admitted "
+             f"out of {len(cands)} candidates — FDR family size {run_row['family_size']} "
+             f"(every test counted, losers included)")
+    for c in admitted:
+        surviving = [t for t in (c["results"] or {}).get("tests", []) if t.get("survived")]
+        out.info(f"  admitted {c['candidate_hash'][:24]}: "
+                 f"{[(t['signal'], t.get('bucket'), t['pvalue']) for t in surviving]}")
+    if out.json_mode:
+        out.json({"run_id": run_row["id"], "family_size": run_row["family_size"],
+                  "verdict_counts": by_verdict, "admitted": admitted})
+
+
 @discover_app.command("show")
 def regime_discover_show(
     run: str = typer.Argument(..., help="Run id or name"),

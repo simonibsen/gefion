@@ -1035,3 +1035,7 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
 - `regime_discover_list` — list discovery runs (status, FDR family size, dataset).
 - `regime_discover_show` — inspect a run: pre-registration (search space + declared
   seams), segregation boundaries, family size, status.
+- `regime_discover_ledger` — the candidate ledger: every candidate evaluated, losers
+  included (they are the FDR family's denominator). Filterable by verdict.
+- `regime_discover_verdicts` — FDR survivors (most runs: none), always with the family
+  size beside them. Never present an unadmitted candidate as a finding.

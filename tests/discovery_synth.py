@@ -87,6 +87,8 @@ def plant_regime_edge(
     conditioning_feature: str = "planted_cond",
     effect: float = 0.02,
     regime_fraction: float = 0.5,
+    episode_len: Optional[int] = None,
+    cancel: bool = False,
 ) -> SynthUniverse:
     """Inject a conditional edge: `signal_feature` predicts forward returns, but
     ONLY inside the regime where `conditioning_feature` is high (SC-102).
@@ -94,13 +96,18 @@ def plant_regime_edge(
     The conditioning series is a slow square wave (long episodes, so causal
     tercile/threshold labels recover it and the episode-based effective-N floor
     is clearable). Inside the regime, forward returns gain
-    `effect * sign(signal)`; outside, returns stay pure noise.
+    `effect * sign(signal)`; outside, returns stay pure noise — or, with
+    `cancel=True`, lose the same amount so the edge nets flat overall (the
+    cancellation design: any decoy bucket mixes +/- to ~zero, only the true
+    regime concentrates the edge — what decoy REJECTION requires).
     """
     rng = np.random.default_rng(universe.seed + 104729)  # distinct stream, still seeded
     n = len(universe.dates)
 
-    # Slow alternation: ~10 episodes across the sample, half of them "in regime".
-    episode_len = max(20, n // 10)
+    # Slow alternation: ~10 episodes across the sample by default, half of
+    # them "in regime"; shorter episodes give bucket tests more effective-N.
+    if episode_len is None:
+        episode_len = max(20, n // 10)
     cond_vals = np.zeros(n)
     in_regime = np.zeros(n, dtype=bool)
     high = True
@@ -119,7 +126,8 @@ def plant_regime_edge(
     sig = np.array([v for _, v in universe.features[signal_feature]])
 
     fwd = np.array([v for _, v in universe.forward_returns])
-    fwd = fwd + np.where(in_regime, effect * np.sign(sig), 0.0)
+    outside = (-effect * np.sign(sig)) if cancel else 0.0
+    fwd = fwd + np.where(in_regime, effect * np.sign(sig), outside)
 
     features = dict(universe.features)
     features[conditioning_feature] = list(zip(universe.dates, cond_vals))

@@ -81,3 +81,29 @@ def test_plant_regime_edge_conditioning_has_long_episodes():
     cond = [v for _, v in u.features["planted_cond"]]
     flips = sum(1 for a, b in zip(cond, cond[1:]) if (a > 0) != (b > 0))
     assert flips <= 12  # slow square wave, not flicker
+
+
+def test_plant_regime_edge_cancel_nets_flat_overall():
+    """The cancellation design: edge inside, anti-edge outside — a decoy
+    bucket mixing both must see ~nothing."""
+    u = plant_regime_edge(make_universe(seed=5, n_days=400, n_features=2),
+                          "noise_0", cancel=True)
+    in_dates = set(u.planted["in_regime_dates"])
+    sig = dict(u.features["noise_0"])
+    fwd = dict(u.forward_returns)
+    aligned = np.array([np.sign(sig[d]) * fwd[d] for d in u.dates])
+    inside = np.array([np.sign(sig[d]) * fwd[d] for d in u.dates if d in in_dates])
+    outside = np.array([np.sign(sig[d]) * fwd[d] for d in u.dates if d not in in_dates])
+    assert inside.mean() > 0.01
+    assert outside.mean() < -0.01
+    assert abs(aligned.mean()) < 0.005  # flat overall
+
+
+def test_plant_regime_edge_episode_len_is_tunable():
+    """Bucket tests need several regime episodes inside the outer holdout —
+    the episode length must be controllable."""
+    u = plant_regime_edge(make_universe(seed=13, n_days=400, n_features=1),
+                          "noise_0", episode_len=10)
+    cond = [v for _, v in u.features["planted_cond"]]
+    flips = sum(1 for a, b in zip(cond, cond[1:]) if (a > 0) != (b > 0))
+    assert flips == 39  # 400 days / 10-day episodes

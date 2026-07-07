@@ -207,7 +207,7 @@ def _render_discovery_tab():
 
 
 def _render_discovery_run_detail(run: dict):
-    """Pre-registration (immutable), segregation boundaries, and status."""
+    """Pre-registration (immutable), segregation boundaries, ledger, verdicts."""
     if run["status"] == "invalid":
         st.error("Run invalid — segregation unproven or execution aborted; "
                  "no verdicts were produced (fail-closed).")
@@ -219,6 +219,62 @@ def _render_discovery_run_detail(run: dict):
     st.json(run["search_space"])
     st.markdown("**Segregation** (discovery never saw the holdout)")
     st.json(run["segregation"])
+    _render_discovery_verdicts(run)
+    _render_discovery_ledger(run)
+
+
+def _render_discovery_verdicts(run: dict):
+    """Admitted edges highlighted — never without the family size beside them."""
+    from gefion.ui.components.database import get_connection
+    from gefion.regimes.discovery import ledger
+    try:
+        with get_connection() as conn:
+            cands = ledger.list_candidates(conn, run["id"])
+    except Exception:  # pragma: no cover - defensive
+        st.caption("Verdicts unavailable.")
+        return
+    admitted = [c for c in cands if c["verdict"] == "admitted"]
+    st.markdown(
+        f"**Verdicts** — {len(admitted)} admitted of {len(cands)} candidates "
+        f"(FDR family size **{run['family_size']}** — every test counted, losers included)")
+    if not admitted:
+        st.caption("No survivors. Most honest runs admit nothing — that is the loop "
+                   "working, not failing.")
+        return
+    for c in admitted:
+        surviving = [t for t in (c["results"] or {}).get("tests", []) if t.get("survived")]
+        st.success(f"Admitted `{c['candidate_hash'][:24]}` — surviving tests: "
+                   + ", ".join(f"{t['signal']}"
+                               + (f"×{t['bucket']}" if t.get("bucket") else "")
+                               + f" (p={t['pvalue']:.2e})" for t in surviving))
+
+
+def _render_discovery_ledger(run: dict):
+    """The full candidate ledger, filterable by verdict; losers visible."""
+    from gefion.ui.components.database import get_connection
+    from gefion.regimes.discovery import ledger
+    st.markdown("**Candidate ledger** (the losers are part of the story)")
+    verdict = st.selectbox(
+        "Filter by verdict",
+        ["all", "admitted", "rejected", "refused_low_power",
+         "refused_degenerate", "refused_unstable"],
+        key=f"ledger_verdict_{run['id']}")
+    try:
+        with get_connection() as conn:
+            cands = ledger.list_candidates(
+                conn, run["id"], verdict=None if verdict == "all" else verdict)
+    except Exception:  # pragma: no cover - defensive
+        st.caption("Ledger unavailable.")
+        return
+    if not cands:
+        st.caption("No candidates under this filter.")
+        return
+    st.dataframe(
+        [{"id": c["id"], "tier": c["tier"], "hash": c["candidate_hash"][:24],
+          "verdict": c["verdict"], "counted in family": c["counted_in_family"],
+          "tests": len((c["results"] or {}).get("tests", []))} for c in cands],
+        width="stretch",
+    )
 
 
 def _render_discovery_start():

@@ -215,6 +215,8 @@ signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
 | `gefion regime discover start` | Pre-register + run an agentic discovery (bounded, nested, search-aware) |
 | `gefion regime discover list` | List discovery runs (status, FDR family size) |
 | `gefion regime discover show` | Inspect a run's pre-registration and segregation |
+| `gefion regime discover ledger` | Candidate ledger — every candidate, losers included |
+| `gefion regime discover verdicts` | FDR survivors, shown with the family size |
 
 ### System
 

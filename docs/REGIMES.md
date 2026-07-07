@@ -141,10 +141,31 @@ making the failure modes *structurally impossible*, not merely discouraged.
 
 ```bash
 gefion regime discover start --name first-hunt --atoms atoms.json \
-  --depth 1 --budget 50 --tier interaction --seed 42
+  --depth 1 --budget 50 --tier interaction --tier grammar --seed 42
 gefion regime discover list                  # runs, status, family size
 gefion regime discover show first-hunt       # pre-registration + segregation
+gefion regime discover ledger first-hunt     # every candidate, every verdict
+gefion regime discover verdicts first-hunt   # survivors (if any) + family size
 ```
+
+### Counting the losers
+
+The candidate ledger is the honesty mechanism, not an audit log. Every candidate the
+search evaluated is persisted with its verdict — `admitted`, `rejected`, or a refusal
+(`refused_low_power` / `refused_degenerate` / `refused_unstable`) — and the run records
+`family_size`, the number of p-valued tests that entered the single Benjamini-Hochberg
+call. Two invariants make cherry-picking impossible at the API level:
+
+- **Refusals never enter the family** (they have no p-value and cannot survive), but they
+  are always persisted and visible — a refusal is a diagnostic, not a deletion.
+- **Evaluated candidates are always counted.** `counted_in_family` is derived from the
+  verdict by the ledger itself; a caller cannot un-count a loser to shrink the
+  denominator, and verdicts are only derivable from the one recorded family run —
+  there is no API to re-test a single hand-picked bucket after peeking.
+
+When reading `verdicts`, the family size is always shown beside the survivors: "1
+admitted out of a 240-test family" and "1 admitted out of 3 tests" are very different
+claims.
 
 **Expect mostly (often entirely) rejections.** A discovery loop that admits often is broken;
 the CI negative-control suite proves this loop admits nothing in pure noise. An admitted

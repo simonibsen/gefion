@@ -156,12 +156,16 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
     usable = _screen_atoms(conn, run_id, config, atoms, market)
 
     # -- enumerate within budget (truncation is loud, never silent) ------------
-    candidates: List[Dict[str, Any]] = []
+    candidates: List[Dict[str, Any]] = []   # ledger rows
+    eval_specs: List[grammar.Candidate] = []  # paired evaluation inputs
     if "interaction" in config.tiers:
         for cand in grammar.enumerate_candidates(usable, depth=1) if usable else []:
             candidates.append(_ledger_candidate(cand, "interaction"))
+            eval_specs.append(cand)
     if "grammar" in config.tiers:
-        raise NotImplementedError("grammar-tier evaluation lands in the next increment (US2)")
+        for cand in grammar.enumerate_candidates(usable, depth=config.depth) if usable else []:
+            candidates.append(_ledger_candidate(cand, "grammar"))
+            eval_specs.append(cand)
     if "expressive" in config.tiers:
         raise NotImplementedError("expressive tier lands with the fresh-holdout reserve (US3)")
 
@@ -173,6 +177,7 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
                     "evaluated": config.budget},
             sample_dependent=False)
         candidates = candidates[: config.budget]
+        eval_specs = eval_specs[: config.budget]
 
     cand_ids = ledger.record_candidates(conn, run_id, candidates)
     ledger.set_status(conn, run_id, "enumerated")  # FREEZE (T4 guard)
@@ -182,21 +187,12 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
                               align_window=config.align_window)
     all_tests: List[Dict[str, Any]] = []      # flat family, in deterministic order
     per_candidate: List[List[Dict[str, Any]]] = []
-    for cand in candidates:
-        tests: List[Dict[str, Any]] = []
-        for signal in config.signals:
-            test = edges.tier1_interaction_test(
-                src, signal=signal,
-                conditioning_feature=cand["provenance"]["atom_features"][0],
-                start=holdout.holdout_start_date, end=holdout.holdout_end_date)
-            test["candidate_hash"] = cand["candidate_hash"]
-            tests.append(test)
-            if test["pvalue"] is None:
-                ledger.record_diagnostic(
-                    conn, run_id, kind="min_sample_refusal",
-                    detail={"signal": signal, "candidate_hash": cand["candidate_hash"],
-                            "n": test["n"], "floor": edges.MIN_INTERACTION_N},
-                    sample_dependent=True)
+    for cand, spec in zip(candidates, eval_specs):
+        if cand["tier"] == "interaction":
+            tests = _evaluate_interaction(conn, run_id, config, src, cand, holdout)
+        else:  # grammar: causal bucket labels through the conditional gate
+            tests = _evaluate_grammar(conn, run_id, config, src, cand, spec,
+                                      market, holdout)
         per_candidate.append(tests)
         all_tests.extend(tests)
 
@@ -238,6 +234,49 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
         "n_admitted": len(admitted),
         "admitted": admitted,
     }
+
+
+def _evaluate_interaction(conn, run_id, config, src, cand, holdout):
+    """Tier 1: one HAC interaction test per signal (the gradient question)."""
+    tests: List[Dict[str, Any]] = []
+    for signal in config.signals:
+        test = edges.tier1_interaction_test(
+            src, signal=signal,
+            conditioning_feature=cand["provenance"]["atom_features"][0],
+            start=holdout.holdout_start_date, end=holdout.holdout_end_date)
+        test["candidate_hash"] = cand["candidate_hash"]
+        tests.append(test)
+        if test["pvalue"] is None:
+            ledger.record_diagnostic(
+                conn, run_id, kind="min_sample_refusal",
+                detail={"signal": signal, "candidate_hash": cand["candidate_hash"],
+                        "n": test["n"], "floor": edges.MIN_INTERACTION_N},
+                sample_dependent=True)
+    return tests
+
+
+def _evaluate_grammar(conn, run_id, config, src, cand, spec, market, holdout):
+    """Tier 2: causal bucket labels over the full timeline (labels at t use
+    data <= t only), edge tests restricted to the outer holdout."""
+    labels = edges.causal_labels(spec, market, window=config.label_window)
+    tests: List[Dict[str, Any]] = []
+    for signal in config.signals:
+        bucket_tests = edges.tier2_bucket_tests(
+            src, signal=signal, labels_by_date=labels,
+            start=holdout.holdout_start_date, end=holdout.holdout_end_date,
+            min_effective_n=config.min_effective_n)
+        for test in bucket_tests:
+            test["candidate_hash"] = cand["candidate_hash"]
+            tests.append(test)
+            if test["pvalue"] is None:
+                ledger.record_diagnostic(
+                    conn, run_id, kind="min_sample_refusal",
+                    detail={"signal": signal, "bucket": test["bucket"],
+                            "candidate_hash": cand["candidate_hash"],
+                            "effective_n": test["effective_n"],
+                            "floor": config.min_effective_n},
+                    sample_dependent=True)
+    return tests
 
 
 def _ledger_candidate(cand: grammar.Candidate, tier: str) -> Dict[str, Any]:

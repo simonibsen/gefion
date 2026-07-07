@@ -341,6 +341,85 @@ def test_runner_rejects_entangled_atoms(conn):
     assert any(d["kind"] == "entangled" for d in diags)
 
 
+# --- US2 (T021/T022): tier-2 through the runner; the family counts the losers
+
+
+def test_runner_tier2_family_counts_every_bucket_test(conn):
+    """N grammar candidates x S signals x B buckets — recorded family equals
+    the p-valued evaluations; refusals recorded but never counted (SC-103)."""
+    u = make_universe(seed=31, n_days=500, n_features=5)
+    cfg = _config(
+        name="ledgertest-t2-family",
+        atoms=[{"feature": "noise_1", "cmp": ">", "value": 0.0},
+               {"feature": "noise_2", "cmp": ">", "value": 0.0}],
+        depth=2, tiers=("grammar",), signals=["noise_0"],
+        holdout_weeks=26, min_effective_n=3)
+    summary = runner.run_discovery(conn, cfg, _market_from(u))
+    run = ledger.get_run(conn, summary["run_id"])
+    cands = ledger.list_candidates(conn, summary["run_id"])
+    # 2 singles + AND + OR = exact enumeration
+    assert len(cands) == 4 and all(c["tier"] == "grammar" for c in cands)
+
+    all_tests = [t for c in cands for t in c["results"]["tests"]]
+    pvalued = [t for t in all_tests if t["pvalue"] is not None]
+    refused = [t for t in all_tests if t["pvalue"] is None]
+    assert run["family_size"] == len(pvalued)
+    # boolean candidates have 2 buckets each; every evaluation reported
+    assert len(all_tests) == len(pvalued) + len(refused) >= 8
+    # zero survivors on pure noise for this seed; losers all persisted
+    assert summary["n_admitted"] == 0
+    assert all(c["verdict"] in ("rejected", "refused_low_power") for c in cands)
+
+
+def test_runner_tier2_recovers_planted_regime_and_rejects_decoys(conn):
+    u = plant_regime_edge(
+        make_universe(seed=32, n_days=500, n_features=4), "noise_0",
+        episode_len=10, cancel=True)
+    cfg = _config(
+        name="ledgertest-t2-planted",
+        atoms=[{"feature": "planted_cond", "cmp": ">", "value": 0.0},
+               {"feature": "noise_1", "cmp": ">", "value": 0.0},
+               {"feature": "noise_2", "cmp": ">", "value": 0.0}],
+        depth=1, tiers=("grammar",), signals=["noise_0"],
+        holdout_weeks=26, min_effective_n=5)
+    summary = runner.run_discovery(conn, cfg, _market_from(u))
+    admitted = ledger.list_candidates(conn, summary["run_id"], verdict="admitted")
+    assert len(admitted) == 1
+    assert admitted[0]["provenance"]["atom_features"] == ["planted_cond"]
+    # the surviving test is the in-regime bucket
+    surviving = [t for t in admitted[0]["results"]["tests"] if t.get("survived")]
+    assert surviving and all(t["bucket"] == "true" for t in surviving)
+    for row in summary["admitted"]:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM regime_definitions WHERE name = %s",
+                        (row["definition"],))
+
+
+def test_runner_verdicts_derive_only_from_the_recorded_family(conn):
+    """Post-hoc cherry-picking is impossible: every test in every candidate's
+    results carries the family's fdr_rate and a survived flag; family_size on
+    the run equals the p-valued tests across ALL candidates (T022)."""
+    u = make_universe(seed=33, n_days=500, n_features=4)
+    cfg = _config(name="ledgertest-t2-audit",
+                  atoms=[{"feature": "noise_1", "form": "tercile"},
+                         {"feature": "noise_2", "cmp": ">", "value": 0.0}],
+                  depth=1, tiers=("interaction", "grammar"),
+                  signals=["noise_0", "noise_3"],
+                  holdout_weeks=26, min_effective_n=3)
+    summary = runner.run_discovery(conn, cfg, _market_from(u))
+    run = ledger.get_run(conn, summary["run_id"])
+    cands = ledger.list_candidates(conn, summary["run_id"])
+    # interaction and grammar hypotheses ledger separately even for one atom
+    assert {c["tier"] for c in cands} == {"interaction", "grammar"}
+    total_pvalued = sum(1 for c in cands for t in c["results"]["tests"]
+                        if t["pvalue"] is not None)
+    assert run["family_size"] == total_pvalued
+    for c in cands:
+        assert c["results"]["fdr_rate"] == cfg.fdr_rate
+        for t in c["results"]["tests"]:
+            assert "survived" in t
+
+
 def test_runner_refuses_all_holdout_data(conn):
     """US1 acceptance 3: a run that cannot prove segregation produces no
     verdicts — it is recorded and marked invalid."""

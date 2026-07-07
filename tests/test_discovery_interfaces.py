@@ -24,6 +24,8 @@ PARITY = {
     "start": (["regime", "discover", "start"], "regime_discover_start", "_render_discovery_start"),
     "list": (["regime", "discover", "list"], "regime_discover_list", "_render_discovery_tab"),
     "show": (["regime", "discover", "show"], "regime_discover_show", "_render_discovery_run_detail"),
+    "ledger": (["regime", "discover", "ledger"], "regime_discover_ledger", "_render_discovery_ledger"),
+    "verdicts": (["regime", "discover", "verdicts"], "regime_discover_verdicts", "_render_discovery_verdicts"),
 }
 
 
@@ -98,3 +100,60 @@ def test_discover_show_unknown_run_is_honest(db_url):
         app, ["regime", "discover", "show", "no-such-run", "--db-url", db_url])
     assert result.exit_code != 0
     assert "not found" in result.output.lower()
+
+
+@pytest.fixture
+def completed_run(db_url):
+    """A tiny completed discovery run in the test DB (losers included)."""
+    import psycopg
+    from gefion.regimes.discovery import runner as drunner, segregation
+    from tests.discovery_synth import make_universe
+    conn = psycopg.connect(db_url)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM regime_discovery_runs WHERE name = 'ifacetest-run'")
+    u = make_universe(seed=51, n_days=400, n_features=3)
+    market = segregation.MarketData(features=u.features,
+                                    forward_returns=u.forward_returns,
+                                    dataset_version="synth-test")
+    cfg = drunner.DiscoveryConfig(
+        name="ifacetest-run", seed=51,
+        atoms=[{"feature": "noise_1", "cmp": ">", "value": 0.0}],
+        signals=["noise_0"], depth=1, budget=10, tiers=("grammar",),
+        holdout_weeks=13, min_effective_n=3, universe_filter="passthrough")
+    summary = drunner.run_discovery(conn, cfg, market)
+    yield summary
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM regime_discovery_runs WHERE name = 'ifacetest-run'")
+        cur.execute("DELETE FROM regime_definitions WHERE name LIKE 'disc-ifacetest-run-%'")
+    conn.close()
+
+
+def test_discover_ledger_shows_losers(db_url, completed_run):
+    import json
+    result = runner.invoke(
+        app, ["regime", "discover", "ledger", "ifacetest-run", "--db-url", db_url, "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)["data"]
+    rows = payload["candidates"]
+    assert rows, "losers must be visible in the ledger"
+    assert all(r["verdict"] is not None for r in rows)
+    # verdict filter works
+    result = runner.invoke(
+        app, ["regime", "discover", "ledger", "ifacetest-run",
+              "--verdict", "admitted", "--db-url", db_url, "--json"])
+    assert result.exit_code == 0
+    filtered = json.loads(result.output)["data"]["candidates"]
+    assert all(r["verdict"] == "admitted" for r in filtered)
+
+
+def test_discover_verdicts_shows_family_size_beside_survivors(db_url, completed_run):
+    import json
+    result = runner.invoke(
+        app, ["regime", "discover", "verdicts", "ifacetest-run", "--db-url", db_url, "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    data = payload["data"] if "data" in payload else payload
+    assert "family_size" in data       # survivors are never shown without it
+    assert "admitted" in data
+    assert isinstance(data["admitted"], list)

@@ -141,6 +141,73 @@ def test_causal_labels_boolean_composite():
     assert set(labels.values()) <= {"true", "false"}
 
 
+# --- tier 2: grammar candidates through the conditional gate (US2, T020) -----
+
+def _planted_tier2(seed=21):
+    """Planted edge with short episodes so the holdout holds several; the
+    conditioning atom is boolean (planted_cond > 0 == in-regime). The
+    cancellation design makes decoy buckets net flat — decoy rejection is
+    only meaningful when the edge is genuinely conditional."""
+    u = plant_regime_edge(
+        make_universe(seed=seed, n_days=500, n_features=3), "noise_0",
+        episode_len=10, cancel=True)
+    return u
+
+
+def test_tier2_bucket_pvalues_find_the_planted_bucket():
+    from gefion.experiments.holdout import HoldoutManager
+    u = _planted_tier2()
+    src = signals.FeatureSignalSource(_market(u), ["noise_0"])
+    holdout = HoldoutManager(max_date=u.dates[-1], holdout_weeks=26)
+    cand = grammar.enumerate_candidates(
+        [{"feature": "planted_cond", "cmp": ">", "value": 0.0}], depth=1)[0]
+    labels = edges.causal_labels(cand, _market(u), window=60)
+    tests = edges.tier2_bucket_tests(
+        src, signal="noise_0", labels_by_date=labels,
+        start=holdout.holdout_start_date, end=holdout.holdout_end_date,
+        min_effective_n=5)
+    by_bucket = {t["bucket"]: t for t in tests}
+    assert by_bucket["true"]["pvalue"] is not None
+    assert by_bucket["true"]["pvalue"] < 0.01          # the edge lives here
+    assert (by_bucket["false"]["pvalue"] is None        # refused, or
+            or by_bucket["false"]["pvalue"] > 0.01)     # honestly unimpressive
+
+
+def test_tier2_low_power_bucket_is_refused_fail_closed():
+    from gefion.experiments.holdout import HoldoutManager
+    u = _planted_tier2(seed=22)
+    src = signals.FeatureSignalSource(_market(u), ["noise_0"])
+    holdout = HoldoutManager(max_date=u.dates[-1], holdout_weeks=26)
+    cand = grammar.enumerate_candidates(
+        [{"feature": "planted_cond", "cmp": ">", "value": 0.0}], depth=1)[0]
+    labels = edges.causal_labels(cand, _market(u), window=60)
+    tests = edges.tier2_bucket_tests(
+        src, signal="noise_0", labels_by_date=labels,
+        start=holdout.holdout_start_date, end=holdout.holdout_end_date,
+        min_effective_n=50)  # unreachable floor in a 26-week holdout
+    assert tests, "buckets must still be reported"
+    assert all(t["pvalue"] is None and t["low_power"] for t in tests)
+
+
+def test_tier2_every_bucket_test_is_reported():
+    """Family assembly needs every (signal x candidate x bucket) evaluation —
+    nothing dropped, refusals included (FR-104)."""
+    from gefion.experiments.holdout import HoldoutManager
+    u = make_universe(seed=23, n_days=500, n_features=2)
+    src = signals.FeatureSignalSource(_market(u), ["noise_0"])
+    holdout = HoldoutManager(max_date=u.dates[-1], holdout_weeks=26)
+    cand = grammar.enumerate_candidates(
+        [{"feature": "noise_1", "form": "tercile"}], depth=1)[0]
+    labels = edges.causal_labels(cand, _market(u), window=60)
+    tests = edges.tier2_bucket_tests(
+        src, signal="noise_0", labels_by_date=labels,
+        start=holdout.holdout_start_date, end=holdout.holdout_end_date,
+        min_effective_n=3)
+    observed_buckets = {lab for d, lab in labels.items()
+                        if lab != "undefined" and d >= holdout.holdout_start_date}
+    assert {t["bucket"] for t in tests} == observed_buckets
+
+
 # --- load_market_data: the real-run data path (DB) ---------------------------
 
 def _conn():

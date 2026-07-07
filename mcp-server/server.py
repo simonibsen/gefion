@@ -1874,6 +1874,35 @@ async def list_tools() -> List[Tool]:
                 "required": ["run"],
             },
         ),
+        Tool(
+            name="regime_discover_ledger",
+            description=(
+                "The candidate ledger of a discovery run: every candidate evaluated, "
+                "losers included — they are the FDR family's denominator."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run": {"type": "string", "description": "Run id or name"},
+                    "verdict": {"type": "string",
+                                "description": "Filter: admitted|rejected|refused_low_power|"
+                                               "refused_degenerate|refused_unstable"},
+                },
+                "required": ["run"],
+            },
+        ),
+        Tool(
+            name="regime_discover_verdicts",
+            description=(
+                "FDR survivors of a discovery run (most runs: none), always with the "
+                "family size beside them. Never present an unadmitted candidate as a finding."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"run": {"type": "string", "description": "Run id or name"}},
+                "required": ["run"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -2093,6 +2122,10 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_list(arguments)
         elif name == "regime_discover_show":
             result = await _regime_discover_show(arguments)
+        elif name == "regime_discover_ledger":
+            result = await _regime_discover_ledger(arguments)
+        elif name == "regime_discover_verdicts":
+            result = await _regime_discover_verdicts(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -4755,6 +4788,23 @@ async def _regime_discover_show(args: Dict[str, Any]) -> Dict[str, Any]:
     """Inspect a discovery run's pre-registration, segregation, and status."""
     async def _run():
         return await GefionExecutor().run("regime", "discover", "show", args["run"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_ledger(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Candidate ledger of a discovery run (losers included)."""
+    async def _run():
+        cmd = ["regime", "discover", "ledger", args["run"]]
+        if args.get("verdict"):
+            cmd.extend(["--verdict", args["verdict"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_verdicts(args: Dict[str, Any]) -> Dict[str, Any]:
+    """FDR survivors of a discovery run, with the family size beside them."""
+    async def _run():
+        return await GefionExecutor().run("regime", "discover", "verdicts", args["run"])
     return await _execute_with_health_check(['postgres'], _run)
 
 

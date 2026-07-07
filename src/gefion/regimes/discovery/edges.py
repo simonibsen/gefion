@@ -59,6 +59,37 @@ def tier1_interaction_test(
                 "coef": result["interaction_coef"]}
 
 
+def tier2_bucket_tests(
+    src: FeatureSignalSource,
+    signal: str,
+    labels_by_date: Dict[datetime.date, str],
+    start: Optional[datetime.date] = None,
+    end: Optional[datetime.date] = None,
+    min_effective_n: int = 20,
+) -> list:
+    """Per-bucket conditional p-values for one (signal, candidate) pair.
+
+    Reuses the 005 conditional gate verbatim: per-observation records are
+    bucketed by the candidate's causal labels; a bucket below the episode-
+    based effective-N floor gets NO p-value (fail-closed) but is still
+    reported — every evaluation belongs to the family, refusals included.
+    """
+    from gefion.regimes.conditional import conditional_pvalues
+
+    with create_span("discovery.edges.tier2", signal=signal) as span:
+        observations = src.records(signal, start=start, end=end)
+        verdicts = conditional_pvalues(
+            observations, labels_by_date,
+            alternative="greater",  # return-like: does following the signal earn here?
+            min_effective_n=min_effective_n)
+        tests = [{"signal": signal, "bucket": v["bucket"], "pvalue": v["pvalue"],
+                  "effective_n": v["effective_n"], "n": v["n"],
+                  "low_power": v["low_power"]} for v in verdicts]
+        set_attributes(span, n_buckets=len(tests),
+                       n_refused=sum(1 for t in tests if t["pvalue"] is None))
+        return tests
+
+
 def causal_labels(candidate: Candidate, market: MarketData,
                   window: int = 60) -> Dict[datetime.date, str]:
     """Causal bucket labels for a candidate over the full timeline.
