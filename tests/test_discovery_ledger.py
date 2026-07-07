@@ -216,3 +216,138 @@ def test_list_runs_filters_by_status(conn):
     names = {r["name"] for r in ledger.list_runs(conn, status="pre_registered")
              if r["name"].startswith("ledgertest-list")}
     assert names == {"ledgertest-list-a"}
+
+
+# =============================================================================
+# T015 — minimal runner path: pre-register → enumerate → freeze → evaluate
+# (tier 1) → FDR → ledger. Written FIRST (RED) against runner.run_discovery.
+# =============================================================================
+
+from gefion.regimes.discovery import runner, segregation  # noqa: E402
+from tests.discovery_synth import make_universe, plant_regime_edge  # noqa: E402
+
+
+def _market_from(u):
+    return segregation.MarketData(features=u.features,
+                                  forward_returns=u.forward_returns,
+                                  dataset_version="synth-test")
+
+
+def _config(**overrides):
+    base = dict(
+        name="ledgertest-runner",
+        seed=42,
+        atoms=[{"feature": "noise_1", "form": "tercile"},
+               {"feature": "noise_2", "cmp": ">", "value": 0.0}],
+        depth=1,
+        budget=10,
+        tiers=("interaction",),
+        signals=["noise_0"],
+        holdout_weeks=13,
+        universe_filter="passthrough",
+    )
+    base.update(overrides)
+    return runner.DiscoveryConfig(**base)
+
+
+def test_runner_end_to_end_on_noise(conn):
+    u = make_universe(seed=42, n_days=400, n_features=4)
+    summary = runner.run_discovery(conn, _config(), _market_from(u))
+
+    run = ledger.get_run(conn, summary["run_id"])
+    assert run["status"] == "complete"
+    # pre-registration carries the full declared search space
+    space = run["search_space"]
+    assert space["signal_source"] == "features"
+    assert space["grading_scheme"] == "walk_forward"
+    assert space["universe_filter"] == ["passthrough"]
+    assert space["tiers"] == ["interaction"]
+    assert space["depth"] == 1 and space["budget"] == 10
+    assert space["fdr_rate"] == runner.DISCOVERY_FDR_RATE
+    assert len(space["atoms"]) == 2
+    # segregation boundaries recorded
+    assert run["segregation"]["holdout_start"] > run["segregation"]["inner_end"]
+
+    # every candidate persisted with results and a verdict
+    cands = ledger.list_candidates(conn, summary["run_id"])
+    assert len(cands) == 2 and all(c["tier"] == "interaction" for c in cands)
+    assert all(c["verdict"] is not None and c["results"] is not None for c in cands)
+
+    # family size = number of p-valued tests = candidates x signals here
+    assert run["family_size"] == summary["family_size"] == 2
+    assert summary["n_admitted"] == 0  # pure noise
+
+
+def test_runner_recovers_planted_interaction(conn):
+    # seed 8 has clean decoy separation; the recovery RATE across many seeds
+    # (where a borderline decoy may legitimately pass BH) is SC-102's job in
+    # test_discovery_negative_control.py — this test checks the plumbing.
+    u = plant_regime_edge(make_universe(seed=8, n_days=400, n_features=4), "noise_0")
+    cfg = _config(name="ledgertest-planted",
+                  atoms=[{"feature": "planted_cond", "form": "tercile"},
+                         {"feature": "noise_1", "form": "tercile"},
+                         {"feature": "noise_2", "cmp": ">", "value": 0.0}])
+    summary = runner.run_discovery(conn, cfg, _market_from(u))
+    admitted = ledger.list_candidates(conn, summary["run_id"], verdict="admitted")
+    assert len(admitted) == 1
+    assert admitted[0]["provenance"]["atom_features"] == ["planted_cond"]
+    # the admitted edge is an ordinary machine-origin regime definition
+    from gefion.regimes.definitions import load_definition
+    name = summary["admitted"][0]["definition"]
+    defn = load_definition(conn, name)
+    assert defn is not None and defn.origin == "machine"
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM regime_definitions WHERE name = %s", (name,))
+
+
+def test_runner_budget_truncation_is_recorded(conn):
+    u = make_universe(seed=8, n_days=400, n_features=4)
+    cfg = _config(name="ledgertest-budget", budget=1)
+    summary = runner.run_discovery(conn, cfg, _market_from(u))
+    cands = ledger.list_candidates(conn, summary["run_id"])
+    assert len(cands) == 1
+    diags = ledger.list_diagnostics(conn, summary["run_id"], sample_dependent=False)
+    kinds = {d["kind"] for d in diags}
+    assert "budget_exhausted" in kinds
+    detail = next(d for d in diags if d["kind"] == "budget_exhausted")["detail"]
+    assert detail["enumerated"] == 2 and detail["budget"] == 1
+
+
+def test_runner_rejects_uncomputable_atoms_at_proposal(conn):
+    u = make_universe(seed=9, n_days=400, n_features=2)
+    cfg = _config(name="ledgertest-uncomputable",
+                  atoms=[{"feature": "vix_level", "cmp": ">", "value": 20},
+                         {"feature": "noise_1", "form": "tercile"}])
+    summary = runner.run_discovery(conn, cfg, _market_from(u))
+    cands = ledger.list_candidates(conn, summary["run_id"])
+    assert len(cands) == 1  # vix atom never attempted
+    diags = ledger.list_diagnostics(conn, summary["run_id"])
+    unc = [d for d in diags if d["kind"] == "uncomputable_proposal"]
+    assert len(unc) == 1 and unc[0]["sample_dependent"] is False
+    assert unc[0]["detail"]["feature"] == "vix_level"
+
+
+def test_runner_rejects_entangled_atoms(conn):
+    """A regime conditioned on the target signal itself is maximally suspect —
+    v1 rejects it at proposal time (FR-114)."""
+    u = make_universe(seed=10, n_days=400, n_features=2)
+    cfg = _config(name="ledgertest-entangled",
+                  atoms=[{"feature": "noise_0", "form": "tercile"},  # == the signal
+                         {"feature": "noise_1", "form": "tercile"}])
+    summary = runner.run_discovery(conn, cfg, _market_from(u))
+    cands = ledger.list_candidates(conn, summary["run_id"])
+    assert len(cands) == 1
+    diags = ledger.list_diagnostics(conn, summary["run_id"])
+    assert any(d["kind"] == "entangled" for d in diags)
+
+
+def test_runner_refuses_all_holdout_data(conn):
+    """US1 acceptance 3: a run that cannot prove segregation produces no
+    verdicts — it is recorded and marked invalid."""
+    u = make_universe(seed=11, n_days=20, n_features=2)
+    with pytest.raises(segregation.SegregationError):
+        runner.run_discovery(conn, _config(name="ledgertest-invalid"),
+                             _market_from(u))
+    run = ledger.get_run(conn, "ledgertest-invalid")
+    assert run["status"] == "invalid"
+    assert ledger.list_candidates(conn, run["id"]) == []
