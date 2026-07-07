@@ -12212,13 +12212,46 @@ def regime_discover_grades(
         flag = " [REGIME-LIMITED]" if grade["regime_limited"] else ""
         out.info(f"Candidate {cand_id}: {grade['confirmed']}/{grade['folds']} "
                  f"forward folds confirmed{flag} "
-                 f"({grade['descriptive_slices']} descriptive slice(s), never graded)")
+                 f"({grade['no_evidence']} no-evidence fold(s), never counted; "
+                 f"{grade['descriptive_slices']} descriptive slice(s), never graded)")
         for r in rows:
             marker = "descriptive" if r["descriptive"] else "forward"
-            out.info(f"  fold {r['fold']} [{marker}]: "
-                     f"{'confirmed' if r['confirmed'] else 'failed'}")
+            if (r["detail"] or {}).get("refused"):
+                status = "no evidence (refused on power — not counted)"
+            else:
+                status = "confirmed" if r["confirmed"] else "failed"
+            out.info(f"  fold {r['fold']} [{marker}]: {status}")
     if out.json_mode:
         out.json({"candidate_id": cand_id, "grade": grade, "rows": rows})
+
+
+@discover_app.command("register")
+def regime_discover_register(
+    candidate: str = typer.Argument(..., help="Candidate id (must be admitted)"),
+    fold_length_days: int = typer.Option(..., "--fold-length-days",
+                                         help="Declared fold width for the grading grid"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Re-declare an admitted edge's grading grid (fold width).
+
+    Allowed only until real evidence exists: after the first confirmed/failed
+    fold the grid is locked — moving fold boundaries after seeing outcomes
+    would be selection. No-evidence folds do not lock the grid.
+    """
+    from gefion.regimes.discovery.grading import GradingError, get_scheme
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            get_scheme("walk_forward").register(conn, int(candidate),
+                                                fold_length_days=fold_length_days)
+        except GradingError as exc:
+            out.error(f"Re-declaration refused: {exc}")
+            raise typer.Exit(1)
+    out.success(f"Candidate {candidate}: grading grid declared at "
+                f"{fold_length_days}-day folds",
+                data={"candidate_id": int(candidate),
+                      "fold_length_days": fold_length_days})
 
 
 @discover_app.command("grade-fold")
@@ -12263,8 +12296,13 @@ def regime_discover_grade_fold(
         except (GradingError, LookupError) as exc:
             out.error(f"Fold evaluation refused: {exc}")
             raise typer.Exit(1)
-    out.success(f"Fold {fold}: {'confirmed' if outcome['confirmed'] else 'failed'} "
-                f"(recorded as a forward result)")
+    if outcome.get("refused"):
+        out.success(f"Fold {fold}: no evidence — the window could not power a "
+                    "single re-test (recorded, never counted; re-declare a wider "
+                    "fold grid with the grading register step if this repeats)")
+    else:
+        out.success(f"Fold {fold}: {'confirmed' if outcome['confirmed'] else 'failed'} "
+                    f"(recorded as a forward result)")
     if out.json_mode:
         out.json(outcome)
 

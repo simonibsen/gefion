@@ -46,9 +46,15 @@ class WalkForwardGrading:
 
     def register(self, conn, candidate_id: int,
                  fold_length_days: int = DEFAULT_FOLD_LENGTH_DAYS) -> None:
-        """Register an ADMITTED edge for grading; records the declared fold
-        length in the candidate's provenance."""
-        from gefion.regimes.discovery import ledger
+        """Register (or re-declare) grading for an ADMITTED edge.
+
+        The grading config is a forward-looking declaration, so it may be
+        re-declared — e.g. to widen folds that turned out too narrow to ever
+        hold enough regime episodes (issue #67) — but only UNTIL real evidence
+        exists: once any non-refused forward row is recorded, moving the fold
+        boundaries would be selection, and the grid is locked.
+        """
+        from psycopg.types.json import Json
 
         with create_span("discovery.grading.register", candidate_id=candidate_id):
             cand = self._candidate(conn, candidate_id)
@@ -56,10 +62,20 @@ class WalkForwardGrading:
                 raise GradingError(
                     f"only admitted edges are graded; candidate {candidate_id} "
                     f"is {cand['verdict']!r}")
-            ledger.update_provenance(
-                conn, cand["run_id"], cand["candidate_hash"],
-                {"grading": {"scheme": "walk_forward",
-                             "fold_length_days": int(fold_length_days)}})
+            if any(not row["refused"] for row in self._forward_rows(conn, candidate_id)):
+                raise GradingError(
+                    "grading grid is locked: forward evidence already exists for "
+                    f"candidate {candidate_id} — fold boundaries cannot move after "
+                    "outcomes have been seen")
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE regime_candidates
+                       SET provenance = COALESCE(provenance, '{}'::jsonb) || %s::jsonb
+                       WHERE id = %s""",
+                    (Json({"grading": {"scheme": "walk_forward",
+                                       "fold_length_days": int(fold_length_days)}}),
+                     candidate_id),
+                )
 
     # -- accrual ----------------------------------------------------------------
 
@@ -79,11 +95,35 @@ class WalkForwardGrading:
                      detail=detail)
 
     def _insert(self, conn, candidate_id, fold, confirmed, descriptive, detail):
+        """Append one grade row. Evidence rows are immutable; a no-evidence
+        placeholder (detail.refused) may be replaced — e.g. after the grid is
+        re-declared with wider folds (issue #67)."""
         from psycopg.types.json import Json
 
         if fold < 1:
             raise GradingError(f"fold must be >= 1, got {fold}")
         with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, COALESCE(detail->>'refused', 'false') = 'true'
+                   FROM regime_trust_grades
+                   WHERE candidate_id = %s AND fold = %s AND descriptive = %s""",
+                (candidate_id, fold, descriptive),
+            )
+            existing = cur.fetchone()
+            if existing is not None:
+                row_id, was_refused = existing
+                if not was_refused:
+                    raise GradingError(
+                        f"fold {fold} already holds evidence for candidate "
+                        f"{candidate_id} — grade rows are immutable")
+                cur.execute(
+                    """UPDATE regime_trust_grades
+                       SET confirmed = %s, detail = %s, graded_at = NOW()
+                       WHERE id = %s""",
+                    (bool(confirmed), Json(detail) if detail is not None else None,
+                     row_id),
+                )
+                return
             cur.execute(
                 """INSERT INTO regime_trust_grades
                        (candidate_id, fold, confirmed, descriptive, detail)
@@ -149,7 +189,6 @@ class WalkForwardGrading:
             src = FeatureSignalSource(market, signals,
                                       align_window=int(space.get("align_window", 60)))
             retests = []
-            confirmed = True
             for t in surviving:
                 if t.get("bucket") is None:  # interaction-tier edge
                     retest = edges.tier1_interaction_test(
@@ -168,39 +207,72 @@ class WalkForwardGrading:
                                   {"pvalue": None, "bucket": t["bucket"],
                                    "signal": t["signal"], "reason": "bucket absent"})
                 retests.append(retest)
-                if retest["pvalue"] is None or retest["pvalue"] > FOLD_CONFIRM_PVALUE:
-                    confirmed = False  # fail-closed: no evidence is not evidence
 
             detail = {"window": {"start": str(start), "end": str(end)},
                       "threshold": FOLD_CONFIRM_PVALUE, "tests": retests}
+            evaluable = [t for t in retests if t["pvalue"] is not None]
+            if not evaluable:
+                # Absent evidence is not contradicting evidence (issue #67):
+                # the fold window couldn't power a single re-test. Record a
+                # replaceable no-evidence row, excluded from the grade.
+                detail["refused"] = True
+                self._insert(conn, candidate_id, fold, confirmed=False,
+                             descriptive=False, detail=detail)
+                set_attributes(span, refused=True)
+                return {"refused": True, "confirmed": None, "fold": fold,
+                        "detail": detail}
+
+            # judged on the evaluable re-tests; unpowered ones stay visible
+            confirmed = all(t["pvalue"] <= FOLD_CONFIRM_PVALUE for t in evaluable)
             self.record_forward_result(conn, candidate_id, fold, confirmed,
                                        detail=detail)
             set_attributes(span, confirmed=confirmed)
-            return {"confirmed": confirmed, "fold": fold, "detail": detail}
+            return {"refused": False, "confirmed": confirmed, "fold": fold,
+                    "detail": detail}
 
     # -- the grade -----------------------------------------------------------------
 
     def grade(self, conn, candidate_id: int) -> Dict[str, Any]:
-        """Aggregate forward rows only; descriptive slices reported separately."""
+        """Aggregate forward EVIDENCE rows only: no-evidence (power-refused)
+        folds are reported but never enter the denominator or the
+        regime-limited flag — absent evidence is not weakness (issue #67).
+        Descriptive slices reported separately."""
+        rows = self._forward_rows(conn, candidate_id)
+        evidence = [r for r in rows if not r["refused"]]
+        confirmed = sum(1 for r in evidence if r["confirmed"])
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT fold, confirmed, descriptive FROM regime_trust_grades
-                   WHERE candidate_id = %s ORDER BY fold, descriptive""",
+                "SELECT count(*) FROM regime_trust_grades "
+                "WHERE candidate_id = %s AND descriptive",
                 (candidate_id,),
             )
-            rows = cur.fetchall()
-        forward = [(fold, ok) for fold, ok, descriptive in rows if not descriptive]
-        confirmed = sum(1 for _, ok in forward if ok)
+            descriptive = cur.fetchone()[0]
         return {
-            "folds": len(forward),
+            "folds": len(evidence),
             "confirmed": confirmed,
-            "grade": (confirmed / len(forward)) if forward else None,
-            "regime_limited": any(not ok for fold, ok in forward
-                                  if fold <= EARLY_FOLDS),
-            "descriptive_slices": sum(1 for *_, descriptive in rows if descriptive),
+            "grade": (confirmed / len(evidence)) if evidence else None,
+            "regime_limited": any(not r["confirmed"] for r in evidence
+                                  if r["fold"] <= EARLY_FOLDS),
+            "no_evidence": len(rows) - len(evidence),
+            "descriptive_slices": descriptive,
         }
 
     # -- helpers ---------------------------------------------------------------------
+
+    @staticmethod
+    def _forward_rows(conn, candidate_id: int):
+        """Forward (non-descriptive) rows with their no-evidence flag."""
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT fold, confirmed,
+                          COALESCE(detail->>'refused', 'false') = 'true'
+                   FROM regime_trust_grades
+                   WHERE candidate_id = %s AND NOT descriptive
+                   ORDER BY fold""",
+                (candidate_id,),
+            )
+            return [{"fold": fold, "confirmed": ok, "refused": refused}
+                    for fold, ok, refused in cur.fetchall()]
 
     @staticmethod
     def _candidate(conn, candidate_id: int) -> Dict[str, Any]:
