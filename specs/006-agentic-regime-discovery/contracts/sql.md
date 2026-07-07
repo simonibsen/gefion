@@ -1,8 +1,13 @@
-# SQL Contract (PROPOSED — owner approval required) — Agentic Regime Discovery (006)
+# SQL Contract — Agentic Regime Discovery (006)
 
-Per Schema Governance this DDL is **proposed for review only** — not to be written to
-`sql/schema.sql`, nor run, until the owner approves. Two-file rule on approval; regenerate
-docs/DATA_DICTIONARY.md in the same change (pre-push enforces).
+**Status: APPROVED by owner 2026-07-07** (scope: exactly the four tables below, with the five
+confirmed decisions — relational not hypertables, CASCADE from runs, JSONB shapes, the
+grades uniqueness with descriptive separation, CHECK-constraint enums). Approval covers only
+this change; future schema changes require separate approval.
+
+At implementation: two-file rule (`schema.sql` + migration), gated behind a schema test as
+the first foundational task, with docs/DATA_DICTIONARY.md regenerated in the same change
+(the pre-push drift check enforces this).
 
 ```sql
 CREATE TABLE IF NOT EXISTS regime_discovery_runs (

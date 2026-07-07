@@ -52,7 +52,7 @@ comfortably in flat-BH territory (per Clarification Q1)
 
 | Principle | Status | How the plan satisfies it |
 |---|---|---|
-| I. Database-First | **PASS (gated)** | Discovered regimes are `regime_definitions` rows (`origin='machine'`) exported to JSON like any other; search spaces/ledgers/diagnostics live in DB. New tables are **proposed DDL only** — owner approval required before touching `schema.sql` (see contracts/sql.md). |
+| I. Database-First | **PASS** | Discovered regimes are `regime_definitions` rows (`origin='machine'`) exported to JSON like any other; search spaces/ledgers/diagnostics live in DB. New-table DDL **APPROVED by owner 2026-07-07** (contracts/sql.md); two-file rule applied at implementation as the first test-guarded task. |
 | II. TDD (non-negotiable) | **PASS** | Every increment lists tests before src; the negative-control suite *is* the feature's own acceptance test and runs in CI (FR-112/SC-101). |
 | III. CLI-First | **PASS** | New `gefion regime discover` group; MCP tools mirror it; UI Regimes page gains a Discovery tab; `/gefion` operator skill updated (see contracts/interfaces.md — parity matrix is the source of truth). |
 | IV. Observability | **PASS** | All `discovery/` modules import `gefion.observability`; spans per run/candidate batch with parent propagation; bulk paths respect the OTLP 4MB lesson (batch attributes, not per-candidate spans). |
