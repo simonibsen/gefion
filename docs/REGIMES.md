@@ -167,6 +167,39 @@ entirely about non-reuse:
   with a `detector_function` leaf — the 005 FR-019a gated escape hatch, whose runtime
   this feature provides.
 
+### Trust accrues forward (two-tier promotion)
+
+Promotion is two-tier (FR-122): the hard, fail-closed holdout gate decides
+**admit/reject once**; *trust* is a separate, accruing quantity among admitted edges —
+and it can only accrue **forward**:
+
+- Every admitted edge is auto-registered with the declared `grading_scheme`
+  (v1 default: walk-forward temporal folds; the fold width is declared configuration).
+- **Fold 1 is the probation window.** Each re-test
+  (`gefion regime discover grade-fold <candidate> --fold N`) re-runs the edge's
+  surviving tests on a window derived from the run's recorded holdout end — data
+  genuinely after the discovery window, enforced by the interface, not caller
+  discipline. A low-power fold fails closed (no evidence is not evidence).
+- **Backward era-slices can never raise a grade.** The regime's fitted boundaries saw
+  that data, so backward applications are stored `descriptive=true` — visible in every
+  surface as display context, structurally excluded from `grade()`. There is no API
+  that turns a backward slice into a confirmation.
+- An edge that fails an early fold is flagged **regime-limited**: transient alpha is
+  captured, not trusted as durable (FR-123).
+
+### Reading the diagnostics ledger
+
+Every limit the search hits is recorded with a quantitative reason
+(`gefion regime discover diagnostics <run>`), tagged one of two ways:
+
+- **sample-dependent** (`--sample-dependent`): "18 of 100 required" — true of *this*
+  dataset, re-evaluated (never inherited) when the same search runs on more data.
+- **structural** (`--structural`): "VIX isn't ingested", "budget exhausted at depth 2" —
+  accumulates as a data-priority / search-design signal.
+
+The negative space is a learning signal: a search that keeps refusing the same
+proposal for a missing input is telling you what to ingest next.
+
 ### Discovery inside experiment cycles
 
 `gefion experiment propose --type regime_discovery` runs discovery under cycle budgets

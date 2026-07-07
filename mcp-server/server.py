@@ -1909,6 +1909,51 @@ async def list_tools() -> List[Tool]:
                 "required": ["run"],
             },
         ),
+        Tool(
+            name="regime_discover_diagnostics",
+            description=(
+                "The diagnostics ledger of a discovery run: every limit the search hit "
+                "(budget/depth exhaustion, min-sample refusals, uncomputable proposals), "
+                "tagged sample-dependent (re-test on new data) vs structural (accumulate)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run": {"type": "string", "description": "Run id or name"},
+                    "kind": {"type": "string",
+                             "description": "Filter: sample_dependent | structural"},
+                },
+                "required": ["run"],
+            },
+        ),
+        Tool(
+            name="regime_discover_grades",
+            description=(
+                "Trust grades for admitted edges: forward folds as they accrue "
+                "(fold 1 = probation). Descriptive rows are backward era-slices — "
+                "display context only, never counted toward the grade."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"candidate": {"type": "string",
+                                             "description": "Candidate id (omit for all graded)"}},
+            },
+        ),
+        Tool(
+            name="regime_discover_grade_fold",
+            description=(
+                "Re-test an admitted edge on a forward fold window and record the "
+                "outcome (MUTATING — appends a trust-grade row; confirm with the user)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "candidate": {"type": "string", "description": "Candidate id"},
+                    "fold": {"type": "integer", "description": "Fold number (1 = probation)"},
+                },
+                "required": ["candidate", "fold"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -2132,6 +2177,12 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_ledger(arguments)
         elif name == "regime_discover_verdicts":
             result = await _regime_discover_verdicts(arguments)
+        elif name == "regime_discover_diagnostics":
+            result = await _regime_discover_diagnostics(arguments)
+        elif name == "regime_discover_grades":
+            result = await _regime_discover_grades(arguments)
+        elif name == "regime_discover_grade_fold":
+            result = await _regime_discover_grade_fold(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -4817,6 +4868,37 @@ async def _regime_discover_verdicts(args: Dict[str, Any]) -> Dict[str, Any]:
     """FDR survivors of a discovery run, with the family size beside them."""
     async def _run():
         return await GefionExecutor().run("regime", "discover", "verdicts", args["run"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_diagnostics(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Diagnostics ledger of a discovery run (sample-dependent vs structural)."""
+    async def _run():
+        cmd = ["regime", "discover", "diagnostics", args["run"]]
+        if args.get("kind") == "sample_dependent":
+            cmd.append("--sample-dependent")
+        elif args.get("kind") == "structural":
+            cmd.append("--structural")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_grades(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Trust grades: forward folds; descriptive rows flagged."""
+    async def _run():
+        cmd = ["regime", "discover", "grades"]
+        if args.get("candidate"):
+            cmd.append(str(args["candidate"]))
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_grade_fold(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Re-test an admitted edge on a forward fold (mutating)."""
+    async def _run():
+        return await GefionExecutor().run(
+            "regime", "discover", "grade-fold", str(args["candidate"]),
+            "--fold", str(args["fold"]))
     return await _execute_with_health_check(['postgres'], _run)
 
 

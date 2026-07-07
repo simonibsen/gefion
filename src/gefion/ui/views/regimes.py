@@ -221,6 +221,8 @@ def _render_discovery_run_detail(run: dict):
     st.json(run["segregation"])
     _render_discovery_verdicts(run)
     _render_discovery_ledger(run)
+    _render_discovery_diagnostics(run)
+    _render_discovery_grades(run)
 
 
 def _render_discovery_verdicts(run: dict):
@@ -275,6 +277,73 @@ def _render_discovery_ledger(run: dict):
           "tests": len((c["results"] or {}).get("tests", []))} for c in cands],
         width="stretch",
     )
+
+
+def _render_discovery_diagnostics(run: dict):
+    """The negative-space learning signal: limits the search hit, with
+    quantitative reasons, split sample-dependent vs structural."""
+    from gefion.ui.components.database import get_connection
+    from gefion.regimes.discovery import ledger
+    st.markdown("**Diagnostics ledger** (limits hit — the negative space is a signal)")
+    try:
+        with get_connection() as conn:
+            rows = ledger.list_diagnostics(conn, run["id"])
+    except Exception:  # pragma: no cover - defensive
+        st.caption("Diagnostics unavailable.")
+        return
+    if not rows:
+        st.caption("No limits hit this run.")
+        return
+    col_sd, col_st = st.columns(2)
+    with col_sd:
+        st.markdown("*Sample-dependent* — re-evaluate on a larger dataset")
+        for r in (x for x in rows if x["sample_dependent"]):
+            st.caption(f"`{r['kind']}` — {r['detail']}")
+    with col_st:
+        st.markdown("*Structural* — accumulates as a data-priority signal")
+        for r in (x for x in rows if not x["sample_dependent"]):
+            st.caption(f"`{r['kind']}` — {r['detail']}")
+
+
+def _render_discovery_grades(run: dict):
+    """Trust-grade timeline per admitted edge: forward folds accrue; backward
+    era-slices are visually distinct and never counted."""
+    from gefion.ui.components.database import get_connection
+    from gefion.regimes.discovery import ledger
+    from gefion.regimes.discovery.grading import get_scheme
+    try:
+        with get_connection() as conn:
+            admitted = ledger.list_candidates(conn, run["id"], verdict="admitted")
+            if not admitted:
+                return
+            st.markdown("**Trust grades** (accrue forward only; fold 1 = probation)")
+            scheme = get_scheme("walk_forward")
+            for cand in admitted:
+                grade = scheme.grade(conn, cand["id"])
+                flag = " 🟠 regime-limited" if grade["regime_limited"] else ""
+                st.markdown(f"`{cand['candidate_hash'][:24]}` — "
+                            f"{grade['confirmed']}/{grade['folds']} folds confirmed"
+                            f"{flag}")
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """SELECT fold, confirmed, descriptive FROM regime_trust_grades
+                           WHERE candidate_id = %s ORDER BY fold, descriptive""",
+                        (cand["id"],))
+                    timeline = cur.fetchall()
+                if timeline:
+                    line = []
+                    for fold, ok, descriptive in timeline:
+                        mark = "✓" if ok else "✗"
+                        if descriptive:
+                            # visually distinct: parenthesized, labeled, never graded
+                            line.append(f"(fold {fold}: {mark} descriptive)")
+                        else:
+                            line.append(f"fold {fold}: {mark}")
+                    st.caption(" · ".join(line))
+                else:
+                    st.caption("No forward folds yet — probation window open.")
+    except Exception:  # pragma: no cover - defensive
+        st.caption("Grades unavailable.")
 
 
 def _render_discovery_start():

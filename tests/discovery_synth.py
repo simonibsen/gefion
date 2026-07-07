@@ -81,6 +81,17 @@ def make_universe(
     )
 
 
+def truncate_universe(u: SynthUniverse, n: int) -> SynthUniverse:
+    """Same universe, future removed — for causality and forward-fold tests."""
+    return dataclasses.replace(
+        u,
+        dates=u.dates[:n],
+        prices=u.prices[:n],
+        features={k: v[:n] for k, v in u.features.items()},
+        forward_returns=u.forward_returns[:n],
+    )
+
+
 def plant_regime_edge(
     universe: SynthUniverse,
     signal_feature: str,
@@ -89,6 +100,7 @@ def plant_regime_edge(
     regime_fraction: float = 0.5,
     episode_len: Optional[int] = None,
     cancel: bool = False,
+    effect_through: Optional[int] = None,
 ) -> SynthUniverse:
     """Inject a conditional edge: `signal_feature` predicts forward returns, but
     ONLY inside the regime where `conditioning_feature` is high (SC-102).
@@ -127,7 +139,12 @@ def plant_regime_edge(
 
     fwd = np.array([v for _, v in universe.forward_returns])
     outside = (-effect * np.sign(sig)) if cancel else 0.0
-    fwd = fwd + np.where(in_regime, effect * np.sign(sig), outside)
+    injection = np.where(in_regime, effect * np.sign(sig), outside)
+    if effect_through is not None:
+        # single-era edge: the conditional structure exists only up to this
+        # day index — later data is pure noise (US6: regime-limited grading)
+        injection = np.where(np.arange(n) < effect_through, injection, 0.0)
+    fwd = fwd + injection
 
     features = dict(universe.features)
     features[conditioning_feature] = list(zip(universe.dates, cond_vals))

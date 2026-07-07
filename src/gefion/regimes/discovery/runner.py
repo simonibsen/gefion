@@ -23,7 +23,15 @@ from gefion.regimes.definitions import (
     store_definition,
     validate_expression,
 )
-from gefion.regimes.discovery import detectors, edges, freshhold, grammar, ledger, universe
+from gefion.regimes.discovery import (
+    detectors,
+    edges,
+    freshhold,
+    grading,
+    grammar,
+    ledger,
+    universe,
+)
 from gefion.regimes.discovery.segregation import (
     DiscoveryDataContext,
     MarketData,
@@ -67,6 +75,7 @@ class DiscoveryConfig:
     fdr_rate: float = DISCOVERY_FDR_RATE
     inner_screen: float = INNER_SCREEN_PVALUE
     min_effective_n: int = 20
+    fold_length_days: int = 30  # walk-forward grading fold width (declared)
     holdout_weeks: int = 6
     label_window: int = 60
     align_window: int = 60
@@ -117,6 +126,7 @@ def run_discovery(conn, config: DiscoveryConfig, market: MarketData) -> Dict[str
             "fdr_rate": config.fdr_rate,
             "inner_screen": config.inner_screen,
             "min_effective_n": config.min_effective_n,
+            "fold_length_days": config.fold_length_days,
             "label_window": config.label_window,
             "align_window": config.align_window,
         }
@@ -337,6 +347,10 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
                                                 detector_state[i]["params"])
             else:
                 name = _store_admitted(conn, run_id, config, cand)
+            # every admitted edge is registered for forward trust grading
+            # (SC-109); fold 1 is the probation window
+            grading.get_scheme(config.grading_scheme).register(
+                conn, cand_id, fold_length_days=config.fold_length_days)
             admitted.append({"candidate_id": cand_id,
                              "candidate_hash": cand["candidate_hash"],
                              "definition": name})

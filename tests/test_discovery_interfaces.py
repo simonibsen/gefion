@@ -26,6 +26,8 @@ PARITY = {
     "show": (["regime", "discover", "show"], "regime_discover_show", "_render_discovery_run_detail"),
     "ledger": (["regime", "discover", "ledger"], "regime_discover_ledger", "_render_discovery_ledger"),
     "verdicts": (["regime", "discover", "verdicts"], "regime_discover_verdicts", "_render_discovery_verdicts"),
+    "diagnostics": (["regime", "discover", "diagnostics"], "regime_discover_diagnostics", "_render_discovery_diagnostics"),
+    "grades": (["regime", "discover", "grades"], "regime_discover_grades", "_render_discovery_grades"),
 }
 
 
@@ -158,6 +160,57 @@ def test_discover_ledger_shows_losers(db_url, completed_run):
     assert result.exit_code == 0
     filtered = json.loads(result.output)["data"]["candidates"]
     assert all(r["verdict"] == "admitted" for r in filtered)
+
+
+# --- diagnostics + grades surfaces (T037/T038, US6) ---------------------------
+
+def test_discover_diagnostics_filters_and_reasons(db_url, completed_run):
+    """The diagnostics ledger renders quantitative reasons and filters by
+    sample-dependent vs structural."""
+    import json
+    result = runner.invoke(
+        app, ["regime", "discover", "diagnostics", "ifacetest-run",
+              "--db-url", db_url, "--json"])
+    assert result.exit_code == 0, result.output
+    rows = json.loads(result.output)["data"]["diagnostics"]
+    for row in rows:
+        assert "kind" in row and "detail" in row and "sample_dependent" in row
+    sd = runner.invoke(
+        app, ["regime", "discover", "diagnostics", "ifacetest-run",
+              "--sample-dependent", "--db-url", db_url, "--json"])
+    assert all(r["sample_dependent"] for r in
+               json.loads(sd.output)["data"]["diagnostics"])
+    st = runner.invoke(
+        app, ["regime", "discover", "diagnostics", "ifacetest-run",
+              "--structural", "--db-url", db_url, "--json"])
+    assert all(not r["sample_dependent"] for r in
+               json.loads(st.output)["data"]["diagnostics"])
+
+
+def test_discover_grades_flags_descriptive_rows(db_url, completed_run):
+    """Grades output separates forward folds from descriptive era-slices."""
+    import json
+    import psycopg
+    conn = psycopg.connect(db_url)
+    conn.autocommit = True
+    from gefion.regimes.discovery import grading, ledger as dledger
+    cands = dledger.list_candidates(conn, completed_run["run_id"])
+    cand = cands[0]
+    scheme = grading.get_scheme("walk_forward")
+    scheme.record_forward_result(conn, cand["id"], fold=1, confirmed=True)
+    scheme.record_descriptive(conn, cand["id"], fold=1, outcome=True,
+                              detail={"era": "backtest-2020"})
+    conn.close()
+    result = runner.invoke(
+        app, ["regime", "discover", "grades", str(cand["id"]),
+              "--db-url", db_url, "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    data = payload.get("data", payload)
+    assert data["grade"]["folds"] == 1
+    assert data["grade"]["descriptive_slices"] == 1
+    rows = data["rows"]
+    assert any(r["descriptive"] for r in rows) and any(not r["descriptive"] for r in rows)
 
 
 # --- experiment-type integration (T032, US3) ---------------------------------

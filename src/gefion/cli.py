@@ -12074,6 +12074,155 @@ def regime_discover_verdicts(
                   "verdict_counts": by_verdict, "admitted": admitted})
 
 
+@discover_app.command("diagnostics")
+def regime_discover_diagnostics(
+    run: str = typer.Argument(..., help="Run id or name"),
+    sample_dependent: bool = typer.Option(
+        False, "--sample-dependent", help="Only sample-dependent limits (re-test on new data)"),
+    structural: bool = typer.Option(
+        False, "--structural", help="Only structural limits (accumulate as data-priority signals)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """The diagnostics ledger: every limit the search hit, with quantitative reasons.
+
+    Sample-dependent diagnostics are re-evaluated on a larger dataset;
+    structural ones accumulate as data-priority / search-design signals.
+    """
+    from gefion.output import Column
+    from gefion.regimes.discovery import ledger as dledger
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    if sample_dependent and structural:
+        out.error("--sample-dependent and --structural are mutually exclusive")
+        raise typer.Exit(1)
+    flag = True if sample_dependent else (False if structural else None)
+    with _regime_conn(db_url) as conn:
+        try:
+            run_row = _resolve_run(conn, run)
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+        rows = dledger.list_diagnostics(conn, run_row["id"], sample_dependent=flag)
+    payload = [{**r, "created_at": str(r["created_at"])} for r in rows]
+    out.table(
+        columns=[Column("id"), Column("kind"), Column("sample_dependent"),
+                 Column("detail")],
+        rows=[[r["id"], r["kind"], r["sample_dependent"], str(r["detail"])[:80]]
+              for r in payload],
+        json_data={"run_id": run_row["id"], "diagnostics": payload},
+    )
+
+
+@discover_app.command("grades")
+def regime_discover_grades(
+    candidate: Optional[str] = typer.Argument(None, help="Candidate id (default: all graded)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Trust grades: forward folds as they accrue (fold 1 = probation window).
+
+    Descriptive rows are backward era-slices — display context only; they can
+    never raise a grade (the regime's fitted boundaries saw that data).
+    """
+    from gefion.output import Column
+    from gefion.regimes.discovery.grading import get_scheme
+    out = get_output(json_output)
+    scheme = get_scheme("walk_forward")
+    with _regime_conn(db_url) as conn:
+        if candidate is None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT DISTINCT c.id, c.candidate_hash, c.run_id
+                       FROM regime_candidates c
+                       JOIN regime_trust_grades g ON g.candidate_id = c.id
+                       ORDER BY c.id""")
+                graded = cur.fetchall()
+            payload = []
+            for cand_id, cand_hash, run_id in graded:
+                grade = scheme.grade(conn, cand_id)
+                payload.append({"candidate_id": cand_id, "run_id": run_id,
+                                "candidate_hash": cand_hash, "grade": grade})
+            out.table(
+                columns=[Column("candidate_id"), Column("run_id"), Column("folds"),
+                         Column("confirmed"), Column("grade"), Column("regime_limited")],
+                rows=[[p["candidate_id"], p["run_id"], p["grade"]["folds"],
+                       p["grade"]["confirmed"], p["grade"]["grade"],
+                       p["grade"]["regime_limited"]] for p in payload],
+                json_data={"graded": payload},
+            )
+            return
+        cand_id = int(candidate)
+        grade = scheme.grade(conn, cand_id)
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT fold, confirmed, descriptive, detail, graded_at
+                   FROM regime_trust_grades WHERE candidate_id = %s
+                   ORDER BY fold, descriptive""", (cand_id,))
+            rows = [{"fold": f, "confirmed": c, "descriptive": d,
+                     "detail": detail, "graded_at": str(at)}
+                    for f, c, d, detail, at in cur.fetchall()]
+    if not out.json_mode:
+        flag = " [REGIME-LIMITED]" if grade["regime_limited"] else ""
+        out.info(f"Candidate {cand_id}: {grade['confirmed']}/{grade['folds']} "
+                 f"forward folds confirmed{flag} "
+                 f"({grade['descriptive_slices']} descriptive slice(s), never graded)")
+        for r in rows:
+            marker = "descriptive" if r["descriptive"] else "forward"
+            out.info(f"  fold {r['fold']} [{marker}]: "
+                     f"{'confirmed' if r['confirmed'] else 'failed'}")
+    if out.json_mode:
+        out.json({"candidate_id": cand_id, "grade": grade, "rows": rows})
+
+
+@discover_app.command("grade-fold")
+def regime_discover_grade_fold(
+    candidate: str = typer.Argument(..., help="Candidate id (must be admitted)"),
+    fold: int = typer.Option(..., "--fold", help="Fold number (1 = probation window)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Re-test an admitted edge on a forward fold window and record the outcome.
+
+    Only data genuinely after the discovery window can confirm — the fold
+    window is derived from the run's recorded holdout end, never the caller.
+    """
+    from gefion.regimes.definitions import iter_leaves
+    from gefion.regimes.discovery.grading import GradingError, get_scheme
+    from gefion.regimes.discovery.signals import load_market_data
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            cand_id = int(candidate)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT c.expression, c.results, r.search_space
+                       FROM regime_candidates c
+                       JOIN regime_discovery_runs r ON r.id = c.run_id
+                       WHERE c.id = %s""", (cand_id,))
+                row = cur.fetchone()
+            if row is None:
+                out.error(f"candidate {candidate} not found")
+                raise typer.Exit(1)
+            expression, results, space = row
+            signals = sorted({t["signal"] for t in (results or {}).get("tests", [])})
+            refs = sorted({leaf["feature"] for leaf in iter_leaves(expression)
+                           if leaf.get("feature")})
+            market = load_market_data(
+                conn, sorted(set(signals) | set(refs)),
+                horizon_days=int(space.get("horizon_days", 1)),
+                dataset_version=space.get("dataset", "dev"))
+            outcome = get_scheme("walk_forward").evaluate_fold(
+                conn, market, cand_id, fold=fold)
+        except (GradingError, LookupError) as exc:
+            out.error(f"Fold evaluation refused: {exc}")
+            raise typer.Exit(1)
+    out.success(f"Fold {fold}: {'confirmed' if outcome['confirmed'] else 'failed'} "
+                f"(recorded as a forward result)")
+    if out.json_mode:
+        out.json(outcome)
+
+
 @discover_app.command("show")
 def regime_discover_show(
     run: str = typer.Argument(..., help="Run id or name"),

@@ -1039,3 +1039,10 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
   included (they are the FDR family's denominator). Filterable by verdict.
 - `regime_discover_verdicts` — FDR survivors (most runs: none), always with the family
   size beside them. Never present an unadmitted candidate as a finding.
+- `regime_discover_diagnostics` — the diagnostics ledger: limits hit with quantitative
+  reasons, tagged sample-dependent (re-test on new data) vs structural (accumulate).
+- `regime_discover_grades` — forward-accruing trust grades (fold 1 = probation);
+  descriptive backward era-slices are flagged and never counted toward the grade.
+- `regime_discover_grade_fold` — re-test an admitted edge on a forward fold window
+  and record the outcome. **Mutating** (appends a trust-grade row): confirm with the
+  user before invoking.

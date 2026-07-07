@@ -534,6 +534,9 @@ ledgers. See [REGIMES.md](REGIMES.md) § Agentic discovery for the threat model.
 - `gefion regime discover show <run>` — pre-registration, segregation boundaries, family size, status.
 - `gefion regime discover ledger <run> [--verdict V]` — the candidate ledger: every candidate evaluated, losers included (they are the FDR denominator).
 - `gefion regime discover verdicts <run>` — FDR survivors, always shown with the family size beside them.
+- `gefion regime discover diagnostics <run> [--sample-dependent|--structural]` — the diagnostics ledger: every limit hit, with quantitative reasons.
+- `gefion regime discover grades [<candidate>]` — trust grades (forward folds; fold 1 = probation; descriptive backward slices flagged, never counted).
+- `gefion regime discover grade-fold <candidate> --fold N` — re-test an admitted edge on a forward fold window and record the outcome.
 
 Honest refusals at start: expressive tier without a declared `--fresh-holdout` reserve;
 an unfiltered universe without explicit `passthrough`; a run whose segregation cannot be
