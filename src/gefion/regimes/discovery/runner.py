@@ -76,6 +76,7 @@ class DiscoveryConfig:
     inner_screen: float = INNER_SCREEN_PVALUE
     min_effective_n: int = 20
     fold_length_days: int = 30  # walk-forward grading fold width (declared)
+    max_date: Optional[datetime.date] = None  # declared vintage (issue #68)
     holdout_weeks: int = 6
     label_window: int = 60
     align_window: int = 60
@@ -127,6 +128,7 @@ def run_discovery(conn, config: DiscoveryConfig, market: MarketData) -> Dict[str
             "inner_screen": config.inner_screen,
             "min_effective_n": config.min_effective_n,
             "fold_length_days": config.fold_length_days,
+            **({"max_date": str(config.max_date)} if config.max_date else {}),
             "label_window": config.label_window,
             "align_window": config.align_window,
         }
@@ -138,6 +140,15 @@ def run_discovery(conn, config: DiscoveryConfig, market: MarketData) -> Dict[str
                 {"name": d["name"], "feature": d["feature"],
                  "code_sha": hashlib.sha256(d["code"].encode("utf-8")).hexdigest()}
                 for d in config.detectors]
+
+        # -- declared vintage: the run must see exactly the world it declared --
+        if config.max_date is not None:
+            beyond = [d for d in market.dates() if d > config.max_date]
+            if beyond:
+                raise DiscoveryError(
+                    f"vintage declared as {config.max_date} but the market data "
+                    f"contains {len(beyond)} later date(s) (first: {min(beyond)}) — "
+                    "load the data with the same max_date it declares")
 
         # -- segregation: prove it or record an invalid run (FR-102) ----------
         holdout = HoldoutManager(max_date=max(market.dates()),

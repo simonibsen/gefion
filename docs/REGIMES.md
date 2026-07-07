@@ -207,6 +207,33 @@ Every limit the search hits is recorded with a quantitative reason
 The negative space is a learning signal: a search that keeps refusing the same
 proposal for a missing input is telling you what to ingest next.
 
+### Deep validation: vintage re-discovery and split-half robustness
+
+Forward trust is slow by nature (the evidence unit is regime episodes). Two declared,
+honest ways to learn more from history — neither may ever top up a forward grade:
+
+- **Vintage re-discovery** (`--max-date YYYY-MM-DD`): run discovery *as of a past
+  date* — data after the declared vintage is never loaded, the run refuses if the
+  market data disagrees with its declaration, and the vintage is recorded in the
+  pre-registration. The recipe: discover as of 2010 (that vintage's holdout confirms
+  on data its search never saw), roll forward per vintage, then read across runs —
+  does the procedure's admission rate behave like the negative control predicts, and
+  would this *kind* of regime have been admitted at most vintages or only recently?
+  Honest limit: for a specific already-admitted regime a selection shadow remains
+  (it is being scrutinized *because* it won on all data), so vintage results are
+  procedure evidence, never grade confirmations. Anything that reuses time blocks
+  across many combinations (CPCV-style) multiplies testing and waits for the
+  FR-108 bootstrap.
+- **Split-half universe agreement** (`half:a` / `half:b` in the filter chain, e.g.
+  `test_tickers,asset_type:common,half:a`): a deterministic, content-hash partition
+  of the symbol universe, declared and recorded like any chain. Run the same
+  pre-registered search on each half and compare. At market scope this is a
+  **robustness** dimension — was the edge driven by a few names, microcaps, or one
+  sector? — *not* independent validation: both halves live through the same market
+  history, so the conditioning series and returns are strongly shared. It graduates
+  to true cross-sectional validation only for per-entity-scope regimes (005
+  follow-up), where held-out symbols are genuinely new evidence units.
+
 ### Discovery inside experiment cycles
 
 `gefion experiment propose --type regime_discovery` runs discovery under cycle budgets

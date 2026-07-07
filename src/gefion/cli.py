@@ -11918,6 +11918,10 @@ def regime_discover_start(
         20, "--min-effective-n",
         help="Episode-based effective-sample floor per bucket (declared; slow "
              "regimes in a narrow holdout need a floor the window can hold)"),
+    max_date: Optional[str] = typer.Option(
+        None, "--max-date",
+        help="Declared vintage (YYYY-MM-DD): run discovery as of this past date "
+             "— the deep-validation enabler (data after it is never loaded)"),
     seed: int = typer.Option(42, "--seed", help="Run seed (reproducibility)"),
     dataset: str = typer.Option("dev", "--dataset", help="Dataset version tag"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
@@ -11942,15 +11946,22 @@ def regime_discover_start(
         out.error(f"Cannot read atom library {atoms}: {exc}")
         raise typer.Exit(1)
 
+    from datetime import datetime as _dt
     reserve = None
     if fresh_holdout:
-        from datetime import datetime as _dt
         try:
             start_s, _, end_s = fresh_holdout.partition(":")
             reserve = (_dt.strptime(start_s, "%Y-%m-%d").date(),
                        _dt.strptime(end_s, "%Y-%m-%d").date())
         except ValueError as exc:
             out.error(f"Invalid --fresh-holdout (expected START:END dates): {exc}")
+            raise typer.Exit(1)
+    vintage = None
+    if max_date:
+        try:
+            vintage = _dt.strptime(max_date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            out.error(f"Invalid --max-date (expected YYYY-MM-DD): {exc}")
             raise typer.Exit(1)
     if "expressive" in tier and reserve is None:
         out.error("expressive tier requires a declared --fresh-holdout reserve block")
@@ -11999,14 +12010,15 @@ def regime_discover_start(
             market = load_market_data(
                 conn, sorted(set(signals_list) | set(atom_features)),
                 horizon_days=horizon_days, dataset_version=dataset,
-                symbols=symbols, optional_features=atom_features)
+                symbols=symbols, optional_features=atom_features,
+                max_date=vintage)
             config = DiscoveryConfig(
                 name=name, seed=seed, atoms=atom_list, signals=signals_list,
                 depth=depth, budget=budget, tiers=tuple(tier),
                 signal_source=signal_source, grading_scheme=grading_scheme,
                 universe_filter=universe_filter, horizon_days=horizon_days,
                 holdout_weeks=holdout_weeks, min_effective_n=min_effective_n,
-                fresh_holdout=reserve,
+                max_date=vintage, fresh_holdout=reserve,
                 freeform=freeform_list, detectors=detector_list,
                 reserve_justification=reserve_justification,
                 dataset_version=dataset)

@@ -529,7 +529,7 @@ segregation (discovery never sees the outer holdout), a pre-registered bounded s
 space, one flat FDR family that counts every test including the losers, and auditable
 ledgers. See [REGIMES.md](REGIMES.md) § Agentic discovery for the threat model.
 
-- `gefion regime discover start --name <slug> --atoms <atoms.json> [--depth K] [--budget N] [--tier interaction|grammar|expressive]... [--signal-source features] [--grading-scheme walk_forward] [--universe-filter <chain>|passthrough] [--fresh-holdout START:END] [--freeform <asts.json>] [--principles <id,id>] [--reserve-justification TEXT] [--signal <feat>]... [--horizon-days N] [--holdout-weeks N] [--min-effective-n N] [--seed N] [--dataset V]` — pre-register and run a bounded discovery. Expect mostly rejections; that is correct behavior. The expressive tier (free-form ASTs via `--freeform`, principle-seeded detectors via `--principles`) requires a declared single-use `--fresh-holdout` reserve; re-declaring a consumed reserve requires `--reserve-justification`.
+- `gefion regime discover start --name <slug> --atoms <atoms.json> [--depth K] [--budget N] [--tier interaction|grammar|expressive]... [--signal-source features] [--grading-scheme walk_forward] [--universe-filter <chain>|passthrough] [--fresh-holdout START:END] [--freeform <asts.json>] [--principles <id,id>] [--reserve-justification TEXT] [--signal <feat>]... [--horizon-days N] [--holdout-weeks N] [--min-effective-n N] [--max-date YYYY-MM-DD] [--seed N] [--dataset V]` — pre-register and run a bounded discovery. Expect mostly rejections; that is correct behavior. The expressive tier (free-form ASTs via `--freeform`, principle-seeded detectors via `--principles`) requires a declared single-use `--fresh-holdout` reserve; re-declaring a consumed reserve requires `--reserve-justification`.
 - `gefion regime discover list [--status S]` — list runs (status, family size, dataset).
 - `gefion regime discover show <run>` — pre-registration, segregation boundaries, family size, status.
 - `gefion regime discover ledger <run> [--verdict V]` — the candidate ledger: every candidate evaluated, losers included (they are the FDR denominator).
@@ -541,4 +541,9 @@ ledgers. See [REGIMES.md](REGIMES.md) § Agentic discovery for the threat model.
 
 Honest refusals at start: expressive tier without a declared `--fresh-holdout` reserve;
 an unfiltered universe without explicit `passthrough`; a run whose segregation cannot be
-proven is recorded with status `invalid` and produces no verdicts.
+proven is recorded with status `invalid` and produces no verdicts; a declared `--max-date`
+vintage that disagrees with the loaded data.
+
+Deep validation (see REGIMES.md): `--max-date` runs discovery as of a past vintage;
+`half:a`/`half:b` in the universe chain give a declared split-half robustness check
+(robustness, not independence, at market scope).

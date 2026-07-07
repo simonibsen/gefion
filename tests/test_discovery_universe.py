@@ -48,9 +48,44 @@ def test_chain_description_roundtrips_for_preregistration():
     """describe_chain output is what lands in search_space JSON; parsing it
     back must yield the same chain (declared == recorded == applied)."""
     for spec in ("test_tickers", "asset_type:common", "passthrough",
-                 "test_tickers,asset_type:common"):
+                 "test_tickers,asset_type:common",
+                 "test_tickers,asset_type:common,half:a"):
         chain = universe.parse_filter_chain(spec)
         assert ",".join(universe.describe_chain(chain)) == spec
+
+
+# --- built-in: split-half (issue #68 — robustness, not independence) ----------
+
+def test_half_filter_partitions_deterministically():
+    """half:a / half:b must partition any symbol list: disjoint, exhaustive,
+    stable across calls and input order (the halves are a declared property
+    of the symbol, not of the run)."""
+    symbols = [f"SYM{i}" for i in range(200)]
+    a = universe.apply_chain(universe.parse_filter_chain("half:a"), symbols)
+    b = universe.apply_chain(universe.parse_filter_chain("half:b"), symbols)
+    assert set(a) | set(b) == set(symbols)
+    assert not (set(a) & set(b))
+    # both halves populated and roughly balanced
+    assert 60 < len(a) < 140
+    # deterministic and order-independent
+    a2 = universe.apply_chain(universe.parse_filter_chain("half:a"),
+                              list(reversed(symbols)))
+    assert set(a2) == set(a)
+
+
+def test_half_filter_composes_with_quality_chain():
+    symbols = ["AAPL", "ZVZZT", "MSFT", "GOOG"]
+    chain = universe.parse_filter_chain("test_tickers,half:a")
+    got = universe.apply_chain(chain, symbols)
+    assert "ZVZZT" not in got
+    assert set(got) <= {"AAPL", "MSFT", "GOOG"}
+
+
+def test_half_filter_unknown_arg_refused():
+    with pytest.raises(universe.UniverseError):
+        universe.parse_filter_chain("half:c")
+    with pytest.raises(universe.UniverseError):
+        universe.parse_filter_chain("half")
 
 
 # --- built-in: test-ticker exclusion ----------------------------------------

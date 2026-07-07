@@ -1859,6 +1859,8 @@ async def list_tools() -> List[Tool]:
                                               "description": "Recorded justification for re-declaring a consumed reserve"},
                     "min_effective_n": {"type": "integer",
                                         "description": "Episode-based effective-sample floor per bucket (default 20)"},
+                    "max_date": {"type": "string",
+                                 "description": "Declared vintage YYYY-MM-DD: discover as of a past date (deep validation)"},
                     "seed": {"type": "integer", "description": "Run seed"},
                     "dataset": {"type": "string", "description": "Dataset version tag"},
                 },
@@ -4852,6 +4854,8 @@ async def _regime_discover_start(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--reserve-justification", args["reserve_justification"]])
         if args.get("min_effective_n") is not None:
             cmd.extend(["--min-effective-n", str(args["min_effective_n"])])
+        if args.get("max_date"):
+            cmd.extend(["--max-date", args["max_date"]])
         if args.get("seed") is not None:
             cmd.extend(["--seed", str(args["seed"])])
         if args.get("dataset"):
