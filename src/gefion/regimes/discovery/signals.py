@@ -69,9 +69,11 @@ class FeatureSignalSource:
             return out
 
 
-def _feature_series(cur, name: str, symbols: Optional[List[str]]) -> Series:
+def _feature_series(cur, name: str, symbols: Optional[List[str]],
+                    max_date: Optional[datetime.date] = None) -> Series:
     """Market-level daily median of a feature, optionally over a declared
-    symbol universe. Raises LookupError on an unknown feature."""
+    symbol universe and up to a declared vintage date. Raises LookupError on
+    an unknown feature."""
     cur.execute("SELECT id FROM feature_definitions WHERE name = %s", (name,))
     found = cur.fetchone()
     if not found:
@@ -79,16 +81,19 @@ def _feature_series(cur, name: str, symbols: Optional[List[str]]) -> Series:
     if symbols is None:
         cur.execute(
             "SELECT date, percentile_cont(0.5) WITHIN GROUP (ORDER BY value) "
-            "FROM computed_features WHERE feature_id = %s GROUP BY date ORDER BY date",
-            (found[0],),
+            "FROM computed_features WHERE feature_id = %s "
+            "AND (%s::date IS NULL OR date <= %s::date) "
+            "GROUP BY date ORDER BY date",
+            (found[0], max_date, max_date),
         )
     else:
         cur.execute(
             """SELECT cf.date, percentile_cont(0.5) WITHIN GROUP (ORDER BY cf.value)
                FROM computed_features cf JOIN stocks s ON s.id = cf.data_id
                WHERE cf.feature_id = %s AND s.symbol = ANY(%s)
+                 AND (%s::date IS NULL OR cf.date <= %s::date)
                GROUP BY cf.date ORDER BY cf.date""",
-            (found[0], symbols),
+            (found[0], symbols, max_date, max_date),
         )
     return [(d, float(v)) for d, v in cur.fetchall() if v is not None]
 
@@ -96,7 +101,8 @@ def _feature_series(cur, name: str, symbols: Optional[List[str]]) -> Series:
 def load_market_data(conn, feature_names: List[str], horizon_days: int = 1,
                      dataset_version: str = "dev",
                      symbols: Optional[List[str]] = None,
-                     optional_features: Optional[List[str]] = None) -> MarketData:
+                     optional_features: Optional[List[str]] = None,
+                     max_date: Optional[datetime.date] = None) -> MarketData:
     """Load market-level series from the DB for a real discovery run.
 
     Features are the cross-sectional daily median (robust to outliers — the
@@ -105,7 +111,8 @@ def load_market_data(conn, feature_names: List[str], horizon_days: int = 1,
     to the declared universe-filter chain's survivors (FR-121a). Features in
     `optional_features` that are unknown/empty are skipped — the runner
     records them as uncomputable-proposal diagnostics; everything else raises
-    LookupError (honest error, no silent empty run).
+    LookupError (honest error, no silent empty run). `max_date` loads the
+    world as of a past date — the vintage re-discovery enabler (issue #68).
     """
     optional = set(optional_features or [])
     with create_span("discovery.signals.load_market_data",
@@ -114,7 +121,7 @@ def load_market_data(conn, feature_names: List[str], horizon_days: int = 1,
         with conn.cursor() as cur:
             for name in feature_names:
                 try:
-                    series = _feature_series(cur, name, symbols)
+                    series = _feature_series(cur, name, symbols, max_date=max_date)
                 except LookupError:
                     if name in optional:
                         continue
@@ -125,7 +132,12 @@ def load_market_data(conn, feature_names: List[str], horizon_days: int = 1,
                     raise LookupError(f"feature {name!r} has no computed data")
                 features[name] = series
             symbol_clause = "" if symbols is None else "JOIN stocks s ON s.id = o.data_id"
-            where = "" if symbols is None else "WHERE s.symbol = ANY(%(symbols)s)"
+            conditions = []
+            if symbols is not None:
+                conditions.append("s.symbol = ANY(%(symbols)s)")
+            if max_date is not None:
+                conditions.append("o.date <= %(max_date)s")
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             cur.execute(
                 f"""
                 SELECT date, AVG(fwd) FROM (
@@ -136,7 +148,7 @@ def load_market_data(conn, feature_names: List[str], horizon_days: int = 1,
                 ) t
                 WHERE fwd IS NOT NULL GROUP BY date ORDER BY date
                 """,
-                {"horizon": horizon_days, "symbols": symbols},
+                {"horizon": horizon_days, "symbols": symbols, "max_date": max_date},
             )
             fwd = [(d, float(v)) for d, v in cur.fetchall() if v is not None]
         if not fwd:

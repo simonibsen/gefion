@@ -289,3 +289,16 @@ def test_load_market_data_optional_features_skipped(seeded_conn):
         seeded_conn, ["edgetest_feat", "vix_level"], optional_features=["vix_level"])
     assert "vix_level" not in market.features
     assert "edgetest_feat" in market.features
+
+
+def test_load_market_data_max_date_truncates_the_vintage(seeded_conn):
+    """Issue #68: vintage re-discovery loads the world as of a past date —
+    features AND forward returns must stop there."""
+    import datetime
+    cutoff = datetime.date(2024, 1, 3)
+    market = signals.load_market_data(
+        seeded_conn, ["edgetest_feat"], max_date=cutoff)
+    assert max(d for d, _ in market.features["edgetest_feat"]) <= cutoff
+    assert max(d for d, _ in market.forward_returns) <= cutoff
+    full = signals.load_market_data(seeded_conn, ["edgetest_feat"])
+    assert max(d for d, _ in full.features["edgetest_feat"]) > cutoff

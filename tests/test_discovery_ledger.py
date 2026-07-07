@@ -536,6 +536,27 @@ def test_consumed_reserve_refused_without_justification(conn):
                             (row["definition"],))
 
 
+# --- issue #68: declared vintage (max_date) ------------------------------------
+
+
+def test_declared_max_date_is_preregistered_and_enforced(conn):
+    """A vintage run declares its as-of date; data beyond it refuses the run
+    (the declaration must match the world the run actually saw)."""
+    import datetime
+    u = make_universe(seed=42, n_days=400, n_features=4)
+    vintage = u.dates[-1]
+    summary = runner.run_discovery(
+        conn, _config(name="ledgertest-vintage", max_date=vintage), _market_from(u))
+    run = ledger.get_run(conn, summary["run_id"])
+    assert run["search_space"]["max_date"] == str(vintage)
+
+    stale_vintage = u.dates[100]  # market contains data beyond the declaration
+    with pytest.raises(runner.DiscoveryError):
+        runner.run_discovery(
+            conn, _config(name="ledgertest-vintage-bad", max_date=stale_vintage),
+            _market_from(u))
+
+
 # --- US5 (T040): byte-reproducibility ----------------------------------------
 
 

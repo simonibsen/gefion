@@ -63,8 +63,17 @@ def test_start_declares_contract_options():
                 "--freeform", "--principles", "--reserve-justification",
                 # T047 learning 1: the effective-N floor is declared config —
                 # slow regimes in a narrow holdout need a declarable floor
-                "--min-effective-n"):
+                "--min-effective-n",
+                # issue #68: vintage re-discovery (deep validation)
+                "--max-date"):
         assert opt in result.output, f"contract option {opt} missing on start"
+
+
+def test_mcp_start_threads_max_date():
+    server = (REPO / "mcp-server" / "server.py").read_text()
+    start = server.index("async def _regime_discover_start(")
+    body = server[start:server.index("\nasync def ", start + 1)]
+    assert "--max-date" in body
 
 
 def test_mcp_start_threads_min_effective_n():

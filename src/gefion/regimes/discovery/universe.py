@@ -14,6 +14,7 @@ later by extending _FILTER_TYPES.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 from typing import List, Optional
 
@@ -44,7 +45,17 @@ class FilterSpec:
 
 DEFAULT_CHAIN = "test_tickers,asset_type:common"
 
-_FILTER_TYPES = ("test_tickers", "asset_type", "passthrough")
+_FILTER_TYPES = ("test_tickers", "asset_type", "passthrough", "half")
+
+# Split-half robustness (issue #68): `half:a`/`half:b` deterministically
+# partition the universe by symbol content hash. At market scope this is a
+# ROBUSTNESS dimension (was the edge driven by a few names?), NOT independent
+# validation — both halves share the same market history. See docs/REGIMES.md.
+_HALVES = ("a", "b")
+
+
+def _half_of(symbol: str) -> str:
+    return _HALVES[hashlib.sha256(symbol.encode("utf-8")).digest()[0] % 2]
 
 
 def parse_filter_chain(spec: Optional[str]) -> List[FilterSpec]:
@@ -68,6 +79,10 @@ def parse_filter_chain(spec: Optional[str]) -> List[FilterSpec]:
         if kind == "asset_type":
             if arg not in _ASSET_TYPE_ALIASES:
                 raise UniverseError(f"unknown asset_type selector: {arg!r}")
+            out.append(FilterSpec(kind, arg))
+        elif kind == "half":
+            if arg not in _HALVES:
+                raise UniverseError(f"unknown half selector: {arg!r} (expected a|b)")
             out.append(FilterSpec(kind, arg))
         else:
             if arg:
@@ -95,6 +110,8 @@ def apply_chain(chain: List[FilterSpec], symbols: List[str], conn=None) -> List[
                 continue
             if spec.kind == "test_tickers":
                 out = [s for s in out if not _TEST_TICKER_RE.match(s)]
+            elif spec.kind == "half":
+                out = [s for s in out if _half_of(s) == spec.arg]
             elif spec.kind == "asset_type":
                 if conn is None:
                     raise UniverseError("asset_type filter requires a database connection")
