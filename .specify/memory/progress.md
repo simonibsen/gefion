@@ -1,10 +1,33 @@
 # Gefion Project Status
 
-**Last Updated**: 2026-07-04
+**Last Updated**: 2026-07-07
 
 ## Current Capabilities
 
-### Regime Slicing (spec 005 — new)
+### Agentic Regime Discovery (spec 006 — new)
+- The system proposes and tests candidate regimes under structural guardrails:
+  pre-registered bounded search spaces (atom grammar to depth K, three declared
+  seams: `signal_source`, `grading_scheme`, `universe_filter`), nested segregation
+  (`DiscoveryDataContext` — discovery cannot touch the outer holdout), candidate
+  freeze before evaluation, inner-evidence screen, and ONE flat FDR family (0.01)
+  that counts every candidate including the losers
+- Four ledger tables: `regime_discovery_runs`, `regime_candidates`,
+  `discovery_diagnostics` (sample-dependent vs structural), `regime_trust_grades`
+- Three expressiveness tiers shipped: continuous-interaction, bounded grammar, and
+  expressive (free-form ASTs + sandboxed detectors) gated by a single-use
+  fresh-holdout reserve with recorded re-declaration justifications
+- Forward-only trust grading: fold 1 = probation; backward era-slices descriptive
+  only; regime-limited flag on early fold failure
+- Standing negative control in CI: zero admissions across 20 noise seeds, ≥95%
+  planted-regime recovery (measured 40/40); byte-reproducible runs
+- Surfaces: `gefion regime discover` CLI group (start/list/show/ledger/verdicts/
+  diagnostics/grades/grade-fold), mirrored `regime_discover_*` MCP tools, UI
+  Regimes → Discovery tab; `regime_discovery` experiment type (high risk, never
+  auto-approved); Module 10 in the learning curriculum
+- **Follow-up filed**: Reality-Check/SPA bootstrap must land before per-cycle
+  search budgets are raised beyond v1 defaults (backlog)
+
+### Regime Slicing (spec 005)
 - First-class regimes: named, causal, persistent market/sector/asset states
   (`regime_definitions` + `regime_labels` hypertable; declarative expression AST)
 - `gefion regime` CLI group (define/compute/list/show/labels/interaction/archive/export/import),

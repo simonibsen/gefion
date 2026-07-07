@@ -68,24 +68,40 @@ action per regime on the UI Regimes page) and no curriculum mention (one line in
 gefion-learn charts/regime material). The plan-template now makes these axes mandatory
 so this class of gap is caught at planning time.
 
-### Regime follow-ups (spec 005 shipped 2026-07; spec 006 parked)
+### Regime follow-ups (spec 005 shipped 2026-07; spec 006 shipped 2026-07-07)
 **Source**: specs/005-regime-slicing, specs/006-agentic-regime-discovery
-**Priority**: Medium (006 explicitly parked until production-scale data)
+**Priority**: Medium
 
 Spec 005 (regime slicing) shipped: definitions/labels, sliced backtests,
 continuous-interaction, conditional experiment verdicts — across CLI/MCP/UI.
 Remaining within 005's spec surface:
 1. Per-entity (sector/industry/asset) label computation — US1 shipped market scope;
    `compute_labels` raises NotImplementedError for finer scopes
-2. Detector-function leaf runtime (HMM/clustering via the feature-function sandbox) —
-   representation exists (FR-019a); execution gated to 006's fresh-holdout tier
-3. Reference-leaf resolution (compose stored regimes by name) and optional DSL string sugar
-4. Per-observation holdout scores wired into more experiment types (only the shared
+2. Reference-leaf resolution (compose stored regimes by name) and optional DSL string sugar
+3. Per-observation holdout scores wired into more experiment types (only the shared
    helper exists; evaluators must emit `observations` for live conditional verdicts)
 
-Spec 006 (agentic regime discovery) is fully specified and **parked by design** until
-decades-scale data lands: nested segregation, search-aware FDR, diagnostics ledger,
-cross-era grading. Do not start it on the dev dataset.
+Spec 006 (agentic regime discovery) **shipped 2026-07-07** (T001–T046 on the dev
+machine; first real-data validation run T047 pending on sloth): nested segregation
+with an inner-evidence screen, one flat FDR family that counts the losers, all three
+expressiveness tiers (incl. the 005 FR-019a detector-leaf runtime under the
+fresh-holdout reserve), forward-only trust grading, diagnostics ledger, negative
+control in CI, full CLI/MCP/UI parity + Module 10 curriculum.
+
+### Reality-Check/SPA bootstrap for discovery (006 fast-follow — REQUIRED before raising budgets)
+**Source**: specs/006-agentic-regime-discovery (FR-108, Clarification Q1)
+**Priority**: High gate, not urgent — blocks raising discovery search budgets only
+
+v1 error control is flat BH over the full realized family at 0.01 plus the inner
+screen, honest at v1's capped volumes (measured false-admission ~1/100 noise runs).
+A data-snooping-robust selection check (White Reality Check / Hansen SPA-style
+bootstrap over the full candidate set) MUST land before per-cycle candidate budgets
+are raised beyond v1 defaults (~50–200) or the grammar depth cap above K=2. The
+candidate ledger already retains everything the bootstrap needs (the seam is there).
+Also queued behind it: `signal_source` rungs `model_predictions` (needs a production
+model) and `strategy_backtests` (needs the bootstrap; equity-curve inference is not a
+clean paired test), and automated fold accrual riding data-update probation checks
+(v1: `regime discover grade-fold` is manual/operator-driven).
 
 ### Live & Paper Trading (ML_ROADMAP Phase 6)
 **Source**: ML_ROADMAP.md

@@ -536,6 +536,45 @@ def test_consumed_reserve_refused_without_justification(conn):
                             (row["definition"],))
 
 
+# --- US5 (T040): byte-reproducibility ----------------------------------------
+
+
+def test_rerun_with_identical_inputs_is_identical(conn):
+    """SC-105: same seed + same inputs -> identical candidate hashes, results,
+    and verdicts, across both tiers and the whole ledger."""
+    def snapshot(name):
+        u = plant_regime_edge(make_universe(seed=17, n_days=500, n_features=4),
+                              "noise_0", episode_len=10, cancel=True)
+        cfg = _config(name=name, seed=17,
+                      atoms=[{"feature": "planted_cond", "cmp": ">", "value": 0.0},
+                             {"feature": "noise_1", "cmp": ">", "value": 0.0},
+                             {"feature": "noise_2", "form": "tercile"}],
+                      depth=2, tiers=("interaction", "grammar"),
+                      signals=["noise_0", "noise_3"],
+                      holdout_weeks=26, min_effective_n=5)
+        summary = runner.run_discovery(conn, cfg, _market_from(u))
+        run = ledger.get_run(conn, summary["run_id"])
+        cands = ledger.list_candidates(conn, summary["run_id"])
+        diags = ledger.list_diagnostics(conn, summary["run_id"])
+        for row in summary["admitted"]:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM regime_definitions WHERE name = %s",
+                            (row["definition"],))
+        return {
+            "family_size": run["family_size"],
+            "search_space": run["search_space"],
+            "candidates": [(c["candidate_hash"], c["tier"], c["verdict"],
+                            c["counted_in_family"], c["results"]) for c in cands],
+            "diagnostics": [(d["kind"], d["sample_dependent"], d["detail"])
+                            for d in diags],
+        }
+
+    a = snapshot("ledgertest-repro-a")
+    b = snapshot("ledgertest-repro-b")
+    # the search space differs only by nothing — names are outside it
+    assert a == b
+
+
 def test_runner_refuses_all_holdout_data(conn):
     """US1 acceptance 3: a run that cannot prove segregation produces no
     verdicts — it is recorded and marked invalid."""

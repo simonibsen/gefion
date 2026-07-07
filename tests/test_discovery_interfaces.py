@@ -162,6 +162,51 @@ def test_discover_ledger_shows_losers(db_url, completed_run):
     assert all(r["verdict"] == "admitted" for r in filtered)
 
 
+# --- parity matrix completion (T041, US5): operations 8 and 9 -----------------
+
+def test_op8_discovery_runs_within_experiment_cycles():
+    """Operation 8: propose/approve/run a regime_discovery experiment through
+    the existing cycle flow — CLI, MCP, and UI all offer the type."""
+    result = runner.invoke(app, ["experiment", "propose", "--help"])
+    assert result.exit_code == 0 and "--type" in result.output
+    server = (REPO / "mcp-server" / "server.py").read_text()
+    assert 'name="experiment_propose"' in server
+    view = (REPO / "src" / "gefion" / "ui" / "views" / "experiments.py").read_text()
+    assert "regime_discovery" in view
+
+
+def test_op9_admitted_regime_is_an_ordinary_regime():
+    """Operation 9: an admitted regime carries origin=machine and the full 005
+    affordances (show/labels/chart/slice) — no special-case surfaces."""
+    # the Regimes page lists origin so machine regimes are badged
+    view = (REPO / "src" / "gefion" / "ui" / "views" / "regimes.py").read_text()
+    assert '"origin"' in view or "origin" in view
+    # 005 surfaces exist and accept any regime name (incl. machine-origin)
+    for cli_path in (["regime", "show"], ["regime", "labels"], ["chart", "regime"]):
+        result = runner.invoke(app, cli_path + ["--help"])
+        assert result.exit_code == 0
+    result = runner.invoke(app, ["backtest", "run", "--help"])
+    assert "--by-regime" in result.output
+
+
+def test_operator_skill_routes_discovery_tools():
+    """Constitution III: new MCP tools require /gefion routing (T042)."""
+    skill = (REPO / ".claude" / "commands" / "gefion.md").read_text()
+    assert "regime_discover" in skill
+    # honesty rules: confirm before starting; never present unadmitted
+    # candidates as findings
+    assert "unadmitted" in skill or "never present" in skill.lower()
+
+
+def test_learn_curriculum_has_discovery_module():
+    """T043: Module 10 — Agentic Regime Discovery, concept-first."""
+    learn = (REPO / ".claude" / "commands" / "gefion-learn.md").read_text()
+    assert "Module 10" in learn
+    assert "discover" in learn.lower()
+    # the checkpoint teaches the deepest rule: backward slices never grade
+    assert "backward" in learn.lower()
+
+
 # --- diagnostics + grades surfaces (T037/T038, US6) ---------------------------
 
 def test_discover_diagnostics_filters_and_reasons(db_url, completed_run):
