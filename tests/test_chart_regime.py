@@ -138,3 +138,39 @@ def test_mcp_chart_regime_tool():
     assert 'name == "chart_regime"' in src
     assert "async def _chart_regime(" in src
     assert '"chart", "regime"' in src
+
+
+def test_chart_regime_end_to_end(conn, tmp_path, monkeypatch):
+    """Full render path against the test DB — catches call-signature drift the
+    --help tests cannot (found when the first production render failed)."""
+    from gefion.db import schema as dbschema
+    from gefion.regimes.definitions import RegimeDefinition, store_definition
+
+    defn = RegimeDefinition(
+        name="e2e-regime", scope="market",
+        expression={"leaf": "comparison", "feature": "realized_vol_20",
+                    "cmp": "quantile", "value": "tercile", "scope": "market"},
+        bucketing={"labels": ["calm", "normal", "stressed"]},
+    )
+    rid = store_definition(conn, defn)
+    d0 = dt.date(2024, 1, 1)
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO stocks (symbol) VALUES ('E2E') "
+                    "ON CONFLICT (symbol) DO UPDATE SET symbol=EXCLUDED.symbol RETURNING id")
+        sid = cur.fetchone()[0]
+        for i in range(6):
+            cur.execute("INSERT INTO stock_ohlcv (data_id, date, close) VALUES (%s,%s,%s) "
+                        "ON CONFLICT (data_id, date) DO UPDATE SET close=EXCLUDED.close",
+                        (sid, d0 + dt.timedelta(days=i), 100.0 + i))
+            cur.execute("INSERT INTO regime_labels (regime_id, date, entity_id, label, dataset_version) "
+                        "VALUES (%s,%s,0,'calm','test') ON CONFLICT DO NOTHING",
+                        (rid, d0 + dt.timedelta(days=i)))
+    monkeypatch.setenv("HOME", str(tmp_path))  # charts land under ~/.gefion/charts
+    r = runner.invoke(app, ["chart", "regime", "e2e-regime", "--symbol", "E2E",
+                            "--no-open", "--db-url", dbschema.test_db_url(), "--json"])
+    assert r.exit_code == 0, r.output
+    # CLI JSON mode emits JSONL (status lines + payload); the payload is last
+    payload = json.loads([l for l in r.output.splitlines() if l.strip()][-1])
+    payload = payload.get("data", payload)
+    assert payload["episodes"] == 1 and payload["bars"] == 6
+    assert pathlib.Path(payload["path"]).exists()

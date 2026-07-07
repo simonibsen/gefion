@@ -11771,7 +11771,7 @@ def chart_regime(
 
     html = create_regime_chart(payload["price"], payload["episodes"],
                                regime_name=name, symbol=symbol.upper())
-    path = save_html_string(html, generate_chart_filename(f"regime_{name}_{symbol.upper()}"))
+    path = save_html_string(html, generate_chart_filename(symbol.upper(), f"regime_{name}"))
     out.success(f"Regime chart saved: {path} "
                 f"({len(payload['episodes'])} episodes over {len(payload['price'])} bars)")
     if out.json_mode:
