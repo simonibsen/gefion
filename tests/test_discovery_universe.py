@@ -96,7 +96,8 @@ def conn():
                ('UNIVT1', 'Common Co', 'Common Stock'),
                ('UNIVT2', 'Fund', 'ETF'),
                ('UNIVT3', 'Warrant Co', 'Warrant'),
-               ('UNIVT4', 'No Type Co', NULL)"""
+               ('UNIVT4', 'No Type Co', NULL),
+               ('UNIVT5', 'Listing Vocab Co', 'Stock')"""
         )
     yield c
     with c.cursor() as cur:
@@ -105,9 +106,13 @@ def conn():
 
 
 def test_asset_type_filter_keeps_common_stock_only(conn):
+    """Both real-world vocabularies count as common stock: the OVERVIEW
+    endpoint says 'Common Stock', LISTING_STATUS says 'Stock' — production
+    data (sloth, 2026-07-07) is entirely the latter."""
     chain = universe.parse_filter_chain("asset_type:common")
-    got = universe.apply_chain(chain, ["UNIVT1", "UNIVT2", "UNIVT3", "UNIVT4"], conn=conn)
-    assert got == ["UNIVT1"]
+    got = universe.apply_chain(
+        chain, ["UNIVT1", "UNIVT2", "UNIVT3", "UNIVT4", "UNIVT5"], conn=conn)
+    assert got == ["UNIVT1", "UNIVT5"]
 
 
 def test_asset_type_filter_requires_connection():

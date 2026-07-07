@@ -22,7 +22,9 @@ from gefion.observability import create_span, set_attributes
 # NASDAQ test tickers: ZVZZT, ZWZZT, ZXZZT, ZJZZT, ZAZZT, ...
 _TEST_TICKER_RE = re.compile(r"^Z[A-Z]ZZT$")
 
-_ASSET_TYPE_ALIASES = {"common": "Common Stock"}
+# Both real-world vocabularies: AlphaVantage OVERVIEW says "Common Stock",
+# LISTING_STATUS (the backfill source) says "Stock".
+_ASSET_TYPE_ALIASES = {"common": ("Common Stock", "Stock")}
 
 
 class UniverseError(ValueError):
@@ -96,10 +98,11 @@ def apply_chain(chain: List[FilterSpec], symbols: List[str], conn=None) -> List[
             elif spec.kind == "asset_type":
                 if conn is None:
                     raise UniverseError("asset_type filter requires a database connection")
-                wanted = _ASSET_TYPE_ALIASES[spec.arg]
+                wanted = list(_ASSET_TYPE_ALIASES[spec.arg])
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT symbol FROM stocks WHERE symbol = ANY(%s) AND asset_type = %s",
+                        "SELECT symbol FROM stocks "
+                        "WHERE symbol = ANY(%s) AND asset_type = ANY(%s)",
                         (out, wanted),
                     )
                     keep = {r[0] for r in cur.fetchall()}
