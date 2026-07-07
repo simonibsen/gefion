@@ -13,7 +13,7 @@ import pytest
 
 from gefion.experiments.holdout import HoldoutManager
 from gefion.regimes.discovery import detectors, segregation
-from tests.discovery_synth import make_universe, plant_regime_edge
+from discovery_synth import make_universe, plant_regime_edge
 
 # A well-behaved detector: threshold on the trailing-median-adjusted level.
 GOOD_DETECTOR = '''

@@ -30,7 +30,7 @@ import pytest
 
 from gefion.db import schema
 from gefion.regimes.discovery import ledger, runner, segregation
-from tests.discovery_synth import make_universe, plant_regime_edge
+from discovery_synth import make_universe, plant_regime_edge
 
 NOISE_SEEDS = range(100, 120)      # fixed a priori — do not tune
 RECOVERY_SEEDS = range(200, 220)   # fixed a priori — do not tune

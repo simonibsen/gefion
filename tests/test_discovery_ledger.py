@@ -243,7 +243,7 @@ def test_list_runs_filters_by_status(conn):
 # =============================================================================
 
 from gefion.regimes.discovery import runner, segregation  # noqa: E402
-from tests.discovery_synth import make_universe, plant_regime_edge  # noqa: E402
+from discovery_synth import make_universe, plant_regime_edge  # noqa: E402
 
 
 def _market_from(u):

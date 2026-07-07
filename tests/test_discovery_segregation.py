@@ -14,7 +14,7 @@ import pytest
 from gefion.experiments.holdout import HoldoutManager
 from gefion.experiments.statistical import compute_holdout_pvalue
 from gefion.regimes.discovery import segregation
-from tests.discovery_synth import make_universe
+from discovery_synth import make_universe
 
 
 def _market(seed=3, n_days=400):

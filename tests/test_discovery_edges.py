@@ -10,7 +10,7 @@ import pytest
 
 from gefion.experiments.holdout import HoldoutManager
 from gefion.regimes.discovery import edges, grammar, segregation, signals
-from tests.discovery_synth import make_universe, plant_regime_edge
+from discovery_synth import make_universe, plant_regime_edge
 
 
 def _market(u):

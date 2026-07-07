@@ -13,7 +13,7 @@ import pytest
 
 from gefion.db import schema
 from gefion.regimes.discovery import grading, ledger, runner, segregation
-from tests.discovery_synth import make_universe, plant_regime_edge, truncate_universe
+from discovery_synth import make_universe, plant_regime_edge, truncate_universe
 
 
 def _conn():

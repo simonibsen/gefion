@@ -122,7 +122,7 @@ def completed_run(db_url):
     """A tiny completed discovery run in the test DB (losers included)."""
     import psycopg
     from gefion.regimes.discovery import runner as drunner, segregation
-    from tests.discovery_synth import make_universe
+    from discovery_synth import make_universe
     conn = psycopg.connect(db_url)
     conn.autocommit = True
     with conn.cursor() as cur:

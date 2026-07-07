@@ -5,7 +5,7 @@ seeded-deterministic and the planted edge must actually be conditional.
 """
 import numpy as np
 
-from tests.discovery_synth import business_days, make_universe, plant_regime_edge
+from discovery_synth import business_days, make_universe, plant_regime_edge
 
 
 def test_business_days_are_weekdays_and_deterministic():
