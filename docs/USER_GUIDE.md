@@ -295,6 +295,25 @@ gefion fundamentals-update --limit 50
 - Tracks staleness with `updated_at` timestamp
 - Required for cross-sectional sector/industry rankings
 
+### Entity deletion (first-class, registry-driven)
+Anything created must be cleanly deletable with its associated data. `data
+entity-delete` works uniformly across entity kinds (stocks, macro series):
+```bash
+# Dry-run (default): report the full blast radius, change nothing
+gefion data entity-delete stocks OLDTICKER
+
+# Execute: delete feature values (per the registry), then the entity row
+gefion data entity-delete stocks OLDTICKER --confirm
+```
+- Dry-run reports feature-value counts per feature, hard-FK dependents with
+  their ON DELETE rules, and any blockers
+- Deletion refuses (with the list) if a RESTRICT/NO-ACTION dependent still
+  has rows — remove those first via their own lifecycle commands
+- Audit ledgers (discovery runs, candidates, trust grades) are never in
+  scope: deleting an artifact never deletes accounting
+- `gefion db-health` includes an entity-integrity orphan scan (feature
+  values whose `data_id` has no home in their declared entity table)
+
 ### Cross-sectional features (market-relative rankings)
 Cross-sectional features compare stocks to their peers at the same point in time, as opposed to time-series features which compare a stock to its own history.
 

@@ -1050,3 +1050,13 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
   and record the outcome — confirmed, failed, or *no evidence* (a power-refused
   fold is recorded but never counted). **Mutating** (appends a trust-grade row):
   confirm with the user before invoking.
+
+## Entity lifecycle
+
+- `entity_delete` — delete an entity (stock, macro series) and its feature-store
+  values, registry-driven and uniform across entity kinds. Dry-run by default
+  (`confirm=false`): reports the full blast radius — feature-value counts,
+  hard-FK dependents with ON DELETE rules, blockers — and changes nothing.
+  With `confirm=true` it is **mutating and destructive**: always show the user
+  the dry-run plan and get explicit confirmation first. Refuses when a
+  RESTRICT/NO-ACTION dependent still has rows. Audit ledgers are never in scope.

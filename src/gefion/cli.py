@@ -11667,6 +11667,50 @@ def data_cull(
 from gefion.output import get_output  # noqa: E402
 
 
+@data_app.command("entity-delete")
+def data_entity_delete(
+    entity_table: str = typer.Argument(..., help="Entity table (e.g. stocks, macro_series)"),
+    key: str = typer.Argument(..., help="Natural key (stocks: symbol; macro_series: name) or integer id"),
+    confirm: bool = typer.Option(False, "--confirm", help="Execute the deletion (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete an entity and its feature-store values (registry-driven).
+
+    Dry-run by default: reports the FULL blast radius — feature values per
+    feature (registry edges) and hard-FK dependents with their delete rules —
+    and changes nothing. --confirm deletes feature values first, then the
+    entity row; refuses with the blocker list if RESTRICT/NO-ACTION dependents
+    have rows. Audit ledgers are never in scope.
+    """
+    from gefion.entities.deletion import EntityDeleteError, execute_delete, plan_delete
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            if confirm:
+                summary = execute_delete(conn, entity_table, key)
+                out.success(
+                    f"Deleted {entity_table} '{key}' and "
+                    f"{summary['feature_values_deleted']} feature value(s)",
+                    data={**summary, "dry_run": False})
+            else:
+                plan = plan_delete(conn, entity_table, key)
+                total = sum(f["count"] for f in plan["feature_values"])
+                out.info(f"DRY RUN — {entity_table} '{key}' (id {plan['entity']['id']}): "
+                         f"{total} feature value(s) across "
+                         f"{sum(1 for f in plan['feature_values'] if f['count'])} feature(s); "
+                         f"{len(plan['fk_dependents'])} FK dependent table(s); "
+                         f"{len(plan['blockers'])} blocker(s). "
+                         "Re-run with --confirm to execute.")
+                for b in plan["blockers"]:
+                    out.info(f"  BLOCKER: {b['table']} — {b['rows']} row(s), {b['on_delete']}")
+                if out.json_mode:
+                    out.json({**plan, "dry_run": True})
+        except EntityDeleteError as exc:
+            out.error(f"Entity delete refused: {exc}")
+            raise typer.Exit(1)
+
+
 @data_app.command("listing-meta")
 def data_listing_meta(
     file: Optional[str] = typer.Option(

@@ -1975,6 +1975,28 @@ async def list_tools() -> List[Tool]:
                 "required": ["candidate", "fold"],
             },
         ),
+        Tool(
+            name="entity_delete",
+            description=(
+                "Delete an entity (stock, macro series) and its feature-store values, "
+                "registry-driven. Dry-run by default (confirm=false): reports the full "
+                "blast radius and changes NOTHING. With confirm=true it is MUTATING and "
+                "DESTRUCTIVE — the operator must confirm with the user first. Audit "
+                "ledgers are never in scope."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "entity_table": {"type": "string",
+                                     "description": "Entity table (stocks, macro_series, …)"},
+                    "key": {"type": "string",
+                            "description": "Natural key (symbol/name) or integer id"},
+                    "confirm": {"type": "boolean",
+                                "description": "Execute the deletion (default false = dry-run)"},
+                },
+                "required": ["entity_table", "key"],
+            },
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -2206,6 +2228,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_register(arguments)
         elif name == "regime_discover_grade_fold":
             result = await _regime_discover_grade_fold(arguments)
+        elif name == "entity_delete":
+            result = await _entity_delete(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -4935,6 +4959,16 @@ async def _regime_discover_grade_fold(args: Dict[str, Any]) -> Dict[str, Any]:
         return await GefionExecutor().run(
             "regime", "discover", "grade-fold", str(args["candidate"]),
             "--fold", str(args["fold"]))
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _entity_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Registry-driven entity deletion (dry-run unless confirm=true)."""
+    async def _run():
+        cmd = ["data", "entity-delete", args["entity_table"], str(args["key"])]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
 
