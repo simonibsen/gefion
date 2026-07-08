@@ -95,6 +95,28 @@ ssh prodhost -N -L 8501:localhost:8501   # gefion UI
 ssh prodhost -N -L 5433:localhost:5432   # prod DB, mapped to a local port
 ```
 
+## Scheduled metadata maintenance (prod crontab)
+
+Price ingest keeps `stock_ohlcv` fresh, but the **dimension metadata** on `stocks`
+(sector, industry, asset_type) comes from different endpoints and silently stays NULL
+unless something refreshes it — prod ran for weeks that way, which blocked asset-type
+universe filters and sector-scoped work. Two guards now exist:
+
+1. **Detection**: `gefion db-health` reports `dimension_coverage` (sector/industry/
+   asset_type % populated + latest fundamentals date) and emits actionable warnings
+   naming the fixing command. Check it after any fresh install or big ingest.
+2. **Automation**: the prod user's crontab (installed 2026-07-07) runs
+   ```cron
+   # weekly: sector/industry/asset-type + numeric fundamentals (incremental via --max-age 30)
+   10 3 * * 0  fundamentals-update --json >> ~/cron-logs/fundamentals-update.log
+   # monthly: exchange/asset_type backfill from LISTING_STATUS (idempotent, 1 API call)
+   40 3 1 * *  data listing-meta --json >> ~/cron-logs/listing-meta.log
+   ```
+   (both wrapped in `bash -lc "cd ~/src/gefion && set -a && . ./.env && set +a && …"`).
+   Logs in `~/cron-logs/`; a full fundamentals pass is ~6.2k OVERVIEW calls ≈ 90 min
+   at the key's rate limit. Cron can silently break — that's why the db-health
+   coverage check exists independently of it.
+
 ## Staging on the prod host (optional)
 
 A second, resource-capped environment on non-prod ports for validating against real
