@@ -561,19 +561,58 @@ def test_fundamentals_update_parallel_execution():
 def test_ratio_columns_hold_degenerate_financials(db_conn):
     """Prod failure 2026-07-07: distressed/shell stocks report margins and
     ROE in the +/-thousands; NUMERIC(8,6) (|v| < 100) overflowed and sank the
-    whole run. The four ratio columns must hold real-world extremes."""
+    whole run. Issue #79 (2026-07-08) showed the same class on the columns
+    that fix skipped — observed live: Beta -503341.44, DividendYield
+    1000000.0. ALL numeric ratio columns must hold real-world extremes."""
+    ratio_columns = (
+        "dividend_yield", "profit_margin", "operating_margin",
+        "return_on_equity",                                   # 2026-07-07 fix
+        "beta", "book_value", "eps", "ev_to_ebitda",
+        "forward_pe", "pe_ratio", "peg_ratio", "revenue_per_share",  # issue #79
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             """SELECT column_name, numeric_precision, numeric_scale
                FROM information_schema.columns
                WHERE table_name = 'stocks_fundamentals'
-                 AND column_name IN ('dividend_yield', 'profit_margin',
-                                     'operating_margin', 'return_on_equity')""")
+                 AND column_name = ANY(%s)""", (list(ratio_columns),))
         cols = {name: (prec, scale) for name, prec, scale in cur.fetchall()}
-    assert len(cols) == 4
+    assert len(cols) == len(ratio_columns)
     for name, (prec, scale) in cols.items():
         assert prec >= 14, f"{name} precision {prec} cannot hold |v| >= 100"
-        assert scale == 6, f"{name} scale changed unexpectedly"
+        assert scale == 6, f"{name} scale should be 6, got {scale}"
+
+
+def test_provider_garbage_extremes_are_storable(db_conn):
+    """The issue #79 repro, verbatim from prod: AlphaVantage returned
+    Beta -503341.44 (MDXH) and DividendYield 1000000.0 (CTAA); both writes
+    failed with numeric field overflow. Store what the provider says —
+    garbage-filtering is a downstream/universe-quality concern."""
+    from datetime import date
+    with db_conn.cursor() as cur:
+        cur.execute("DELETE FROM stocks WHERE symbol = 'FWID1'")
+        cur.execute("INSERT INTO stocks (symbol, name) VALUES ('FWID1', 'X') "
+                    "RETURNING id")
+        sid = cur.fetchone()[0]
+    db_conn.commit()
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO stocks_fundamentals
+                       (data_id, date, beta, dividend_yield)
+                   VALUES (%s, %s, -503341.44, 1000000.0)""",
+                (sid, date(2026, 7, 8)))
+            cur.execute(
+                "SELECT beta, dividend_yield FROM stocks_fundamentals "
+                "WHERE data_id = %s", (sid,))
+            beta, dy = cur.fetchone()
+        assert float(beta) == -503341.44
+        assert float(dy) == 1000000.0
+    finally:
+        with db_conn.cursor() as cur:
+            cur.execute("DELETE FROM stocks_fundamentals WHERE data_id = %s", (sid,))
+            cur.execute("DELETE FROM stocks WHERE id = %s", (sid,))
+        db_conn.commit()
 
 
 def test_one_bad_symbol_cannot_sink_the_batch(db_conn):

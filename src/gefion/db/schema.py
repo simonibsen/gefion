@@ -722,24 +722,33 @@ def create_stocks_fundamentals_table(conn: Connection) -> None:
                 data_id INTEGER NOT NULL REFERENCES stocks(id),
                 date DATE NOT NULL,
                 market_cap BIGINT,
-                pe_ratio NUMERIC(10,2),
-                forward_pe NUMERIC(10,2),
-                peg_ratio NUMERIC(10,4),
-                book_value NUMERIC(12,4),
-                dividend_yield NUMERIC(8,6),
-                eps NUMERIC(10,4),
-                revenue_per_share NUMERIC(10,4),
-                profit_margin NUMERIC(8,6),
-                operating_margin NUMERIC(8,6),
-                return_on_equity NUMERIC(8,6),
-                beta NUMERIC(8,4),
-                ev_to_ebitda NUMERIC(10,2),
+                pe_ratio NUMERIC(14,6),
+                forward_pe NUMERIC(14,6),
+                peg_ratio NUMERIC(14,6),
+                book_value NUMERIC(14,6),
+                dividend_yield NUMERIC(14,6),
+                eps NUMERIC(14,6),
+                revenue_per_share NUMERIC(14,6),
+                profit_margin NUMERIC(14,6),
+                operating_margin NUMERIC(14,6),
+                return_on_equity NUMERIC(14,6),
+                beta NUMERIC(14,6),
+                ev_to_ebitda NUMERIC(14,6),
                 shares_outstanding BIGINT,
                 created_at TIMESTAMP DEFAULT NOW(),
                 PRIMARY KEY (data_id, date)
             );
             """
         )
+        # Idempotent for pre-existing tables: providers report garbage
+        # extremes (issue #79) — every ratio column must be NUMERIC(14,6)
+        for col in ("pe_ratio", "forward_pe", "peg_ratio", "book_value",
+                    "dividend_yield", "eps", "revenue_per_share",
+                    "profit_margin", "operating_margin", "return_on_equity",
+                    "beta", "ev_to_ebitda"):
+            cur.execute(
+                sql.SQL("ALTER TABLE stocks_fundamentals ALTER COLUMN {} "
+                        "TYPE NUMERIC(14,6)").format(sql.Identifier(col)))
         cur.execute("SELECT create_hypertable('stocks_fundamentals', 'date', if_not_exists => TRUE);")
         try:
             cur.execute("SELECT set_chunk_time_interval('stocks_fundamentals', INTERVAL '90 days');")
