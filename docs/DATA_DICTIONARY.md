@@ -190,6 +190,7 @@ Primary key: `id`
 | `active` | BOOLEAN | ✓ |  |  |
 | `version` | TEXT | ✓ |  |  |
 | `created_at` | TIMESTAMP | ✓ |  |  |
+| `entity_table` | TEXT |  |  |  |
 | `is_experimental` | BOOLEAN | ✓ |  |  |
 | `source_experiment_id` | INTEGER | ✓ |  |  |
 | `promoted_at` | TIMESTAMPTZ | ✓ |  |  |

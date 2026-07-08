@@ -736,6 +736,8 @@ def ensure_feature_definitions(
     Upsert feature_definitions rows; return map name -> id.
     Each def expects keys: name, function_name, params, source_table, source_column, store_table, store_column, store_type.
     """
+    from gefion.entities.registry import validate_entity_table
+
     ids: Dict[str, int] = {}
     with conn.cursor() as cur:
         for d in defs:
@@ -745,12 +747,17 @@ def ensure_feature_definitions(
                 payload["store_column"] = "value"
             if payload.get("params") is not None:
                 payload["params"] = Json(payload["params"])
+            # Declared entity axis (spec 007): who the values belong to.
+            # Validated here so a bad declaration is refused at registration,
+            # never a runtime surprise.
+            payload.setdefault("entity_table", "stocks")
+            validate_entity_table(conn, payload["entity_table"])
             cur.execute(
                 """
                 INSERT INTO feature_definitions
-                (name, function_name, params, source_table, source_column, store_table, store_column, store_type, active)
+                (name, function_name, params, source_table, source_column, store_table, store_column, store_type, active, entity_table)
                 VALUES (%(name)s, %(function_name)s, %(params)s, %(source_table)s, %(source_column)s,
-                        %(store_table)s, %(store_column)s, %(store_type)s, %(active)s)
+                        %(store_table)s, %(store_column)s, %(store_type)s, %(active)s, %(entity_table)s)
                 ON CONFLICT (name) DO UPDATE SET
                     function_name = EXCLUDED.function_name,
                     params = EXCLUDED.params,
@@ -759,7 +766,8 @@ def ensure_feature_definitions(
                     store_table = EXCLUDED.store_table,
                     store_column = EXCLUDED.store_column,
                     store_type = EXCLUDED.store_type,
-                    active = EXCLUDED.active
+                    active = EXCLUDED.active,
+                    entity_table = EXCLUDED.entity_table
                 RETURNING id;
                 """,
                 payload,

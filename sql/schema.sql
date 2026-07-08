@@ -53,15 +53,21 @@ CREATE TABLE IF NOT EXISTS feature_definitions (
     name TEXT NOT NULL UNIQUE,
     function_name TEXT NOT NULL,  -- Routes to compute function (e.g., 'indicator', 'derivative')
     params JSONB,                  -- Function-specific parameters
-    source_table TEXT,             -- Where to read source data from
+    source_table TEXT,             -- Where to read source data from (what the computation READS)
     source_column TEXT,            -- Column to read from source table
     store_table TEXT DEFAULT 'computed_features',
     store_column TEXT,             -- Column to store result in
     store_type TEXT DEFAULT 'double precision',
     active BOOLEAN DEFAULT TRUE,
     version TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    -- The declared entity axis (spec 007): which table computed_features.data_id
+    -- resolves against for this feature — who the value BELONGS TO, independent
+    -- of source_table. Validated at registration (table exists, integer id PK).
+    entity_table TEXT NOT NULL DEFAULT 'stocks'
 );
+-- Idempotent add for databases created before spec 007
+ALTER TABLE feature_definitions ADD COLUMN IF NOT EXISTS entity_table TEXT NOT NULL DEFAULT 'stocks';
 
 -- Function registry for reusable feature functions
 CREATE TABLE IF NOT EXISTS feature_functions (
