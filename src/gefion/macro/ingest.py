@@ -81,20 +81,24 @@ def _fetch_rows(provider: str, full: bool) -> List[Dict[str, Any]]:
 
 
 def upsert_values(conn, series_id: int, rows: List[Dict[str, Any]]) -> int:
-    """Idempotent upsert into macro_series_values; returns rows written."""
+    """Idempotent upsert into macro_series_values; returns rows written.
+
+    Batched (one executemany, not one execute per row): a --full backfill is
+    ~9k rows, and row-by-row floods the span exporter with 9k DB spans —
+    enough to overflow the queue and drop the parent span from the trace.
+    """
     with create_span("macro.ingest.upsert_values", series_id=series_id) as span:
         with conn.cursor() as cur:
-            for r in rows:
-                cur.execute(
-                    """INSERT INTO macro_series_values
-                           (series_id, date, value, open, high, low)
-                       VALUES (%s, %s, %s, %s, %s, %s)
-                       ON CONFLICT (series_id, date) DO UPDATE SET
-                           value = EXCLUDED.value, open = EXCLUDED.open,
-                           high = EXCLUDED.high, low = EXCLUDED.low""",
-                    (series_id, r["date"], r["value"],
-                     r.get("open"), r.get("high"), r.get("low")),
-                )
+            cur.executemany(
+                """INSERT INTO macro_series_values
+                       (series_id, date, value, open, high, low)
+                   VALUES (%s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (series_id, date) DO UPDATE SET
+                       value = EXCLUDED.value, open = EXCLUDED.open,
+                       high = EXCLUDED.high, low = EXCLUDED.low""",
+                [(series_id, r["date"], r["value"],
+                  r.get("open"), r.get("high"), r.get("low")) for r in rows],
+            )
         set_attributes(span, n_rows=len(rows))
         return len(rows)
 

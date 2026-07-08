@@ -48,7 +48,15 @@ Systematic hardening of the Streamlit UI assistant view:
 
 ## Future Features
 
-### VIX (macro series) ingestion as a regime input
+### VIX (macro series) ingestion as a regime input — ✅ CLOSED by spec 007 (2026-07-08)
+**Resolution**: went the first-class route, not the pseudo-symbol route — spec 007
+built the `macro_series` home, `gefion macro ingest --name vix --provider fred:VIXCLS`
+(INDEX_DATA verified not-entitled on the prod key; FRED keyless CSV is the default),
+and the `macro_vix` feature with `entity_table='macro_series'`. The "add a data
+source" recipe now exists in docs/DEVELOPMENT.md. Related: issues #75/#76 —
+`data entity-delete` is their first landed increment. Prod rollout = 007 T027.
+
+**Original item** (kept for the record):
 **Source**: T047 discovery diagnostics (2026-07-07); `regime-detection-hmm` principle
 declares `macro.vix` in data_requirements and discovery records it as an
 `uncomputable_proposal` structural diagnostic — the ledger is literally asking for it
