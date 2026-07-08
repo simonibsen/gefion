@@ -93,6 +93,9 @@ app.add_typer(chart_app, name="chart", cls=SortedGroup)
 data_app = typer.Typer(help="Data management commands (cull)")
 app.add_typer(data_app, name="data", cls=SortedGroup)
 
+macro_app = typer.Typer(help="Macro series (VIX, CPI, …): catalog, ingest, materialize")
+app.add_typer(macro_app, name="macro", cls=SortedGroup)
+
 regime_app = typer.Typer(help="Regime slicing commands (define/compute/list/show/labels)")
 app.add_typer(regime_app, name="regime", cls=SortedGroup)
 
@@ -191,7 +194,8 @@ def _export_feature_definitions(conn, names: Optional[List[str]] = None) -> list
         cur.execute(
             """
             SELECT name, function_name, params, source_table, source_column,
-                   store_table, store_column, store_type, active, version
+                   store_table, store_column, store_type, active, version,
+                   entity_table
             FROM feature_definitions
             {where}
             ORDER BY name;
@@ -215,6 +219,7 @@ def _export_feature_definitions(conn, names: Optional[List[str]] = None) -> list
                 "store_type": r[7],
                 "active": r[8],
                 "version": r[9],
+                "entity_table": r[10],
             }
         )
     return data
@@ -4323,6 +4328,24 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                                 "no fundamentals rows — run `gefion fundamentals-update`")
                 except Exception:
                     health["dimension_coverage"] = {"error": "unavailable"}
+
+                # Entity integrity (spec 007): with the hard FK retired,
+                # orphaned feature values are detectable-not-impossible —
+                # detection must therefore be loud and always on.
+                try:
+                    from gefion.entities.orphans import scan as orphan_scan
+                    report = orphan_scan(conn)
+                    health["entity_integrity"] = report
+                    for table, count in report.items():
+                        if count:
+                            warnings.append(
+                                f"{count} orphaned feature value(s) whose data_id "
+                                f"has no home in declared entity table "
+                                f"'{table}' — investigate the write path; clean "
+                                "up via `gefion data entity-delete` or targeted "
+                                "repair")
+                except Exception:
+                    health["entity_integrity"] = {"error": "unavailable"}
                 health["warnings"] = warnings
 
     except Exception as exc:
@@ -11647,6 +11670,104 @@ def data_cull(
 # =============================================================================
 
 from gefion.output import get_output  # noqa: E402
+
+
+@data_app.command("entity-delete")
+def data_entity_delete(
+    entity_table: str = typer.Argument(..., help="Entity table (e.g. stocks, macro_series)"),
+    key: str = typer.Argument(..., help="Natural key (stocks: symbol; macro_series: name) or integer id"),
+    confirm: bool = typer.Option(False, "--confirm", help="Execute the deletion (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete an entity and its feature-store values (registry-driven).
+
+    Dry-run by default: reports the FULL blast radius — feature values per
+    feature (registry edges) and hard-FK dependents with their delete rules —
+    and changes nothing. --confirm deletes feature values first, then the
+    entity row; refuses with the blocker list if RESTRICT/NO-ACTION dependents
+    have rows. Audit ledgers are never in scope.
+    """
+    from gefion.entities.deletion import EntityDeleteError, execute_delete, plan_delete
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            if confirm:
+                summary = execute_delete(conn, entity_table, key)
+                out.success(
+                    f"Deleted {entity_table} '{key}' and "
+                    f"{summary['feature_values_deleted']} feature value(s)",
+                    data={**summary, "dry_run": False})
+            else:
+                plan = plan_delete(conn, entity_table, key)
+                total = sum(f["count"] for f in plan["feature_values"])
+                out.info(f"DRY RUN — {entity_table} '{key}' (id {plan['entity']['id']}): "
+                         f"{total} feature value(s) across "
+                         f"{sum(1 for f in plan['feature_values'] if f['count'])} feature(s); "
+                         f"{len(plan['fk_dependents'])} FK dependent table(s); "
+                         f"{len(plan['blockers'])} blocker(s). "
+                         "Re-run with --confirm to execute.")
+                for b in plan["blockers"]:
+                    out.info(f"  BLOCKER: {b['table']} — {b['rows']} row(s), {b['on_delete']}")
+                if out.json_mode:
+                    out.json({**plan, "dry_run": True})
+        except EntityDeleteError as exc:
+            out.error(f"Entity delete refused: {exc}")
+            raise typer.Exit(1)
+
+
+@macro_app.command("ingest")
+def macro_ingest(
+    name: str = typer.Option(..., "--name", help="Series name (e.g. vix)"),
+    provider: str = typer.Option(
+        "fred:VIXCLS", "--provider",
+        help="Provider key: fred:<SERIES> (keyless, default) or "
+             "alphavantage:INDEX_DATA (premium)"),
+    kind: str = typer.Option("index", "--kind", help="index | rate | breadth | …"),
+    cadence: str = typer.Option("daily", "--cadence", help="daily | weekly | monthly"),
+    full: bool = typer.Option(False, "--full", help="Decades backfill vs incremental"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Ingest a macro series and materialize its feature.
+
+    Catalog row (configuration, not schema) → provider fetch → value upsert →
+    `macro_<name>` feature definition (entity_table='macro_series') landing in
+    computed_features, ready for discovery atoms and regime expressions.
+    """
+    from gefion.macro.ingest import MacroIngestError, ingest_series
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            summary = ingest_series(conn, name, provider=provider, kind=kind,
+                                    cadence=cadence, full=full)
+            out.success(
+                f"Ingested {summary['values_upserted']} value(s) into "
+                f"macro series '{name}' and materialized "
+                f"{summary['feature']} ({summary['values']} value(s))",
+                data=summary)
+        except MacroIngestError as exc:
+            out.error(f"Macro ingest refused: {exc}")
+            raise typer.Exit(1)
+
+
+@macro_app.command("list")
+def macro_list(
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """List the macro-series catalog with value coverage."""
+    from gefion.macro.catalog import list_series
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        series = list_series(conn)
+        if not out.json_mode:
+            for s in series:
+                out.info(
+                    f"{s['name']} [{s['kind']}, {s['cadence']}] via {s['provider']}: "
+                    f"{s['values']} value(s) {s['first_date']}..{s['last_date']} "
+                    f"{'(materialized)' if s['materialized'] else '(not materialized)'}")
+        out.success(f"{len(series)} macro series", data={"series": series})
 
 
 @data_app.command("listing-meta")

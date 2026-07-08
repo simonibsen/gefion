@@ -45,9 +45,9 @@ Do: `/gefion-services start` equivalent (`docker ps` to inspect), `gefion health
 Checkpoint: learner explains what each running container does, and names the three surfaces (CLI / MCP / UI).
 
 **Module 1 — Data layer**
-Concepts: stocks, OHLCV hypertable, fundamentals, data freshness; why `pg_stat` row counts can lie.
-Do: UI Data page; `gefion db-health`; a `query_database`-style SQL peek (`SELECT COUNT(DISTINCT data_id), MAX(date) FROM stock_ohlcv`).
-Checkpoint: learner states the current data date range and stock count, and why we do NOT run bulk `data-update` casually.
+Concepts: stocks, OHLCV hypertable, fundamentals, data freshness; why `pg_stat` row counts can lie. Then the **entity model** (spec 007): `computed_features.data_id` has no hard foreign key — each feature *declares* who its values belong to (`feature_definitions.entity_table`: `stocks` for equities, `macro_series` for market-level series like VIX), and the pair (entity_table, data_id) is the logical key. Two axes, kept separate: `source_table` is what a computation *reads*; `entity_table` is who the value *belongs to*. Non-stock series get their own home (`gefion macro ingest|list`) — VIX never masquerades as a stock. The **feeds graph** in `docs/DATA_DICTIONARY.md` shows what feeds what (solid = FK, dashed = declared registry edge) and flags raw tables nothing consumes. The **row-vs-table rule** for new data: if a new series is *just another row* to every consumer (CPI next to VIX — same shape, same queries), it's a `macro_series` row; if consumers would branch on it, or it has its own attributes and lifecycle (sectors, currencies), it earns its own entity table.
+Do: UI Data page; `gefion db-health` (note the `entity_integrity` orphan scan); `gefion macro list`; a `query_database`-style SQL peek (`SELECT COUNT(DISTINCT data_id), MAX(date) FROM stock_ohlcv`); skim the feeds graph in `docs/DATA_DICTIONARY.md`.
+Checkpoint: learner states the current data date range and stock count, and why we do NOT run bulk `data-update` casually. Then the 007 checkpoint: *why is CPI a `macro_series` row, but sectors would be their own entity table?* (CPI is peer-shaped with VIX — every consumer treats it as another dated value series; sectors have their own attributes, members, and lifecycle, and consumers would branch on them.)
 
 **Module 2 — Features**
 Concepts: feature definitions vs feature functions; file-based functions in `feature-functions/` imported via `feat-fx-import`; experimental vs active vs demoted lifecycle.
@@ -55,7 +55,7 @@ Do: `gefion feat-def-list --json`; inspect one definition; UI Features page; loo
 Checkpoint: learner explains how a feature goes experimental → active → (maybe) demoted, and where the code for an AI-generated feature lives.
 
 **Module 3 — ML pipeline**
-Concepts: dataset manifests (`datasets/<name>_<version>/manifest.json`, features/labels/prices parquet), horizons, quantile models (q10/q50/q90), train → predict → eval.
+Concepts: dataset manifests (`datasets/<name>_<version>/manifest.json`, features/labels/prices parquet), horizons, quantile models (q10/q50/q90), train → predict → eval. Trend-class labels come from per-stock adaptive `volatility` thresholds (`gefion volatility compute`), not fixed cutoffs — a 2% move is noise for a volatile name and a signal for a stable one.
 Do: inspect `datasets/baseline_v2/manifest.json`; `gefion ml dataset-inspect`; UI ML page (models, predictions); read one prediction row and interpret q10/q50/q90.
 Checkpoint: learner interprets a prediction (median outlook, confidence from the q10–q90 spread) without help.
 
@@ -76,7 +76,7 @@ Do: UI Experiments → Cycles: load cycle 12, read the holdout p-value column an
 Checkpoint: learner explains, in their own words, why an experiment with no p-value must never be promoted.
 
 **Module 7 — Experiments II: running a cycle**
-Concepts: cycle config guardrails (allowed types, max experiments/trials, budget, dataset), principle-driven hypotheses, AI feature codegen, reuse rules (demoted functions are never reused).
+Concepts: cycle config guardrails (allowed types, max experiments/trials, budget, dataset), principle-driven hypotheses (the `principles` catalog — `gefion principles list|suggest` — seeds experiments from documented quant-finance priors instead of random search), AI feature codegen, reuse rules (demoted functions are never reused).
 Do: `gefion experiment cycle-start --name learn-<date> --max-experiments 2 --budget 1800 --config <small config>` then `cycle-run` (bounded: 2 experiments, 5 trials); watch it in the UI Discovery/Cycles tabs; read results with `experiment results --id N --json`.
 Checkpoint: learner reads the cycle verdict and says which experiments survived FDR and why.
 

@@ -171,12 +171,59 @@ def conn():
 
 ### Adding a database table (checklist)
 
+0. **Row vs table first** (spec 007). Before proposing DDL, ask whether the new
+   data is a *row* in an existing home or a new *table*:
+   - **Attribute test**: does it need columns no existing peer has? Same shape →
+     row.
+   - **Peer-group litmus**: would every consumer treat it as "just another one
+     of those" (CPI next to VIX in `macro_series`)? → row. Would consumers
+     *branch* on it? → its own table.
+   - **Consumer-branching smell**: if loaders/queries would grow `if kind ==
+     'x'` arms, the shape is wrong — split it out.
+   - **Cost asymmetry**: a wrong row is an UPDATE/DELETE; a wrong table is a
+     migration. When in doubt, start as a row.
 1. **Get owner approval** — schema changes require it (Schema Governance).
 2. **Two-file rule**: add the DDL to `sql/schema.sql` **and** a migration
    `sql/migrations/YYYYMMDD_NNNNNN_name.sql`, kept in sync.
-3. **Regenerate the data dictionary** — `.venv/bin/python scripts/gen_data_dictionary.py --write`
+3. **Declare the layer** — add the table to `TABLE_LAYER` in
+   `scripts/gen_data_dictionary.py` (catalog / raw / derived / registry) and a
+   purpose line to `TABLE_PURPOSE`, so it joins the feeds graph. Naming: entity-ness
+   is declared, not spelled — no `ent_`/`dim_` prefixes; plain names (`stocks`,
+   `macro_series`).
+4. **Declare feeder edges** — if features read it, their definitions carry
+   `source_table` (and `entity_table` where it IS an entity home); the feeds
+   graph flags raw tables with no declared consumers.
+5. **Declare the deletion story** (owner principle: deletions are first-class —
+   anything created must be cleanly deletable with its associated data).
+   Choose ON DELETE rules deliberately: CASCADE for owned children (e.g.
+   `macro_series_values`), RESTRICT/NO ACTION where a delete must be refused,
+   and confirm `gefion data entity-delete` covers it for entity tables (a
+   natural key entry in `gefion.entities.deletion._NATURAL_KEYS` if it has one).
+   Audit ledgers are the declared exception — never deleted with artifacts.
+6. **Regenerate the data dictionary** — `.venv/bin/python scripts/gen_data_dictionary.py --write`
    and commit `docs/DATA_DICTIONARY.md`. **Easy to forget; the pre-push hook fails if you do.**
-4. Verify: drop `gefion_test`, run the schema/DB tests (db-init builds from `schema.sql`).
+7. Verify: drop `gefion_test`, run the schema/DB tests (db-init builds from `schema.sql`).
+
+### Adding a data source (recipe — VIX is the worked example)
+
+Non-stock series never masquerade as stocks. The macro home makes a new series
+configuration, not schema:
+
+1. **Verify the provider first** — one live call before building anything
+   (the INDEX_DATA lesson: premium endpoint, key not entitled → pivoted to
+   `fred:VIXCLS` as a config change, recorded in specs/007 research.md).
+2. **Row, not table** (per the rule above): `gefion macro ingest --name vix
+   --provider fred:VIXCLS --full` creates the catalog row, fetches, upserts
+   values, and materializes the `macro_vix` feature
+   (`entity_table='macro_series'`) into `computed_features`.
+3. **Export the definition** — `gefion feat-def-export` so the registry stays
+   the hermetic source of truth (exports carry `entity_table`) and the feeds
+   graph picks up the edge.
+4. **Verify consumption** — the feature is now a discovery atom and a
+   `regime interaction --by macro_vix` conditioning variable with zero
+   equity-pipeline changes; `gefion db-health` entity_integrity stays at zero.
+5. A genuinely new *kind* of source (needs its own attributes/lifecycle, or
+   consumers would branch) goes through the add-a-table checklist instead.
 
 ### Gotchas
 

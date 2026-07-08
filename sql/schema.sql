@@ -53,15 +53,21 @@ CREATE TABLE IF NOT EXISTS feature_definitions (
     name TEXT NOT NULL UNIQUE,
     function_name TEXT NOT NULL,  -- Routes to compute function (e.g., 'indicator', 'derivative')
     params JSONB,                  -- Function-specific parameters
-    source_table TEXT,             -- Where to read source data from
+    source_table TEXT,             -- Where to read source data from (what the computation READS)
     source_column TEXT,            -- Column to read from source table
     store_table TEXT DEFAULT 'computed_features',
     store_column TEXT,             -- Column to store result in
     store_type TEXT DEFAULT 'double precision',
     active BOOLEAN DEFAULT TRUE,
     version TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    -- The declared entity axis (spec 007): which table computed_features.data_id
+    -- resolves against for this feature — who the value BELONGS TO, independent
+    -- of source_table. Validated at registration (table exists, integer id PK).
+    entity_table TEXT NOT NULL DEFAULT 'stocks'
 );
+-- Idempotent add for databases created before spec 007
+ALTER TABLE feature_definitions ADD COLUMN IF NOT EXISTS entity_table TEXT NOT NULL DEFAULT 'stocks';
 
 -- Function registry for reusable feature functions
 CREATE TABLE IF NOT EXISTS feature_functions (
@@ -191,8 +197,11 @@ CREATE INDEX IF NOT EXISTS quarterly_financials_data_type_date_idx
 -- Computed features hypertable
 -- Tall table storing all computed features (indicators, derivatives, etc.)
 -- Uses feature_id to reference feature_definitions
+-- No hard FK on data_id (spec 007): entity identity is declared — the pair
+-- (feature_definitions.entity_table, data_id) is the logical FK, validated at
+-- registration and audited by db-health's entity-integrity orphan scan.
 CREATE TABLE IF NOT EXISTS computed_features (
-    data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
+    data_id INTEGER NOT NULL,
     date DATE NOT NULL,
     feature_id INTEGER NOT NULL REFERENCES feature_definitions(id),
     value DOUBLE PRECISION,
@@ -201,9 +210,53 @@ CREATE TABLE IF NOT EXISTS computed_features (
     PRIMARY KEY (feature_id, data_id, date)
 );
 
+-- Idempotent for pre-007 databases: drop the retired FK by introspected name
+DO $$
+DECLARE
+    fk_name TEXT;
+BEGIN
+    SELECT conname INTO fk_name
+    FROM pg_constraint
+    WHERE contype = 'f'
+      AND conrelid = 'computed_features'::regclass
+      AND confrelid = 'stocks'::regclass;
+    IF fk_name IS NOT NULL THEN
+        EXECUTE format('ALTER TABLE computed_features DROP CONSTRAINT %I', fk_name);
+    END IF;
+END $$;
+
 -- Convert to hypertable (30-day chunks)
 SELECT create_hypertable('computed_features', 'date', if_not_exists => TRUE);
 SELECT set_chunk_time_interval('computed_features', INTERVAL '30 days');
+
+-- =============================================================================
+-- MACRO SERIES (L1) — first non-stock entity table (spec 007)
+-- =============================================================================
+
+-- Catalog: one row per market-level series (VIX, CPI, rates, …)
+CREATE TABLE IF NOT EXISTS macro_series (
+    id           SERIAL PRIMARY KEY,
+    name         TEXT UNIQUE NOT NULL,
+    provider     TEXT NOT NULL,          -- e.g. 'alphavantage:INDEX_DATA', 'fred:VIXCLS'
+    kind         TEXT NOT NULL,          -- 'index' | 'rate' | 'breadth' | … (label, not schema)
+    cadence      TEXT NOT NULL CHECK (cadence IN ('daily','weekly','monthly')),
+    description  TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Raw values. Plain relational (not a hypertable): ~7k rows per series over
+-- 26 years. Required value + optional OHLC serves both the daily-OHLC class
+-- (VIX) and the monthly-single-value class (CPI) with zero DDL for the
+-- second series.
+CREATE TABLE IF NOT EXISTS macro_series_values (
+    series_id    INTEGER NOT NULL REFERENCES macro_series(id) ON DELETE CASCADE,
+    date         DATE NOT NULL,
+    value        NUMERIC(14,6) NOT NULL,
+    open         NUMERIC(14,6),
+    high         NUMERIC(14,6),
+    low          NUMERIC(14,6),
+    PRIMARY KEY (series_id, date)
+);
 
 -- =============================================================================
 -- STRATEGY MANAGEMENT

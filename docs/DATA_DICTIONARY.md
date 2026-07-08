@@ -13,6 +13,8 @@
   - [`experiments`](#experiments)
   - [`feature_definitions`](#feature-definitions)
   - [`feature_functions`](#feature-functions)
+  - [`macro_series`](#macro-series)
+  - [`macro_series_values`](#macro-series-values)
   - [`ml_datasets`](#ml-datasets)
   - [`ml_models`](#ml-models)
   - [`ml_runs`](#ml-runs)
@@ -32,6 +34,7 @@
   - [`strategy_configs`](#strategy-configs)
   - [`strategy_registry`](#strategy-registry)
   - [`volatility_thresholds`](#volatility-thresholds)
+- [Feeds graph](#feeds-graph-what-feeds-what)
 - [AlphaVantage endpoints → tables](#alphavantage-endpoints--tables)
 
 ## Tables
@@ -190,6 +193,7 @@ Primary key: `id`
 | `active` | BOOLEAN | ✓ |  |  |
 | `version` | TEXT | ✓ |  |  |
 | `created_at` | TIMESTAMP | ✓ |  |  |
+| `entity_table` | TEXT |  |  |  |
 | `is_experimental` | BOOLEAN | ✓ |  |  |
 | `source_experiment_id` | INTEGER | ✓ |  |  |
 | `promoted_at` | TIMESTAMPTZ | ✓ |  |  |
@@ -225,6 +229,37 @@ Primary key: `id`
 | `called_by` | TEXT | ✓ |  |  |
 | `created_at` | TIMESTAMP | ✓ |  |  |
 | `updated_at` | TIMESTAMP | ✓ |  |  |
+
+### `macro_series`
+
+Macro-series catalog (VIX, CPI, rates …). One row per market-level series — the first non-stock entity table (spec 007). Rows are configuration: a new series is an INSERT, never DDL.
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `name` | TEXT |  |  |  |
+| `provider` | TEXT |  |  |  |
+| `kind` | TEXT |  |  |  |
+| `cadence` | TEXT |  |  |  |
+| `description` | TEXT | ✓ |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
+
+### `macro_series_values`
+
+Raw macro-series values keyed by (series_id, date). Required `value` + optional OHLC serves daily-OHLC and monthly-single-value series alike. Plain relational, not a hypertable.
+
+Primary key: `date, series_id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`series_id`** 🔑 | INTEGER |  |  |  |
+| **`date`** 🔑 | DATE |  |  |  |
+| `value` | NUMERIC(14,6) |  |  |  |
+| `open` | NUMERIC(14,6) | ✓ |  |  |
+| `high` | NUMERIC(14,6) | ✓ |  |  |
+| `low` | NUMERIC(14,6) | ✓ |  |  |
 
 ### `ml_datasets`
 
@@ -597,6 +632,50 @@ Per-symbol volatility thresholds used by trend-classifier label generation.
 | `strong_threshold` | NUMERIC(10,6) | ✓ |  |  |
 | `volatility_percentile` | NUMERIC(5,4) | ✓ |  |  |
 | `created_at` | TIMESTAMPTZ | ✓ |  |  |
+
+## Feeds graph (what feeds what)
+
+*Solid edges are hard foreign keys from the SQL schema; dashed edges are declared registry edges from `feature-definitions/*.json` — `source_table` (what a feature reads) and `entity_table` (who its values belong to; spec 007). A raw table with no declared consumers is flagged: it is either dead weight or missing its feature definitions.*
+
+```mermaid
+flowchart LR
+    subgraph catalog["Catalogs (entity tables)"]
+        macro_series
+        stocks
+    end
+    subgraph raw["Raw ingested (L1)"]
+        macro_series_values
+        quarterly_financials
+        stock_ohlcv
+        stocks_fundamentals
+    end
+    subgraph derived["Derived (L2)"]
+        computed_features
+        cross_sectional_features
+    end
+    subgraph registry["Registry"]
+        feature_definitions
+        feature_functions
+    end
+    computed_features --> feature_definitions
+    cross_sectional_features --> stocks
+    macro_series_values --> macro_series
+    quarterly_financials --> stocks
+    stock_ohlcv --> stocks
+    stocks_fundamentals --> stocks
+    quarterly_financials -.->|3 features| computed_features
+    stock_ohlcv -.->|18 features| computed_features
+    computed_features -.-> stocks
+```
+
+### Declared consumers per raw table
+
+| Raw table | Declared consumers |
+|---|---|
+| `macro_series_values` | ⚠️ **none — no declared consumers** |
+| `quarterly_financials` | `computed_features` (3 features) |
+| `stock_ohlcv` | `computed_features` (18 features) |
+| `stocks_fundamentals` | ⚠️ **none — no declared consumers** |
 
 ## AlphaVantage endpoints → tables
 

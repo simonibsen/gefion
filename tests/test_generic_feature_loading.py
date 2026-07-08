@@ -191,6 +191,9 @@ def test_ensure_feature_definitions_from_json_inserts_to_db(db_conn):
     import tempfile
 
     schema.create_feature_definitions_table(db_conn)
+    # 007: registration validates the declared entity table (default 'stocks')
+    # exists — a definition is unregistrable in a world with no entity table
+    schema.create_stocks_table(db_conn)
 
     # Create JSON definition
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:

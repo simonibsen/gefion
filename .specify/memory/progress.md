@@ -1,10 +1,28 @@
 # Gefion Project Status
 
-**Last Updated**: 2026-07-07
+**Last Updated**: 2026-07-08
 
 ## Current Capabilities
 
-### Agentic Regime Discovery (spec 006 — new)
+### First-Class Entities (spec 007 — new)
+- Entity identity is declared, not hard-wired: `computed_features.data_id`
+  carries no FK; the pair (`feature_definitions.entity_table`, `data_id`) is
+  the logical key, validated at registration (`gefion.entities.registry`)
+- The constraint's replacements shipped BEFORE its removal (safety ordering):
+  db-health `entity_integrity` orphan scan + `gefion data entity-delete`
+  (registry-driven, dry-run default, blocker-aware — issues #75/#76's first
+  landed increment)
+- Macro home: `macro_series` + `macro_series_values`; `gefion macro ingest|list`
+  (+ MCP `macro_ingest`/`macro_list`); VIX via `fred:VIXCLS` (INDEX_DATA is
+  premium — key not entitled, verified live 2026-07-08); `macro_vix` feature
+  consumable by discovery atoms and `regime interaction --by macro_vix` with
+  zero equity-pipeline changes (SC-201 full-suite regression gate green)
+- The registry is the feeds graph: data dictionary renders solid-FK/dashed-
+  registry Mermaid edges by declared layer, flags consumer-less raw tables
+- Docs-drift enforcement widened: every MCP tool, every CLI command, and
+  every CLI group in the curriculum are now test-enforced
+
+### Agentic Regime Discovery (spec 006)
 - The system proposes and tests candidate regimes under structural guardrails:
   pre-registered bounded search spaces (atom grammar to depth K, three declared
   seams: `signal_source`, `grading_scheme`, `universe_filter`), nested segregation

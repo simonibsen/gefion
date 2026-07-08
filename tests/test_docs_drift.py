@@ -94,15 +94,62 @@ class TestDocumentedCommandsExist:
 
 
 class TestMcpToolsDocumented:
-    """New-generation MCP tools must appear in the MCP workflow docs."""
+    """Every MCP tool must appear in the MCP workflow docs."""
 
-    def test_experiment_and_docs_tools_documented(self):
+    def test_all_mcp_tools_documented(self):
         server = (REPO / "mcp-server" / "server.py").read_text()
-        tool_names = re.findall(
-            r'name="((?:experiment_|docs_|regime_discover_)[a-z_]+)"', server)
+        tool_names = re.findall(r'Tool\(\s*\n\s*name="([a-z_]+)"', server)
+        assert len(tool_names) > 50, "tool extraction regex broke"
         corpus = (REPO / "docs" / "MCP_WORKFLOWS.md").read_text()
 
         missing = sorted({t for t in tool_names if t not in corpus})
         assert not missing, (
             f"MCP tools undocumented in docs/MCP_WORKFLOWS.md: {missing}"
+        )
+
+
+class TestFullCliSurfaceDocumented:
+    """Definition of done (CLAUDE.md): a user-facing surface is not done
+    until the docs reflect it. Every subcommand of every group, and every
+    top-level command, must appear in README.md or docs/USER_GUIDE.md."""
+
+    def _corpus(self):
+        return (REPO / "README.md").read_text() + (
+            REPO / "docs" / "USER_GUIDE.md").read_text()
+
+    def test_every_group_subcommand_documented(self):
+        _, groups = _cli_surface()
+        corpus = self._corpus()
+        missing = [f"gefion {g} {s}"
+                   for g, subs in sorted(groups.items())
+                   for s in sorted(subs)
+                   if f"{g} {s}" not in corpus]
+        assert not missing, (
+            f"Undocumented CLI subcommands: {missing} — add them to "
+            "README.md or docs/USER_GUIDE.md"
+        )
+
+    def test_every_top_level_command_documented(self):
+        top, _ = _cli_surface()
+        corpus = self._corpus()
+        missing = sorted(c for c in top if c not in corpus)
+        assert not missing, (
+            f"Undocumented top-level CLI commands: {missing} — add them to "
+            "README.md or docs/USER_GUIDE.md"
+        )
+
+
+class TestLearningPathCoversFeatureAreas:
+    """The curriculum must at least name every CLI command group — a new
+    feature area (macro, regimes, …) is not done until the learning path
+    knows it exists (owner directive: learning materials are part of the
+    definition of done)."""
+
+    def test_every_cli_group_in_learning_path(self):
+        _, groups = _cli_surface()
+        learn = (REPO / ".claude" / "commands" / "gefion-learn.md").read_text()
+        missing = sorted(g for g in groups if g not in learn)
+        assert not missing, (
+            f"CLI groups absent from .claude/commands/gefion-learn.md: "
+            f"{missing} — extend the curriculum (or mention where they fit)"
         )

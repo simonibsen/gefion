@@ -192,9 +192,15 @@ def create_feature_definitions_table(conn: Connection) -> None:
                 store_type TEXT DEFAULT 'double precision',
                 active BOOLEAN DEFAULT TRUE,
                 version TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                entity_table TEXT NOT NULL DEFAULT 'stocks'
             );
             """
+        )
+        # Idempotent add for pre-007 databases (matches sql/schema.sql)
+        cur.execute(
+            "ALTER TABLE feature_definitions "
+            "ADD COLUMN IF NOT EXISTS entity_table TEXT NOT NULL DEFAULT 'stocks';"
         )
     conn.commit()
 
@@ -324,13 +330,17 @@ def create_strategy_configs_table(conn: Connection) -> None:
 
 
 def create_computed_features_table(conn: Connection) -> None:
-    """Tall table for computed feature values."""
+    """Tall table for computed feature values.
+
+    No hard FK on data_id (spec 007): entity identity is declared — the pair
+    (feature_definitions.entity_table, data_id) is the logical FK.
+    """
     _ensure_timescaledb(conn)
     with conn.cursor() as cur:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS computed_features (
-                data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
+                data_id INTEGER NOT NULL,
                 date DATE NOT NULL,
                 feature_id INTEGER NOT NULL REFERENCES feature_definitions(id),
                 value DOUBLE PRECISION,
@@ -338,6 +348,25 @@ def create_computed_features_table(conn: Connection) -> None:
                 created_at TIMESTAMP DEFAULT NOW(),
                 PRIMARY KEY (feature_id, data_id, date)
             );
+            """
+        )
+        # Idempotent for pre-007 tables: drop the retired FK by introspected name
+        cur.execute(
+            """
+            DO $$
+            DECLARE
+                fk_name TEXT;
+            BEGIN
+                SELECT conname INTO fk_name
+                FROM pg_constraint
+                WHERE contype = 'f'
+                  AND conrelid = 'computed_features'::regclass
+                  AND confrelid = 'stocks'::regclass;
+                IF fk_name IS NOT NULL THEN
+                    EXECUTE format(
+                        'ALTER TABLE computed_features DROP CONSTRAINT %I', fk_name);
+                END IF;
+            END $$;
             """
         )
         cur.execute(

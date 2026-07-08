@@ -66,6 +66,36 @@ def parse_daily_adjusted(symbol: str, payload: Mapping[str, object]) -> List[Dic
     return rows
 
 
+def parse_index_data(payload: Mapping[str, object]) -> List[Dict[str, object]]:
+    """Parse INDEX_DATA (daily OHLC, e.g. VIX) into macro-series rows.
+
+    The canonical value is the close (spec 007 R3: `value` is required, OHLC
+    optional). Rows with missing/invalid numbers are skipped, not fatal.
+    """
+    from datetime import date as _date
+
+    series = payload.get("Time Series (Daily)", {})
+    if not isinstance(series, Mapping):
+        return []
+
+    rows: List[Dict[str, object]] = []
+    for date_str, values in series.items():
+        try:
+            rows.append(
+                {
+                    "date": _date.fromisoformat(date_str),
+                    "value": float(values.get("4. close")),
+                    "open": float(values.get("1. open")),
+                    "high": float(values.get("2. high")),
+                    "low": float(values.get("3. low")),
+                }
+            )
+        except (TypeError, ValueError, AttributeError):
+            continue
+    rows.sort(key=lambda r: r["date"])
+    return rows
+
+
 def parse_cpi_monthly(payload: Mapping[str, object]) -> List[Dict[str, object]]:
     """Parse CPI monthly series from AlphaVantage."""
     data = payload.get("data", [])
