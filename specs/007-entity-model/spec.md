@@ -61,6 +61,22 @@ ever covered the stocks case.
   `macro.spy_returns`), the unused CPI parser, and the diagnostics ledger's standing
   request all say it is. The reversal condition (macro data out of scope for a
   year-plus) was considered and rejected.
+- Q: Is this VIX-specific? → A: **No — VIX-heavy narrative, VIX-free architecture.**
+  The mechanism is "any declared entity table" (US1/FR-201/202 never mention VIX);
+  VIX is only the proving case because a real consumer beats a synthetic one. SC-207
+  (the family test) guards against VIX-isms leaking into the implementation, and the
+  model extends past macro entirely — a future *sectors* entity table (005's
+  deferred sector-scope regimes) or benchmark/portfolio entities ride the same rail.
+  One shape decision is deliberately left to planning: the raw values table must
+  serve both daily-OHLC (VIX) and monthly-single-value (CPI) cadences.
+- Q: Why the name `macro_series`? → A: It matches vocabulary the system already
+  declared — the principles catalog namespaces these requirements `macro.vix` /
+  `macro.spy_returns`, and diagnostics report the gap under that name. "Macro" is
+  quant shorthand for market/economy-wide series as opposed to per-security data;
+  alternatives (`market_series`, `external_series`) were considered and rejected as
+  more ambiguous. Final say rests with DDL approval. It houses market-level time
+  series specifically — future non-series entity kinds (sectors, benchmarks) get
+  their own entity tables, not residence here.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -254,6 +270,12 @@ row; nothing else is touched; an entity with no values deletes trivially.
 - **FR-209**: The generated data dictionary MUST render the feeds graph from the
   registry (source and entity edges per raw table) and flag raw tables with no
   declared consumers.
+- **FR-209a**: The generated data dictionary MUST include an entity-relationship
+  diagram (Mermaid, rendered natively on the code host), generated — never
+  hand-maintained — from the schema plus the registry: database-enforced
+  relationships drawn solid, registry-declared logical relationships (entity/source
+  edges) drawn dashed, grouped by the layer taxonomy so each sub-diagram stays
+  legible. The solid-vs-dashed distinction is the entity model made visible.
 - **FR-210**: The add-a-table checklist MUST require, at DDL-approval time: declared
   layer, naming-prefix compliance, feeder edges, and a deletion story with
   deliberate delete behavior.
@@ -294,8 +316,8 @@ row; nothing else is touched; an entity with no values deletes trivially.
 - **docs/DEVELOPMENT.md** — add-a-table checklist additions (layer, prefix, feeder
   edges, deletion story); the "add a data source" recipe (VIX as the worked
   example — no such recipe exists today).
-- **docs/DATA_DICTIONARY.md** — regenerated with the feeds-graph section and layer
-  grouping.
+- **docs/DATA_DICTIONARY.md** — regenerated with the feeds-graph section, layer
+  grouping, and the generated Mermaid ERD (FR-209a).
 - **README.md / docs/USER_GUIDE.md** — new commands (macro ingestion, entity
   delete) in the CLI reference.
 - **docs/MCP_WORKFLOWS.md** — mirrored tools for any new user-facing operations.
@@ -321,6 +343,10 @@ row; nothing else is touched; an entity with no values deletes trivially.
   uncomputable-VIX diagnostics after ingestion (previously: every run).
 - **SC-204**: The generated dictionary answers "what consumes table X" for 100% of
   raw tables, and correctly flags `stocks_fundamentals` as consumer-less today.
+- **SC-204a**: The generated ERD renders on the code host without manual steps,
+  covers 100% of tables grouped by layer, and visibly distinguishes
+  database-enforced from registry-declared relationships; regenerating after any
+  schema change requires zero hand-editing.
 - **SC-205**: A manufactured orphan is reported by the health check within one run,
   with entity table and count; clean databases report zero.
 - **SC-206**: Entity deletion via the command removes 100% of the entity's feature
