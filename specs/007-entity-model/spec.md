@@ -43,6 +43,10 @@ associated data. The registry-driven entity model is what makes a uniform,
 dependency-aware delete possible across entity kinds, replacing a cascade that only
 ever covered the stocks case.
 
+> **Visual design record**: [design-options.md](./design-options.md) — the problem
+> and all three options as Mermaid diagrams (preserved from the interactive review
+> artifact), plus the row-vs-table decision rule for future entity kinds.
+
 ## Clarifications
 
 ### Session 2026-07-08 (design review, pre-spec)
@@ -278,7 +282,11 @@ row; nothing else is touched; an entity with no values deletes trivially.
   legible. The solid-vs-dashed distinction is the entity model made visible.
 - **FR-210**: The add-a-table checklist MUST require, at DDL-approval time: declared
   layer, naming-prefix compliance, feeder edges, and a deletion story with
-  deliberate delete behavior.
+  deliberate delete behavior — plus, for entity tables, the **row-vs-table decision
+  rule** (see design-options.md): a new *instance* of an existing kind is a catalog
+  row; a new *kind* (own attributes/relationships, or a meaningful peer group for
+  within-kind aggregation) is a new entity table. When in doubt, start as a row and
+  promote later.
 - **FR-211**: The database health check MUST scan for orphaned feature values per
   declared entity table and warn actionably (entity table, count, remediation);
   this MUST land in the same increment as FR-202.
@@ -322,7 +330,10 @@ row; nothing else is touched; an entity with no values deletes trivially.
   delete) in the CLI reference.
 - **docs/MCP_WORKFLOWS.md** — mirrored tools for any new user-facing operations.
 - **.claude/commands/gefion-learn.md** — Module 1 (data layer) gains the
-  entity-model and feeds-graph concepts; the "add a data source" path referenced.
+  entity-model and feeds-graph concepts, **including the row-vs-table decision rule
+  and the peer-group litmus** (owner directive: this must reach the curriculum);
+  the "add a data source" path referenced. Checkpoint candidate: learner explains
+  why CPI is a `macro_series` row but sectors would be their own entity table.
 - **tests/test_docs_drift.py** — passes for all new commands/tools.
 
 ## Automation *(consider)*
