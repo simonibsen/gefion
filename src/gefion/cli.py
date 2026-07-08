@@ -4323,6 +4323,24 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                                 "no fundamentals rows — run `gefion fundamentals-update`")
                 except Exception:
                     health["dimension_coverage"] = {"error": "unavailable"}
+
+                # Entity integrity (spec 007): with the hard FK retired,
+                # orphaned feature values are detectable-not-impossible —
+                # detection must therefore be loud and always on.
+                try:
+                    from gefion.entities.orphans import scan as orphan_scan
+                    report = orphan_scan(conn)
+                    health["entity_integrity"] = report
+                    for table, count in report.items():
+                        if count:
+                            warnings.append(
+                                f"{count} orphaned feature value(s) whose data_id "
+                                f"has no home in declared entity table "
+                                f"'{table}' — investigate the write path; clean "
+                                "up via `gefion data entity-delete` or targeted "
+                                "repair")
+                except Exception:
+                    health["entity_integrity"] = {"error": "unavailable"}
                 health["warnings"] = warnings
 
     except Exception as exc:

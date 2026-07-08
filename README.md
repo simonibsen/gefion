@@ -229,7 +229,7 @@ signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
 |---------|-------------|
 | `gefion init` | Initialize database schema and seed features |
 | `gefion health` | Check infrastructure health |
-| `gefion db-health` | Database health report |
+| `gefion db-health` | Database health report (dimension coverage + entity-integrity orphan scan) |
 | `gefion db-migrate` | Run database migrations |
 | `gefion span-check` | Check recent traces for slow operations |
 | `gefion ui` | Launch Streamlit web UI |
