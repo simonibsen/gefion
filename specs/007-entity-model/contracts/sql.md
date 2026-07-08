@@ -1,8 +1,12 @@
 # SQL Contract — First-Class Entities (007)
 
-**Status: PROPOSED — awaiting owner approval (Schema Governance).** Nothing here is
-written to `sql/schema.sql`, added to `sql/migrations/`, or executed until the owner
-approves this exact scope. Approval covers only these changes.
+**Status: APPROVED by owner 2026-07-08** (scope: exactly the two migrations below —
+the entity_table column, the computed_features FK retirement with its mandated
+detection/deletion sequencing, and the macro_series pair with the plain-relational
+exception). Approval covers only this change; future schema changes require
+separate approval. Applied at implementation via the two-file rule, gated behind
+schema tests written first, with the data dictionary regenerated in the same
+commits.
 
 Three changes, sequenced across two migrations so detection/deletion exist before
 the constraint they compensate for is removed (plan increments 1–4):

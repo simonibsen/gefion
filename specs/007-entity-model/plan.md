@@ -26,8 +26,8 @@ rejected alternatives and the row-vs-table decision rule.
 typer CLI, existing MCP server. No new third-party dependencies (Simplicity).
 **Storage**: PostgreSQL + TimescaleDB. Changes — `feature_definitions.entity_table`
 column, `computed_features` FK retirement, new `macro_series` + `macro_series_values`
-(plain relational; hypertable exception justified below). **All DDL PROPOSED, not
-executed — awaiting owner approval** (Schema Governance); see contracts/sql.md.
+(plain relational; hypertable exception justified below). **DDL APPROVED by owner
+2026-07-08** (contracts/sql.md); applied at implementation via the two-file rule.
 **Testing**: pytest; DB tests via `schema.test_db_url()` + `ENABLE_DB_TESTS`; the
 migration is proven against a fresh db-init AND an existing database (both paths of
 the two-file rule); a manufactured-orphan test drives the health scan.
