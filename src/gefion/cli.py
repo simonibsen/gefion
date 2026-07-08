@@ -93,6 +93,9 @@ app.add_typer(chart_app, name="chart", cls=SortedGroup)
 data_app = typer.Typer(help="Data management commands (cull)")
 app.add_typer(data_app, name="data", cls=SortedGroup)
 
+macro_app = typer.Typer(help="Macro series (VIX, CPI, …): catalog, ingest, materialize")
+app.add_typer(macro_app, name="macro", cls=SortedGroup)
+
 regime_app = typer.Typer(help="Regime slicing commands (define/compute/list/show/labels)")
 app.add_typer(regime_app, name="regime", cls=SortedGroup)
 
@@ -11709,6 +11712,60 @@ def data_entity_delete(
         except EntityDeleteError as exc:
             out.error(f"Entity delete refused: {exc}")
             raise typer.Exit(1)
+
+
+@macro_app.command("ingest")
+def macro_ingest(
+    name: str = typer.Option(..., "--name", help="Series name (e.g. vix)"),
+    provider: str = typer.Option(
+        "fred:VIXCLS", "--provider",
+        help="Provider key: fred:<SERIES> (keyless, default) or "
+             "alphavantage:INDEX_DATA (premium)"),
+    kind: str = typer.Option("index", "--kind", help="index | rate | breadth | …"),
+    cadence: str = typer.Option("daily", "--cadence", help="daily | weekly | monthly"),
+    full: bool = typer.Option(False, "--full", help="Decades backfill vs incremental"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Ingest a macro series and materialize its feature.
+
+    Catalog row (configuration, not schema) → provider fetch → value upsert →
+    `macro_<name>` feature definition (entity_table='macro_series') landing in
+    computed_features, ready for discovery atoms and regime expressions.
+    """
+    from gefion.macro.ingest import MacroIngestError, ingest_series
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            summary = ingest_series(conn, name, provider=provider, kind=kind,
+                                    cadence=cadence, full=full)
+            out.success(
+                f"Ingested {summary['values_upserted']} value(s) into "
+                f"macro series '{name}' and materialized "
+                f"{summary['feature']} ({summary['values']} value(s))",
+                data=summary)
+        except MacroIngestError as exc:
+            out.error(f"Macro ingest refused: {exc}")
+            raise typer.Exit(1)
+
+
+@macro_app.command("list")
+def macro_list(
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """List the macro-series catalog with value coverage."""
+    from gefion.macro.catalog import list_series
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        series = list_series(conn)
+        if not out.json_mode:
+            for s in series:
+                out.info(
+                    f"{s['name']} [{s['kind']}, {s['cadence']}] via {s['provider']}: "
+                    f"{s['values']} value(s) {s['first_date']}..{s['last_date']} "
+                    f"{'(materialized)' if s['materialized'] else '(not materialized)'}")
+        out.success(f"{len(series)} macro series", data={"series": series})
 
 
 @data_app.command("listing-meta")

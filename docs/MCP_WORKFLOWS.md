@@ -1060,3 +1060,14 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
   With `confirm=true` it is **mutating and destructive**: always show the user
   the dry-run plan and get explicit confirmation first. Refuses when a
   RESTRICT/NO-ACTION dependent still has rows. Audit ledgers are never in scope.
+
+## Macro series
+
+- `macro_ingest` — ingest a macro series (VIX, CPI, rates …) into the macro home
+  and materialize its `macro_<name>` feature, making it available to discovery
+  atoms, regime expressions, and interaction tests with zero equity-pipeline
+  changes. Default provider `fred:<SERIES>` is keyless (`fred:VIXCLS` for VIX;
+  AlphaVantage INDEX_DATA is premium and not entitled on the current key).
+  **Mutating**, and `full=true` backfills decades — confirm with the user first.
+- `macro_list` — the macro-series catalog with per-series value coverage
+  (first/last date, row count) and materialization status (read-only).

@@ -236,6 +236,8 @@ If the arguments don't match a mode keyword, interpret the user's intent and rou
 | "what did discovery find" | `regime_discover_ledger` + `regime_discover_diagnostics` (losers included) |
 | "can I trust this discovered regime" | `regime_discover_grades` (forward folds only) |
 | "delete this stock/series" | `entity_delete` dry-run → show plan → confirm with user → `entity_delete` with `confirm=true` |
+| "add VIX" / "ingest a macro series" | confirm, then `macro_ingest` → `macro_list` to verify coverage |
+| "what macro series do we have" | `macro_list` |
 
 ---
 

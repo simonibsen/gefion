@@ -1997,6 +1997,36 @@ async def list_tools() -> List[Tool]:
                 "required": ["entity_table", "key"],
             },
         ),
+        Tool(
+            name="macro_ingest",
+            description=(
+                "Ingest a macro series (VIX, CPI, …) into the macro home and "
+                "materialize its macro_<name> feature for discovery/regimes "
+                "(MUTATING — may take minutes with full=true; confirm with the "
+                "user first). Default provider fred:<SERIES> is keyless."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Series name (e.g. vix)"},
+                    "provider": {"type": "string",
+                                 "description": "fred:<SERIES> (default fred:VIXCLS) "
+                                                "or alphavantage:INDEX_DATA"},
+                    "kind": {"type": "string", "description": "index | rate | breadth"},
+                    "cadence": {"type": "string", "description": "daily | weekly | monthly"},
+                    "full": {"type": "boolean", "description": "Decades backfill"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="macro_list",
+            description=(
+                "List the macro-series catalog with value coverage (first/last "
+                "date, row count) and materialization status (read-only)."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
     ]
 
     # RBAC: Filter tools based on role
@@ -2230,6 +2260,10 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_grade_fold(arguments)
         elif name == "entity_delete":
             result = await _entity_delete(arguments)
+        elif name == "macro_ingest":
+            result = await _macro_ingest(arguments)
+        elif name == "macro_list":
+            result = await _macro_list(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -4969,6 +5003,26 @@ async def _entity_delete(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get("confirm"):
             cmd.append("--confirm")
         return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_ingest(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Ingest a macro series + materialize its feature (mutating)."""
+    async def _run():
+        cmd = ["macro", "ingest", "--name", args["name"]]
+        for opt in ("provider", "kind", "cadence"):
+            if args.get(opt):
+                cmd.extend([f"--{opt}", str(args[opt])])
+        if args.get("full"):
+            cmd.append("--full")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List the macro-series catalog (read-only)."""
+    async def _run():
+        return await GefionExecutor().run("macro", "list")
     return await _execute_with_health_check(['postgres'], _run)
 
 

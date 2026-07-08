@@ -184,3 +184,8 @@ class AlphaVantageClient:
     def fetch_earnings(self, symbol: str) -> Mapping[str, object]:
         """Fetch quarterly earnings (EPS actual vs estimate) for a symbol."""
         return self.get("EARNINGS", symbol=symbol)
+
+    def fetch_index_data(self, symbol: str = "VIX", outputsize: str = "compact") -> Mapping[str, object]:
+        """Fetch daily index OHLC (premium endpoint — a not-entitled key gets
+        a Note payload, which parses to zero rows)."""
+        return self.get("INDEX_DATA", symbol=symbol, outputsize=outputsize)

@@ -63,6 +63,16 @@ redesign (the entity model is provider-agnostic).
 **Rationale**: reuse over new dependency; verify-before-build was already recorded
 in the backlog item; the fallback path exercises R3's shape flexibility.
 
+**T016 verification result (2026-07-08)**: the live `INDEX_DATA&symbol=VIX` call on
+the production key (run on sloth) returned the not-entitled notice — index data
+requires a premium plan the key doesn't carry. **Pivoted to the fallback**: FRED
+`VIXCLS` via the keyless CSV endpoint
+(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS`) — verified same day:
+9,525 daily observations, 1990-01-02 through the previous close, value-only (R3's
+`value` path; missing-value rows carry `.` and are skipped). Default provider for
+the `vix` catalog row is therefore `fred:VIXCLS`; the AlphaVantage path remains a
+config change away if the key is ever upgraded.
+
 ## R5 — Market-level loader branching
 
 **Decision**: the market-series loader (`_feature_series` / `load_market_data`)

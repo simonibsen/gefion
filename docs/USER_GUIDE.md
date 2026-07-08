@@ -295,6 +295,25 @@ gefion fundamentals-update --limit 50
 - Tracks staleness with `updated_at` timestamp
 - Required for cross-sectional sector/industry rankings
 
+### Macro series (VIX, CPI, rates — non-stock data)
+Market-level series live in their own home (`macro_series`), never shoehorned
+into the stocks table. Adding one is configuration, not schema:
+```bash
+# Ingest VIX from FRED (keyless, back to 1990) and materialize macro_vix
+gefion macro ingest --name vix --provider fred:VIXCLS --full
+
+# Catalog + coverage
+gefion macro list
+```
+- The `macro_<name>` feature declares `entity_table='macro_series'` and lands
+  in `computed_features` — usable by discovery atoms, regime expressions
+  (`regime interaction --by macro_vix`), and interaction tests with zero
+  changes to equity pipelines
+- Providers: `fred:<SERIES>` (default, keyless) or `alphavantage:INDEX_DATA`
+  (premium; refused with the fallback named if the key isn't entitled)
+- A second series of a different shape (monthly CPI, value-only) is just
+  another catalog row — no DDL
+
 ### Entity deletion (first-class, registry-driven)
 Anything created must be cleanly deletable with its associated data. `data
 entity-delete` works uniformly across entity kinds (stocks, macro series):
