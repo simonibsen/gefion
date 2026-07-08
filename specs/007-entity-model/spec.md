@@ -81,6 +81,16 @@ ever covered the stocks case.
   more ambiguous. Final say rests with DDL approval. It houses market-level time
   series specifically — future non-series entity kinds (sectors, benchmarks) get
   their own entity tables, not residence here.
+- Q: Should entity tables share a common prefix (`ent_`/`dim_`)? → A: **No —
+  entity-ness is declared, not spelled.** A prefix convention would be born broken
+  (`stocks` can never comply; renames are ruled out), and a convention with a
+  permanent exception teaches people to ignore it. The classification already
+  exists machine-readably — entity tables are exactly the distinct values of the
+  registry's `entity_table` column — and the generated dictionary/ERD group them
+  regardless of name. The FR-210 naming taxonomy for entity tables is therefore:
+  **plural domain nouns for entity catalogs** (`stocks`; future `sectors`,
+  `benchmarks`) and the **`<domain>_series` + `<domain>_series_values` pairing**
+  for series catalogs and their raw values (`macro_series` fits).
 
 ## User Scenarios & Testing *(mandatory)*
 
