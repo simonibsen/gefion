@@ -150,6 +150,8 @@ def test_fundamentals_update_uses_single_db_connection():
     def tracking_connection(url):
         connection_count["opens"] += 1
         mock_conn = Mock()
+        mock_conn.transaction = lambda: __import__('contextlib').nullcontext()
+        mock_conn.autocommit = True
         mock_cur = Mock()
         mock_cur.fetchall.return_value = stocks
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cur)
@@ -198,6 +200,8 @@ def test_fundamentals_update_emits_progress():
     stocks = [(i, f"SYM{i}", None) for i in range(5)]
 
     mock_conn = Mock()
+    mock_conn.transaction = lambda: __import__('contextlib').nullcontext()
+    mock_conn.autocommit = True
     mock_cur = Mock()
     mock_cur.fetchall.return_value = stocks
     mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cur)
@@ -250,6 +254,8 @@ def test_fundamentals_update_rich_progress():
     stocks = [(1, "AAPL", None), (2, "MSFT", None)]
 
     mock_conn = Mock()
+    mock_conn.transaction = lambda: __import__('contextlib').nullcontext()
+    mock_conn.autocommit = True
     mock_cur = Mock()
     mock_cur.fetchall.return_value = stocks
     mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cur)
@@ -320,6 +326,8 @@ def test_fundamentals_update_inserts_into_stocks_fundamentals():
     executed_sqls = []
 
     mock_conn = Mock()
+    mock_conn.transaction = lambda: __import__('contextlib').nullcontext()
+    mock_conn.autocommit = True
     mock_cur = Mock()
     mock_cur.fetchall.return_value = stocks
 
@@ -384,6 +392,8 @@ def test_fundamentals_update_writes_exchange():
     executed_sqls = []
 
     mock_conn = Mock()
+    mock_conn.transaction = lambda: __import__('contextlib').nullcontext()
+    mock_conn.autocommit = True
     mock_cur = Mock()
     mock_cur.fetchall.return_value = stocks
 
@@ -511,6 +521,8 @@ def test_fundamentals_update_parallel_execution():
     stocks = [(i, f"SYM{i}", None) for i in range(6)]
 
     mock_conn = Mock()
+    mock_conn.transaction = lambda: __import__('contextlib').nullcontext()
+    mock_conn.autocommit = True
     mock_cur = Mock()
     mock_cur.fetchall.return_value = stocks
     mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cur)
@@ -544,3 +556,65 @@ def test_fundamentals_update_parallel_execution():
     assert elapsed < 0.25, (
         f"With 3 workers, 6x50ms calls should complete in <250ms, took {elapsed*1000:.0f}ms"
     )
+
+
+def test_ratio_columns_hold_degenerate_financials(db_conn):
+    """Prod failure 2026-07-07: distressed/shell stocks report margins and
+    ROE in the +/-thousands; NUMERIC(8,6) (|v| < 100) overflowed and sank the
+    whole run. The four ratio columns must hold real-world extremes."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            """SELECT column_name, numeric_precision, numeric_scale
+               FROM information_schema.columns
+               WHERE table_name = 'stocks_fundamentals'
+                 AND column_name IN ('dividend_yield', 'profit_margin',
+                                     'operating_margin', 'return_on_equity')""")
+        cols = {name: (prec, scale) for name, prec, scale in cur.fetchall()}
+    assert len(cols) == 4
+    for name, (prec, scale) in cols.items():
+        assert prec >= 14, f"{name} precision {prec} cannot hold |v| >= 100"
+        assert scale == 6, f"{name} scale changed unexpectedly"
+
+
+def test_one_bad_symbol_cannot_sink_the_batch(db_conn):
+    """Prod failure 2026-07-07: one overflowing symbol raised out of the
+    write loop, discarding ~6,175 fetched results. The write path must be
+    per-symbol fault-isolated: bad rows are counted and logged, good rows
+    land."""
+    from gefion.cli import _write_fundamentals_results
+
+    with db_conn.cursor() as cur:
+        cur.execute("DELETE FROM stocks WHERE symbol IN ('FWRT1', 'FWRT2')")
+        cur.execute(
+            "INSERT INTO stocks (symbol, name) VALUES ('FWRT1', 'Good Co'), "
+            "('FWRT2', 'Degenerate Co') RETURNING id")
+        good_id, bad_id = [r[0] for r in cur.fetchall()]
+    db_conn.commit()
+
+    good = {"Symbol": "FWRT1", "Name": "Good Co", "Sector": "Tech",
+            "Industry": "Software", "Exchange": "NASDAQ",
+            "ReturnOnEquityTTM": "0.21", "ProfitMargin": "0.1"}
+    # overflows even the widened NUMERIC(14,6): |v| >= 10^8
+    bad = {"Symbol": "FWRT2", "Name": "Degenerate Co", "Sector": "Shell",
+           "Industry": "Shell", "Exchange": "NASDAQ",
+           "ReturnOnEquityTTM": "999999999999"}
+    results = [(good_id, "FWRT1", good, None, False),
+               (bad_id, "FWRT2", bad, None, False)]
+
+    try:
+        summary = _write_fundamentals_results(db_conn, results)
+        assert summary["updated"] == 1
+        assert summary["write_errors"] == 1
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT sector FROM stocks WHERE id = %s", (good_id,))
+            assert cur.fetchone()[0] == "Tech"  # the good row landed
+            cur.execute(
+                "SELECT count(*) FROM stocks_fundamentals WHERE data_id = %s",
+                (good_id,))
+            assert cur.fetchone()[0] == 1
+    finally:
+        with db_conn.cursor() as cur:
+            cur.execute("DELETE FROM stocks_fundamentals WHERE data_id IN (%s, %s)",
+                        (good_id, bad_id))
+            cur.execute("DELETE FROM stocks WHERE id IN (%s, %s)", (good_id, bad_id))
+        db_conn.commit()

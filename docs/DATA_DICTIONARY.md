@@ -533,12 +533,12 @@ Point-in-time company fundamentals (no history — overwritten on update).
 | `forward_pe` | NUMERIC(10,2) | ✓ | `OVERVIEW`.<br>`ForwardPE` | Forward P/E ratio |
 | `peg_ratio` | NUMERIC(10,4) | ✓ | `OVERVIEW`.<br>`PEGRatio` | Price/Earnings-to-Growth |
 | `book_value` | NUMERIC(12,4) | ✓ | `OVERVIEW`.<br>`BookValue` | Book value per share |
-| `dividend_yield` | NUMERIC(8,6) | ✓ | `OVERVIEW`.<br>`DividendYield` | Annualized dividend yield |
+| `dividend_yield` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`DividendYield` | Annualized dividend yield |
 | `eps` | NUMERIC(10,4) | ✓ | `OVERVIEW`.<br>`EPS` | Earnings per share (TTM) |
 | `revenue_per_share` | NUMERIC(10,4) | ✓ | `OVERVIEW`.<br>`RevenuePerShareTTM` | Revenue per share TTM |
-| `profit_margin` | NUMERIC(8,6) | ✓ | `OVERVIEW`.<br>`ProfitMargin` | Net profit margin |
-| `operating_margin` | NUMERIC(8,6) | ✓ | `OVERVIEW`.<br>`OperatingMarginTTM` | Operating margin TTM |
-| `return_on_equity` | NUMERIC(8,6) | ✓ | `OVERVIEW`.<br>`ReturnOnEquityTTM` | Return on equity TTM |
+| `profit_margin` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`ProfitMargin` | Net profit margin |
+| `operating_margin` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`OperatingMarginTTM` | Operating margin TTM |
+| `return_on_equity` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`ReturnOnEquityTTM` | Return on equity TTM |
 | `beta` | NUMERIC(8,4) | ✓ | `OVERVIEW`.<br>`Beta` | Beta vs market |
 | `ev_to_ebitda` | NUMERIC(10,2) | ✓ | `OVERVIEW`.<br>`EVToEBITDA` | Enterprise value / EBITDA |
 | `shares_outstanding` | BIGINT | ✓ | `OVERVIEW`.<br>`SharesOutstanding` | Shares outstanding |

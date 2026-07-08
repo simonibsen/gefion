@@ -6875,48 +6875,10 @@ def _fundamentals_update_impl(
             results.append((stock_id, symbol, overview, err, was_skipped))
 
     # Write all updates in a single DB connection
-    skipped_ids = [sid for sid, _, _, _, ws in results if ws]
     with db_connection(url) as conn:
-        for stock_id, symbol, overview, err, was_skipped in results:
-            if err or was_skipped:
-                continue
-            name = overview.get("Name", "")
-            sector = overview.get("Sector", "")
-            industry = overview.get("Industry", "")
-            stock_exchange = overview.get("Exchange", "")
-
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE stocks
-                    SET name = %s, sector = %s, industry = %s, exchange = %s, updated_at = NOW()
-                    WHERE id = %s
-                """, (name or None, sector or None, industry or None, stock_exchange or None, stock_id))
-
-                # Insert time-series fundamentals data
-                fundamentals = _parse_overview_fundamentals(overview)
-                if any(v is not None for v in fundamentals.values()):
-                    cols = list(fundamentals.keys())
-                    placeholders = ", ".join(["%s"] * (2 + len(cols)))
-                    col_names = ", ".join(["data_id", "date"] + cols)
-                    cur.execute(
-                        f"""
-                        INSERT INTO stocks_fundamentals ({col_names})
-                        VALUES ({placeholders})
-                        ON CONFLICT (data_id, date) DO UPDATE SET
-                            {", ".join(f"{c} = EXCLUDED.{c}" for c in cols)}
-                        """,
-                        (stock_id, date.today(), *[fundamentals[c] for c in cols]),
-                    )
-            updated += 1
-
-        # Mark skipped symbols (no fundamental data) so they aren't retried next run
-        if skipped_ids:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE stocks SET updated_at = NOW() WHERE id = ANY(%s)",
-                    (skipped_ids,),
-                )
-        conn.commit()
+        write_summary = _write_fundamentals_results(conn, results)
+    updated = write_summary["updated"]
+    write_errors = write_summary["write_errors"]
 
     reporter.complete()
     if not json_output:
@@ -6927,10 +6889,79 @@ def _fundamentals_update_impl(
         if skipped:
             parts.append(f"{skipped} skipped")
         if errors:
-            parts.append(f"{errors} errors")
+            parts.append(f"{errors} fetch errors")
+        if write_errors:
+            parts.append(f"{write_errors} write errors (see log)")
         emit(f"[bold]Complete:[/bold] {', '.join(parts)}")
     else:
-        emit_json({"success": True, "updated": updated, "skipped": skipped, "errors": errors})
+        emit_json({"success": True, "updated": updated, "skipped": skipped,
+                   "errors": errors, "write_errors": write_errors})
+
+
+def _write_fundamentals_results(conn, results) -> Dict[str, int]:
+    """Write fetched OVERVIEW results, fault-isolated per symbol.
+
+    Prod lesson (2026-07-07): one overflowing row raised out of the write
+    loop and discarded ~6,175 fetched results (90 minutes of API quota).
+    Each symbol now writes inside its own conn.transaction() block (a real
+    transaction under autocommit, a savepoint inside an outer transaction) —
+    a bad row rolls back alone, is counted and logged, and the batch lands.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    updated = 0
+    write_errors = 0
+    skipped_ids = [sid for sid, _, _, _, ws in results if ws]
+    for stock_id, symbol, overview, err, was_skipped in results:
+        if err or was_skipped:
+            continue
+        name = overview.get("Name", "")
+        sector = overview.get("Sector", "")
+        industry = overview.get("Industry", "")
+        stock_exchange = overview.get("Exchange", "")
+        try:
+            with conn.transaction():
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE stocks
+                        SET name = %s, sector = %s, industry = %s, exchange = %s, updated_at = NOW()
+                        WHERE id = %s
+                    """, (name or None, sector or None, industry or None,
+                          stock_exchange or None, stock_id))
+
+                    # Insert time-series fundamentals data
+                    fundamentals = _parse_overview_fundamentals(overview)
+                    if any(v is not None for v in fundamentals.values()):
+                        cols = list(fundamentals.keys())
+                        placeholders = ", ".join(["%s"] * (2 + len(cols)))
+                        col_names = ", ".join(["data_id", "date"] + cols)
+                        cur.execute(
+                            f"""
+                            INSERT INTO stocks_fundamentals ({col_names})
+                            VALUES ({placeholders})
+                            ON CONFLICT (data_id, date) DO UPDATE SET
+                                {", ".join(f"{c} = EXCLUDED.{c}" for c in cols)}
+                            """,
+                            (stock_id, date.today(), *[fundamentals[c] for c in cols]),
+                        )
+            updated += 1
+        except Exception as exc:
+            write_errors += 1
+            log.warning(f"fundamentals write failed for {symbol}: {exc}")
+
+    # Mark skipped symbols (no fundamental data) so they aren't retried next run
+    if skipped_ids:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE stocks SET updated_at = NOW() WHERE id = ANY(%s)",
+                    (skipped_ids,),
+                )
+    if not conn.autocommit:
+        conn.commit()
+    return {"updated": updated, "write_errors": write_errors,
+            "skipped": len(skipped_ids)}
 
 
 @app.command("cross-sectional-compute")
