@@ -564,18 +564,18 @@ Point-in-time company fundamentals (no history — overwritten on update).
 | **`data_id`** 🔑 | INTEGER |  |  |  |
 | **`date`** 🔑 | DATE |  |  |  |
 | `market_cap` | BIGINT | ✓ | `OVERVIEW`.<br>`MarketCapitalization` | Market capitalization in USD |
-| `pe_ratio` | NUMERIC(10,2) | ✓ | `OVERVIEW`.<br>`PERatio` | Trailing P/E ratio |
-| `forward_pe` | NUMERIC(10,2) | ✓ | `OVERVIEW`.<br>`ForwardPE` | Forward P/E ratio |
-| `peg_ratio` | NUMERIC(10,4) | ✓ | `OVERVIEW`.<br>`PEGRatio` | Price/Earnings-to-Growth |
-| `book_value` | NUMERIC(12,4) | ✓ | `OVERVIEW`.<br>`BookValue` | Book value per share |
+| `pe_ratio` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`PERatio` | Trailing P/E ratio |
+| `forward_pe` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`ForwardPE` | Forward P/E ratio |
+| `peg_ratio` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`PEGRatio` | Price/Earnings-to-Growth |
+| `book_value` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`BookValue` | Book value per share |
 | `dividend_yield` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`DividendYield` | Annualized dividend yield |
-| `eps` | NUMERIC(10,4) | ✓ | `OVERVIEW`.<br>`EPS` | Earnings per share (TTM) |
-| `revenue_per_share` | NUMERIC(10,4) | ✓ | `OVERVIEW`.<br>`RevenuePerShareTTM` | Revenue per share TTM |
+| `eps` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`EPS` | Earnings per share (TTM) |
+| `revenue_per_share` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`RevenuePerShareTTM` | Revenue per share TTM |
 | `profit_margin` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`ProfitMargin` | Net profit margin |
 | `operating_margin` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`OperatingMarginTTM` | Operating margin TTM |
 | `return_on_equity` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`ReturnOnEquityTTM` | Return on equity TTM |
-| `beta` | NUMERIC(8,4) | ✓ | `OVERVIEW`.<br>`Beta` | Beta vs market |
-| `ev_to_ebitda` | NUMERIC(10,2) | ✓ | `OVERVIEW`.<br>`EVToEBITDA` | Enterprise value / EBITDA |
+| `beta` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`Beta` | Beta vs market |
+| `ev_to_ebitda` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`EVToEBITDA` | Enterprise value / EBITDA |
 | `shares_outstanding` | BIGINT | ✓ | `OVERVIEW`.<br>`SharesOutstanding` | Shares outstanding |
 | `created_at` | TIMESTAMP | ✓ |  |  |
 
