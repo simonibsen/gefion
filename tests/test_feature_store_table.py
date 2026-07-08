@@ -20,6 +20,19 @@ def require_db():
     return conn
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_db_after_module():
+    """Restore canonical test DB state after this module's destructive cleanup
+    (issue #29). Without this, every module alphabetically after this one runs
+    against a gutted schema until something else re-inits — found when new
+    fundamentals tests were the first in that dead zone to need a
+    schema.sql-created table."""
+    yield
+    if DB_TESTS_ENABLED:
+        from conftest import restore_test_db
+        restore_test_db()
+
+
 @pytest.fixture(autouse=True)
 def clean_db():
     # Skip early if DB tests not enabled - before any DB operations
