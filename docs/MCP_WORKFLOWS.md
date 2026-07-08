@@ -1071,3 +1071,68 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
   **Mutating**, and `full=true` backfills decades — confirm with the user first.
 - `macro_list` — the macro-series catalog with per-series value coverage
   (first/last date, row count) and materialization status (read-only).
+
+## Tool reference (remaining tools)
+
+One-liners for every tool not covered by a workflow section above. The
+docs-drift test (`tests/test_docs_drift.py`) enforces that every MCP tool is
+documented here or in a section above.
+
+### System & health
+
+- `system_status` — comprehensive status with intelligent suggestions: infrastructure health, data freshness, missing features.
+- `health_check` — quick infrastructure health check (PostgreSQL, Tempo, Docker); use `system_status` for the full picture.
+- `docker_status` — docker compose services status (quick docker-specific check).
+- `get_role_info` — current MCP server role (developer/operator) and behavioral guidelines.
+- `dev_status` — parse DEVELOPMENT/NEXT_STEPS/PROGRESS docs for roadmap position and next steps.
+
+### Data & features
+
+- `feature_compute` — compute features for symbols via the generic dispatcher.
+- `features_list` — list feature definitions with metadata.
+- `feature_show` — one feature definition: function, params, source/store tables, entity table, active.
+- `feature_functions_list` — list registered feature functions (the computation bodies).
+- `feature_definitions_export` / `feature_definitions_import` — sync feature definitions with `feature-definitions/*.json` (idempotent; exports carry `entity_table`).
+- `feature_functions_export` / `feature_functions_import` — sync feature functions with `feature-functions/*.json` (idempotent).
+- `volatility_compute` — per-stock adaptive volatility thresholds (trend-classifier labels).
+
+### ML pipeline
+
+- `ml_dataset_build` — build a training dataset (manifest + price/feature/label files).
+- `ml_dataset_inspect` — dataset configuration and dependent models.
+- `ml_train_classifier` — train the 5-class trend classifier.
+- `ml_train_ensemble` — train a multi-algorithm ensemble.
+- `ml_predict` — quantile predictions (q10/q50/q90) for symbols on a date.
+- `ml_predict_classifier` — trend-class predictions with probabilities.
+- `ml_predict_ensemble` — weighted-average ensemble predictions.
+- `ml_eval` — calibration metrics (coverage, pinball loss, IQR) over stored predictions.
+- `ml_calibrate` — conformal-prediction shift corrections from a holdout period.
+- `ml_tune` — Optuna hyperparameter tuning with time-series cross-validation.
+- `ml_feature_importance` — SHAP-based feature importance for a trained model.
+- `query_predictions` — stored predictions by symbol/date/horizon/type.
+- `query_model_performance` — evaluation metrics from past runs.
+
+### Backtesting & strategies
+
+- `backtest_run` — backtest a strategy with optional realistic execution (costs, slippage).
+- `backtest_compare` — side-by-side strategy comparison (return, Sharpe, drawdown).
+- `strategy_list` — registered strategies with defaults.
+- `strategy_configs` — saved strategy configurations.
+- `strategy_create_config` — create a named strategy configuration.
+
+### Charts
+
+- `chart_price` — candlestick chart with volume and technical context.
+- `chart_predictions` — price with quantile prediction bands.
+- `chart_pred_vs_actual` — predicted vs realized returns scatter.
+- `chart_calibration` — model calibration curve.
+- `chart_confusion_matrix` — trend-classifier confusion matrix.
+- `chart_features` — price with technical-indicator subplots.
+- `chart_pipeline_health` — data freshness / feature coverage / prediction distribution dashboard.
+
+### Principles & observability
+
+- `principles_list` — the quantitative-finance principles catalog.
+- `principles_suggest` — principle-seeded experiment suggestions.
+- `trace_search` — find traces by tags/duration/service.
+- `trace_compare` — quantify performance changes between two traces.

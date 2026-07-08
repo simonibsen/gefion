@@ -144,6 +144,26 @@ concept and never applies to non-stock features; a single-entity series'
 market-level value is the value itself (the cross-sectional median
 degenerates). Cross-sectional peer groups remain stocks-only.
 
+### Table layering (the feeds graph)
+
+Every data-flow table declares a layer (in `TABLE_LAYER`,
+`scripts/gen_data_dictionary.py`), and the data dictionary renders the
+resulting feeds graph — solid edges for hard FKs, dashed for declared
+registry edges:
+
+- **Catalogs (entity tables)** — who exists: `stocks`, `macro_series`
+- **Raw ingested (L1)** — what providers gave us: `stock_ohlcv`,
+  `stocks_fundamentals`, `quarterly_financials`, `macro_series_values`
+- **Derived (L2)** — what we computed: `computed_features`,
+  `cross_sectional_features`
+- **Registry** — configuration of the flow: `feature_definitions`,
+  `feature_functions`
+
+ML/ops/ledger tables sit deliberately outside the graph. A raw table with no
+declared consumers is flagged in the dictionary — dead weight or a missing
+feature definition. Naming carries no layer prefixes; layer and entity-ness
+are declared in the registry, not spelled into table names.
+
 ### Indexing Strategy
 
 **Optimized for**:

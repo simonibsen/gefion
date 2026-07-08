@@ -173,6 +173,14 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion ml e2e-test` | Run full pipeline end-to-end test |
 | `gefion ml feature-importance` | SHAP-based feature importance |
 | `gefion ml calibrate` | Conformal prediction calibration |
+| `gefion ml init` | Initialize ML tables (datasets/runs/models/predictions) |
+| `gefion ml dataset-inspect` | Inspect a dataset's metadata and dependent models |
+| `gefion ml dataset-delete` | Delete a dataset and its artifacts |
+| `gefion ml model-inspect` | Inspect a model's metadata, training info, predictions |
+| `gefion ml model-delete` | Delete a model and its artifacts |
+| `gefion ml predict-list` | List predictions with optional filters |
+| `gefion ml predict-inspect` | Inspect predictions for a specific symbol |
+| `gefion volatility compute` | Compute volatility thresholds (trend-classifier labels) |
 
 ### Experiments
 
@@ -189,6 +197,9 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion experiment apply` | Take a promoted winner to production (rebuild → retrain → predict → backtest) |
 | `gefion experiment probation-check` | Re-measure promoted artifacts; auto-demote degradation (also runs on every data-update) |
 | `gefion experiment demote` | Manually demote a promoted artifact (reason required) |
+| `gefion principles list` | List the experiment-principles catalog |
+| `gefion principles show` | Show one principle (rationale, seeds) |
+| `gefion principles suggest` | Suggest principle-seeded experiments |
 | `gefion chart experiment-trials` / `experiment-fdr` | Trial scatter / FDR cycle summary charts |
 | `gefion chart regime` | Price with regime-episode bands overlaid (see docs/REGIMES.md) |
 
@@ -200,6 +211,27 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion backtest compare` | Compare multiple strategies side-by-side |
 | `gefion strategy list` | List registered strategies |
 | `gefion strategy create-config` | Create a strategy configuration |
+| `gefion strategy configs` | List saved strategy configurations |
+
+### Charts
+
+Static chart images (PNG via D3 templates) for any pipeline artifact.
+
+| Command | Description |
+|---------|-------------|
+| `gefion chart price` | Candlestick price chart for a symbol |
+| `gefion chart predictions` | Price chart with prediction bands (q10/q50/q90) |
+| `gefion chart pred-vs-actual` | Predictions vs actual scatter |
+| `gefion chart calibration` | Model calibration curve |
+| `gefion chart confusion-matrix` | Trend-classifier confusion matrix |
+| `gefion chart features` | Price chart with feature overlays |
+| `gefion chart volatility` | Volatility analysis (Bollinger Bands, ATR, historical vol) |
+| `gefion chart correlation` | Correlation matrix heatmap for multiple symbols |
+| `gefion chart rolling` | Rolling returns comparison |
+| `gefion chart drawdown` | Drawdown analysis |
+| `gefion chart sector` | Sector performance heatmap |
+| `gefion chart compare` | Price performance of multiple symbols |
+| `gefion chart pipeline-health` | Pipeline health dashboard |
 
 ### Regimes
 
@@ -231,9 +263,12 @@ signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
 | Command | Description |
 |---------|-------------|
 | `gefion init` | Initialize database schema and seed features |
+| `gefion db-init` | Initialize database schema from sql/schema.sql |
+| `gefion db-cleanup` | Remove orphaned data from database tables |
 | `gefion health` | Check infrastructure health |
 | `gefion db-health` | Database health report (dimension coverage + entity-integrity orphan scan) |
 | `gefion db-migrate` | Run database migrations |
+| `gefion mcp-setup` | Configure the MCP server for use with AI assistants |
 | `gefion span-check` | Check recent traces for slow operations |
 | `gefion ui` | Launch Streamlit web UI |
 | `gefion backup` / `gefion restore` | Backup and restore database |
