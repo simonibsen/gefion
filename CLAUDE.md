@@ -146,6 +146,8 @@ Before exiting plan mode, verify:
 - PostgreSQL + TimescaleDB. New `regime_definitions` (relational) and `regime_labels` (005-regime-slicing)
 - Python 3.10+ + numpy/scipy (tests + enumeration), psycopg (ledgers), existing gefion (006-agentic-regime-discovery)
 - PostgreSQL + TimescaleDB. New tables — `regime_discovery_runs`, (006-agentic-regime-discovery)
+- Python 3.10+ + psycopg (registry/store), existing `alphavantage/` clien (007-entity-model)
+- PostgreSQL + TimescaleDB. Changes — `feature_definitions.entity_table` (007-entity-model)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)
