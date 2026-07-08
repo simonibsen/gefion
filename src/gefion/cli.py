@@ -4282,6 +4282,49 @@ def _db_health_impl(db_url, migrations_dir, json_output):
 
                 health["migrations"] = migration_status
 
+                # Dimension coverage: the silent-metadata guard. Prod ran for
+                # weeks with sector/industry/asset_type entirely NULL and
+                # nothing surfaced it — coverage is health, and each gap names
+                # the command that fixes it.
+                warnings: list = []
+                try:
+                    cur.execute(
+                        "SELECT count(*), count(sector), count(industry), "
+                        "count(asset_type) FROM stocks"
+                    )
+                    total, n_sector, n_industry, n_asset = cur.fetchone()
+                    cur.execute("SELECT max(date) FROM stocks_fundamentals")
+                    fund_row = cur.fetchone()
+                    fundamentals_latest = fund_row[0] if fund_row else None
+
+                    def pct(n):
+                        return round(100.0 * n / total, 1) if total else 0.0
+
+                    health["dimension_coverage"] = {
+                        "stocks_total": total,
+                        "sector_pct": pct(n_sector),
+                        "industry_pct": pct(n_industry),
+                        "asset_type_pct": pct(n_asset),
+                        "fundamentals_latest": (
+                            str(fundamentals_latest) if fundamentals_latest else None),
+                    }
+                    if total:
+                        if pct(n_sector) < 50 or pct(n_industry) < 50:
+                            warnings.append(
+                                f"sector/industry coverage low "
+                                f"({pct(n_sector)}%/{pct(n_industry)}%) — run "
+                                "`gefion fundamentals-update`")
+                        if pct(n_asset) < 50:
+                            warnings.append(
+                                f"asset_type coverage low ({pct(n_asset)}%) — run "
+                                "`gefion data listing-meta`")
+                        if fundamentals_latest is None:
+                            warnings.append(
+                                "no fundamentals rows — run `gefion fundamentals-update`")
+                except Exception:
+                    health["dimension_coverage"] = {"error": "unavailable"}
+                health["warnings"] = warnings
+
     except Exception as exc:
         emit_error(f"DB health failed: {exc}", json_output=json_output)
         return
