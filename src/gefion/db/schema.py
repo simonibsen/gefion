@@ -192,9 +192,15 @@ def create_feature_definitions_table(conn: Connection) -> None:
                 store_type TEXT DEFAULT 'double precision',
                 active BOOLEAN DEFAULT TRUE,
                 version TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                entity_table TEXT NOT NULL DEFAULT 'stocks'
             );
             """
+        )
+        # Idempotent add for pre-007 databases (matches sql/schema.sql)
+        cur.execute(
+            "ALTER TABLE feature_definitions "
+            "ADD COLUMN IF NOT EXISTS entity_table TEXT NOT NULL DEFAULT 'stocks';"
         )
     conn.commit()
 
