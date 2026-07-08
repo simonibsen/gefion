@@ -663,8 +663,10 @@ flowchart LR
     quarterly_financials --> stocks
     stock_ohlcv --> stocks
     stocks_fundamentals --> stocks
+    macro_series_values -.->|1 feature| computed_features
     quarterly_financials -.->|3 features| computed_features
     stock_ohlcv -.->|18 features| computed_features
+    computed_features -.-> macro_series
     computed_features -.-> stocks
 ```
 
@@ -672,7 +674,7 @@ flowchart LR
 
 | Raw table | Declared consumers |
 |---|---|
-| `macro_series_values` | ⚠️ **none — no declared consumers** |
+| `macro_series_values` | `computed_features` (1 feature) |
 | `quarterly_financials` | `computed_features` (3 features) |
 | `stock_ohlcv` | `computed_features` (18 features) |
 | `stocks_fundamentals` | ⚠️ **none — no declared consumers** |

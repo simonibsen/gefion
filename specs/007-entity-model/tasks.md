@@ -106,7 +106,7 @@ DDL-approval time; the curriculum teaches the model.
 
 - [x] T025 Observability pass: run registry validation, ingest, orphan scan, entity-delete with `OTEL_ENABLED=true`; `gefion span-check` — spans parented, no orphans
 - [x] T026 Full-suite pre-flight: drop `gefion_test`, complete suite against fresh DB (capture the exit code — the pipe-masking lesson); docs-drift green
-- [ ] T027 Prod rollout on sloth (post-merge): pull + `db-migrate`; `gefion macro ingest --name vix --full`; `db-health` (entity_integrity zeros; coverage clean); one bounded VIX-atom discovery run — confirm the uncomputable-VIX diagnostic is gone from a real run's ledger (SC-203 in production)
+- [x] T027 Prod rollout on sloth (post-merge): pull + `db-migrate`; `gefion macro ingest --name vix --full`; `db-health` (entity_integrity zeros; coverage clean); one bounded VIX-atom discovery run — confirm the uncomputable-VIX diagnostic is gone from a real run's ledger (SC-203 in production)
 - [x] T028 Update `.specify/memory/progress.md` + `backlog.md` (VIX backlog item closed by 007; note relation to issues #75/#76 — entity-delete is their first landed increment)
 
 ---

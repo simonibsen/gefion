@@ -21,6 +21,11 @@
   registry Mermaid edges by declared layer, flags consumer-less raw tables
 - Docs-drift enforcement widened: every MCP tool, every CLI command, and
   every CLI group in the curriculum are now test-enforced
+- **Prod rollout complete (T027, 2026-07-08)**: sloth migrated (compressed-
+  hypertable dance documented in docs/DEPLOYMENT.md gotchas), VIX live
+  (9,224 values 1990→present, fred:VIXCLS), db-health entity_integrity
+  zeros, and run `vix-atom-proof` (id 7) evaluated a macro_vix atom with an
+  EMPTY diagnostics ledger — the uncomputable-VIX diagnostic is gone (SC-203)
 
 ### Agentic Regime Discovery (spec 006)
 - The system proposes and tests candidate regimes under structural guardrails:
