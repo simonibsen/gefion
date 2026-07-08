@@ -13,6 +13,8 @@
   - [`experiments`](#experiments)
   - [`feature_definitions`](#feature-definitions)
   - [`feature_functions`](#feature-functions)
+  - [`macro_series`](#macro-series)
+  - [`macro_series_values`](#macro-series-values)
   - [`ml_datasets`](#ml-datasets)
   - [`ml_models`](#ml-models)
   - [`ml_runs`](#ml-runs)
@@ -226,6 +228,37 @@ Primary key: `id`
 | `called_by` | TEXT | ✓ |  |  |
 | `created_at` | TIMESTAMP | ✓ |  |  |
 | `updated_at` | TIMESTAMP | ✓ |  |  |
+
+### `macro_series`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `name` | TEXT |  |  |  |
+| `provider` | TEXT |  |  |  |
+| `kind` | TEXT |  |  |  |
+| `cadence` | TEXT |  |  |  |
+| `description` | TEXT | ✓ |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
+
+### `macro_series_values`
+
+*(no description yet)*
+
+Primary key: `date, series_id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`series_id`** 🔑 | INTEGER |  |  |  |
+| **`date`** 🔑 | DATE |  |  |  |
+| `value` | NUMERIC(14,6) |  |  |  |
+| `open` | NUMERIC(14,6) | ✓ |  |  |
+| `high` | NUMERIC(14,6) | ✓ |  |  |
+| `low` | NUMERIC(14,6) | ✓ |  |  |
 
 ### `ml_datasets`
 
