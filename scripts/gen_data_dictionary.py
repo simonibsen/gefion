@@ -60,6 +60,7 @@ class Table:
     columns: "Dict[str, Column]" = field(default_factory=dict)
     primary_key: List[str] = field(default_factory=list)
     is_hypertable: bool = False
+    foreign_keys: List[Tuple[str, str]] = field(default_factory=list)  # (column, referenced table)
 
 
 _TYPE_RE = re.compile(
@@ -158,12 +159,20 @@ def _apply_create_table(stmt: str, tables: Dict[str, Table]) -> None:
             pk = _PK_COLS_RE.search(item)
             if pk and not item.upper().startswith("FOREIGN"):
                 table.primary_key = [c.strip().strip('"') for c in pk.group(1).split(",")]
+            fk = re.search(
+                r'FOREIGN\s+KEY\s*\(\s*"?(\w+)"?\s*\)\s*REFERENCES\s+"?(\w+)"?',
+                item, re.IGNORECASE)
+            if fk:
+                table.foreign_keys.append((fk.group(1), fk.group(2)))
             continue
         col = _parse_column_def(item)
         if col is None:
             continue
         if col.name not in table.columns:
             table.columns[col.name] = col
+        ref = re.search(r'\bREFERENCES\s+"?(\w+)"?', item, re.IGNORECASE)
+        if ref:
+            table.foreign_keys.append((col.name, ref.group(1)))
         # Inline single-column PRIMARY KEY
         rest = item[len(col.name):]
         if re.search(r"\bPRIMARY\s+KEY\b", rest, re.IGNORECASE) and not _PK_COLS_RE.search(item):
@@ -281,7 +290,110 @@ TABLE_PURPOSE: Dict[str, str] = {
     "experiment_cycles": "Top-level autonomous experiment cycles (discover → propose → run → evaluate).",
     "experiment_trials": "Individual trials within an experiment (e.g. one hyperparameter combination).",
     "schema_migrations": "Migration bookkeeping: which sql/migrations/*.sql files have been applied (managed by `src/gefion/db/migrate.py`).",
+    "macro_series": "Macro-series catalog (VIX, CPI, rates …). One row per market-level series — the first non-stock entity table (spec 007). Rows are configuration: a new series is an INSERT, never DDL.",
+    "macro_series_values": "Raw macro-series values keyed by (series_id, date). Required `value` + optional OHLC serves daily-OHLC and monthly-single-value series alike. Plain relational, not a hypertable.",
 }
+
+# Declared layer per data-flow table (spec 007 — the add-a-table checklist in
+# docs/DEVELOPMENT.md requires an entry here). Only layered tables appear in
+# the feeds graph; ML/ops/ledger tables are deliberately outside it.
+TABLE_LAYER: Dict[str, str] = {
+    "stocks": "catalog",
+    "macro_series": "catalog",
+    "feature_definitions": "registry",
+    "feature_functions": "registry",
+    "stock_ohlcv": "raw",
+    "stocks_fundamentals": "raw",
+    "quarterly_financials": "raw",
+    "macro_series_values": "raw",
+    "computed_features": "derived",
+    "cross_sectional_features": "derived",
+}
+
+LAYER_TITLES = [("catalog", "Catalogs (entity tables)"), ("raw", "Raw ingested (L1)"),
+                ("derived", "Derived (L2)"), ("registry", "Registry")]
+
+FEATURE_DEFINITIONS_DIR = REPO_ROOT / "feature-definitions"
+
+
+def _load_registry_edges() -> Tuple[Dict[Tuple[str, str], int], Dict[Tuple[str, str], int]]:
+    """Declared edges from feature-definitions/*.json exports (no DB).
+
+    Returns (feeds, identity): feeds counts features per (source_table,
+    store_table); identity counts features per (store_table, entity_table) —
+    who the stored values belong to (defaults to 'stocks', pre-007 exports).
+    """
+    import json
+
+    feeds: Dict[Tuple[str, str], int] = defaultdict(int)
+    identity: Dict[Tuple[str, str], int] = defaultdict(int)
+    for path in sorted(FEATURE_DEFINITIONS_DIR.glob("*.json")):
+        d = json.loads(path.read_text())
+        source = d.get("source_table")
+        store = d.get("store_table") or "computed_features"
+        entity = d.get("entity_table") or "stocks"
+        if source:
+            feeds[(source, store)] += 1
+        identity[(store, entity)] += 1
+    return dict(feeds), dict(identity)
+
+
+def render_feeds_graph(tables: Dict[str, Table]) -> List[str]:
+    """The registry as the feeds graph: solid = hard FK (schema.sql), dashed =
+    declared registry edge (feature-definitions exports). Raw tables nothing
+    declares as a source are flagged (SC-204)."""
+    feeds, identity = _load_registry_edges()
+    layered = {t for t in tables if t in TABLE_LAYER}
+
+    lines: List[str] = []
+    lines.append("## Feeds graph (what feeds what)")
+    lines.append("")
+    lines.append(
+        "*Solid edges are hard foreign keys from the SQL schema; dashed edges "
+        "are declared registry edges from `feature-definitions/*.json` — "
+        "`source_table` (what a feature reads) and `entity_table` (who its "
+        "values belong to; spec 007). A raw table with no declared consumers "
+        "is flagged: it is either dead weight or missing its feature "
+        "definitions.*"
+    )
+    lines.append("")
+    lines.append("```mermaid")
+    lines.append("flowchart LR")
+    for layer, title in LAYER_TITLES:
+        members = sorted(t for t in layered if TABLE_LAYER[t] == layer)
+        if not members:
+            continue
+        lines.append(f"    subgraph {layer}[\"{title}\"]")
+        for t in members:
+            lines.append(f"        {t}")
+        lines.append("    end")
+    for name in sorted(layered):
+        for col, ref in sorted(set(tables[name].foreign_keys)):
+            if ref in layered:
+                lines.append(f"    {name} --> {ref}")
+    for (source, store), n in sorted(feeds.items()):
+        lines.append(f"    {source} -.->|{n} feature{'s' if n != 1 else ''}| {store}")
+    for (store, entity), _n in sorted(identity.items()):
+        lines.append(f"    {store} -.-> {entity}")
+    lines.append("```")
+    lines.append("")
+
+    lines.append("### Declared consumers per raw table")
+    lines.append("")
+    lines.append("| Raw table | Declared consumers |")
+    lines.append("|---|---|")
+    for name in sorted(t for t in layered if TABLE_LAYER[t] == "raw"):
+        consumers = [(store, n) for (source, store), n in sorted(feeds.items())
+                     if source == name]
+        if consumers:
+            desc = "; ".join(
+                f"`{store}` ({n} feature{'s' if n != 1 else ''})"
+                for store, n in consumers)
+        else:
+            desc = "⚠️ **none — no declared consumers**"
+        lines.append(f"| `{name}` | {desc} |")
+    lines.append("")
+    return lines
 
 
 def render(tables: Dict[str, Table]) -> str:
@@ -302,6 +414,7 @@ def render(tables: Dict[str, Table]) -> str:
     lines.append("- [Tables](#tables)")
     for t in table_names:
         lines.append(f"  - [`{t}`](#{t.replace('_', '-')})")
+    lines.append("- [Feeds graph](#feeds-graph-what-feeds-what)")
     lines.append("- [AlphaVantage endpoints → tables](#alphavantage-endpoints--tables)")
     lines.append("")
 
@@ -348,6 +461,8 @@ def render(tables: Dict[str, Table]) -> str:
                 f"| {col_display} | {col.data_type} | {null_marker} | {source_str} | {notes_str} |"
             )
         lines.append("")
+
+    lines.extend(render_feeds_graph(tables))
 
     lines.append("## AlphaVantage endpoints → tables")
     lines.append("")

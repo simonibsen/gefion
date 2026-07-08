@@ -194,7 +194,8 @@ def _export_feature_definitions(conn, names: Optional[List[str]] = None) -> list
         cur.execute(
             """
             SELECT name, function_name, params, source_table, source_column,
-                   store_table, store_column, store_type, active, version
+                   store_table, store_column, store_type, active, version,
+                   entity_table
             FROM feature_definitions
             {where}
             ORDER BY name;
@@ -218,6 +219,7 @@ def _export_feature_definitions(conn, names: Optional[List[str]] = None) -> list
                 "store_type": r[7],
                 "active": r[8],
                 "version": r[9],
+                "entity_table": r[10],
             }
         )
     return data
