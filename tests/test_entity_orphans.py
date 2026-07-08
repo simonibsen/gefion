@@ -42,7 +42,7 @@ def conn():
         cur.execute("DELETE FROM stocks WHERE symbol = 'ORPHT1'")
         cur.execute("INSERT INTO stocks (symbol, name) VALUES ('ORPHT1', 'Anchor') RETURNING id")
         anchor_id = cur.fetchone()[0]
-        cur.execute("DELETE FROM feature_definitions WHERE name = 'orphtest_feature'")
+        cur.execute("DELETE FROM feature_definitions WHERE name LIKE 'orphtest_%'")
         cur.execute(
             """INSERT INTO feature_definitions
                    (name, function_name, source_table, source_column, entity_table)
@@ -50,10 +50,16 @@ def conn():
                        'orphtest_entities')
                RETURNING id""")
         feature_id = cur.fetchone()[0]
+        # A stocks-declaring feature of our own: earlier suite modules may have
+        # deleted the seeded definitions (shared test DB — issue #29 lesson),
+        # so 'stocks' being declared must not be assumed, it must be arranged.
+        cur.execute(
+            """INSERT INTO feature_definitions (name, function_name, entity_table)
+               VALUES ('orphtest_stock_feature', 'indicator', 'stocks')""")
     yield c, anchor_id, feature_id
     with c.cursor() as cur:
         cur.execute("DELETE FROM computed_features WHERE feature_id = %s", (feature_id,))
-        cur.execute("DELETE FROM feature_definitions WHERE name = 'orphtest_feature'")
+        cur.execute("DELETE FROM feature_definitions WHERE name LIKE 'orphtest_%'")
         cur.execute("DELETE FROM stocks WHERE symbol = 'ORPHT1'")
         cur.execute("DROP TABLE IF EXISTS orphtest_entities")
     c.close()

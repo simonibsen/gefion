@@ -94,8 +94,9 @@ def test_unknown_entity_refused(conn):
 # --- confirm: order, parity, blockers --------------------------------------------
 
 def test_confirm_deletes_values_then_entity_cascade_parity(conn):
-    """While the old FK cascade still exists, the command's cleanup must equal
-    it: feature values gone, entity row gone."""
+    """The command's cleanup equals what the retired FK cascade used to do:
+    feature values gone, entity row gone. (Written and first proven while the
+    cascade still existed — the strongest baseline; it now guards parity.)"""
     with conn.cursor() as cur:
         stock_id, feature_id = _seed_stock(cur, "DELT2")
     summary = deletion.execute_delete(conn, "stocks", "DELT2")
@@ -109,23 +110,31 @@ def test_confirm_deletes_values_then_entity_cascade_parity(conn):
 
 
 def test_restrict_blockers_refuse_with_the_list(conn):
-    """A NO-ACTION dependent with rows (e.g. predictions) blocks deletion and
-    the refusal names it."""
+    """A RESTRICT/NO-ACTION dependent with rows blocks deletion and the
+    refusal names it. The dependent table is created here — relying on a
+    product table's FK (e.g. stocks_fundamentals) breaks when earlier suite
+    modules rebuild tables in the shared test DB (issue #29 lesson)."""
     with conn.cursor() as cur:
         stock_id, _ = _seed_stock(cur, "DELT3", with_feature_values=False)
-        # stocks_fundamentals has FK stocks(id) with NO ACTION — a real blocker
+        cur.execute("DROP TABLE IF EXISTS deltest_blocker")
         cur.execute(
-            """INSERT INTO stocks_fundamentals (data_id, date, market_cap)
-               VALUES (%s, %s, 1000)""", (stock_id, date(2026, 1, 5)))
-    plan = deletion.plan_delete(conn, "stocks", "DELT3")
-    assert any(b["table"] == "stocks_fundamentals" for b in plan["blockers"])
-    with pytest.raises(deletion.EntityDeleteError) as exc:
-        deletion.execute_delete(conn, "stocks", "DELT3")
-    assert "stocks_fundamentals" in str(exc.value)
-    with conn.cursor() as cur:  # nothing was deleted
-        cur.execute("SELECT count(*) FROM stocks WHERE symbol = 'DELT3'")
-        assert cur.fetchone()[0] == 1
-        cur.execute("DELETE FROM stocks_fundamentals WHERE data_id = %s", (stock_id,))
+            """CREATE TABLE deltest_blocker (
+                   id SERIAL PRIMARY KEY,
+                   data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE RESTRICT
+               )""")
+        cur.execute("INSERT INTO deltest_blocker (data_id) VALUES (%s)", (stock_id,))
+    try:
+        plan = deletion.plan_delete(conn, "stocks", "DELT3")
+        assert any(b["table"] == "deltest_blocker" for b in plan["blockers"])
+        with pytest.raises(deletion.EntityDeleteError) as exc:
+            deletion.execute_delete(conn, "stocks", "DELT3")
+        assert "deltest_blocker" in str(exc.value)
+        with conn.cursor() as cur:  # nothing was deleted
+            cur.execute("SELECT count(*) FROM stocks WHERE symbol = 'DELT3'")
+            assert cur.fetchone()[0] == 1
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS deltest_blocker")
 
 
 def test_audit_ledgers_are_never_in_scope(conn):

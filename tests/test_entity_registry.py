@@ -129,7 +129,15 @@ def test_registration_refuses_undeclared_entity_table(conn):
 
 def test_declared_entity_tables_enumerates_distinct(conn):
     from gefion.db.ingest import ensure_feature_definitions
+    # Register one default (stocks) and one declared definition ourselves —
+    # earlier suite modules may have deleted the seeded definitions (shared
+    # test DB — issue #29 lesson), so neither may be assumed present.
     ensure_feature_definitions(conn, [{
+        "name": "enttest_feature_stock", "function_name": "indicator",
+        "params": None, "source_table": "stock_ohlcv", "source_column": "close",
+        "store_table": "computed_features", "store_column": "value",
+        "store_type": "double precision", "active": True,
+    }, {
         "name": "enttest_feature2", "function_name": "indicator",
         "params": None, "source_table": "enttest_ok", "source_column": "name",
         "store_table": "computed_features", "store_column": "value",

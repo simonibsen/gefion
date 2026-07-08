@@ -73,18 +73,25 @@ def _feature_series(cur, name: str, symbols: Optional[List[str]],
                     max_date: Optional[datetime.date] = None) -> Series:
     """Market-level daily median of a feature, optionally over a declared
     symbol universe and up to a declared vintage date. Raises LookupError on
-    an unknown feature."""
-    cur.execute("SELECT id FROM feature_definitions WHERE name = %s", (name,))
+    an unknown feature.
+
+    Branches on the feature's declared entity_table (spec 007): the symbol
+    universe is a stocks concept and never applies to non-stock features; a
+    single-entity series' daily median degenerates to the value itself.
+    """
+    cur.execute("SELECT id, entity_table FROM feature_definitions WHERE name = %s",
+                (name,))
     found = cur.fetchone()
     if not found:
         raise LookupError(f"feature {name!r} is not defined")
-    if symbols is None:
+    feature_id, entity_table = found
+    if symbols is None or entity_table != "stocks":
         cur.execute(
             "SELECT date, percentile_cont(0.5) WITHIN GROUP (ORDER BY value) "
             "FROM computed_features WHERE feature_id = %s "
             "AND (%s::date IS NULL OR date <= %s::date) "
             "GROUP BY date ORDER BY date",
-            (found[0], max_date, max_date),
+            (feature_id, max_date, max_date),
         )
     else:
         cur.execute(
@@ -93,7 +100,7 @@ def _feature_series(cur, name: str, symbols: Optional[List[str]],
                WHERE cf.feature_id = %s AND s.symbol = ANY(%s)
                  AND (%s::date IS NULL OR cf.date <= %s::date)
                GROUP BY cf.date ORDER BY cf.date""",
-            (found[0], symbols, max_date, max_date),
+            (feature_id, symbols, max_date, max_date),
         )
     return [(d, float(v)) for d, v in cur.fetchall() if v is not None]
 

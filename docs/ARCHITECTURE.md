@@ -77,15 +77,25 @@ feature_definitions (
     source_table,            -- Where to read data (e.g., stock_ohlcv)
     source_column,           -- Which column (e.g., close)
     store_table,             -- Where to write (e.g., computed_features)
+    entity_table,            -- Who the value belongs to (default 'stocks')
     active                   -- Can be disabled
 )
 
 -- Computed results (TimescaleDB hypertable)
 computed_features (
-    data_id → stocks.id,
+    data_id,                 -- entity id in the feature's declared entity_table
     date,
     feature_id → feature_definitions.id,
     value
+)
+
+-- Macro series (first non-stock entity): catalog + raw values
+macro_series (
+    id, name, provider, kind, cadence
+)
+macro_series_values (
+    series_id → macro_series.id (CASCADE),
+    date, value, open, high, low
 )
 
 -- Quarterly financial data
@@ -102,8 +112,37 @@ quarterly_financials (
 - `stocks`: one row per symbol (`id` PK, `symbol`, `name`, `exchange`)
 - `stock_ohlcv`: Timescale hypertable keyed by (`data_id`, `date`), with OHLCV columns and a composite index on `data_id, date DESC`
 - `feature_functions`: registry of callable implementations (`name`, `version`, `language`, `function_body`, `enabled`, `status`, `inputs`, `param_schema`, `output_name`, `output_type`), indexed on `enabled, status, name`
-- `feature_definitions`: configuration of what to compute (`name`, `function_name`, `params`, `source_table`, `source_column`, `store_table`, `active`)
+- `feature_definitions`: configuration of what to compute (`name`, `function_name`, `params`, `source_table`, `source_column`, `store_table`, `entity_table`, `active`)
 - `computed_features`: tall store for outputs (`data_id`, `date`, `feature_id`, `value`), composite index on `data_id, feature_id, date DESC`
+- `macro_series` / `macro_series_values`: catalog + raw values for market-level series (VIX, CPI, rates) — the first non-stock entity home
+
+### Entity resolution (spec 007)
+
+`computed_features.data_id` carries no hard foreign key. Entity identity is
+**declared**: each feature definition names its `entity_table` (default
+`'stocks'`), and the pair `(feature_definitions.entity_table,
+computed_features.data_id)` is the logical FK — resolved per feature, in-query.
+Two axes, deliberately separate:
+
+- `source_table` — what a computation **reads** (e.g. `stock_ohlcv`,
+  `macro_series_values`)
+- `entity_table` — who the value **belongs to** (e.g. `stocks`, `macro_series`)
+
+The invariants that replace the constraint:
+
+1. **Registration validates** — a feature cannot declare an entity table that
+   doesn't exist or lacks an integer `id` primary key
+   (`gefion.entities.registry`).
+2. **Integrity is detectable** — `gefion db-health` runs an orphan scan per
+   declared entity table (feature values whose `data_id` has no home).
+3. **Deletion is first-class** — `gefion data entity-delete` replaces the
+   retired FK cascade with a registry-driven, dependency-aware delete, uniform
+   across entity kinds.
+
+Loaders branch on the declared axis: the symbol-universe filter is a stocks
+concept and never applies to non-stock features; a single-entity series'
+market-level value is the value itself (the cross-sectional median
+degenerates). Cross-sectional peer groups remain stocks-only.
 
 ### Indexing Strategy
 
