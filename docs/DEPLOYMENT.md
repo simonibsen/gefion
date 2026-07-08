@@ -139,3 +139,19 @@ data. Guardrails are the point:
 - **Old deployments**: decommission fully (containers, volumes, repo → `.old`), but
   keep the old volume/dir until the new stack is verified. Fresh install + re-ingest
   beats in-place migration once schemas have drifted.
+- **DDL on compressed hypertables** (learned rolling out 007): TimescaleDB refuses
+  constraint changes on a hypertable with compression — and it's two separate walls:
+  compressed *chunks* AND the compression *setting* itself. Prod-only (dev/test DBs
+  aren't compressed), so a migration that passed every gate can still fail on sloth.
+  The sequence that works (007's FK drop, ~35 min for 41 GB raw):
+  1. Pause the compression policy: `SELECT alter_job(<job_id>, scheduled => false)`
+  2. Decompress: `SELECT decompress_chunk(format('%I.%I', chunk_schema, chunk_name)::regclass, true) FROM timescaledb_information.chunks WHERE hypertable_name = '<t>' AND is_compressed` (check `df -h` first: ~7-8× the compressed size)
+  3. **Record the settings** (`timescaledb_information.compression_settings`), then
+     `SELECT remove_compression_policy('<t>')` and `ALTER TABLE <t> SET (timescaledb.compress = false)`
+  4. Run `gefion db-migrate`
+  5. Restore compression with the recorded segmentby/orderby, re-add the policy —
+     then **pause the new job before any bulk write** (a freshly added policy fires
+     immediately and will deadlock a concurrent backfill; 007's VIX materialization
+     hit exactly this)
+  6. Bulk writes, then recompress:
+     `SELECT compress_chunk(..., true) ... WHERE NOT is_compressed AND range_end < now() - interval '30 days'`, re-enable the job, verify `df -h` is back.
