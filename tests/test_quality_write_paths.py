@@ -174,7 +174,8 @@ def test_macro_ingest_validates_against_the_series_stanza(conn):
                WHERE s.name = 'qwptest_vix' AND v.value = -3.0""")
         assert cur.fetchone()[0] == 1
     rows_f = findings.list_findings(conn, metric="vix",
-                                    entity_table="macro_series")
+                                    entity_table="macro_series",
+                                    entity_id=summary["series_id"])
     assert len(rows_f) == 1
     assert rows_f[0]["verdict"] == "trash"
     assert rows_f[0]["observed"] == -3.0
