@@ -89,8 +89,14 @@ class BacktestEngine:
         # Track peak equity for drawdown calculations
         self._peak_equity = initial_cash
 
+        # Short-holding-cost accumulators + margin events (spec 009)
+        self._borrow_total = 0.0
+        self._dividends_total = 0.0
+        self._margin_events: List[Dict[str, Any]] = []
+
         # Pre-process price data into efficient lookups
         self._prices_by_date = self._index_prices_by_date()
+        self._dividends_by_date = self._index_dividends_by_date()
         self._trading_dates = sorted(
             [d for d in self._prices_by_date.keys() if start_date <= d <= end_date]
         )
@@ -111,6 +117,42 @@ class BacktestEngine:
             prices_by_date[row_date][symbol] = close
 
         return dict(prices_by_date)
+
+    def _index_dividends_by_date(self) -> Dict[date, Dict[str, float]]:
+        """Index per-share dividend amounts by date (spec 009 — shorts owe
+        dividends to the lender). Absent field → no dividend."""
+        divs: Dict[date, Dict[str, float]] = defaultdict(dict)
+        for row in self.price_data:
+            amt = row.get("dividend_amount")
+            if amt:
+                divs[row["date"]][row["symbol"]] = float(amt)
+        return dict(divs)
+
+    def _accrue_short_holding_costs(
+        self, portfolio, current_prices: Dict[str, float], current_date: date
+    ) -> None:
+        """Charge borrow fees and dividends owed on open shorts for this day.
+
+        Debited from cash so mark-to-market equity reflects them. A no-op when
+        there are no shorts (long_only never enters here) — the reproducibility
+        gate is preserved.
+        """
+        day_divs = self._dividends_by_date.get(current_date, {})
+        for symbol, position in portfolio.positions.items():
+            if position["shares"] >= 0:
+                continue
+            shares = position["shares"]                 # negative
+            price = current_prices.get(symbol, position["avg_price"])
+            if self.costs is not None:
+                fee = self.costs.daily_borrow_fee(shares, price)
+                if fee:
+                    portfolio.cash -= fee
+                    self._borrow_total += fee
+            div = day_divs.get(symbol)
+            if div:
+                owed = abs(shares) * div
+                portfolio.cash -= owed
+                self._dividends_total += owed
 
     def _get_historical_prices(self, current_date: date) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -195,6 +237,17 @@ class BacktestEngine:
                 )
                 if executed_trade:
                     trades.append(executed_trade)
+                    # A risk-driven forced cover on a losing short is a margin
+                    # event (spec 009) — bounds unbounded loss, logged.
+                    if (executed_trade.get("action") == "cover"
+                            and signal.get("reason") == "stop_loss"):
+                        pnl = executed_trade.get("pnl", 0.0)
+                        self._margin_events.append({
+                            "date": current_date,
+                            "symbol": executed_trade["symbol"],
+                            "loss": max(0.0, -pnl),
+                            "action": "forced_cover",
+                        })
 
             # 2. Get strategy signals
             strategy_signals = self.strategy(
@@ -214,6 +267,10 @@ class BacktestEngine:
                 )
                 if executed_trade:
                     trades.append(executed_trade)
+
+            # Short holding costs (borrow fee + dividends owed) accrue for
+            # positions held through the day, before equity is marked.
+            self._accrue_short_holding_costs(portfolio, current_prices, current_date)
 
             # Record equity for this date
             equity = portfolio.calculate_equity(current_prices)
@@ -240,7 +297,10 @@ class BacktestEngine:
         )
 
         return {"trades": trades, "equity_curve": equity_curve,
-                "metrics": metrics, "mode": self.mode}
+                "metrics": metrics, "mode": self.mode,
+                "short_costs": {"borrow_total": self._borrow_total,
+                                "dividends_total": self._dividends_total},
+                "margin_events": self._margin_events}
 
     def _execute_signal(
         self,
