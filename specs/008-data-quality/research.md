@@ -66,6 +66,22 @@ missing-data path; no consumer grows new semantics.
 view indirection in 007 for good reason: fix the model, not the lens); deleting
 convicted rows (out of scope by spec: flag, don't rewrite history).
 
+**Amendment (US2 implementation, 2026-07-08 — owner-approved "chokepoint"
+approach)**: implementation found that `stocks_fundamentals` — the table holding
+every convicted value — is *consumer-less today* (007's own feeds graph flagged
+it): no feature definition reads it, and cross-sectional compute / dataset build
+read `computed_features`, which the fundamentals garbage never reaches. So the
+per-downstream-consumer exclusion the spec described would, for fundamentals,
+protect nothing real yet. Exclusion therefore moved UP to the single
+feature-computation chokepoint: the dispatcher's generic-table source fetch
+(`_fetch_from_generic_table`) drops convicted `(data_id, column, date)` values,
+and macro materialization excludes convicted series values before they enter
+`computed_features`. This keeps every current AND future consumer clean in one
+place (the "no distributed vigilance" principle), and the one live convicted-data
+path today — `macro_vix` reading `macro_series_values.value` — is protected
+end-to-end. `--include-flagged` opts a macro series back in. Downstream consumers
+inherit a clean feature store rather than each re-implementing the filter.
+
 ## R4 — Cross-field tolerance semantics
 
 **Decision**: tier 2 convicts when observed and recomputed disagree by more than a

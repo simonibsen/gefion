@@ -11755,21 +11755,28 @@ def macro_ingest(
     kind: str = typer.Option("index", "--kind", help="index | rate | breadth | …"),
     cadence: str = typer.Option("daily", "--cadence", help="daily | weekly | monthly"),
     full: bool = typer.Option(False, "--full", help="Decades backfill vs incremental"),
+    include_flagged: bool = typer.Option(
+        False, "--include-flagged",
+        help="Carry data-quality-convicted values into the feature anyway "
+             "(default: convicted values are excluded from the feature)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
 ) -> None:
     """Ingest a macro series and materialize its feature.
 
     Catalog row (configuration, not schema) → provider fetch → value upsert →
-    `macro_<name>` feature definition (entity_table='macro_series') landing in
-    computed_features, ready for discovery atoms and regime expressions.
+    data-quality validation → `macro_<name>` feature definition
+    (entity_table='macro_series') landing in computed_features. Values
+    convicted as provider trash (e.g. a VIX <= 0) are excluded from the
+    feature by default; the raw value stays verbatim in macro_series_values.
     """
     from gefion.macro.ingest import MacroIngestError, ingest_series
     out = get_output(json_output)
     with _regime_conn(db_url) as conn:
         try:
             summary = ingest_series(conn, name, provider=provider, kind=kind,
-                                    cadence=cadence, full=full)
+                                    cadence=cadence, full=full,
+                                    include_flagged=include_flagged)
             out.success(
                 f"Ingested {summary['values_upserted']} value(s) into "
                 f"macro series '{name}' and materialized "

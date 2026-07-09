@@ -1319,30 +1319,37 @@ def _fetch_from_generic_table(
     start_date: Optional[date],
 ) -> List[Dict[str, Any]]:
     """Fetch from a generic table."""
-    query = sql.SQL("""
-    SELECT date, {column}
-    FROM {table}
-    WHERE data_id = %s
-    """).format(
-        table=sql.Identifier(table),
-        column=sql.Identifier(column),
-    )
-
-    query_params = [data_id]
+    # Compose with sql.Composed parts — str()-ing a Composed yields its repr,
+    # not SQL (the bug this path carried until spec 008 began relying on it).
+    parts = [sql.SQL("SELECT date, {column} FROM {table} WHERE data_id = %s").format(
+        table=sql.Identifier(table), column=sql.Identifier(column))]
+    query_params: List[Any] = [data_id]
 
     if start_date:
-        query = sql.SQL(str(query) + " AND date > %s")
+        parts.append(sql.SQL(" AND date > %s"))
         query_params.append(start_date)
 
-    query = sql.SQL(str(query) + " ORDER BY date")
+    parts.append(sql.SQL(" ORDER BY date"))
+    query = sql.SQL(" ").join(parts)
 
     with conn.cursor() as cur:
         cur.execute(query, query_params)
         rows = cur.fetchall()
 
+    # Data quality (spec 008): drop source values convicted as provider trash
+    # so they never enter the feature store — the single chokepoint that keeps
+    # every downstream consumer clean. Guarded: a quality-check failure must
+    # never break feature computation.
+    try:
+        from gefion.quality import exclusions
+        skip = exclusions.convicted_dates(conn, table, data_id, column)
+    except Exception:  # pragma: no cover - defensive
+        skip = set()
+
     return [
         {'date': row[0], 'value': row[1]}
         for row in rows
+        if row[0] not in skip
     ]
 
 

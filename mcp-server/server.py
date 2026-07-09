@@ -2015,6 +2015,9 @@ async def list_tools() -> List[Tool]:
                     "kind": {"type": "string", "description": "index | rate | breadth"},
                     "cadence": {"type": "string", "description": "daily | weekly | monthly"},
                     "full": {"type": "boolean", "description": "Decades backfill"},
+                    "include_flagged": {"type": "boolean",
+                                        "description": "Carry quality-convicted "
+                                        "values into the feature (default: excluded)"},
                 },
                 "required": ["name"],
             },
@@ -5015,6 +5018,8 @@ async def _macro_ingest(args: Dict[str, Any]) -> Dict[str, Any]:
                 cmd.extend([f"--{opt}", str(args[opt])])
         if args.get("full"):
             cmd.append("--full")
+        if args.get("include_flagged"):
+            cmd.append("--include-flagged")
         return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
