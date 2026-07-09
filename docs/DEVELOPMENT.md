@@ -110,6 +110,25 @@ Releases are fully automated (issue #30) — no manual bumping or tagging.
 - Wrap JSONB values with `Json()` adapter for PostgreSQL
 - Use `gefion.db.pool` for connection pooling in parallel operations
 
+## Where work lives (tracking convention)
+
+Three homes, one rule each — so "where does this go?" is never ambiguous:
+
+- **GitHub Issues** = the single tracker for anything *actionable*: bugs and
+  discrete enhancements. Global state (not per-branch), closeable from a commit
+  (`Closes #N`). Use labels: `bug` / `enhancement` / `tech-debt`, `epic` for
+  spec-worthy features, and `priority: high|medium|low`.
+- **`specs/NNN-*/`** = the design home. When an `epic` issue is ripe, it
+  graduates to a spec (spec ⇄ issue cross-link). Designs stay in the repo,
+  reviewed through PRs.
+- **`.specify/memory/backlog.md`** = a thin roadmap **pointer** only (links to
+  open issues + in-flight specs + explicit out-of-scope decisions). It is *not*
+  a worklist — don't add actionable items there; file an issue.
+
+Why not a checked-in worklist: per-branch state drifts (done on one branch, open
+on another) and can't be closed by a PR. State belongs in issues; design belongs
+in `specs/`. (Migration: 2026-07-09, backlog.md items → issues #86–#90.)
+
 ## Patterns & Gotchas (living reference)
 
 > **This is a living document.** When you rediscover a convention or hit a gotcha during
