@@ -48,6 +48,7 @@ class MLFilterStrategy:
         # Classifier filter params
         allowed_classes: Optional[List[str]] = None,
         min_confidence: float = 0.4,
+        mode: str = "long_only",
         # Database
         db_url: Optional[str] = None,
     ):
@@ -77,6 +78,11 @@ class MLFilterStrategy:
         self.horizon_days = horizon_days
         self.filter_mode = filter_mode
         self.prediction_type = prediction_type
+        # spec 009: propagate mode so the base strategy emits short/cover; the
+        # filter passes short/cover through like sells (see generate_signals).
+        self.mode = mode
+        if hasattr(self.base_strategy, "mode"):
+            self.base_strategy.mode = mode
 
         # Quantile params
         self.min_q50 = min_q50
@@ -150,8 +156,10 @@ class MLFilterStrategy:
         # Filter signals
         filtered = []
         for signal in base_signals:
-            # Always pass through sell signals
-            if signal["action"] == "sell":
+            # Always pass through exit/short signals (sell, cover, short) — the
+            # ML filter gates entries into longs, not the base strategy's
+            # bearish decisions (spec 009).
+            if signal["action"] in ("sell", "cover", "short"):
                 filtered.append(signal)
                 continue
 

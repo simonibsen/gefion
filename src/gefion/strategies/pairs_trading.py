@@ -57,6 +57,7 @@ class PairsTradingStrategy:
         exit_zscore: float = 0.5,
         position_size: float = 0.2,
         max_pairs: int = 3,
+        mode: str = "long_only",
     ):
         """
         Initialize pairs trading strategy.
@@ -73,6 +74,9 @@ class PairsTradingStrategy:
         self.exit_zscore = exit_zscore
         self.position_size = position_size
         self.max_pairs = max_pairs
+        # spec 009: in long_short the short leg is a real short (short/cover);
+        # in long_only it falls back to the legacy sell-to-open (held-only).
+        self.mode = mode
 
     def generate_signals(
         self,
@@ -141,7 +145,7 @@ class PairsTradingStrategy:
                     shares = portfolio[symbol1]["shares"]
                     if shares != 0:
                         signals.append({
-                            "action": "sell" if shares > 0 else "buy",
+                            "action": "sell" if shares > 0 else "cover",
                             "symbol": symbol1,
                             "shares": abs(shares),
                             "reason": f"exit pair (z-score: {pair_spread['zscore']:.2f})",
@@ -151,7 +155,7 @@ class PairsTradingStrategy:
                     shares = portfolio[symbol2]["shares"]
                     if shares != 0:
                         signals.append({
-                            "action": "sell" if shares > 0 else "buy",
+                            "action": "sell" if shares > 0 else "cover",
                             "symbol": symbol2,
                             "shares": abs(shares),
                             "reason": f"exit pair (z-score: {pair_spread['zscore']:.2f})",
@@ -195,9 +199,10 @@ class PairsTradingStrategy:
                     shares1 = int(shares2 * hedge_ratio)
 
                     if shares1 > 0 and shares2 > 0:
-                        # Short symbol1
+                        # Short symbol1 (a real short in long_short; legacy
+                        # sell-to-open in long_only)
                         signals.append({
-                            "action": "sell",
+                            "action": "short" if self.mode == "long_short" else "sell",
                             "symbol": symbol1,
                             "shares": shares1,
                             "reason": f"enter pair short (z-score: {info['zscore']:.2f})",
@@ -222,9 +227,9 @@ class PairsTradingStrategy:
                             "shares": shares1,
                             "reason": f"enter pair long (z-score: {info['zscore']:.2f})",
                         })
-                        # Short symbol2
+                        # Short symbol2 (real short in long_short)
                         signals.append({
-                            "action": "sell",
+                            "action": "short" if self.mode == "long_short" else "sell",
                             "symbol": symbol2,
                             "shares": shares2,
                             "reason": f"enter pair short (z-score: {info['zscore']:.2f})",

@@ -41,6 +41,60 @@ def test_mean_reversion_defaults_to_long_only():
     assert strat.mode == "long_only"
 
 
+def _series(symbol, closes, start=D(2025, 1, 1)):
+    return [{"symbol": symbol, "date": start + dt.timedelta(days=i), "close": c}
+            for i, c in enumerate(closes)]
+
+
+def test_momentum_shorts_losers_in_long_short():
+    from gefion.strategies.momentum import MomentumStrategy
+    price_data = {
+        "UP": _series("UP", [100.0 + i for i in range(25)]),     # rising winner
+        "DN": _series("DN", [100.0 - i * 2 for i in range(25)]),  # falling loser
+    }
+    strat = MomentumStrategy(lookback_days=20, top_n=2, mode="long_short")
+    sigs = strat.generate_signals(
+        current_date=price_data["UP"][-1]["date"], portfolio={},
+        price_data=price_data, initial_cash=10_000.0)
+    assert any(s["action"] == "short" and s["symbol"] == "DN" for s in sigs)
+    assert any(s["action"] == "buy" and s["symbol"] == "UP" for s in sigs)
+
+
+def test_momentum_long_only_never_shorts():
+    from gefion.strategies.momentum import MomentumStrategy
+    price_data = {
+        "UP": _series("UP", [100.0 + i for i in range(25)]),
+        "DN": _series("DN", [100.0 - i * 2 for i in range(25)]),
+    }
+    strat = MomentumStrategy(lookback_days=20, top_n=2, mode="long_only")
+    sigs = strat.generate_signals(
+        current_date=price_data["UP"][-1]["date"], portfolio={},
+        price_data=price_data, initial_cash=10_000.0)
+    assert all(s["action"] != "short" for s in sigs)
+
+
+def test_all_six_strategies_default_to_long_only():
+    from gefion.strategies.momentum import MomentumStrategy
+    from gefion.strategies.breakout import BreakoutStrategy
+    from gefion.strategies.pairs_trading import PairsTradingStrategy
+    from gefion.strategies.ml_signal import MLSignalStrategy
+    from gefion.strategies.ml_filter import MLFilterStrategy
+    assert MomentumStrategy().mode == "long_only"
+    assert MeanReversionStrategy().mode == "long_only"
+    assert BreakoutStrategy().mode == "long_only"
+    assert PairsTradingStrategy().mode == "long_only"
+    assert MLSignalStrategy().mode == "long_only"
+    assert MLFilterStrategy().mode == "long_only"
+
+
+def test_ml_filter_propagates_mode_to_base_strategy():
+    from gefion.strategies.momentum import MomentumStrategy
+    from gefion.strategies.ml_filter import MLFilterStrategy
+    base = MomentumStrategy()
+    f = MLFilterStrategy(base_strategy=base, mode="long_short")
+    assert base.mode == "long_short"      # propagated so the base shorts
+
+
 def test_backtest_run_cli_exposes_mode_flag():
     from typer.testing import CliRunner
     from gefion.cli import app
