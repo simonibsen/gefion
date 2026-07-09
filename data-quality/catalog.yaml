@@ -1,0 +1,140 @@
+# Data-quality validation catalog (spec 008).
+#
+# Configuration, not code: adding or tuning a metric's rules is an edit here
+# (SC-306). Every bounds stanza carries a `why` — the definitional argument
+# for the envelope — so no bound is a magic number.
+#
+# Only tiers 1–2 (bounds, derivation) can convict; the defaults below also
+# parameterize the corroboration tiers (suspect only).
+
+defaults:
+  tolerance_factor: 10        # tier 2: convict beyond this observed/recomputed magnitude ratio
+  spike_factor: 100           # tier 3: neighbor-magnitude multiple that marks an episodic spike
+  robust_z_threshold: 10      # tier 4: |v - median| / (1.4826 * MAD) beyond this -> suspect
+
+metrics:
+  beta:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: beta
+    bounds: {min: -50, max: 50}
+    why: >
+      Beta is a regression slope of asset vs market returns; empirically
+      |beta| rarely exceeds 5 and never ~50 for anything traded. Observed
+      garbage: -503341.44 (MDXH), -165013.73 (ELOX), 2026-07-08.
+
+  dividend_yield:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: dividend_yield
+    bounds: {min: 0, max: 2.0}
+    derivation:
+      expression: dividend_per_share / close
+      inputs: [overview.DividendPerShare, stock_ohlcv.close]
+    why: >
+      Yield is dividend/price; 200% is generous even for imminent delisting.
+      Observed garbage: 1000000.0 (CTAA), 2026-07-08.
+
+  pe_ratio:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: pe_ratio
+    bounds: {min: -10000, max: 10000}
+    derivation:
+      expression: close / eps
+      inputs: [stock_ohlcv.close, stocks_fundamentals.eps]
+    why: >
+      Price/earnings explodes legitimately near zero EPS, so the envelope is
+      loose — it exists to catch sign-flipped or scaled-by-1e6 nonsense only.
+
+  forward_pe:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: forward_pe
+    bounds: {min: -10000, max: 10000}
+    why: Same definition class as pe_ratio (price over estimated earnings).
+
+  peg_ratio:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: peg_ratio
+    bounds: {min: -1000, max: 1000}
+    why: >
+      PE over growth; both terms can be small, so loose — but |PEG| beyond
+      the hundreds has no definitional reading.
+
+  book_value:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: book_value
+    bounds: {min: -100000, max: 1000000}
+    why: >
+      Book value per share in dollars; the highest real per-share book values
+      (BRK.A class) sit in the hundreds of thousands. Negative equity is real
+      but bounded.
+
+  eps:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: eps
+    bounds: {min: -100000, max: 100000}
+    why: >
+      Dollars per share; extreme losses per share exist for tiny-float
+      shells, so the envelope is wide — beyond ±1e5 is pipeline garbage.
+
+  revenue_per_share:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: revenue_per_share
+    bounds: {min: 0, max: 1000000}
+    why: Revenue cannot be negative; per-share values beyond 1e6 are garbage.
+
+  profit_margin:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: profit_margin
+    bounds: {min: -100000, max: 1000}
+    why: >
+      Net income / revenue. Near-zero revenue legitimately produces margins
+      in the +/- thousands (the 2026-07-07 lesson), so the floor is very
+      loose; a margin above ~1000x revenue has no definitional reading.
+
+  operating_margin:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: operating_margin
+    bounds: {min: -100000, max: 1000}
+    why: Same definition class as profit_margin (ratio to near-zero revenue).
+
+  return_on_equity:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: return_on_equity
+    bounds: {min: -100000, max: 100000}
+    why: >
+      Income / equity with near-zero (or negative) equity legitimately lands
+      in the +/- thousands — shells report ROE -615% routinely. The envelope
+      exists only for scaled-by-1e6 pipeline faults.
+
+  ev_to_ebitda:
+    entity_table: stocks
+    table: stocks_fundamentals
+    column: ev_to_ebitda
+    bounds: {min: -100000, max: 100000}
+    why: EBITDA near zero explodes the ratio legitimately; loose envelope.
+
+  vix:
+    entity_table: macro_series
+    table: macro_series_values
+    column: value
+    series: vix
+    bounds: {min: 0.01, max: 200}
+    why: >
+      A volatility index is strictly positive; the all-time intraday extreme
+      is ~90 (2008). 200 leaves headroom for regime breaks; <= 0 is trash.
+
+universe:
+  # NASDAQ's published test-symbol family — configuration, not code.
+  test_tickers: [ZVZZT, ZWZZT, ZXZZT, ZJZZT, ZBZX, ZTEST, ZAZZT, ZBZZT, ZCZZT]
+  selectors:
+    asset_type_common: "asset_type = 'Common Stock'"
