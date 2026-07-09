@@ -265,10 +265,19 @@ class BacktestEngine:
         symbol = signal.get("symbol")
         shares = signal.get("shares", 0)
 
+        # Short-side actions require long_short mode; in long_only they are
+        # dropped (like any unrecognized action) — the reproducibility gate.
+        if action in ("short", "cover") and self.mode != "long_short":
+            return None
+
         if symbol not in current_prices:
             return None
 
         price = current_prices[symbol]
+
+        # Market direction for slippage/cost purposes: a short is a sell, a
+        # cover is a buy.
+        market_action = {"short": "sell", "cover": "buy"}.get(action, action)
 
         # Get volume and volatility if available
         daily_volume = self.volume_data.get(symbol, {}).get(current_date)
@@ -292,7 +301,7 @@ class BacktestEngine:
             slipped_price = self.slippage.calculate_execution_price(
                 order_price=price,
                 shares=shares,
-                action=action,
+                action=market_action,
                 daily_volume=daily_volume,
                 volatility=volatility,
             )
@@ -329,6 +338,32 @@ class BacktestEngine:
                     costs=self.costs,
                     daily_volume=daily_volume,
                 )
+            elif action == "short":
+                portfolio.short(
+                    symbol=symbol,
+                    shares=shares,
+                    price=execution_price,
+                    date=current_date,
+                    costs=self.costs,
+                    daily_volume=daily_volume,
+                )
+            elif action == "cover":
+                # Don't cover more than the open short.
+                position = portfolio.get_position(symbol)
+                open_short = -int(position.get("shares", 0))
+                shares = min(shares, open_short)
+                if shares <= 0:
+                    return None
+                # Capture entry before the cover mutates the position.
+                avg_entry = float(position.get("avg_price", 0.0))
+                portfolio.cover(
+                    symbol=symbol,
+                    shares=shares,
+                    price=execution_price,
+                    date=current_date,
+                    costs=self.costs,
+                    daily_volume=daily_volume,
+                )
             else:
                 return None
 
@@ -344,13 +379,18 @@ class BacktestEngine:
                 # Realized pnl — trade metrics (win_rate, profit_factor)
                 # are meaningless without it
                 trade["pnl"] = (execution_price - avg_cost) * shares
+            elif action == "cover":
+                # A short profits when the price falls: entry − exit.
+                trade["pnl"] = (avg_entry - execution_price) * shares
+            if action in ("short", "cover"):
+                trade["side"] = "short"
             if signal.get("reason"):
                 trade["reason"] = signal["reason"]
             if self.slippage and execution_price != price:
                 trade["slippage"] = execution_price - price
             if self.costs:
                 trade["cost"] = self.costs.calculate_cost(
-                    shares, execution_price, action, daily_volume
+                    shares, execution_price, market_action, daily_volume
                 )
 
             return trade

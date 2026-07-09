@@ -182,6 +182,113 @@ class Portfolio:
             tx_record["cost"] = tx_cost
         self.transactions.append(tx_record)
 
+    def short(
+        self,
+        symbol: str,
+        shares: int,
+        price: float,
+        date: date,
+        costs: Optional["TransactionCosts"] = None,
+        daily_volume: Optional[int] = None,
+    ) -> None:
+        """
+        Open or increase a short position (spec 009).
+
+        Sells borrowed shares: the position size goes negative and proceeds
+        (net of transaction costs) are credited to cash. The short gains as the
+        price falls. `calculate_equity` already marks `shares × price`
+        correctly for negative shares, so no special mark-to-market is needed.
+
+        Raises:
+            ValueError: if the symbol already holds a long position (a flip
+                must explicitly close the long first — spec edge case).
+        """
+        existing = self.positions.get(symbol)
+        if existing is not None and existing["shares"] > 0:
+            raise ValueError(
+                f"Cannot short {symbol}: holds a long position of "
+                f"{existing['shares']} — close it first")
+
+        gross_proceeds = shares * price
+        tx_cost = 0.0
+        if costs is not None:
+            # A short is a sell for cost purposes.
+            tx_cost = costs.calculate_cost(shares, price, "sell", daily_volume)
+        self.cash += gross_proceeds - tx_cost
+
+        if existing is not None:  # averaging into an existing short
+            total_short = -existing["shares"] + shares
+            weighted = (-existing["shares"] * existing["avg_price"]) + gross_proceeds
+            self.positions[symbol] = {"shares": -total_short,
+                                      "avg_price": weighted / total_short}
+        else:
+            self.positions[symbol] = {"shares": -shares, "avg_price": price}
+
+        tx_record = {
+            "action": "short",
+            "symbol": symbol,
+            "shares": shares,
+            "price": price,
+            "date": date,
+            "value": gross_proceeds,
+        }
+        if tx_cost > 0:
+            tx_record["cost"] = tx_cost
+        self.transactions.append(tx_record)
+
+    def cover(
+        self,
+        symbol: str,
+        shares: int,
+        price: float,
+        date: date,
+        costs: Optional["TransactionCosts"] = None,
+        daily_volume: Optional[int] = None,
+    ) -> None:
+        """
+        Cover (buy back) part or all of a short position (spec 009).
+
+        Debits the buy-back cost, realizes `(entry − exit) × covered` P&L, and
+        reduces the negative position toward zero. Covering more than the open
+        short is clamped — a cover never flips into a long.
+
+        Raises:
+            ValueError: if there is no short position in the symbol.
+        """
+        position = self.positions.get(symbol)
+        if position is None or position["shares"] >= 0:
+            raise ValueError(f"No short position in {symbol} to cover")
+
+        open_short = -position["shares"]
+        shares = min(shares, open_short)               # clamp — never flip long
+
+        gross_cost = shares * price
+        tx_cost = 0.0
+        if costs is not None:
+            # Covering is a buy for cost purposes.
+            tx_cost = costs.calculate_cost(shares, price, "buy", daily_volume)
+        self.cash -= gross_cost + tx_cost
+
+        avg_entry = position["avg_price"]
+        realized_pnl = (avg_entry - price) * shares    # short profits price-down
+
+        position["shares"] += shares                   # toward zero (shares<0)
+        if position["shares"] == 0:
+            del self.positions[symbol]
+
+        tx_record = {
+            "action": "cover",
+            "symbol": symbol,
+            "shares": shares,
+            "price": price,
+            "date": date,
+            "value": gross_cost,
+            "realized_pnl": realized_pnl,
+        }
+        if tx_cost > 0:
+            tx_record["cost"] = tx_cost
+        self.transactions.append(tx_record)
+
     def calculate_equity(self, current_prices: Dict[str, float]) -> float:
         """
         Calculate mark-to-market equity with current prices.
