@@ -150,6 +150,8 @@ Before exiting plan mode, verify:
 - PostgreSQL + TimescaleDB. Changes — `feature_definitions.entity_table` (007-entity-model)
 - Python 3.10+ (existing codebase) + psycopg (ledger + reads), numpy (robust z: median/MAD), (008-data-quality)
 - PostgreSQL + TimescaleDB. ONE new table — `data_quality_findings` (008-data-quality)
+- Python 3.10+ (existing codebase) + numpy (metrics), existing `gefion.backtest` package (009-short-side-execution)
+- **None new.** Backtests run in-memory and return a result payload; (009-short-side-execution)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)
