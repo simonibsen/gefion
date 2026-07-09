@@ -4,7 +4,25 @@
 
 ## Current Capabilities
 
-### Data Quality (spec 008 — new)
+### Short-Side Execution (spec 009 — new)
+- gefion detects both directions but until 009 could only *act* long; now
+  `gefion backtest run --mode long_short` makes a short a first-class position
+  so negative-directionality edges are actable
+- Signed positions (Portfolio.short/cover); the existing calculate_equity marks
+  shares×price, already correct for negatives; short P&L is (entry−exit)×size
+- Honestly costed & risk-bounded: borrow fee accrues daily, dividends owed while
+  short, Reg-T margin + forced-cover guardrail (margin_events), exposure limits;
+  equity may go negative (represented, not clamped)
+- Metrics correct under shorts (a winning short is price-down); gross/net/long/
+  short exposure series
+- All six strategies emit short/cover on their bearish branch (mode-gated);
+  pairs_trading is genuinely long-short; ml_signal/ml_filter short on down-class
+  / low q10
+- `long_only` (default) is byte-identical to pre-009 (SC-902 regression gate);
+  short is opt-in and recorded. Live/paper trading stays out of scope — gefion
+  emits validated signals, it doesn't trade
+
+### Data Quality (spec 008)
 - Provider-garbage detection without losing degenerate-but-real extremes:
   a declarative catalog (`data-quality/catalog.yaml`, every bound carrying its
   `why`) drives two convicting tiers (definitional bounds, cross-field

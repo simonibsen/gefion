@@ -23,7 +23,7 @@ existing long-only results.
 
 ## Phase 1: Setup
 
-- [ ] T001 Add a `mode` parameter (`long_only` default) plumbed through `BacktestEngine.__init__`/`run` and the strategy call site in `src/gefion/backtest/engine.py` — inert until later phases consume it (no behavior change yet; the seam only)
+- [x] T001 Add a `mode` parameter (`long_only` default) plumbed through `BacktestEngine.__init__`/`run` and the strategy call site in `src/gefion/backtest/engine.py` — inert until later phases consume it (no behavior change yet; the seam only)
 
 ## Phase 2: US2 — Long-only reproducibility harness (P1) 🎯 the safety gate
 
@@ -32,8 +32,8 @@ short code exists, and keep it locked as short paths are added.
 **Independent test**: run reference strategies in default mode; equity curve,
 metrics, and trades match a captured baseline exactly.
 
-- [ ] T002 Write `tests/test_backtest_long_only_regression.py`: for a set of seeded strategies/datasets, assert the full result (equity curve points, metrics, trade log) equals a committed reference fixture; and that `mode` defaults to `long_only` when unspecified (RED — reference fixtures captured from current `main`)
-- [ ] T003 Capture the reference fixtures from current behavior and make the harness GREEN with the T001 seam in place (proves the mode seam changed nothing); this file is the SC-902 gate re-run in every later phase
+- [x] T002 Write `tests/test_backtest_long_only_regression.py`: for a set of seeded strategies/datasets, assert the full result (equity curve points, metrics, trade log) equals a committed reference fixture; and that `mode` defaults to `long_only` when unspecified (RED — reference fixtures captured from current `main`)
+- [x] T003 Capture the reference fixtures from current behavior and make the harness GREEN with the T001 seam in place (proves the mode seam changed nothing); this file is the SC-902 gate re-run in every later phase
 
 **Checkpoint**: a green, committed byte-identical baseline exists; all subsequent
 phases must keep it green.
@@ -47,10 +47,10 @@ closes a short correctly — the mirror of a long.
 **Independent test**: short a price that falls 10% and cover → +10% of notional
 (minus costs); rising 10% → −10%.
 
-- [ ] T004 [US1] Write `tests/test_backtest_short_positions.py`: `Portfolio.short` opens a negative position and credits proceeds; `calculate_equity` marks it up as price falls (research R1); `cover` realizes `(entry−exit)×size` and records a short round-trip; partial cover attributes P&L pro-rata; a cover never flips into a long (clamped); flip long→short requires explicit close+open (RED)
-- [ ] T005 [US1] Implement `Portfolio.short`/`Portfolio.cover` (signed positions) in `src/gefion/backtest/portfolio.py`; leave `buy`/`sell` untouched (GREEN)
-- [ ] T006 [US1] Write `tests/test_backtest_short_positions.py` (engine part): `_execute_signal` routes `short`/`cover` in `long_short` mode and drops them in `long_only`; the trade log carries `side`/`action` (RED)
-- [ ] T007 [US1] Implement `short`/`cover` routing + mode gate in `src/gefion/backtest/engine.py::_execute_signal` (GREEN); rerun the T002 regression harness — long_only still byte-identical
+- [x] T004 [US1] Write `tests/test_backtest_short_positions.py`: `Portfolio.short` opens a negative position and credits proceeds; `calculate_equity` marks it up as price falls (research R1); `cover` realizes `(entry−exit)×size` and records a short round-trip; partial cover attributes P&L pro-rata; a cover never flips into a long (clamped); flip long→short requires explicit close+open (RED)
+- [x] T005 [US1] Implement `Portfolio.short`/`Portfolio.cover` (signed positions) in `src/gefion/backtest/portfolio.py`; leave `buy`/`sell` untouched (GREEN)
+- [x] T006 [US1] Write `tests/test_backtest_short_positions.py` (engine part): `_execute_signal` routes `short`/`cover` in `long_short` mode and drops them in `long_only`; the trade log carries `side`/`action` (RED)
+- [x] T007 [US1] Implement `short`/`cover` routing + mode gate in `src/gefion/backtest/engine.py::_execute_signal` (GREEN); rerun the T002 regression harness — long_only still byte-identical
 
 ---
 
@@ -61,10 +61,10 @@ owed, buying-power consumption, and a forced-cover guardrail.
 **Independent test**: hold a short across a borrow window and an ex-div date →
 equity reflects both; drive loss past maintenance → forced-cover event fires.
 
-- [ ] T008 [US3] Write `tests/test_backtest_short_costs.py`: a short held D days accrues `shares×price×rate/252` per day (equity reduced); a short across an ex-dividend date is debited the dividend (from `stock_ohlcv.dividend_amount`); commission/spread/impact/slippage apply symmetrically to `short`/`cover` (RED)
-- [ ] T009 [US3] Extend `src/gefion/backtest/costs.py` (borrow rate + `accrue_borrow`) and wire the daily borrow accrual + ex-div dividend debit into `src/gefion/backtest/engine.py`'s per-bar loop (GREEN)
-- [ ] T010 [US3] Write `tests/test_backtest_short_risk.py`: a short exceeding buying power is rejected/sized down and recorded; a short breaching maintenance margin emits a logged `forced_cover` margin-event (reusing the engine's exit-signal-first seam); `max_gross_exposure`/`max_short_exposure` constrain new shorts; equity may go negative (represented, not clamped — research R9) (RED)
-- [ ] T011 [US3] Extend `src/gefion/backtest/risk.py` (`RiskManager`: Reg-T buying power, short exposure limits, forced-cover exit signals) and wire into the engine (GREEN); regression harness still green
+- [x] T008 [US3] Write `tests/test_backtest_short_costs.py`: a short held D days accrues `shares×price×rate/252` per day (equity reduced); a short across an ex-dividend date is debited the dividend (from `stock_ohlcv.dividend_amount`); commission/spread/impact/slippage apply symmetrically to `short`/`cover` (RED)
+- [x] T009 [US3] Extend `src/gefion/backtest/costs.py` (borrow rate + `accrue_borrow`) and wire the daily borrow accrual + ex-div dividend debit into `src/gefion/backtest/engine.py`'s per-bar loop (GREEN)
+- [x] T010 [US3] Write `tests/test_backtest_short_risk.py`: a short exceeding buying power is rejected/sized down and recorded; a short breaching maintenance margin emits a logged `forced_cover` margin-event (reusing the engine's exit-signal-first seam); `max_gross_exposure`/`max_short_exposure` constrain new shorts; equity may go negative (represented, not clamped — research R9) (RED)
+- [x] T011 [US3] Extend `src/gefion/backtest/risk.py` (`RiskManager`: Reg-T buying power, short exposure limits, forced-cover exit signals) and wire into the engine (GREEN); regression harness still green
 
 ---
 
@@ -75,8 +75,8 @@ visible.
 **Independent test**: a short-only strategy over a declining market reports
 positive return and win rate reconciling to the equity curve.
 
-- [ ] T012 [US4] Write `tests/test_backtest_short_metrics.py`: a short round-trip with entry>exit counts as a win and raises `profit_factor`; drawdown/returns reconcile to the (signed-correct) equity curve on a mixed long-short run; gross/net/long/short `exposure` series is emitted; the no-losses `profit_factor=0` convention is unchanged (RED)
-- [ ] T013 [US4] Implement short-aware per-trade P&L sign and the exposure series in `src/gefion/backtest/metrics.py` (GREEN); regression harness still green (long-only metrics unchanged)
+- [x] T012 [US4] Write `tests/test_backtest_short_metrics.py`: a short round-trip with entry>exit counts as a win and raises `profit_factor`; drawdown/returns reconcile to the (signed-correct) equity curve on a mixed long-short run; gross/net/long/short `exposure` series is emitted; the no-losses `profit_factor=0` convention is unchanged (RED)
+- [x] T013 [US4] Implement short-aware per-trade P&L sign and the exposure series in `src/gefion/backtest/metrics.py` (GREEN); regression harness still green (long-only metrics unchanged)
 
 ---
 
@@ -87,19 +87,19 @@ the mode/params reach CLI + MCP + docs in the same increment.
 **Independent test**: each strategy shorts in `long_short` on its bearish trigger
 and flattens on the same trigger in `long_only`.
 
-- [ ] T014 [US5] Write `tests/test_strategies_short_side.py`: each of `mean_reversion` (short overbought), `momentum` (short losers), `breakout` (short downside breakout), `pairs_trading` (short rich + long cheap from flat), `ml_signal`/`ml_filter` (short on `strong_down`/low `q10`) emits `short`/`cover` in `long_short` and its existing long/flat signals in `long_only` (RED)
-- [ ] T015 [US5] Thread `mode` into the strategies and implement their bearish `short`/`cover` branch in `src/gefion/strategies/{mean_reversion,momentum,breakout,pairs_trading,ml_signal,ml_filter}.py` (GREEN); regression harness still green
-- [ ] T016 [P] [US5] CLI: `--mode`, `--borrow-rate`, `--initial-margin`/`--maintenance-margin`, `--max-gross-exposure`/`--max-short-exposure` on `backtest run` (and `--mode` on `compare`) in `src/gefion/cli.py`; result payload gains `mode`/`exposure`/`margin_events`/`short_costs` (tests: interface assertions in `tests/test_strategies_short_side.py` or a surfaces test) (RED→GREEN)
-- [ ] T017 [P] [US5] MCP: `backtest_run` (+`backtest_compare`) gain the mode/short args in `mcp-server/server.py`; `/gefion` operator-skill routing ("short this / long-short backtest", always surface margin events + short costs); docs: README backtest-mode row, USER_GUIDE short section, MCP_WORKFLOWS args, ARCHITECTURE execution-model section; docs-drift green
+- [x] T014 [US5] Write `tests/test_strategies_short_side.py`: each of `mean_reversion` (short overbought), `momentum` (short losers), `breakout` (short downside breakout), `pairs_trading` (short rich + long cheap from flat), `ml_signal`/`ml_filter` (short on `strong_down`/low `q10`) emits `short`/`cover` in `long_short` and its existing long/flat signals in `long_only` (RED)
+- [x] T015 [US5] Thread `mode` into the strategies and implement their bearish `short`/`cover` branch in `src/gefion/strategies/{mean_reversion,momentum,breakout,pairs_trading,ml_signal,ml_filter}.py` (GREEN); regression harness still green
+- [x] T016 [P] [US5] CLI: `--mode`, `--borrow-rate`, `--initial-margin`/`--maintenance-margin`, `--max-gross-exposure`/`--max-short-exposure` on `backtest run` (and `--mode` on `compare`) in `src/gefion/cli.py`; result payload gains `mode`/`exposure`/`margin_events`/`short_costs` (tests: interface assertions in `tests/test_strategies_short_side.py` or a surfaces test) (RED→GREEN)
+- [x] T017 [P] [US5] MCP: `backtest_run` (+`backtest_compare`) gain the mode/short args in `mcp-server/server.py`; `/gefion` operator-skill routing ("short this / long-short backtest", always surface margin events + short costs); docs: README backtest-mode row, USER_GUIDE short section, MCP_WORKFLOWS args, ARCHITECTURE execution-model section; docs-drift green
 
 ---
 
 ## Phase 7: Polish & Cross-Cutting
 
-- [ ] T018 [US5] Learning materials: `.claude/commands/gefion-learn.md` Module 4 short-side aside + checkpoint (why a winning short is price-down; why borrow cost + unbounded loss must be modeled); curriculum drift test green
-- [ ] T019 Observability: run a long_short backtest with `OTEL_ENABLED=true`; `gefion span-check` — short-execution and margin-event spans parented, no orphans
-- [ ] T020 Full-suite pre-flight: drop `gefion_test`, complete suite against a fresh DB (capture the exit code — the pipe-masking lesson); the T002 long-only regression harness green; docs-drift green
-- [ ] T021 Update the roadmap stub `.specify/memory/progress.md` (short-side execution shipped); note that gefion now acts on both directions; PR the branch, merge on green
+- [x] T018 [US5] Learning materials: `.claude/commands/gefion-learn.md` Module 4 short-side aside + checkpoint (why a winning short is price-down; why borrow cost + unbounded loss must be modeled); curriculum drift test green
+- [x] T019 Observability: run a long_short backtest with `OTEL_ENABLED=true`; `gefion span-check` — short-execution and margin-event spans parented, no orphans
+- [x] T020 Full-suite pre-flight: drop `gefion_test`, complete suite against a fresh DB (capture the exit code — the pipe-masking lesson); the T002 long-only regression harness green; docs-drift green
+- [x] T021 Update the roadmap stub `.specify/memory/progress.md` (short-side execution shipped); note that gefion now acts on both directions; PR the branch, merge on green
 
 ---
 

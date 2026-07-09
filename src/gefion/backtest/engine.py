@@ -217,6 +217,7 @@ class BacktestEngine:
         with create_span(
             "backtest.run",
             initial_cash=self.initial_cash,
+            mode=self.mode,
             start_date=str(self.start_date),
             end_date=str(self.end_date),
             trading_days=len(self._trading_dates),
@@ -313,6 +314,9 @@ class BacktestEngine:
             total_return=metrics.get("total_return", 0),
             sharpe_ratio=metrics.get("sharpe_ratio", 0),
             max_drawdown=metrics.get("max_drawdown", 0),
+            borrow_total=self._borrow_total,
+            dividends_total=self._dividends_total,
+            margin_events=len(self._margin_events),
         )
 
         logger.info(
