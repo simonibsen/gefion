@@ -56,7 +56,7 @@ macro values per series; findings expected in the hundreds on current prod data
 | IV. Observability | PASS | `gefion.quality` modules import observability; validation pass and backfill are spanned with counts; span-check gate in polish. |
 | V. CLI Presentation | PASS | Output via `get_output`/`out.*` helpers, `--json` bypasses formatting. |
 | VI. Simplicity | PASS | One table, one package, one catalog file. Suspect tiers are v1-informational (no consumer machinery for them). No trigger/scan-job infrastructure — validation rides existing write paths. |
-| Schema Governance | **PENDING** | `data_quality_findings` DDL is proposed, not executed (contracts/sql.md). Implementation of Phase 1+ blocks on owner approval. |
+| Schema Governance | PASS | `data_quality_findings` DDL approved by owner 2026-07-08 (contracts/sql.md). |
 | Secrets | PASS | No secrets involved. |
 
 *Post-Phase-1 re-check (design complete): no new violations introduced; the
