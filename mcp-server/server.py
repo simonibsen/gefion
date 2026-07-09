@@ -1105,6 +1105,13 @@ async def list_tools() -> List[Tool]:
                     "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
                     "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
                     "initial_cash": {"type": "number", "description": "Initial portfolio cash", "default": 100000},
+                    "mode": {
+                        "type": "string",
+                        "description": "long_only (default) or long_short — enable short-side execution so strategies act on bearish signals (spec 009). Surface margin events + short costs, never a short's return without them.",
+                        "enum": ["long_only", "long_short"]
+                    },
+                    "borrow_rate": {"type": "number", "description": "Annualized short borrow fee (long_short)"},
+                    "max_short_exposure": {"type": "number", "description": "Cap on short notional / equity (long_short)"},
                     "cost_preset": {
                         "type": "string",
                         "description": "Transaction cost preset (zero, retail, institutional)",
@@ -4256,6 +4263,14 @@ async def _backtest_run(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(['--start-date', args['start_date']])
         if args.get('end_date'):
             cmd.extend(['--end-date', args['end_date']])
+
+        # Short-side execution (spec 009)
+        if args.get('mode'):
+            cmd.extend(['--mode', args['mode']])
+        if args.get('borrow_rate') is not None:
+            cmd.extend(['--borrow-rate', str(args['borrow_rate'])])
+        if args.get('max_short_exposure') is not None:
+            cmd.extend(['--max-short-exposure', str(args['max_short_exposure'])])
 
         # Symbol selection
         if args.get('symbols'):

@@ -37,6 +37,12 @@ class RiskLimits:
     max_positions: Optional[int] = None  # Max number of positions
     max_portfolio_drawdown: Optional[float] = None  # Max drawdown from peak
 
+    # Short-side limits (spec 009)
+    max_short_exposure: Optional[float] = None  # Max Σ|short notional| / equity
+    max_gross_exposure: Optional[float] = None  # Max Σ|all notional| / equity
+    initial_margin: Optional[float] = None      # Reg-T initial (e.g. 0.50)
+    maintenance_margin: Optional[float] = None  # Reg-T maintenance (e.g. 0.25)
+
 
 class RiskManager:
     """
@@ -81,15 +87,23 @@ class RiskManager:
             return RiskAction.HOLD
 
         pct_change = (current_price - entry_price) / entry_price
+        is_short = shares < 0
 
-        # Check stop loss
-        if self.limits.stop_loss_pct is not None:
-            if pct_change < -self.limits.stop_loss_pct:
+        if is_short:
+            # A short LOSES when the price rises, GAINS when it falls — the
+            # mirror of a long.
+            if (self.limits.stop_loss_pct is not None
+                    and pct_change > self.limits.stop_loss_pct):
                 return RiskAction.EXIT
-
-        # Check take profit
-        if self.limits.take_profit_pct is not None:
-            if pct_change > self.limits.take_profit_pct:
+            if (self.limits.take_profit_pct is not None
+                    and pct_change < -self.limits.take_profit_pct):
+                return RiskAction.EXIT
+        else:
+            if (self.limits.stop_loss_pct is not None
+                    and pct_change < -self.limits.stop_loss_pct):
+                return RiskAction.EXIT
+            if (self.limits.take_profit_pct is not None
+                    and pct_change > self.limits.take_profit_pct):
                 return RiskAction.EXIT
 
         return RiskAction.HOLD
@@ -176,31 +190,63 @@ class RiskManager:
         portfolio_value = portfolio.calculate_equity(prices)
 
         for signal in signals:
-            if signal.get("action") != "buy":
-                # Keep sell signals
-                filtered.append(signal)
-                continue
-
+            act = signal.get("action")
             symbol = signal.get("symbol")
             shares = signal.get("shares", 0)
             price = prices.get(symbol, 0)
             proposed_value = shares * price
 
-            # Check portfolio limits
+            if act == "short":
+                # Short exposure / gross exposure guardrails (spec 009).
+                if self._short_blocked(portfolio, prices, portfolio_value,
+                                       proposed_value):
+                    continue
+                filtered.append(signal)
+                current_positions += 1
+                continue
+
+            if act != "buy":
+                # Keep sell/cover signals as-is
+                filtered.append(signal)
+                continue
+
+            # Check portfolio limits (long)
             action = self.check_portfolio(
                 portfolio_value=portfolio_value,
                 current_positions=current_positions,
                 proposed_position_value=proposed_value,
             )
-
             if action == RiskAction.BLOCK:
                 continue  # Skip blocked signal
 
             filtered.append(signal)
-            # Account for the new position in subsequent checks
             current_positions += 1
 
         return filtered
+
+    def _short_blocked(self, portfolio, prices, portfolio_value,
+                       proposed_value: float) -> bool:
+        """True if a new short would breach short or gross exposure limits."""
+        if portfolio_value <= 0:
+            return True
+        short_notional = 0.0
+        long_notional = 0.0
+        for sym, pos in portfolio.positions.items():
+            px = prices.get(sym, pos["avg_price"])
+            notional = abs(pos["shares"]) * px
+            if pos["shares"] < 0:
+                short_notional += notional
+            else:
+                long_notional += notional
+        if self.limits.max_short_exposure is not None:
+            if (short_notional + proposed_value) / portfolio_value > \
+                    self.limits.max_short_exposure:
+                return True
+        if self.limits.max_gross_exposure is not None:
+            gross = short_notional + long_notional + proposed_value
+            if gross / portfolio_value > self.limits.max_gross_exposure:
+                return True
+        return False
 
     def generate_exit_signals(
         self,
@@ -235,21 +281,25 @@ class RiskManager:
             )
 
             if action == RiskAction.EXIT:
-                # Determine reason
                 pct_change = (current_price - entry_price) / entry_price
-                if pct_change < 0:
-                    reason = "stop_loss"
+                if shares < 0:
+                    # Short: cover to close; a loss (price up) is the guardrail
+                    # firing, a gain (price down) is a take-profit.
+                    reason = "stop_loss" if pct_change > 0 else "take_profit"
+                    exits.append({
+                        "symbol": symbol,
+                        "action": "cover",
+                        "shares": -shares,       # positive share count to cover
+                        "reason": reason,
+                    })
                 else:
-                    reason = "take_profit"
-
-                exits.append(
-                    {
+                    reason = "stop_loss" if pct_change < 0 else "take_profit"
+                    exits.append({
                         "symbol": symbol,
                         "action": "sell",
                         "shares": shares,
                         "reason": reason,
-                    }
-                )
+                    })
 
         return exits
 

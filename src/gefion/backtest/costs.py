@@ -32,6 +32,17 @@ class TransactionCosts:
     # Market impact (for large orders)
     market_impact_coefficient: float = 0.0   # sqrt(participation) * coefficient
 
+    # Short borrow fee (spec 009): annualized rate charged per day a short is
+    # held. 0 = free to borrow (explicit; the CLI sets a sensible default).
+    borrow_rate_annual: float = 0.0
+
+    def daily_borrow_fee(self, shares: int, price: float,
+                         trading_days: int = 252) -> float:
+        """Borrow fee for holding `shares` short at `price` for one day."""
+        if self.borrow_rate_annual <= 0:
+            return 0.0
+        return abs(shares) * price * (self.borrow_rate_annual / trading_days)
+
     def calculate_cost(
         self,
         shares: int,

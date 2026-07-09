@@ -224,6 +224,7 @@ If the arguments don't match a mode keyword, interpret the user's intent and rou
 | "show me AAPL" | `chart_price` + `query_predictions` |
 | "what features are available" | `features_list` |
 | "compare momentum vs mean reversion" | `backtest_compare` |
+| "short this" / "long-short backtest" / "act on the bearish signal" | `backtest_run` with `mode=long_short` — always surface `margin_events` and `short_costs`, never a short's return without them |
 | "tune my model" | `ml_tune` |
 | "calibrate the model" | `ml_calibrate` |
 | "run experiment" | `experiment_propose` → `experiment_approve` → `experiment_run` |

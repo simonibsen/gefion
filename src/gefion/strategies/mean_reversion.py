@@ -54,6 +54,7 @@ class MeanReversionStrategy:
         rsi_period: int = 14,
         position_size: float = 0.2,
         max_positions: int = 5,
+        mode: str = "long_only",
     ):
         """
         Initialize mean reversion strategy.
@@ -70,6 +71,7 @@ class MeanReversionStrategy:
         self.rsi_period = rsi_period
         self.position_size = position_size
         self.max_positions = max_positions
+        self.mode = mode
 
     def generate_signals(
         self,
@@ -135,16 +137,32 @@ class MeanReversionStrategy:
         else:
             positions = portfolio
 
-        # Sell signals for overbought positions
+        # Exit overbought long positions
         for symbol, position in positions.items():
-            if symbol in rsi_values and rsi_values[symbol] > self.rsi_overbought:
-                # Sell entire position
+            if (symbol in rsi_values and rsi_values[symbol] > self.rsi_overbought
+                    and position["shares"] > 0):
                 signals.append({
                     "action": "sell",
                     "symbol": symbol,
                     "shares": position["shares"],
                     "reason": f"overbought (RSI: {rsi_values[symbol]:.1f})",
                 })
+
+        # Short the overbought (long_short mode only): overbought names not
+        # already held. In long_only these are simply not traded (flatten).
+        if self.mode == "long_short":
+            held = set(positions.keys())
+            for symbol, rsi in rsi_values.items():
+                if rsi > self.rsi_overbought and symbol not in held:
+                    shares = int((initial_cash * self.position_size)
+                                 / current_prices[symbol])
+                    if shares > 0:
+                        signals.append({
+                            "action": "short",
+                            "symbol": symbol,
+                            "shares": shares,
+                            "reason": f"overbought short (RSI: {rsi:.1f})",
+                        })
 
         # Buy signals for oversold stocks
         current_positions = len(positions)

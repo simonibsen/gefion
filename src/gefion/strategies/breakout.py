@@ -57,6 +57,7 @@ class BreakoutStrategy:
         volume_threshold: float = 1.5,
         position_size: float = 0.2,
         max_positions: int = 5,
+        mode: str = "long_only",
     ):
         """
         Initialize breakout strategy.
@@ -66,11 +67,14 @@ class BreakoutStrategy:
             volume_threshold: Volume multiplier for confirmation (default: 1.5)
             position_size: Fraction of portfolio per position (default: 0.2)
             max_positions: Maximum concurrent positions (default: 5)
+            mode: 'long_only' (default) or 'long_short' — short downside
+                  breakouts instead of only flattening (spec 009)
         """
         self.lookback_days = lookback_days
         self.volume_threshold = volume_threshold
         self.position_size = position_size
         self.max_positions = max_positions
+        self.mode = mode
 
     def generate_signals(
         self,
@@ -158,15 +162,31 @@ class BreakoutStrategy:
         else:
             positions = portfolio
 
-        # Sell signals for downside breakouts
+        # Exit held longs on a downside breakout
         for symbol, position in positions.items():
-            if symbol in breakouts and breakouts[symbol] == "downside":
+            if (symbol in breakouts and breakouts[symbol] == "downside"
+                    and position["shares"] > 0):
                 signals.append({
                     "action": "sell",
                     "symbol": symbol,
                     "shares": position["shares"],
                     "reason": "downside breakout",
                 })
+
+        # Short downside breakouts (long_short only): names not already held.
+        if self.mode == "long_short":
+            held = set(positions.keys())
+            for symbol, direction in breakouts.items():
+                if direction == "downside" and symbol not in held:
+                    shares = int((initial_cash * self.position_size)
+                                 / current_prices[symbol])
+                    if shares > 0:
+                        signals.append({
+                            "action": "short",
+                            "symbol": symbol,
+                            "shares": shares,
+                            "reason": "downside breakout short",
+                        })
 
         # Buy signals for upside breakouts
         current_positions = len(positions)

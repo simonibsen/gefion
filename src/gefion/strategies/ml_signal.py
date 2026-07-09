@@ -181,6 +181,7 @@ class MLSignalStrategy:
         position_size: float = 0.1,
         max_positions: int = 10,
         rebalance_days: int = 1,
+        mode: str = "long_only",
         # Database
         db_url: Optional[str] = None,
         # Deprecated - kept for backwards compatibility
@@ -221,6 +222,7 @@ class MLSignalStrategy:
         self.position_size = position_size
         self.max_positions = max_positions
         self.rebalance_days = rebalance_days
+        self.mode = mode
 
         # Database
         self.db_url = db_url or os.environ.get(
@@ -373,6 +375,21 @@ class MLSignalStrategy:
                     "reason": f"ML signal (q50={candidate['q50']:.2%}, q10={candidate['q10']:.2%})",
                 })
 
+        # Short bearish names (long_short only): a strongly negative q50 on a
+        # name we don't hold.
+        if self.mode == "long_short":
+            for symbol, pred in predictions.items():
+                if symbol in positions or symbol not in current_prices:
+                    continue
+                if pred["q50"] <= -self.return_threshold:
+                    price = current_prices[symbol]
+                    shares = int((initial_cash * self.position_size) / price)
+                    if shares > 0:
+                        signals.append({
+                            "action": "short", "symbol": symbol, "shares": shares,
+                            "reason": f"ML bearish short (q50={pred['q50']:.2%})",
+                        })
+
         return signals
 
     def _generate_classifier_signals_from_predictions(
@@ -435,6 +452,24 @@ class MLSignalStrategy:
                     "shares": shares,
                     "reason": f"ML classifier ({candidate['class']}, p={candidate['probability']:.2%})",
                 })
+
+        # Short bearish names (long_short only): a confident down-class on a
+        # name we don't hold.
+        if self.mode == "long_short":
+            for symbol, pred in predictions.items():
+                if symbol in positions or symbol not in current_prices:
+                    continue
+                if pred["predicted_class"] in bearish_classes:
+                    prob = pred.get(f"p_{pred['predicted_class']}", 0)
+                    if prob >= self.confidence_threshold:
+                        price = current_prices[symbol]
+                        shares = int((initial_cash * self.position_size) / price)
+                        if shares > 0:
+                            signals.append({
+                                "action": "short", "symbol": symbol,
+                                "shares": shares,
+                                "reason": f"ML bearish short ({pred['predicted_class']}, p={prob:.2%})",
+                            })
 
         return signals
 
