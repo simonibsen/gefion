@@ -96,6 +96,9 @@ app.add_typer(data_app, name="data", cls=SortedGroup)
 macro_app = typer.Typer(help="Macro series (VIX, CPI, …): catalog, ingest, materialize")
 app.add_typer(macro_app, name="macro", cls=SortedGroup)
 
+quality_app = typer.Typer(help="Data quality: findings ledger, catalog, backfill")
+app.add_typer(quality_app, name="quality", cls=SortedGroup)
+
 regime_app = typer.Typer(help="Regime slicing commands (define/compute/list/show/labels)")
 app.add_typer(regime_app, name="regime", cls=SortedGroup)
 
@@ -4346,6 +4349,30 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                                 "repair")
                 except Exception:
                     health["entity_integrity"] = {"error": "unavailable"}
+
+                # Data quality (spec 008): per-metric unresolved finding counts
+                # by verdict — a provider-side regression shows up as a trend.
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """SELECT metric, verdict, count(*)
+                               FROM data_quality_findings
+                               WHERE resolved_at IS NULL
+                               GROUP BY metric, verdict""")
+                        dq: Dict[str, Dict[str, int]] = {}
+                        for metric_name, verdict, count in cur.fetchall():
+                            dq.setdefault(metric_name, {})[verdict] = count
+                    health["data_quality"] = dq
+                    trash_total = sum(v.get("trash", 0) for v in dq.values())
+                    if trash_total:
+                        metrics_hit = sorted(m for m, v in dq.items() if v.get("trash"))
+                        warnings.append(
+                            f"{trash_total} unresolved data-quality trash "
+                            f"finding(s) across {len(metrics_hit)} metric(s) "
+                            f"({', '.join(metrics_hit)}) — see `gefion quality "
+                            "findings`")
+                except Exception:
+                    health["data_quality"] = {"error": "unavailable"}
                 health["warnings"] = warnings
 
     except Exception as exc:
@@ -11804,6 +11831,110 @@ def macro_list(
                     f"{s['values']} value(s) {s['first_date']}..{s['last_date']} "
                     f"{'(materialized)' if s['materialized'] else '(not materialized)'}")
         out.success(f"{len(series)} macro series", data={"series": series})
+
+
+@quality_app.command("findings")
+def quality_findings_cmd(
+    metric: Optional[str] = typer.Option(None, "--metric", help="Filter by metric"),
+    symbol: Optional[str] = typer.Option(None, "--symbol", help="Filter by stock symbol"),
+    entity_table: Optional[str] = typer.Option(None, "--entity-table", help="Entity table"),
+    entity_id: Optional[int] = typer.Option(None, "--entity-id", help="Entity id"),
+    verdict: Optional[str] = typer.Option(None, "--verdict", help="trash | suspect"),
+    since: Optional[str] = typer.Option(None, "--since", help="Only findings on/after (YYYY-MM-DD)"),
+    include_resolved: bool = typer.Option(False, "--include-resolved", help="Include resolved findings"),
+    limit: int = typer.Option(50, "--limit"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """List data-quality findings (default: unresolved, newest first)."""
+    from gefion.quality import findings as qfindings
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        if symbol and entity_id is None:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM stocks WHERE symbol = %s", (symbol,))
+                row = cur.fetchone()
+            if row:
+                entity_table, entity_id = "stocks", row[0]
+        rows = qfindings.list_findings(
+            conn, metric=metric, entity_table=entity_table, entity_id=entity_id,
+            verdict=verdict, since=since, include_resolved=include_resolved,
+            limit=limit)
+        if not out.json_mode:
+            for r in rows:
+                out.info(f"{r['entity_table']}#{r['entity_id']} {r['metric']} "
+                         f"{r['date']} {r['rule']} {r['verdict']} "
+                         f"observed={r['observed']} expected={r['expected']}")
+        out.success(f"{len(rows)} finding(s)",
+                    data={"findings": [_jsonable_finding(r) for r in rows]})
+
+
+def _jsonable_finding(r: dict) -> dict:
+    return {k: (v.isoformat() if hasattr(v, "isoformat") else v)
+            for k, v in r.items()}
+
+
+@quality_app.command("catalog")
+def quality_catalog_cmd(
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Show the validation catalog: covered metrics and uncovered columns."""
+    from gefion.quality import catalog as qcatalog
+    out = get_output(json_output)
+    cat = qcatalog.load_default()
+    with _regime_conn(db_url) as conn:
+        report = qcatalog.coverage(conn, cat)
+    if not out.json_mode:
+        for name in report["covered"]:
+            m = cat.metrics[name]
+            bounds = f"bounds {list(m.bounds)}" if m.bounds else "no bounds"
+            out.info(f"{name} [{m.table}.{m.column}] {bounds}"
+                     f"{' + derivation' if m.derivation else ''}")
+        for table, col in report["uncovered"]:
+            out.info(f"  uncovered: {table}.{col}")
+    out.success(f"{len(report['covered'])} covered, {len(report['uncovered'])} uncovered",
+                data={"covered": report["covered"],
+                      "uncovered": [f"{t}.{c}" for t, c in report["uncovered"]]})
+
+
+@quality_app.command("backfill")
+def quality_backfill_cmd(
+    entity_table: Optional[str] = typer.Option(None, "--entity-table", help="stocks | macro_series"),
+    metric: Optional[str] = typer.Option(None, "--metric", help="Restrict to one metric"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Validate already-stored history — flags trash, changes no stored value."""
+    from gefion.quality import backfill
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        summary = backfill.run(conn, entity_table=entity_table, metric=metric)
+    out.success(
+        f"Examined {summary['rows_examined']} value(s): "
+        f"{summary['findings']['created']} new finding(s), "
+        f"{summary['stored_values_changed']} stored value(s) changed",
+        data=summary)
+
+
+@quality_app.command("resolve")
+def quality_resolve_cmd(
+    finding_id: int = typer.Argument(..., help="Finding id to supersede"),
+    reason: str = typer.Option(..., "--reason", help="Why the finding is superseded"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Supersede a finding (sets resolved_at/resolution; never deletes)."""
+    from gefion.quality.findings import FindingError, resolve_finding
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            resolve_finding(conn, finding_id, reason=reason)
+            out.success(f"Finding {finding_id} resolved",
+                        data={"finding_id": finding_id, "resolution": reason})
+        except FindingError as exc:
+            out.error(f"Resolve refused: {exc}")
+            raise typer.Exit(1)
 
 
 @data_app.command("listing-meta")

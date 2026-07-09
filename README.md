@@ -140,6 +140,10 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion data listing-meta` | Backfill stocks.exchange/asset_type from the listing |
 | `gefion macro ingest` | Ingest a macro series (VIX, CPI, …) + materialize its feature |
 | `gefion macro list` | Macro-series catalog with value coverage |
+| `gefion quality findings` | List data-quality findings (provider-garbage detections) |
+| `gefion quality catalog` | Validation catalog: covered metrics + uncovered columns |
+| `gefion quality backfill` | Flag garbage in already-stored history (changes no values) |
+| `gefion quality resolve` | Supersede a finding (never deletes) |
 
 ### Features
 

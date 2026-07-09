@@ -1072,6 +1072,25 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
 - `macro_list` — the macro-series catalog with per-series value coverage
   (first/last date, row count) and materialization status (read-only).
 
+## Data quality (spec 008)
+
+Provider-garbage detection: definitionally impossible or self-contradictory
+values are convicted as trash and kept out of research by default; degenerate-
+but-real extremes stay usable. Always show the verdict tier — a suspect is not
+a conviction.
+
+- `quality_findings` — list detections (rule, observed vs expected, verdict);
+  default unresolved, newest first. Read-only.
+- `quality_catalog` — the validation catalog: covered metrics and the uncovered
+  (unvalidated) columns. Read-only.
+- `quality_backfill` — **mutating (ledger only)**: validate stored history and
+  record findings for pre-existing garbage; changes no stored value. Confirm
+  first (may take minutes on full history).
+- `quality_resolve` — **mutating**: supersede a finding (reason required; never
+  deletes). Confirm first.
+- db-health / `health_check` gain a `data_quality` section automatically
+  (per-metric unresolved counts by verdict).
+
 ## Tool reference (remaining tools)
 
 One-liners for every tool not covered by a workflow section above. The
