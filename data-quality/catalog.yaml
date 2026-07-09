@@ -10,7 +10,9 @@
 defaults:
   tolerance_factor: 10        # tier 2: convict beyond this observed/recomputed magnitude ratio
   spike_factor: 100           # tier 3: neighbor-magnitude multiple that marks an episodic spike
-  robust_z_threshold: 10      # tier 4: |v - median| / (1.4826 * MAD) beyond this -> suspect
+  robust_z_threshold: 25      # tier 4: |v - median| / (1.4826 * MAD) beyond this -> suspect
+                              # (raised from 10 after the 2026-07-09 prod backfill:
+                              #  fundamentals are heavy-tailed, 10 flagged ~6% as suspect)
 
 metrics:
   beta:
@@ -90,24 +92,29 @@ metrics:
     entity_table: stocks
     table: stocks_fundamentals
     column: revenue_per_share
-    bounds: {min: 0, max: 1000000}
-    why: Revenue cannot be negative; per-share values beyond 1e6 are garbage.
+    bounds: {min: -1, max: 1000000}
+    why: >
+      Revenue cannot be negative; per-share values beyond 1e6 are garbage. The
+      floor is -1 (not 0): the 2026-07-09 prod backfill showed tiny negatives
+      (-0.001) that are rounding artifacts around zero revenue, not garbage —
+      a large negative (-440) still convicts.
 
   profit_margin:
     entity_table: stocks
     table: stocks_fundamentals
     column: profit_margin
-    bounds: {min: -100000, max: 1000}
+    bounds: {min: -100000, max: 100000}
     why: >
-      Net income / revenue. Near-zero revenue legitimately produces margins
-      in the +/- thousands (the 2026-07-07 lesson), so the floor is very
-      loose; a margin above ~1000x revenue has no definitional reading.
+      Net income / revenue. Near-zero revenue legitimately explodes the margin
+      in EITHER direction — the 2026-07-09 prod backfill showed real positive
+      explosions (1654) the old max=1000 wrongly convicted, so the envelope is
+      now symmetric and loose; only scaled-by-1e6 faults fall outside it.
 
   operating_margin:
     entity_table: stocks
     table: stocks_fundamentals
     column: operating_margin
-    bounds: {min: -100000, max: 1000}
+    bounds: {min: -100000, max: 100000}
     why: Same definition class as profit_margin (ratio to near-zero revenue).
 
   return_on_equity:

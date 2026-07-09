@@ -137,6 +137,27 @@ def test_coverage_listing_enumerates_gaps(tmp_path):
     conn.close()
 
 
+def test_tuned_bounds_tolerate_real_prod_extremes():
+    """The 2026-07-09 prod backfill surfaced borderline convictions that are
+    real, not garbage (SC-306 tuning): near-zero-revenue margin explosions and
+    tiny-negative revenue_per_share rounding artifacts must NOT convict, while
+    the genuine garbage still does."""
+    from gefion.quality.rules import check_bounds
+    cat = catalog.load_default()
+    # near-zero-revenue margin explosions are real — must pass
+    assert check_bounds(cat.metrics["operating_margin"], 4592.41) is None
+    assert check_bounds(cat.metrics["operating_margin"], 1105.13) is None
+    assert check_bounds(cat.metrics["profit_margin"], 1654.37) is None
+    # tiny-negative revenue_per_share (rounding around zero revenue) — must pass
+    assert check_bounds(cat.metrics["revenue_per_share"], -0.001) is None
+    assert check_bounds(cat.metrics["revenue_per_share"], -0.492) is None
+    # but genuine garbage still convicts
+    assert check_bounds(cat.metrics["beta"], -503341.44) is not None
+    assert check_bounds(cat.metrics["revenue_per_share"], -440.75) is not None
+    # cross-sectional threshold raised to quiet heavy-tailed fundamentals
+    assert cat.defaults["robust_z_threshold"] >= 20
+
+
 def test_shipped_catalog_covers_initial_scope():
     """T003's deliverable: the repo catalog covers the twelve fundamentals
     ratio metrics + vix, with derivations where trusted recomputes exist."""
