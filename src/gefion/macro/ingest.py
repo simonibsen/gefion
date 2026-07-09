@@ -143,11 +143,14 @@ def materialize_feature(conn, name: str) -> Dict[str, Any]:
 def ingest_series(conn, name: str, provider: str, kind: str, cadence: str,
                   description: Optional[str] = None, full: bool = False,
                   fetch: Optional[Callable[[str, bool], List[Dict[str, Any]]]] = None,
+                  quality_catalog: Any = None,
                   ) -> Dict[str, Any]:
-    """The pipeline: catalog upsert → fetch → value upsert → materialize.
+    """The pipeline: catalog upsert → fetch → value upsert → materialize →
+    data-quality validation.
 
     `fetch(provider, full)` is injectable for tests; the default dispatches on
-    the provider string.
+    the provider string. `quality_catalog` is injectable too; when omitted the
+    shipped catalog is loaded. Validation never blocks the ingest (FR-303).
     """
     with create_span("macro.ingest.ingest_series", series=name,
                      provider=provider) as span:
@@ -157,6 +160,29 @@ def ingest_series(conn, name: str, provider: str, kind: str, cadence: str,
                                           description=description)
         n = upsert_values(conn, series_id, rows)
         summary = materialize_feature(conn, name)
-        set_attributes(span, series_id=series_id, values_upserted=n)
+        quality_findings = _validate_macro(conn, name, series_id, rows,
+                                           quality_catalog)
+        set_attributes(span, series_id=series_id, values_upserted=n,
+                       quality_findings=quality_findings)
         return {"series": name, "series_id": series_id, "provider": provider,
-                "values_upserted": n, **summary}
+                "values_upserted": n, "quality_findings": quality_findings,
+                **summary}
+
+
+def _validate_macro(conn, name: str, series_id: int,
+                    rows: List[Dict[str, Any]], quality_catalog: Any) -> int:
+    """Validate ingested macro values against the data-quality catalog and
+    record findings. Guarded — never raises into the ingest (FR-303)."""
+    import logging
+    try:
+        from gefion.quality import catalog as qcatalog
+        from gefion.quality import findings as qfindings
+        from gefion.quality import validate as qvalidate
+        cat = quality_catalog or qcatalog.load_default()
+        entries = qvalidate.validate_macro_values(cat, name, series_id, rows)
+        return qfindings.record_findings(conn, entries, context=f"macro ingest {name}") \
+            if entries else 0
+    except Exception as exc:  # pragma: no cover - defensive
+        logging.getLogger(__name__).warning(
+            f"data-quality validation failed for macro {name}: {exc}")
+        return 0

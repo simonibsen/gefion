@@ -30,7 +30,9 @@ metrics:
     bounds: {min: 0, max: 2.0}
     derivation:
       expression: dividend_per_share / close
-      inputs: [overview.DividendPerShare, stock_ohlcv.close]
+      inputs:
+        dividend_per_share: overview.DividendPerShare
+        close: stock_ohlcv.close
     why: >
       Yield is dividend/price; 200% is generous even for imminent delisting.
       Observed garbage: 1000000.0 (CTAA), 2026-07-08.
@@ -42,7 +44,9 @@ metrics:
     bounds: {min: -10000, max: 10000}
     derivation:
       expression: close / eps
-      inputs: [stock_ohlcv.close, stocks_fundamentals.eps]
+      inputs:
+        close: stock_ohlcv.close
+        eps: stocks_fundamentals.eps
     why: >
       Price/earnings explodes legitimately near zero EPS, so the envelope is
       loose — it exists to catch sign-flipped or scaled-by-1e6 nonsense only.

@@ -38,7 +38,9 @@ VALID = """
         bounds: {min: 0, max: 2.0}
         derivation:
           expression: dividend_per_share / close
-          inputs: [overview.DividendPerShare, stock_ohlcv.close]
+          inputs:
+            dividend_per_share: overview.DividendPerShare
+            close: stock_ohlcv.close
         why: Yield is dividend/price.
       vix:
         entity_table: macro_series

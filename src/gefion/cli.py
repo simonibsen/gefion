@@ -6933,8 +6933,19 @@ def _write_fundamentals_results(conn, results) -> Dict[str, int]:
     import logging
     log = logging.getLogger(__name__)
 
+    # Data-quality catalog (spec 008): loaded once, guarded — a catalog problem
+    # must never cost an ingest. Validation rides each successful write below.
+    try:
+        from gefion.quality import catalog as _qcatalog
+        _cat = _qcatalog.load_default()
+    except Exception as exc:  # pragma: no cover - defensive
+        _cat = None
+        log.warning(f"data-quality catalog unavailable, skipping validation: {exc}")
+
     updated = 0
     write_errors = 0
+    quality_findings = 0
+    quality_findings_errors = 0
     skipped_ids = [sid for sid, _, _, _, ws in results if ws]
     for stock_id, symbol, overview, err, was_skipped in results:
         if err or was_skipped:
@@ -6943,6 +6954,7 @@ def _write_fundamentals_results(conn, results) -> Dict[str, int]:
         sector = overview.get("Sector", "")
         industry = overview.get("Industry", "")
         stock_exchange = overview.get("Exchange", "")
+        fundamentals = None
         try:
             with conn.transaction():
                 with conn.cursor() as cur:
@@ -6972,6 +6984,22 @@ def _write_fundamentals_results(conn, results) -> Dict[str, int]:
         except Exception as exc:
             write_errors += 1
             log.warning(f"fundamentals write failed for {symbol}: {exc}")
+            continue
+
+        # Data quality: validate the just-written values. Never blocks or fails
+        # the write (FR-303) — a validation error is counted, not raised.
+        if _cat is not None and fundamentals is not None:
+            try:
+                from gefion.quality import findings as _qfindings
+                from gefion.quality import validate as _qvalidate
+                entries = _qvalidate.validate_stock_values(
+                    conn, _cat, stock_id, date.today(), fundamentals, overview)
+                if entries:
+                    quality_findings += _qfindings.record_findings(
+                        conn, entries, context="fundamentals-update")
+            except Exception as exc:
+                quality_findings_errors += 1
+                log.warning(f"data-quality validation failed for {symbol}: {exc}")
 
     # Mark skipped symbols (no fundamental data) so they aren't retried next run
     if skipped_ids:
@@ -6984,7 +7012,8 @@ def _write_fundamentals_results(conn, results) -> Dict[str, int]:
     if not conn.autocommit:
         conn.commit()
     return {"updated": updated, "write_errors": write_errors,
-            "skipped": len(skipped_ids)}
+            "skipped": len(skipped_ids), "quality_findings": quality_findings,
+            "quality_findings_errors": quality_findings_errors}
 
 
 @app.command("cross-sectional-compute")

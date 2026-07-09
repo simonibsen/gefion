@@ -7,6 +7,7 @@
 - [Tables](#tables)
   - [`computed_features`](#computed-features)
   - [`cross_sectional_features`](#cross-sectional-features)
+  - [`data_quality_findings`](#data-quality-findings)
   - [`discovery_diagnostics`](#discovery-diagnostics)
   - [`experiment_cycles`](#experiment-cycles)
   - [`experiment_trials`](#experiment-trials)
@@ -70,6 +71,29 @@ Market-relative feature rankings (percentile, z-score) computed across the unive
 | `percentile` | DOUBLE PRECISION | ✓ |  |  |
 | `created_at` | TIMESTAMP | ✓ |  |  |
 | **`comparison_group`** 🔑 | TEXT |  |  |  |
+
+### `data_quality_findings`
+
+Data-quality findings audit ledger (spec 008): one row per detection (rule, observed vs expected, trash/suspect verdict). No FKs by design — survives deletion of the entities it describes; supersede via resolution fields, never erase.
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `entity_table` | TEXT |  |  |  |
+| `entity_id` | INTEGER |  |  |  |
+| `metric` | TEXT |  |  |  |
+| `date` | DATE |  |  |  |
+| `rule` | TEXT |  |  |  |
+| `verdict` | TEXT |  |  |  |
+| `observed` | DOUBLE PRECISION | ✓ |  |  |
+| `expected` | DOUBLE PRECISION | ✓ |  |  |
+| `detail` | JSONB | ✓ |  |  |
+| `context` | TEXT | ✓ |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
+| `resolved_at` | TIMESTAMPTZ | ✓ |  |  |
+| `resolution` | TEXT | ✓ |  |  |
 
 ### `discovery_diagnostics`
 
