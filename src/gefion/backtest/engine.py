@@ -49,6 +49,7 @@ class BacktestEngine:
         position_sizer: Optional["PositionSizer"] = None,
         volume_data: Optional[Dict[str, Dict[date, int]]] = None,
         volatility_data: Optional[Dict[str, Dict[date, float]]] = None,
+        mode: str = "long_only",
     ):
         """
         Initialize backtesting engine.
@@ -66,12 +67,16 @@ class BacktestEngine:
             position_sizer: Optional position sizing strategy
             volume_data: Optional dict {symbol: {date: volume}} for slippage/costs
             volatility_data: Optional dict {symbol: {date: volatility}} for sizing
+            mode: 'long_only' (default) or 'long_short' — gates short-side
+                  execution (spec 009). 'long_only' is byte-identical to
+                  pre-009 behavior; short/cover actions are dropped.
         """
         self.price_data = price_data
         self.strategy = strategy
         self.initial_cash = initial_cash
         self.start_date = start_date
         self.end_date = end_date
+        self.mode = mode
 
         # Optional advanced features
         self.costs = costs
@@ -234,7 +239,8 @@ class BacktestEngine:
             f"sharpe={metrics.get('sharpe_ratio', 0):.2f}"
         )
 
-        return {"trades": trades, "equity_curve": equity_curve, "metrics": metrics}
+        return {"trades": trades, "equity_curve": equity_curve,
+                "metrics": metrics, "mode": self.mode}
 
     def _execute_signal(
         self,
