@@ -211,7 +211,7 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 
 | Command | Description |
 |---------|-------------|
-| `gefion backtest run` | Run backtest for a trading strategy |
+| `gefion backtest run` | Run backtest for a trading strategy (`--mode long_short` for short-side execution) |
 | `gefion backtest compare` | Compare multiple strategies side-by-side |
 | `gefion strategy list` | List registered strategies |
 | `gefion strategy create-config` | Create a strategy configuration |

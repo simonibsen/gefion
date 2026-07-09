@@ -1133,7 +1133,7 @@ documented here or in a section above.
 
 ### Backtesting & strategies
 
-- `backtest_run` — backtest a strategy with optional realistic execution (costs, slippage).
+- `backtest_run` — backtest a strategy with optional realistic execution (costs, slippage). `mode=long_short` (spec 009) enables short-side execution so strategies act on bearish signals; the result carries `short_costs`, `margin_events`, and an `exposure` series — surface those, never a short's return without its borrow/dividend/margin costs. Default `long_only` is byte-identical to before.
 - `backtest_compare` — side-by-side strategy comparison (return, Sharpe, drawdown).
 - `strategy_list` — registered strategies with defaults.
 - `strategy_configs` — saved strategy configurations.

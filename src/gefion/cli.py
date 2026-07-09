@@ -7797,6 +7797,27 @@ def backtest_run(
         "--initial-cash",
         help="Initial portfolio cash amount"
     ),
+    mode: str = typer.Option(
+        "long_only",
+        "--mode",
+        help="'long_only' (default) or 'long_short' — enable short-side "
+             "execution so strategies can act on bearish signals (spec 009)"
+    ),
+    borrow_rate: float = typer.Option(
+        0.0,
+        "--borrow-rate",
+        help="Annualized short borrow fee (long_short only), e.g. 0.03"
+    ),
+    max_short_exposure: Optional[float] = typer.Option(
+        None,
+        "--max-short-exposure",
+        help="Cap on Σ|short notional| / equity (long_short only)"
+    ),
+    stop_loss_pct: Optional[float] = typer.Option(
+        None,
+        "--stop-loss-pct",
+        help="Force-cover/exit when a position's loss exceeds this fraction"
+    ),
     lookback_days: int = typer.Option(
         20,
         "--lookback-days",
@@ -8264,12 +8285,31 @@ def backtest_run(
                 initial_cash=initial_cash,
             )
 
+        # Short-side execution (spec 009): thread the mode into the strategy
+        # (so its bearish branch emits short/cover) and build short cost/risk.
+        if strat is not None:
+            strat.mode = mode
+
+        engine_costs = None
+        engine_risk = None
+        if mode == "long_short":
+            from gefion.backtest.costs import TransactionCosts
+            engine_costs = TransactionCosts(borrow_rate_annual=borrow_rate)
+            if max_short_exposure is not None or stop_loss_pct is not None:
+                from gefion.backtest.risk import RiskLimits, RiskManager
+                engine_risk = RiskManager(RiskLimits(
+                    stop_loss_pct=stop_loss_pct,
+                    max_short_exposure=max_short_exposure))
+
         engine = BacktestEngine(
             price_data=price_data,
             strategy=strategy_fn,
             initial_cash=initial_cash,
             start_date=start,
             end_date=end,
+            costs=engine_costs,
+            risk_manager=engine_risk,
+            mode=mode,
         )
 
         results = engine.run()
@@ -8366,6 +8406,13 @@ def backtest_run(
                     "max_drawdown": base_metrics.get("max_drawdown", 0),
                 },
                 "metrics": metrics,
+                "mode": results.get("mode", "long_only"),
+                "short_costs": results.get("short_costs", {}),
+                "margin_events": [
+                    {"date": str(m.get("date", "")), "symbol": m.get("symbol", ""),
+                     "loss": round(m.get("loss", 0), 2), "action": m.get("action", "")}
+                    for m in results.get("margin_events", [])
+                ],
                 "trades_count": trade_count,
                 "trades": [
                     {
