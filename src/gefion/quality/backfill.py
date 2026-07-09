@@ -86,15 +86,58 @@ def _scan_stock(conn, cat, metric, entries):
             sql.SQL("SELECT data_id, date, {col} FROM {tbl} WHERE {col} IS NOT NULL")
             .format(col=sql.Identifier(metric.column),
                     tbl=sql.Identifier(metric.table)))
-        rows = cur.fetchall()
-    examined = 0
-    for data_id, d, value in rows:
-        examined += 1
-        r = rules.check_bounds(metric, float(value))
-        if r is not None:
-            entries.append({"entity_table": "stocks", "entity_id": data_id,
-                            "metric": metric.name, "date": d, "result": r})
+        rows = [(data_id, d, float(value)) for data_id, d, value in cur.fetchall()]
+    examined = len(rows)
+    _apply_tiers(cat, metric, rows, "stocks", entries)
     return examined, entries
+
+
+def _apply_tiers(cat, metric, rows, entity_table, entries):
+    """Bounds (trash) plus the corroboration tiers (suspect): temporal spike
+    per entity series and cross-sectional outlier per date. A date already
+    convicted by bounds is not re-flagged by a corroboration tier."""
+    convicted = set()   # (entity_id, date) already trash — don't double-flag
+
+    for eid, d, value in rows:
+        r = rules.check_bounds(metric, value)
+        if r is not None:
+            entries.append(_entry(entity_table, eid, metric, d, r))
+            convicted.add((eid, d))
+
+    # temporal spike: per entity, ordered by date, interior points
+    spike_factor = cat.defaults["spike_factor"]
+    by_entity: Dict[int, list] = {}
+    for eid, d, value in rows:
+        by_entity.setdefault(eid, []).append((d, value))
+    for eid, series in by_entity.items():
+        series.sort(key=lambda t: t[0])
+        for i in range(1, len(series) - 1):
+            d, value = series[i]
+            if (eid, d) in convicted:
+                continue
+            r = rules.check_temporal_spike(series[i - 1][1], value,
+                                           series[i + 1][1], spike_factor)
+            if r is not None:
+                entries.append(_entry(entity_table, eid, metric, d, r))
+
+    # cross-sectional outlier: per date across the universe
+    z_threshold = cat.defaults["robust_z_threshold"]
+    by_date: Dict[Any, list] = {}
+    for eid, d, value in rows:
+        by_date.setdefault(d, []).append((eid, value))
+    for d, members in by_date.items():
+        universe = [v for _, v in members]
+        for eid, value in members:
+            if (eid, d) in convicted:
+                continue
+            r = rules.check_cross_sectional(value, universe, z_threshold)
+            if r is not None:
+                entries.append(_entry(entity_table, eid, metric, d, r))
+
+
+def _entry(entity_table, entity_id, metric, d, result):
+    return {"entity_table": entity_table, "entity_id": entity_id,
+            "metric": metric.name, "date": d, "result": result}
 
 
 def _scan_macro(conn, cat, metric, entries):
