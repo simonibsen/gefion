@@ -154,6 +154,28 @@ class BacktestEngine:
                 portfolio.cash -= owed
                 self._dividends_total += owed
 
+    def _bar_exposure(self, portfolio, current_prices: Dict[str, float],
+                      equity: float, current_date: date) -> Dict[str, Any]:
+        """Gross/net/long/short exposure (as fractions of equity) for one bar
+        (spec 009). Long-only bars have short == 0."""
+        long_notional = 0.0
+        short_notional = 0.0
+        for symbol, position in portfolio.positions.items():
+            price = current_prices.get(symbol, position["avg_price"])
+            notional = abs(position["shares"]) * price
+            if position["shares"] < 0:
+                short_notional += notional
+            else:
+                long_notional += notional
+        denom = equity if equity else 1.0
+        return {
+            "date": current_date,
+            "long": long_notional / denom,
+            "short": short_notional / denom,
+            "gross": (long_notional + short_notional) / denom,
+            "net": (long_notional - short_notional) / denom,
+        }
+
     def _get_historical_prices(self, current_date: date) -> Dict[str, List[Dict[str, Any]]]:
         """
         Get historical prices up to (and including) current date.
@@ -210,6 +232,7 @@ class BacktestEngine:
         portfolio = Portfolio(initial_cash=self.initial_cash)
         trades = []
         equity_curve = []
+        exposure_curve: List[Dict[str, Any]] = []
 
         for current_date in self._trading_dates:
             # Get current prices for this date
@@ -275,6 +298,8 @@ class BacktestEngine:
             # Record equity for this date
             equity = portfolio.calculate_equity(current_prices)
             equity_curve.append({"date": current_date, "equity": equity})
+            exposure_curve.append(
+                self._bar_exposure(portfolio, current_prices, equity, current_date))
 
         # Calculate metrics
         from gefion.backtest.metrics import calculate_metrics
@@ -300,7 +325,8 @@ class BacktestEngine:
                 "metrics": metrics, "mode": self.mode,
                 "short_costs": {"borrow_total": self._borrow_total,
                                 "dividends_total": self._dividends_total},
-                "margin_events": self._margin_events}
+                "margin_events": self._margin_events,
+                "exposure": exposure_curve}
 
     def _execute_signal(
         self,
