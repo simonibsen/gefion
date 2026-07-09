@@ -314,6 +314,28 @@ gefion macro list
 - A second series of a different shape (monthly CPI, value-only) is just
   another catalog row — no DDL
 
+### Data quality — provider-garbage detection (spec 008)
+Providers occasionally emit trash: definitionally impossible values (a beta of
+−503,341) or self-contradictory ones (a dividend yield of 1,000,000). Gefion
+stores what the provider says verbatim, but **detects** the trash and keeps it
+out of research:
+- **Two populations, told apart.** A shell company's real ROE of −615% (from
+  near-zero revenue) is internally consistent and stays usable; only
+  definitionally impossible or self-contradictory values are convicted as
+  trash. The rules live in a declarative catalog (`data-quality/catalog.yaml`),
+  each bound carrying its definitional justification.
+- **Validation rides the write paths.** `fundamentals-update` and
+  `macro ingest` validate as they store — the raw value lands verbatim and a
+  finding is recorded; the write is never blocked.
+- **Convicted values are excluded at the feature-computation chokepoint.** A
+  value convicted as trash never enters the feature store, so every downstream
+  consumer (cross-sectional rankings, ML datasets, backtests) is clean without
+  per-query vigilance. `macro ingest --include-flagged` opts a series back in.
+```bash
+gefion macro ingest --name vix                    # a VIX <= 0 is excluded from macro_vix
+gefion macro ingest --name vix --include-flagged  # carry convicted values in anyway
+```
+
 ### Entity deletion (first-class, registry-driven)
 Anything created must be cleanly deletable with its associated data. `data
 entity-delete` works uniformly across entity kinds (stocks, macro series):

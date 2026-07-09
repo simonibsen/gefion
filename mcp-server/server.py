@@ -2015,6 +2015,9 @@ async def list_tools() -> List[Tool]:
                     "kind": {"type": "string", "description": "index | rate | breadth"},
                     "cadence": {"type": "string", "description": "daily | weekly | monthly"},
                     "full": {"type": "boolean", "description": "Decades backfill"},
+                    "include_flagged": {"type": "boolean",
+                                        "description": "Carry quality-convicted "
+                                        "values into the feature (default: excluded)"},
                 },
                 "required": ["name"],
             },
@@ -2026,6 +2029,67 @@ async def list_tools() -> List[Tool]:
                 "date, row count) and materialization status (read-only)."
             ),
             inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="quality_findings",
+            description=(
+                "List data-quality findings — provider-garbage detections "
+                "(rule, observed vs expected, trash/suspect verdict). Default: "
+                "unresolved, newest first. Always show the verdict tier: a "
+                "suspect is not a conviction. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "metric": {"type": "string"},
+                    "symbol": {"type": "string"},
+                    "entity_table": {"type": "string"},
+                    "entity_id": {"type": "integer"},
+                    "verdict": {"type": "string", "description": "trash | suspect"},
+                    "since": {"type": "string", "description": "YYYY-MM-DD"},
+                    "limit": {"type": "integer"},
+                },
+            },
+        ),
+        Tool(
+            name="quality_catalog",
+            description=(
+                "Show the data-quality validation catalog: covered metrics "
+                "(bounds, derivations) and uncovered numeric columns — the "
+                "coverage gap is enumerable. Read-only."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="quality_backfill",
+            description=(
+                "Validate already-stored history against the catalog and record "
+                "findings for pre-existing provider garbage. **Mutating (ledger "
+                "only)** — creates findings, changes NO stored value; may take "
+                "minutes on full history. Operator confirms first."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "entity_table": {"type": "string", "description": "stocks | macro_series"},
+                    "metric": {"type": "string"},
+                },
+            },
+        ),
+        Tool(
+            name="quality_resolve",
+            description=(
+                "Supersede a data-quality finding (sets resolution; never "
+                "deletes). **Mutating** — operator MUST confirm; reason required."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "finding_id": {"type": "integer"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["finding_id", "reason"],
+            },
         ),
     ]
 
@@ -2264,6 +2328,14 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _macro_ingest(arguments)
         elif name == "macro_list":
             result = await _macro_list(arguments)
+        elif name == "quality_findings":
+            result = await _quality_findings(arguments)
+        elif name == "quality_catalog":
+            result = await _quality_catalog(arguments)
+        elif name == "quality_backfill":
+            result = await _quality_backfill(arguments)
+        elif name == "quality_resolve":
+            result = await _quality_resolve(arguments)
         else:
             result = {"success": False, "error": f"Unknown tool: {name}"}
 
@@ -5015,6 +5087,8 @@ async def _macro_ingest(args: Dict[str, Any]) -> Dict[str, Any]:
                 cmd.extend([f"--{opt}", str(args[opt])])
         if args.get("full"):
             cmd.append("--full")
+        if args.get("include_flagged"):
+            cmd.append("--include-flagged")
         return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
@@ -5023,6 +5097,47 @@ async def _macro_list(args: Dict[str, Any]) -> Dict[str, Any]:
     """List the macro-series catalog (read-only)."""
     async def _run():
         return await GefionExecutor().run("macro", "list")
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _quality_findings(args: Dict[str, Any]) -> Dict[str, Any]:
+    """List data-quality findings (read-only)."""
+    async def _run():
+        cmd = ["quality", "findings"]
+        for opt in ("metric", "symbol", "entity-table", "entity-id", "verdict",
+                    "since", "limit"):
+            key = opt.replace("-", "_")
+            if args.get(key) is not None:
+                cmd.extend([f"--{opt}", str(args[key])])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _quality_catalog(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Show the validation catalog (read-only)."""
+    async def _run():
+        return await GefionExecutor().run("quality", "catalog")
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _quality_backfill(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate stored history and record findings (mutating — ledger only)."""
+    async def _run():
+        cmd = ["quality", "backfill"]
+        if args.get("entity_table"):
+            cmd.extend(["--entity-table", str(args["entity_table"])])
+        if args.get("metric"):
+            cmd.extend(["--metric", str(args["metric"])])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _quality_resolve(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Supersede a finding (mutating)."""
+    async def _run():
+        return await GefionExecutor().run(
+            "quality", "resolve", str(args["finding_id"]),
+            "--reason", str(args["reason"]))
     return await _execute_with_health_check(['postgres'], _run)
 
 

@@ -4,7 +4,26 @@
 
 ## Current Capabilities
 
-### First-Class Entities (spec 007 — new)
+### Data Quality (spec 008 — new)
+- Provider-garbage detection without losing degenerate-but-real extremes:
+  a declarative catalog (`data-quality/catalog.yaml`, every bound carrying its
+  `why`) drives two convicting tiers (definitional bounds, cross-field
+  recompute vs price) and two suspect-only corroboration tiers (temporal
+  spike, robust-z cross-sectional)
+- `data_quality_findings` audit ledger (DOUBLE PRECISION so it can't overflow
+  on what it convicts; no FKs so it survives entity-delete); idempotent,
+  supersede-never-erase
+- Validation rides the write paths (`fundamentals-update`, `macro ingest`),
+  never blocking a write; convicted values excluded at the feature-computation
+  chokepoint so research is clean by default (`--include-flagged` opts in)
+- `gefion quality findings|catalog|backfill|resolve` (+ MCP tools); db-health
+  `data_quality` section; the backfill flags already-stored garbage changing
+  zero values
+- Universe hardening: test tickers excluded from research universes;
+  asset_type/exchange fail-closed selectors (closes the universe-quality
+  backlog item)
+
+### First-Class Entities (spec 007)
 - Entity identity is declared, not hard-wired: `computed_features.data_id`
   carries no FK; the pair (`feature_definitions.entity_table`, `data_id`) is
   the logical key, validated at registration (`gefion.entities.registry`)

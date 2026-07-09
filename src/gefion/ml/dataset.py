@@ -80,6 +80,15 @@ def resolve_universe_symbols(conn, universe: Dict[str, Any]) -> List[str]:
             cur.execute(query + ";", params or None)
             symbols = [row[0] for row in cur.fetchall()]
 
+        # Research universes are quality-filtered by default (spec 008): NASDAQ
+        # test tickers never belong in a dataset. Explicit universe['symbols']
+        # above bypasses this (the caller asked for exactly those).
+        try:
+            from gefion.quality.universe import exclude_test_tickers
+            symbols = exclude_test_tickers(symbols)
+        except Exception:  # pragma: no cover - defensive
+            pass
+
         set_attributes(span, symbol_count=len(symbols))
         return symbols
 

@@ -88,7 +88,13 @@ with zero further code. Plan:
    learning-module line — and write the generic "add a data source" recipe into
    `docs/DEVELOPMENT.md` while doing it (no such recipe exists today).
 
-### Universe quality filter (test tickers, asset types)
+### Universe quality filter (test tickers, asset types) — ✅ CLOSED by spec 008 (2026-07-09)
+**Resolution**: absorbed into spec 008. `gefion.quality.universe` excludes NASDAQ
+test tickers unconditionally and offers asset_type/exchange as fail-closed
+selectors, wired into the dataset-build universe resolution; 006's discovery chain
+already had the equivalent. Test-ticker list lives in the data-quality catalog.
+
+**Original item** (kept for the record):
 **Source**: first production ingest (sloth, 2026-07-06)
 **Priority**: Medium — bites as soon as research runs against the prod universe
 

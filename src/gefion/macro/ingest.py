@@ -103,9 +103,11 @@ def upsert_values(conn, series_id: int, rows: List[Dict[str, Any]]) -> int:
         return len(rows)
 
 
-def materialize_feature(conn, name: str) -> Dict[str, Any]:
+def materialize_feature(conn, name: str,
+                        include_flagged: bool = False) -> Dict[str, Any]:
     """Ensure the `macro_<name>` feature definition and copy the series into
-    computed_features (data_id = the series id). Idempotent."""
+    computed_features (data_id = the series id). Idempotent. By default,
+    values convicted as provider trash are excluded (spec 008)."""
     from gefion.db.ingest import ensure_feature_definitions
 
     with create_span("macro.ingest.materialize_feature", series=name) as span:
@@ -122,32 +124,52 @@ def materialize_feature(conn, name: str) -> Dict[str, Any]:
             "active": True, "entity_table": "macro_series",
         }])
         feature_id = ids[feature_name]
+        # Data quality (spec 008): by default, values convicted as provider
+        # trash (e.g. a VIX <= 0) are not carried into the feature store —
+        # the raw value stays verbatim in macro_series_values, but the feature
+        # excludes it. include_flagged opts back in (recorded by the caller).
+        skip_clause, skip_params = "", []
+        if not include_flagged:
+            skip_clause = (
+                " AND NOT EXISTS (SELECT 1 FROM data_quality_findings f "
+                "WHERE f.entity_table = 'macro_series' AND f.entity_id = %s "
+                "AND f.verdict = 'trash' AND f.resolved_at IS NULL "
+                "AND f.date = macro_series_values.date)")
+            skip_params = [series["id"]]
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO computed_features (data_id, date, feature_id, value)
-                   SELECT series_id, date, %s, value
-                   FROM macro_series_values WHERE series_id = %s
-                   ON CONFLICT (feature_id, data_id, date)
-                   DO UPDATE SET value = EXCLUDED.value""",
-                (feature_id, series["id"]),
+                f"""INSERT INTO computed_features (data_id, date, feature_id, value)
+                    SELECT series_id, date, %s, value
+                    FROM macro_series_values
+                    WHERE series_id = %s{skip_clause}
+                    ON CONFLICT (feature_id, data_id, date)
+                    DO UPDATE SET value = EXCLUDED.value""",
+                (feature_id, series["id"], *skip_params),
             )
             cur.execute(
                 "SELECT count(*) FROM computed_features "
                 "WHERE feature_id = %s AND data_id = %s",
                 (feature_id, series["id"]))
             n_values = cur.fetchone()[0]
-        set_attributes(span, feature_id=feature_id, n_values=n_values)
+        set_attributes(span, feature_id=feature_id, n_values=n_values,
+                       include_flagged=include_flagged)
         return {"feature": feature_name, "values": n_values}
 
 
 def ingest_series(conn, name: str, provider: str, kind: str, cadence: str,
                   description: Optional[str] = None, full: bool = False,
                   fetch: Optional[Callable[[str, bool], List[Dict[str, Any]]]] = None,
+                  quality_catalog: Any = None,
+                  include_flagged: bool = False,
                   ) -> Dict[str, Any]:
-    """The pipeline: catalog upsert → fetch → value upsert → materialize.
+    """The pipeline: catalog upsert → fetch → value upsert → validate →
+    materialize.
 
     `fetch(provider, full)` is injectable for tests; the default dispatches on
-    the provider string.
+    the provider string. `quality_catalog` is injectable too; when omitted the
+    shipped catalog is loaded. Validation runs BEFORE materialization so the
+    latter can exclude convicted values, and never blocks the ingest (FR-303).
+    `include_flagged` carries convicted values into the feature anyway.
     """
     with create_span("macro.ingest.ingest_series", series=name,
                      provider=provider) as span:
@@ -156,7 +178,32 @@ def ingest_series(conn, name: str, provider: str, kind: str, cadence: str,
                                           kind=kind, cadence=cadence,
                                           description=description)
         n = upsert_values(conn, series_id, rows)
-        summary = materialize_feature(conn, name)
-        set_attributes(span, series_id=series_id, values_upserted=n)
+        quality_findings = _validate_macro(conn, name, series_id, rows,
+                                           quality_catalog)
+        summary = materialize_feature(conn, name, include_flagged=include_flagged)
+        set_attributes(span, series_id=series_id, values_upserted=n,
+                       quality_findings=quality_findings,
+                       include_flagged=include_flagged)
         return {"series": name, "series_id": series_id, "provider": provider,
-                "values_upserted": n, **summary}
+                "values_upserted": n, "quality_findings": quality_findings,
+                "quality_filtering": "opted-out" if include_flagged else "active",
+                **summary}
+
+
+def _validate_macro(conn, name: str, series_id: int,
+                    rows: List[Dict[str, Any]], quality_catalog: Any) -> int:
+    """Validate ingested macro values against the data-quality catalog and
+    record findings. Guarded — never raises into the ingest (FR-303)."""
+    import logging
+    try:
+        from gefion.quality import catalog as qcatalog
+        from gefion.quality import findings as qfindings
+        from gefion.quality import validate as qvalidate
+        cat = quality_catalog or qcatalog.load_default()
+        entries = qvalidate.validate_macro_values(cat, name, series_id, rows)
+        return qfindings.record_findings(conn, entries, context=f"macro ingest {name}") \
+            if entries else 0
+    except Exception as exc:  # pragma: no cover - defensive
+        logging.getLogger(__name__).warning(
+            f"data-quality validation failed for macro {name}: {exc}")
+        return 0
