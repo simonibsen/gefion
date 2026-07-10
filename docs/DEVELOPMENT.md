@@ -129,6 +129,32 @@ Why not a checked-in worklist: per-branch state drifts (done on one branch, open
 on another) and can't be closed by a PR. State belongs in issues; design belongs
 in `specs/`. (Migration: 2026-07-09, backlog.md items → issues #86–#90.)
 
+## Deletion policy (first-class deletes)
+
+Owner principle (2026-07-08, issue #76): **deletions are first-class actions —
+anything we create must be cleanly deletable, together with its associated
+data.** Archive-only lifecycles accumulate junk; ad-hoc SQL deletes either fail
+on RESTRICT FKs or orphan dependents.
+
+1. **Every plan adding a created artifact includes its deletion story in the
+   same increment** — a spec that creates something says how it dies.
+2. **Deletes are dependency-aware, dry-run by default, `--confirm` to
+   execute** (the `data cull` / `entity-delete` mold): the dry-run reports the
+   full blast radius and changes nothing.
+3. **Honest exceptions are declared, not implied**: append-only audit ledgers
+   (the discovery candidate/diagnostics ledgers, trust grades, quality
+   findings) are never deleted by artifact deletion — removing the artifact
+   must not remove the accounting. Runs with admitted candidates refuse
+   deletion with deliberately no `--force`.
+4. **New tables declare their delete story at DDL-approval time**: the
+   ON DELETE behavior is chosen deliberately (CASCADE for derived/owned rows,
+   RESTRICT for accounting), never defaulted by omission.
+
+Landed doors: `data cull`, `data entity-delete` (007), `regime delete` +
+`regime discover delete` (#75/#76). Known gaps (tracked on #76): per-model ML
+artifact delete, experiment delete, feature definition/function delete,
+disk-artifact reaping.
+
 ## Patterns & Gotchas (living reference)
 
 > **This is a living document.** When you rediscover a convention or hit a gotcha during

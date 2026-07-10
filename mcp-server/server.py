@@ -1921,6 +1921,51 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="regime_delete",
+            description=(
+                "Delete a regime definition and its labels. Dry-run by default "
+                "(confirm=false): reports labels count, discovery provenance, and "
+                "stored experiment results referencing the name (soft references are "
+                "reported, never mutated). With confirm=true it is MUTATING and "
+                "destructive: always show the user the dry-run and get explicit "
+                "approval first. Machine-origin (discovery-admitted) regimes need "
+                "force=true; the candidate ledger is never touched either way. "
+                "regime_archive is the recommended lifecycle exit."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Regime name"},
+                    "confirm": {"type": "boolean",
+                                "description": "Actually delete (default false = dry-run)"},
+                    "force": {"type": "boolean",
+                              "description": "Allow deleting a machine-origin regime"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="regime_discover_delete",
+            description=(
+                "Delete a discovery run and its ledger rows (candidates, grades, "
+                "diagnostics, SPA re-verdicts — via the run cascade). For invalid/"
+                "test runs. Dry-run by default (confirm=false). A run with ADMITTED "
+                "candidates refuses always — the ledger behind an admitted artifact "
+                "is the multiple-testing audit trail; there is deliberately no force. "
+                "With confirm=true it is MUTATING and destructive: always show the "
+                "user the dry-run and get explicit approval first."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run": {"type": "string", "description": "Run id or name"},
+                    "confirm": {"type": "boolean",
+                                "description": "Actually delete (default false = dry-run)"},
+                },
+                "required": ["run"],
+            },
+        ),
+        Tool(
             name="regime_discover_spa",
             description=(
                 "Selection-aware SPA re-verdict over a completed discovery run's counted "
@@ -2348,6 +2393,10 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_ledger(arguments)
         elif name == "regime_discover_verdicts":
             result = await _regime_discover_verdicts(arguments)
+        elif name == "regime_delete":
+            result = await _regime_delete(arguments)
+        elif name == "regime_discover_delete":
+            result = await _regime_discover_delete(arguments)
         elif name == "regime_discover_spa":
             result = await _regime_discover_spa(arguments)
         elif name == "regime_discover_diagnostics":
@@ -5069,6 +5118,28 @@ async def _regime_discover_verdicts(args: Dict[str, Any]) -> Dict[str, Any]:
     """FDR survivors of a discovery run, with the family size beside them."""
     async def _run():
         return await GefionExecutor().run("regime", "discover", "verdicts", args["run"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Delete a regime definition (dry-run unless confirm=true)."""
+    async def _run():
+        cmd = ["regime", "delete", args["name"]]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        if args.get("force"):
+            cmd.append("--force")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Delete a discovery run (dry-run unless confirm=true; admitted runs refuse)."""
+    async def _run():
+        cmd = ["regime", "discover", "delete", args["run"]]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
 

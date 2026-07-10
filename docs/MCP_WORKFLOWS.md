@@ -1018,7 +1018,11 @@ The `regime_*` MCP tools mirror the `gefion regime` CLI (see [REGIMES.md](REGIME
 - `regime_show` — show a regime definition.
 - `regime_compute` — compute causal labels for a regime.
 - `regime_labels` — summarize computed labels (bucket coverage).
-- `regime_archive` — archive a regime definition.
+- `regime_archive` — archive a regime definition (recommended lifecycle exit).
+- `regime_delete` — delete a definition + labels. Dry-run by default (`confirm=false`)
+  reporting the full blast radius; **mutating and destructive** with `confirm=true` —
+  always show the user the dry-run and get explicit approval first. Machine-origin
+  regimes need `force=true`; the candidate ledger is never touched either way.
 - `regime_definitions_export` / `regime_definitions_import` — JSON backup/restore.
 - `regime_interaction` — continuous-interaction test (does a signal's edge scale with a conditioning variable?).
 - `chart_regime` — chart a symbol's price with regime-episode bands overlaid.
@@ -1048,6 +1052,10 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
   alarming beside admissions — report it as caution, never as a demotion.
   **Mutating** (appends one durable row) and compute-heavy
   (reconstruction + B bootstrap iterations): confirm with the user before invoking.
+- `regime_discover_delete` — delete an invalid/test discovery run and its ledger rows
+  (run cascade). Dry-run by default (`confirm=false`); **mutating and destructive**
+  with `confirm=true` — show the user the dry-run and get explicit approval first.
+  A run with admitted candidates refuses always (no force door).
 - `regime_discover_diagnostics` — the diagnostics ledger: limits hit with quantitative
   reasons, tagged sample-dependent (re-test on new data) vs structural (accumulate).
 - `regime_discover_grades` — forward-accruing trust grades (fold 1 = probation);

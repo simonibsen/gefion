@@ -86,6 +86,18 @@ a verdict.
 
 Every operation is reachable via CLI, MCP (`regime_*` tools), and the UI **Regimes** page.
 
+### Lifecycle exits: archive vs delete
+
+`regime archive` is the recommended exit — stored experiment verdicts reference
+regimes by *name*, and an archived definition keeps those results resolvable.
+`regime delete` (dry-run by default, `--confirm` to execute) removes the
+definition and its labels in dependency order and reports — but never mutates —
+the stored results that reference the name. A discovery-admitted (machine-origin)
+regime requires `--force`, and even then the candidate ledger is untouched:
+deleting the artifact never deletes the search accounting. Invalid/test discovery
+runs have their own guarded door (`regime discover delete`); runs with admitted
+candidates refuse always.
+
 ## Agentic discovery (spec 006)
 
 Spec 005 lets a **human** specify a regime; discovery lets the **agent** propose and test
