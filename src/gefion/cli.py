@@ -5348,13 +5348,25 @@ def _backup_impl(
                 )
                 return
 
-            # Check disk space
-            if not check_disk_space(str(output), estimate["total_bytes"]):
+            # Check disk space (issue #90): refuse only on genuinely
+            # insufficient space; if the pre-check itself fails, warn and
+            # attempt the backup — the write will fail honestly if the disk
+            # really is full.
+            space = check_disk_space(str(output), estimate["total_bytes"])
+            if not space.ok and space.reason == "insufficient":
                 emit_error(
-                    f"Insufficient disk space. Need ~{estimate['total_bytes'] / (1024*1024):.1f} MB",
+                    f"Insufficient disk space: need "
+                    f"~{space.required_bytes / (1024*1024):.1f} MB, have "
+                    f"{space.free_bytes / (1024*1024):.1f} MB free",
                     json_output=json_output,
                 )
                 return
+            if not space.ok:
+                emit(
+                    f"Warning: could not verify free disk space "
+                    f"({space.detail or 'unknown reason'}) — proceeding",
+                    json_output=json_output,
+                )
 
             # Create backup
             result = create_backup(
