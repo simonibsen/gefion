@@ -129,3 +129,67 @@ def test_mcp_spa_tool_exists():
     assert 'name="regime_discover_spa"' in server
     assert 'name == "regime_discover_spa"' in server
     assert "async def _regime_discover_spa(" in server
+
+
+# --- surfacing (T016/T017 — US3) ------------------------------------------------------
+
+def _cli(args):
+    from typer.testing import CliRunner
+    from gefion.cli import app
+    return CliRunner().invoke(
+        app, args + ["--db-url", schema.test_db_url()])
+
+
+def test_show_says_spa_not_yet_run(conn):
+    run_id = _make_run(conn, "sparev-show-none")
+    result = _cli(["regime", "discover", "show", str(run_id)])
+    assert result.exit_code == 0
+    assert "SPA: not yet run" in result.output
+
+
+def test_show_and_verdicts_display_latest_spa(conn):
+    from gefion.regimes.discovery.ledger import record_spa_reverdict
+    run_id = _make_run(conn, "sparev-show-latest")
+    record_spa_reverdict(conn, run_id, _result(p=0.40))
+    record_spa_reverdict(conn, run_id, _result(p=0.004))    # latest: FAIL at 0.01
+    for cmd in ("show", "verdicts"):
+        result = _cli(["regime", "discover", cmd, str(run_id)])
+        assert result.exit_code == 0
+        assert "SPA" in result.output
+        assert "0.004" in result.output                     # latest, not first
+        assert "FAIL" in result.output
+    # JSON payload carries the same fields (MCP reads this)
+    result = _cli(["regime", "discover", "show", str(run_id), "--json"])
+    import json as _json
+    payload = _json.loads(result.output)
+    assert payload["spa"]["p_consistent"] == 0.004
+    assert payload["spa"]["passed"] is False
+
+
+def test_grades_flag_admitted_edge_whose_family_failed_spa(conn):
+    from gefion.regimes.discovery import ledger as dledger
+    run_id = _make_run(conn, "sparev-grades-flag")
+    with conn.cursor() as cur:
+        cur.execute("UPDATE regime_discovery_runs SET status='pre_registered' "
+                    "WHERE id=%s", (run_id,))
+    cand_id = dledger.record_candidates(conn, run_id, [{
+        "candidate_hash": "sparevhash1", "tier": "interaction",
+        "expression": {"kind": "interaction", "signal": "x", "conditioning": "y"},
+        "provenance": {"atom_features": ["y"]}}])[0]
+    dledger.set_status(conn, run_id, "enumerated")
+    dledger.record_result(conn, cand_id, {"tests": []}, "admitted")
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO regime_trust_grades (candidate_id, fold, confirmed) "
+                    "VALUES (%s, 1, TRUE)", (cand_id,))
+    from gefion.regimes.discovery.ledger import record_spa_reverdict
+    record_spa_reverdict(conn, run_id, _result(p=0.004))    # FAIL at level 0.01
+    result = _cli(["regime", "discover", "grades", str(cand_id)])
+    assert result.exit_code == 0
+    assert "failed selection-aware check" in result.output.lower()
+    assert "0.004" in result.output
+    # loud flag, not a demotion: the grade line is intact
+    assert "1/1" in result.output
+    # and a passing family carries no flag
+    record_spa_reverdict(conn, run_id, _result(p=0.30))     # latest now PASS
+    result = _cli(["regime", "discover", "grades", str(cand_id)])
+    assert "failed selection-aware check" not in result.output.lower()

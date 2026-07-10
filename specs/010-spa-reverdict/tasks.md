@@ -64,8 +64,8 @@ doesn't; perturbing one price row → refusal naming the divergent unit.
 
 ## Phase 5: US3 — The verdict is visible where verdicts live (P2)
 
-- [ ] T016 [US3] Write surfacing tests (extend `tests/test_spa_reverdict.py`, RED): `discover show`/`verdicts` display the latest SPA (p_consistent, level, pass/fail, when) or `SPA: not yet run`; `discover grades` flags an admitted edge whose run's latest SPA fails, while its BH verdict and trust grade are unchanged
-- [ ] T017 [US3] Implement the show/verdicts SPA line and the grades flag in `src/gefion/cli.py` (+ the same fields in the MCP payloads) (GREEN); `/gefion` operator routing ("is this family trustworthy at scale" → `regime_discover_spa`; a flag is not a demotion)
+- [x] T016 [US3] Write surfacing tests (extend `tests/test_spa_reverdict.py`, RED): `discover show`/`verdicts` display the latest SPA (p_consistent, level, pass/fail, when) or `SPA: not yet run`; `discover grades` flags an admitted edge whose run's latest SPA fails, while its BH verdict and trust grade are unchanged
+- [x] T017 [US3] Implement the show/verdicts SPA line and the grades flag in `src/gefion/cli.py` (+ the same fields in the MCP payloads) (GREEN); `/gefion` operator routing ("is this family trustworthy at scale" → `regime_discover_spa`; a flag is not a demotion)
 
 ---
 
