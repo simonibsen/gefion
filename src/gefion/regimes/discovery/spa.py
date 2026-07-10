@@ -449,10 +449,11 @@ def reverdict(conn, run, iterations: int = 1000,
     """The post-run SPA re-verdict (FR-1001..1006): reconstruct → verify →
     joint stationary bootstrap → Hansen SPA. Read-only over ledger and market
     rows; recording is the caller's step."""
-    fam = reconstruct_family(conn, run)
-    run_row = fam["run"]
-    with create_span("discovery.spa.reverdict", run_id=run_row["id"],
+    with create_span("discovery.spa.reverdict", run=str(run),
                      iterations=iterations) as span:
+        fam = reconstruct_family(conn, run)
+        run_row = fam["run"]
+        set_attributes(span, run_id=run_row["id"])
         all_dates = sorted({d for u in fam["units"] for d in u["dates"]})
         n = len(all_dates)
         if n < MIN_OUTER_OBSERVATIONS:

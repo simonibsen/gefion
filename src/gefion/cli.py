@@ -12602,7 +12602,8 @@ def regime_discover_spa(
     from gefion.regimes.discovery import spa as dspa
     from gefion.regimes.discovery.ledger import LedgerError
     out = get_output(json_output)
-    with _regime_conn(db_url) as conn:
+    with create_span("cli.regime-discover-spa", run=run,
+                     iterations=iterations), _regime_conn(db_url) as conn:
         try:
             run_row = _resolve_run(conn, run)
         except LedgerError as exc:

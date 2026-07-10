@@ -1,10 +1,35 @@
 # Gefion Project Status
 
-**Last Updated**: 2026-07-08
+**Last Updated**: 2026-07-10
 
 ## Current Capabilities
 
-### Short-Side Execution (spec 009 — new)
+### SPA Re-Verdict (spec 010 — new)
+- Selection-aware check over a discovery run's counted family: `gefion regime
+  discover spa <run>` answers "could the best candidate be the best of many
+  lucky draws?" — Hansen SPA (consistent p is the verdict; lower/upper as
+  diagnostics), joint stationary bootstrap (Politis–Romano, automatic
+  Politis–White block length), seeded and reproducible
+- Reconstruction honesty core: the family is rebuilt via the run's OWN code
+  paths from ledger + pre-registration; recomputed per-unit p-values must
+  reproduce stored ones (1e-9/1e-6) before any verdict — drift (price
+  backfills) means an honest refusal naming the divergent units, never a
+  verdict from a different world
+- `spa_reverdicts` table: append-only beside the run (latest by timestamp);
+  BH verdicts and the candidate ledger are never rewritten; surfaced in
+  show/verdicts (`SPA: not yet run` when absent) and grades (loud
+  family-failed flag, never auto-demotion); MCP `regime_discover_spa`
+- Budget gate ENFORCED: `--budget > 200` or `--depth > 2` (V1_MAX_BUDGET/
+  V1_MAX_DEPTH) refused unless the 2 most recent completed runs (same
+  dataset version) carry passing latest re-verdicts; satisfaction recorded
+  as `{gate: "spa", runs, reverdict_ids}` in the new run's pre-registration
+- Standing negative control in CI: 40 seeded noise families in the
+  production unit form (sign-aligned — measured nominal 3/60 vs raw 0/60)
+  bounded by the exact binomial 99% bound; planted edge must reject; plus a
+  full-pipeline noise world (empty family refuses; open family doesn't
+  reject). In-run gate and signal_source rungs remain follow-ups (#87)
+
+### Short-Side Execution (spec 009)
 - gefion detects both directions but until 009 could only *act* long; now
   `gefion backtest run --mode long_short` makes a short a first-class position
   so negative-directionality edges are actable
