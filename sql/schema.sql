@@ -838,6 +838,31 @@ CREATE TABLE IF NOT EXISTS regime_trust_grades (
     UNIQUE (candidate_id, fold, descriptive)
 );
 
+-- SPA re-verdict results (spec 010): one row per execution of
+-- `regime discover spa <run>` — append-only ("latest" by created_at).
+-- Cascades with its run: derived analysis OF the run, re-runnable from the
+-- ledger — unlike the candidate ledger, which must survive artifacts. A
+-- recorded row always implies reconstruction verification passed.
+CREATE TABLE IF NOT EXISTS spa_reverdicts (
+    id            SERIAL PRIMARY KEY,
+    run_id        INTEGER NOT NULL
+                  REFERENCES regime_discovery_runs(id) ON DELETE CASCADE,
+    p_consistent  DOUBLE PRECISION NOT NULL,
+    p_lower       DOUBLE PRECISION NOT NULL,
+    p_upper       DOUBLE PRECISION NOT NULL,
+    level         DOUBLE PRECISION NOT NULL,
+    passed        BOOLEAN NOT NULL,
+    iterations    INTEGER NOT NULL,
+    seed          BIGINT NOT NULL,
+    block_length  DOUBLE PRECISION NOT NULL,
+    family_size   INTEGER NOT NULL,
+    verification  JSONB NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS spa_reverdicts_run_created_idx
+    ON spa_reverdicts (run_id, created_at DESC);
+
 -- =============================================================================
 -- MIGRATION BOOKKEEPING
 -- =============================================================================

@@ -256,3 +256,53 @@ def list_diagnostics(conn, run_id: int,
             params,
         )
         return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+# --- SPA re-verdicts (spec 010) --------------------------------------------------
+
+_SPA_COLUMNS = ("id", "run_id", "p_consistent", "p_lower", "p_upper", "level",
+                "passed", "iterations", "seed", "block_length", "family_size",
+                "verification", "created_at")
+
+
+def record_spa_reverdict(conn, run_id: int, result: Dict[str, Any]) -> int:
+    """Append one SPA re-verdict row (spec 010, FR-1007). Append-only by
+    construction: nothing here updates or deletes; re-runs add rows and
+    'latest' is by created_at. A recorded row implies verification passed —
+    drift refuses before any insert."""
+    with create_span("discovery.ledger.record_spa_reverdict",
+                     run_id=run_id) as span:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO spa_reverdicts
+                       (run_id, p_consistent, p_lower, p_upper, level, passed,
+                        iterations, seed, block_length, family_size, verification)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   RETURNING id""",
+                (run_id, result["p_consistent"], result["p_lower"],
+                 result["p_upper"], result["level"], result["passed"],
+                 result["iterations"], result["seed"], result["block_length"],
+                 result["family_size"], Json(result["verification"])),
+            )
+            rid = cur.fetchone()[0]
+        set_attributes(span, reverdict_id=rid,
+                       p_consistent=result["p_consistent"])
+        return rid
+
+
+def latest_spa_reverdict(conn, run_id: int) -> Optional[Dict[str, Any]]:
+    """The most recent SPA re-verdict for a run, or None if never run —
+    absence is visible, not implied (FR-1008)."""
+    rows = list_spa_reverdicts(conn, run_id, limit=1)
+    return rows[0] if rows else None
+
+
+def list_spa_reverdicts(conn, run_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+    """Re-verdict history for a run, newest first."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {', '.join(_SPA_COLUMNS)} FROM spa_reverdicts "
+            "WHERE run_id = %s ORDER BY created_at DESC, id DESC LIMIT %s",
+            (run_id, limit),
+        )
+        return [dict(zip(_SPA_COLUMNS, row)) for row in cur.fetchall()]

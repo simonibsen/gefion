@@ -12304,6 +12304,23 @@ def _discovery_run_payload(run: dict) -> dict:
     return {k: (str(v) if hasattr(v, "isoformat") else v) for k, v in run.items()}
 
 
+def _latest_spa(conn, run_id: int) -> tuple:
+    """(JSON-safe latest SPA re-verdict or None, human-readable one-liner).
+
+    The absence is explicit — 'SPA: not yet run' — because a family that was
+    never selection-checked is a different claim than one that passed.
+    """
+    from gefion.regimes.discovery import ledger as dledger
+    latest = dledger.latest_spa_reverdict(conn, run_id)
+    if latest is None:
+        return None, "SPA: not yet run"
+    payload = _discovery_run_payload(latest)
+    verdict = "PASS" if latest["passed"] else "FAIL"
+    line = (f"SPA: {verdict} — consistent p = {latest['p_consistent']:.4g} "
+            f"at level {latest['level']:g} ({payload['created_at']})")
+    return payload, line
+
+
 @discover_app.command("start")
 def regime_discover_start(
     name: str = typer.Option(..., "--name", help="Run name (kebab-case slug)"),
@@ -12538,6 +12555,7 @@ def regime_discover_verdicts(
             out.error(str(exc))
             raise typer.Exit(1)
         cands = dledger.list_candidates(conn, run_row["id"])
+        spa_payload, spa_line = _latest_spa(conn, run_row["id"])
     admitted = [c for c in cands if c["verdict"] == "admitted"]
     by_verdict: dict = {}
     for c in cands:
@@ -12545,13 +12563,74 @@ def regime_discover_verdicts(
     out.info(f"Run {run_row['id']} '{run_row['name']}': {len(admitted)} admitted "
              f"out of {len(cands)} candidates — FDR family size {run_row['family_size']} "
              f"(every test counted, losers included)")
+    out.info(spa_line)
     for c in admitted:
         surviving = [t for t in (c["results"] or {}).get("tests", []) if t.get("survived")]
         out.info(f"  admitted {c['candidate_hash'][:24]}: "
                  f"{[(t['signal'], t.get('bucket'), t['pvalue']) for t in surviving]}")
     if out.json_mode:
         out.json({"run_id": run_row["id"], "family_size": run_row["family_size"],
-                  "verdict_counts": by_verdict, "admitted": admitted})
+                  "verdict_counts": by_verdict, "admitted": admitted,
+                  "spa": spa_payload})
+
+
+@discover_app.command("spa")
+def regime_discover_spa(
+    run: str = typer.Argument(..., help="Run id or name (must be completed)"),
+    iterations: int = typer.Option(
+        1000, "--iterations", "-B", help="Bootstrap iterations"),
+    seed: Optional[int] = typer.Option(
+        None, "--seed", help="Bootstrap seed (default: the run's own seed)"),
+    level: Optional[float] = typer.Option(
+        None, "--level", help="Pass threshold on the consistent p-value "
+        "(default: the run's FDR rate)"),
+    block_length: Optional[float] = typer.Option(
+        None, "--block-length", help="Expected block length override "
+        "(default: Politis-White automatic)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Selection-aware SPA re-verdict over the run's counted candidate family.
+
+    Reconstructs every counted candidate's outer-window records via the run's
+    own code paths, verifies the recomputed p-values reproduce the ledger's
+    stored ones (refusing on drift), then runs Hansen's SPA test with a joint
+    stationary bootstrap. The result is recorded append-only beside the run —
+    it never rewrites the BH verdicts or the ledger.
+    """
+    from gefion.regimes.discovery import ledger as dledger
+    from gefion.regimes.discovery import spa as dspa
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    with create_span("cli.regime-discover-spa", run=run,
+                     iterations=iterations), _regime_conn(db_url) as conn:
+        try:
+            run_row = _resolve_run(conn, run)
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+        try:
+            result = dspa.reverdict(
+                conn, run_row["id"], iterations=iterations, seed=seed,
+                level=level, block_length=block_length)
+        except dspa.SpaRefusal as exc:
+            out.error(f"SPA re-verdict refused: {exc}")
+            raise typer.Exit(1)
+        dledger.record_spa_reverdict(conn, run_row["id"], result)
+        conn.commit()
+    verdict = "PASS" if result["passed"] else "FAIL"
+    out.info(f"SPA re-verdict for run {run_row['id']} '{run_row['name']}': "
+             f"{verdict} — consistent p = {result['p_consistent']:.4f} "
+             f"(lower {result['p_lower']:.4f}, upper {result['p_upper']:.4f}) "
+             f"at level {result['level']}")
+    out.info(f"  family size {result['family_size']}, "
+             f"{result['iterations']} iterations, seed {result['seed']}, "
+             f"expected block length {result['block_length']:.2f}")
+    ver = result["verification"]
+    out.info(f"  verification: {ver['units']} units reconstructed, "
+             f"max divergence {ver['max_abs_divergence']:.2e}")
+    if out.json_mode:
+        out.json({"run_id": run_row["id"], **result})
 
 
 @discover_app.command("diagnostics")
@@ -12621,14 +12700,20 @@ def regime_discover_grades(
             payload = []
             for cand_id, cand_hash, run_id in graded:
                 grade = scheme.grade(conn, cand_id)
+                spa_payload, _ = _latest_spa(conn, run_id)
                 payload.append({"candidate_id": cand_id, "run_id": run_id,
-                                "candidate_hash": cand_hash, "grade": grade})
+                                "candidate_hash": cand_hash, "grade": grade,
+                                "spa": spa_payload})
             out.table(
                 columns=[Column("candidate_id"), Column("run_id"), Column("folds"),
-                         Column("confirmed"), Column("grade"), Column("regime_limited")],
+                         Column("confirmed"), Column("grade"), Column("regime_limited"),
+                         Column("spa")],
                 rows=[[p["candidate_id"], p["run_id"], p["grade"]["folds"],
                        p["grade"]["confirmed"], p["grade"]["grade"],
-                       p["grade"]["regime_limited"]] for p in payload],
+                       p["grade"]["regime_limited"],
+                       "not run" if p["spa"] is None else
+                       ("pass" if p["spa"]["passed"] else "FAMILY FAILED")]
+                      for p in payload],
                 json_data={"graded": payload},
             )
             return
@@ -12642,12 +12727,26 @@ def regime_discover_grades(
             rows = [{"fold": f, "confirmed": c, "descriptive": d,
                      "detail": detail, "graded_at": str(at)}
                     for f, c, d, detail, at in cur.fetchall()]
+        with conn.cursor() as cur:
+            cur.execute("SELECT run_id FROM regime_candidates WHERE id = %s",
+                        (cand_id,))
+            row = cur.fetchone()
+        spa_payload = None
+        if row is not None:
+            spa_payload, _ = _latest_spa(conn, row[0])
+    spa_failed = spa_payload is not None and not spa_payload["passed"]
     if not out.json_mode:
         flag = " [REGIME-LIMITED]" if grade["regime_limited"] else ""
         out.info(f"Candidate {cand_id}: {grade['confirmed']}/{grade['folds']} "
                  f"forward folds confirmed{flag} "
                  f"({grade['no_evidence']} no-evidence fold(s), never counted; "
                  f"{grade['descriptive_slices']} descriptive slice(s), never graded)")
+        if spa_failed:
+            out.warning(
+                f"  ⚠ family failed selection-aware check "
+                f"(SPA p={spa_payload['p_consistent']:.4g} at level "
+                f"{spa_payload['level']:g}) — BH verdict and trust grade "
+                f"unchanged; treat with caution, re-examine before scaling")
         for r in rows:
             marker = "descriptive" if r["descriptive"] else "forward"
             if (r["detail"] or {}).get("refused"):
@@ -12656,7 +12755,8 @@ def regime_discover_grades(
                 status = "confirmed" if r["confirmed"] else "failed"
             out.info(f"  fold {r['fold']} [{marker}]: {status}")
     if out.json_mode:
-        out.json({"candidate_id": cand_id, "grade": grade, "rows": rows})
+        out.json({"candidate_id": cand_id, "grade": grade, "rows": rows,
+                  "spa": spa_payload, "spa_failed": spa_failed})
 
 
 @discover_app.command("register")
@@ -12752,10 +12852,12 @@ def regime_discover_show(
     out = get_output(json_output)
     with _regime_conn(db_url) as conn:
         try:
-            payload = _discovery_run_payload(_resolve_run(conn, run))
+            run_row = _resolve_run(conn, run)
         except LedgerError as exc:
             out.error(str(exc))
             raise typer.Exit(1)
+        payload = _discovery_run_payload(run_row)
+        payload["spa"], spa_line = _latest_spa(conn, run_row["id"])
     if out.json_mode:
         out.json(payload)
     else:
@@ -12763,6 +12865,7 @@ def regime_discover_show(
                  f"seed {payload['seed']}, family size {payload['family_size']}")
         out.info(f"Search space: {payload['search_space']}")
         out.info(f"Segregation: {payload['segregation']}")
+        out.info(spa_line)
 
 
 def entrypoint() -> None:  # pragma: no cover - thin wrapper

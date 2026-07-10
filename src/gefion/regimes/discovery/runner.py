@@ -52,6 +52,17 @@ INNER_SCREEN_PVALUE = 0.05
 
 VALID_TIERS = ("interaction", "grammar", "expressive")
 
+# The v1 scale ceiling made explicit (spec 010, FR-1009). v1's flat BH family
+# is honest at these volumes (measured false-admission ~1/100 noise runs);
+# beyond them the search itself must be modeled, so raising either cap
+# requires passing selection-aware (SPA) re-verdicts on recent prior runs.
+V1_MAX_BUDGET = 200
+V1_MAX_DEPTH = 2
+
+# How many of the most recent completed runs (same dataset version) must
+# carry a passing latest SPA re-verdict to license an above-cap start.
+_SPA_GATE_RUNS = 2
+
 
 class DiscoveryError(ValueError):
     """Raised on an invalid discovery configuration."""
@@ -105,12 +116,66 @@ class DiscoveryConfig:
                 "freeform/detector candidates require the expressive tier")
 
 
+def check_budget_gate(conn, config: DiscoveryConfig,
+                      dataset_version: str) -> Optional[Dict[str, Any]]:
+    """The SPA budget gate (FR-1009/1010): above-cap scale must be earned.
+
+    Within the v1 caps, returns None — the gate does not exist for such runs.
+    Above either cap, the _SPA_GATE_RUNS most recent completed runs on the
+    same dataset version must each carry a passing latest SPA re-verdict;
+    returns the auditable satisfaction record for the pre-registration, or
+    raises DiscoveryError naming the gate and the satisfying command.
+    """
+    if config.budget <= V1_MAX_BUDGET and config.depth <= V1_MAX_DEPTH:
+        return None
+    with create_span("discovery.runner.budget_gate",
+                     budget=config.budget, depth=config.depth,
+                     dataset_version=dataset_version) as span:
+        excess = (f"budget {config.budget} > {V1_MAX_BUDGET}"
+                  if config.budget > V1_MAX_BUDGET
+                  else f"depth {config.depth} > {V1_MAX_DEPTH}")
+        recent = [r for r in ledger.list_runs(conn, status="complete")
+                  if r["dataset_version"] == dataset_version][:_SPA_GATE_RUNS]
+        if len(recent) < _SPA_GATE_RUNS:
+            raise DiscoveryError(
+                f"budget gate: {excess} requires passing SPA re-verdicts on the "
+                f"{_SPA_GATE_RUNS} most recent completed runs (dataset version "
+                f"{dataset_version!r}), but only {len(recent)} completed run(s) "
+                f"exist — run within the v1 caps first, then "
+                f"`gefion regime discover spa <run>`")
+        failing = []
+        reverdict_ids = []
+        for r in recent:
+            latest = ledger.latest_spa_reverdict(conn, r["id"])
+            if latest is None:
+                failing.append(f"run {r['id']} '{r['name']}': SPA not yet run")
+            elif not latest["passed"]:
+                failing.append(
+                    f"run {r['id']} '{r['name']}': latest SPA FAILED "
+                    f"(p={latest['p_consistent']:.4g} at level {latest['level']:g})")
+            else:
+                reverdict_ids.append(latest["id"])
+        if failing:
+            raise DiscoveryError(
+                f"budget gate: {excess} requires a passing latest SPA "
+                f"re-verdict on each of the {_SPA_GATE_RUNS} most recent "
+                f"completed runs (dataset version {dataset_version!r}) — "
+                + "; ".join(failing)
+                + " — satisfy with `gefion regime discover spa <run>`")
+        gate = {"gate": "spa", "runs": [r["id"] for r in recent],
+                "reverdict_ids": reverdict_ids}
+        set_attributes(span, gate_runs=gate["runs"],
+                       gate_reverdicts=reverdict_ids)
+        return gate
+
+
 def run_discovery(conn, config: DiscoveryConfig, market: MarketData) -> Dict[str, Any]:
     """Execute one discovery run end to end; returns a summary dict."""
     with create_span("discovery.runner.run", run_name=config.name,
                      seed=config.seed) as span:
         config.validate()
         dataset_version = config.dataset_version or market.dataset_version
+        gate = check_budget_gate(conn, config, dataset_version)
         chain = universe.parse_filter_chain(config.universe_filter)
         atoms = grammar.validate_atoms(config.atoms)
 
@@ -133,6 +198,8 @@ def run_discovery(conn, config: DiscoveryConfig, market: MarketData) -> Dict[str
             "align_window": config.align_window,
         }
 
+        if gate is not None:
+            search_space["gate"] = gate
         if config.freeform:
             search_space["freeform"] = list(config.freeform)
         if config.detectors:

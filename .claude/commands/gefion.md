@@ -196,20 +196,29 @@ structural guardrails (see `docs/REGIMES.md` § Agentic discovery for the threat
    regime-limited trigger — do not read it as a failure. The fold grid can be
    re-declared with `regime_discover_register` (mutating) only until real evidence
    exists; after the first confirmed/failed fold it is locked
-5. Deep validation: pass `max_date` to `regime_discover_start` to discover as of a
+5. "Is this family trustworthy at scale?" → `regime_discover_spa` — the
+   selection-aware SPA re-verdict (reconstructs the counted family, verifies against
+   the ledger, joint stationary bootstrap; **mutating** — appends one durable row —
+   and compute-heavy: confirm first). It may **refuse** on drift (price backfills):
+   report the refusal verbatim, never substitute a guess. A failing SPA beside an
+   admitted edge is a loud flag, **not a demotion** — the BH verdict and trust grade
+   stand; say both facts
+6. Deep validation: pass `max_date` to `regime_discover_start` to discover as of a
    past vintage (procedure evidence — never a grade confirmation); `half:a`/`half:b`
    in the universe chain give a split-half robustness check (robustness, NOT
    independent validation, at market scope)
-6. To start a run, `regime_discover_start` — **mutating and potentially long: always
+7. To start a run, `regime_discover_start` — **mutating and potentially long: always
    confirm with the user before invoking** (same class as experiment runs). Expect
    mostly/entirely rejections; that is the loop working
-7. An admitted regime is an ordinary machine-origin regime: chart/label/slice it with
+8. An admitted regime is an ordinary machine-origin regime: chart/label/slice it with
    the normal `regime_*` and `chart_regime` tools
 
-**Honesty rules:** confirm before `regime_discover_start` or `regime_discover_grade_fold`;
+**Honesty rules:** confirm before `regime_discover_start`, `regime_discover_grade_fold`,
+or `regime_discover_spa`;
 **never present an unadmitted candidate as a finding** — refused and rejected candidates
 are part of the denominator, not discoveries; report survivors only alongside their
-family size; descriptive (backward) grade rows are context, never confirmations.
+family size; descriptive (backward) grade rows are context, never confirmations; an
+SPA flag is caution, not demotion.
 
 ---
 

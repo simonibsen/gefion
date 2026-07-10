@@ -1039,6 +1039,13 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
   included (they are the FDR family's denominator). Filterable by verdict.
 - `regime_discover_verdicts` — FDR survivors (most runs: none), always with the family
   size beside them. Never present an unadmitted candidate as a finding.
+- `regime_discover_spa` — selection-aware Superior Predictive Ability (SPA) re-verdict
+  over a completed run's counted family: reconstructs each unit from the ledger +
+  pre-registration, verifies the recomputed p-values reproduce the stored ones
+  (refuses honestly on drift), runs Hansen's SPA with a joint stationary bootstrap,
+  and records the result append-only beside the run. Never rewrites BH verdicts or
+  the ledger. **Mutating** (appends one durable row) and compute-heavy
+  (reconstruction + B bootstrap iterations): confirm with the user before invoking.
 - `regime_discover_diagnostics` — the diagnostics ledger: limits hit with quantitative
   reasons, tagged sample-dependent (re-test on new data) vs structural (accumulate).
 - `regime_discover_grades` — forward-accruing trust grades (fold 1 = probation);

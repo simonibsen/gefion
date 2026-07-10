@@ -29,6 +29,7 @@
   - [`regime_labels`](#regime-labels)
   - [`regime_trust_grades`](#regime-trust-grades)
   - [`schema_migrations`](#schema-migrations)
+  - [`spa_reverdicts`](#spa-reverdicts)
   - [`stock_ohlcv`](#stock-ohlcv)
   - [`stocks`](#stocks)
   - [`stocks_fundamentals`](#stocks-fundamentals)
@@ -537,6 +538,28 @@ Primary key: `id`
 | `name` | TEXT |  |  |  |
 | `applied_at` | TIMESTAMP | ✓ |  |  |
 | `checksum` | TEXT | ✓ |  |  |
+
+### `spa_reverdicts`
+
+SPA re-verdict results (spec 010): one append-only row per `regime discover spa` execution — the selection-aware p-values (consistent/lower/upper) beside the run's BH family. Cascades with its run (derived analysis, re-runnable from the ledger).
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `run_id` | INTEGER |  |  |  |
+| `p_consistent` | DOUBLE PRECISION |  |  |  |
+| `p_lower` | DOUBLE PRECISION |  |  |  |
+| `p_upper` | DOUBLE PRECISION |  |  |  |
+| `level` | DOUBLE PRECISION |  |  |  |
+| `passed` | BOOLEAN |  |  |  |
+| `iterations` | INTEGER |  |  |  |
+| `seed` | BIGINT |  |  |  |
+| `block_length` | DOUBLE PRECISION |  |  |  |
+| `family_size` | INTEGER |  |  |  |
+| `verification` | JSONB |  |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
 
 ### `stock_ohlcv`
 
