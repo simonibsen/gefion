@@ -951,18 +951,13 @@ class TestCullStatusRenderer:
     def views_dir(self):
         return Path(__file__).parent.parent / "src" / "gefion" / "ui" / "views"
 
-    def test_cull_status_handles_progress_events(self, views_dir):
-        """Cull status renderer should display per-table progress lines."""
+    def test_cull_delegates_to_unified_component(self, views_dir):
+        """Cull rendering goes through the unified CLI output component
+        (issue #88) — phase events (cull/vacuum tables) render there."""
         content = (views_dir / "data.py").read_text()
-        # Should handle "phase" key in JSON progress events
-        assert '"phase"' in content or "'phase'" in content
-        # Should show table name being processed
-        assert 'culling' in content.lower() or 'processing' in content.lower() or 'deleting' in content.lower()
-
-    def test_cull_status_shows_vacuum_phase(self, views_dir):
-        """Cull status should show vacuum phase."""
-        content = (views_dir / "data.py").read_text()
-        assert 'vacuum' in content.lower() or 'Vacuum' in content
+        assert "render_cli_state(" in content
+        component = (views_dir.parent / "components" / "cli_output.py").read_text()
+        assert '"phase"' in component or "'phase'" in component
 
     def test_cull_status_shows_summary_when_no_events(self, views_dir):
         """Cull complete must show a fallback when no structured progress events are available.
@@ -971,15 +966,11 @@ class TestCullStatusRenderer:
         match the expected JSON structure (no 'phase' keys), showing raw output
         or a 'no data found' message instead of an empty expander.
         """
-        content = (views_dir / "data.py").read_text()
+        content = (views_dir.parent / "components" / "cli_output.py").read_text()
         import re
-        # After the progress_events/final_result parsing, there must be a
-        # fallback path that shows something when both are empty
-        # Look for: handles case where no progress_events AND no final_result
+        # the unified component must show SOMETHING when nothing parsed
         assert re.search(
-            r'not\s+progress_events.*not\s+final_result|'
-            r'not\s+final_result.*not\s+progress_events|'
-            r'No data|no rows deleted',
+            r'No output|No data|no rows deleted',
             content,
             re.DOTALL,
         ), (

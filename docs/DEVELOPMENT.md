@@ -157,6 +157,13 @@ disk-artifact reaping.
 
 ## Patterns & Gotchas (living reference)
 
+- **UI rendering of CLI processes** (issue #88): don't write bespoke output
+  renderers in views — `gefion.ui.components.cli_output.render_cli_output(key,
+  title)` (or `render_cli_state(state, title)`) gives any launched CLI command
+  running/complete/error states, `--json` structured display (phase events with
+  `step`/`total_steps` progress hints, final summary as metrics/tables), and
+  plain-text fallback for free.
+
 > **This is a living document.** When you rediscover a convention or hit a gotcha during
 > implementation, add it here so the next author (human or AI) looks it up instead of
 > re-deriving it. Append freely; keep entries short and concrete.
