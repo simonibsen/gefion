@@ -12138,9 +12138,10 @@ def regime_compute(
     scopes store per-entity labels — each stock carries its own (asset) or
     its group's (sector/industry, cross-sectional median) label.
     """
-    from gefion.regimes.definitions import load_definition
+    from gefion.regimes.definitions import iter_leaves, load_definition
     from gefion.regimes.labels import (compute_and_store, compute_and_store_entities,
-                                       load_market_feature_series)
+                                       load_market_feature_series,
+                                       load_reference_series)
     out = get_output(json_output)
     with _regime_conn(db_url) as conn:
         defn = load_definition(conn, name)
@@ -12150,8 +12151,13 @@ def regime_compute(
         try:
             if defn.scope == "market":
                 features = load_market_feature_series(conn, defn)
+                references = None
+                if any(leaf.get("leaf") == "reference"
+                       for leaf in iter_leaves(defn.expression)):
+                    references = load_reference_series(conn, defn)
                 n = compute_and_store(conn, defn, features, window=window,
-                                      dataset_version=dataset_version)
+                                      dataset_version=dataset_version,
+                                      references=references)
             else:
                 n = compute_and_store_entities(conn, defn, window=window,
                                                dataset_version=dataset_version)

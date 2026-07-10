@@ -44,8 +44,11 @@ They share only the intellectual move "condition, don't average." Everything bel
 ## Representation
 
 A regime is a **declarative expression tree (AST)**: leaves are atomic causal conditions
-(`comparison` over a feature, or a `reference` to another regime), nodes are boolean operators
-(`AND`/`OR`/`NOT`). Under composition, a leaf resolves at its own scope and the composite's
+(`comparison` over a feature, or a `reference` to another *stored* regime by name —
+resolved from its computed labels, with an explicit `bucket` for multi-bucket regimes;
+market-scope composites), nodes are boolean operators
+(`AND`/`OR`/`NOT`). Composites combine on the intersection of their children's dates —
+a date where any input is undefined or missing is not evidence either way. Under composition, a leaf resolves at its own scope and the composite's
 output scope is the **finest** scope involved. A sandboxed **detector-function leaf** is a gated
 escape hatch for detectors that can't be expressed declaratively (HMM, clustering) — admissible
 only under stricter validation (see spec 006, agentic discovery).
