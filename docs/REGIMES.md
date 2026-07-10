@@ -243,8 +243,9 @@ honest ways to learn more from history — neither may ever top up a forward gra
   **robustness** dimension — was the edge driven by a few names, microcaps, or one
   sector? — *not* independent validation: both halves live through the same market
   history, so the conditioning series and returns are strongly shared. It graduates
-  to true cross-sectional validation only for per-entity-scope regimes (005
-  follow-up), where held-out symbols are genuinely new evidence units.
+  to true cross-sectional validation only for per-entity-scope regimes, where
+  held-out symbols are genuinely new evidence units (per-entity label computation
+  landed with issue #86; the discovery loop itself still searches at market scope).
 
 ### Discovery inside experiment cycles
 
