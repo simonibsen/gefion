@@ -41,7 +41,8 @@ def conn():
     c.close()
 
 
-def _completed_run(conn, name, dataset_version="synth-gate"):
+def _completed_run(conn, name, dataset_version="synth-gate", admitted=0,
+                   family_size=3):
     from gefion.regimes.discovery import ledger
     run_id = ledger.create_run(
         conn, name=name, seed=3,
@@ -52,9 +53,20 @@ def _completed_run(conn, name, dataset_version="synth-gate"):
         segregation={"inner_start": "2024-01-01", "inner_end": "2024-06-01",
                      "holdout_start": "2024-06-02", "holdout_end": "2024-09-01"},
         dataset_version=dataset_version)
-    for status in ("enumerated", "evaluated", "complete"):
+    cand_ids = []
+    if admitted:
+        cand_ids = ledger.record_candidates(conn, run_id, [
+            {"candidate_hash": f"{name}-c{i}", "tier": "interaction",
+             "expression": {"kind": "interaction", "signal": "x",
+                            "conditioning": "y"},
+             "provenance": {"atom_features": ["y"]}}
+            for i in range(admitted)])
+    ledger.set_status(conn, run_id, "enumerated")
+    for cid in cand_ids:
+        ledger.record_result(conn, cid, {"tests": []}, "admitted")
+    for status in ("evaluated", "complete"):
         ledger.set_status(conn, run_id, status)
-    ledger.set_family_size(conn, run_id, 3)
+    ledger.set_family_size(conn, run_id, family_size)
     return run_id
 
 
@@ -62,10 +74,11 @@ def _reverdict(conn, run_id, p):
     from gefion.regimes.discovery.ledger import record_spa_reverdict
     return record_spa_reverdict(conn, run_id, {
         "p_consistent": p, "p_lower": p / 2, "p_upper": min(1.0, p * 1.5),
-        "level": 0.01, "passed": p > 0.01, "iterations": 200, "seed": 3,
+        "level": 0.01, "passed": p <= 0.01, "iterations": 200, "seed": 3,
         "block_length": 4.0, "family_size": 3,
         "verification": {"units": 3, "max_abs_divergence": 0.0,
                          "all_match": True}})
+    # NB: passed means SUPPORTED (research R9): p <= level
 
 
 def _config(budget, depth, name="spagate-new"):
@@ -92,7 +105,7 @@ def test_within_cap_is_unaffected(conn):
     assert gate is None
 
 
-def test_above_cap_refused_without_passing_spa(conn):
+def test_above_cap_refused_without_coherent_spa(conn):
     from gefion.regimes.discovery import runner
     cfg = _config(budget=runner.V1_MAX_BUDGET + 1, depth=1)
     # (a) no completed runs at all
@@ -101,16 +114,18 @@ def test_above_cap_refused_without_passing_spa(conn):
     msg = str(exc.value)
     assert "gate" in msg.lower()
     assert "regime discover spa" in msg          # names the satisfying command
-    # (b) two completed runs, neither SPA-checked
+    # (b) two completed runs, neither SPA-checked: machinery not demonstrated
     r1 = _completed_run(conn, "spagate-a")
-    r2 = _completed_run(conn, "spagate-b")
+    r2 = _completed_run(conn, "spagate-b", admitted=2)
     with pytest.raises(runner.DiscoveryError):
         runner.check_budget_gate(conn, cfg, "synth-gate")
-    # (c) one passing, one failing latest
-    _reverdict(conn, r1, p=0.40)                 # pass
-    _reverdict(conn, r2, p=0.004)                # fail
-    with pytest.raises(runner.DiscoveryError):
+    # (c) INCOHERENT: a run with admissions whose latest SPA is unsupported --
+    # BH admitted what SPA cannot distinguish from search luck (R9)
+    _reverdict(conn, r1, p=0.40)                 # 0 admissions: coherent
+    _reverdict(conn, r2, p=0.30)                 # 2 admissions, unsupported
+    with pytest.raises(runner.DiscoveryError) as exc:
         runner.check_budget_gate(conn, cfg, "synth-gate")
+    assert "admission" in str(exc.value).lower()
     # depth alone also trips the gate
     with pytest.raises(runner.DiscoveryError):
         runner.check_budget_gate(
@@ -120,21 +135,23 @@ def test_above_cap_refused_without_passing_spa(conn):
 def test_latest_reverdict_governs(conn):
     from gefion.regimes.discovery import runner
     r1 = _completed_run(conn, "spagate-a")
-    r2 = _completed_run(conn, "spagate-b")
+    r2 = _completed_run(conn, "spagate-b", admitted=1)
     _reverdict(conn, r1, p=0.40)
-    _reverdict(conn, r2, p=0.40)                 # older: pass
-    _reverdict(conn, r2, p=0.004)                # latest: fail — governs
+    _reverdict(conn, r2, p=0.004)                # older: supported
+    _reverdict(conn, r2, p=0.30)                 # latest: unsupported — governs
     with pytest.raises(runner.DiscoveryError):
         runner.check_budget_gate(
             conn, _config(budget=runner.V1_MAX_BUDGET + 1, depth=1), "synth-gate")
 
 
-def test_above_cap_accepted_and_recorded_with_passing_spa(conn):
+def test_above_cap_accepted_when_coherent(conn):
+    """Coherence (R9): an all-reject run with large p AND an admitting run
+    whose family SPA supports -- both coherent, gate opens and records."""
     from gefion.regimes.discovery import runner
-    r1 = _completed_run(conn, "spagate-a")
-    r2 = _completed_run(conn, "spagate-b")
-    v1 = _reverdict(conn, r1, p=0.40)
-    v2 = _reverdict(conn, r2, p=0.30)
+    r1 = _completed_run(conn, "spagate-a")                   # 0 admissions
+    r2 = _completed_run(conn, "spagate-b", admitted=2)       # supported below
+    v1 = _reverdict(conn, r1, p=0.40)    # unsupported but 0 admissions: coherent
+    v2 = _reverdict(conn, r2, p=0.004)   # supported: coherent
     gate = runner.check_budget_gate(
         conn, _config(budget=runner.V1_MAX_BUDGET + 1, depth=1), "synth-gate")
     assert gate["gate"] == "spa"
@@ -142,9 +159,23 @@ def test_above_cap_accepted_and_recorded_with_passing_spa(conn):
     assert sorted(gate["reverdict_ids"]) == sorted([v1, v2])
 
 
+def test_family_zero_runs_are_skipped_for_the_gate(conn):
+    """A family-0 run can never carry a re-verdict (nothing to test) -- it is
+    skipped when selecting the relevant prior runs, not a permanent blocker."""
+    from gefion.regimes.discovery import runner
+    r1 = _completed_run(conn, "spagate-a")
+    r2 = _completed_run(conn, "spagate-b", admitted=1)
+    _reverdict(conn, r1, p=0.40)
+    _reverdict(conn, r2, p=0.004)
+    _completed_run(conn, "spagate-empty", family_size=0)     # most recent
+    gate = runner.check_budget_gate(
+        conn, _config(budget=runner.V1_MAX_BUDGET + 1, depth=1), "synth-gate")
+    assert sorted(gate["runs"]) == sorted([r1, r2])
+
+
 def test_gate_scoped_to_dataset_version(conn):
     from gefion.regimes.discovery import runner
-    # two passing runs — on a DIFFERENT dataset version
+    # two coherent runs — on a DIFFERENT dataset version
     for name in ("spagate-x", "spagate-y"):
         rid = _completed_run(conn, name, dataset_version="synth-other")
         _reverdict(conn, rid, p=0.40)

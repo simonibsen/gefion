@@ -15,7 +15,7 @@ deletion story).
 | `p_consistent` | DOUBLE PRECISION NOT NULL | the verdict (Hansen consistent null) |
 | `p_lower` / `p_upper` | DOUBLE PRECISION NOT NULL | bracketing diagnostics |
 | `level` | DOUBLE PRECISION NOT NULL | pass/fail level (default: the run's FDR rate) |
-| `passed` | BOOLEAN NOT NULL | `p_consistent > level` — precomputed for gate/display |
+| `passed` | BOOLEAN NOT NULL | **supported**: `p_consistent ≤ level` (R9 amendment — SPA supports the family's best against its own search); precomputed for gate/display |
 | `iterations` | INTEGER NOT NULL | bootstrap B |
 | `seed` | BIGINT NOT NULL | RNG seed used |
 | `block_length` | DOUBLE PRECISION NOT NULL | expected block length used (auto or override) |

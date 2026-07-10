@@ -12315,7 +12315,9 @@ def _latest_spa(conn, run_id: int) -> tuple:
     if latest is None:
         return None, "SPA: not yet run"
     payload = _discovery_run_payload(latest)
-    verdict = "PASS" if latest["passed"] else "FAIL"
+    # R9: supported = SPA can back the family's best candidate against its
+    # own search (small p). UNSUPPORTED is only alarming beside admissions.
+    verdict = "supported" if latest["passed"] else "UNSUPPORTED"
     line = (f"SPA: {verdict} — consistent p = {latest['p_consistent']:.4g} "
             f"at level {latest['level']:g} ({payload['created_at']})")
     return payload, line
@@ -12618,7 +12620,7 @@ def regime_discover_spa(
             raise typer.Exit(1)
         dledger.record_spa_reverdict(conn, run_row["id"], result)
         conn.commit()
-    verdict = "PASS" if result["passed"] else "FAIL"
+    verdict = "supported" if result["passed"] else "UNSUPPORTED"
     out.info(f"SPA re-verdict for run {run_row['id']} '{run_row['name']}': "
              f"{verdict} — consistent p = {result['p_consistent']:.4f} "
              f"(lower {result['p_lower']:.4f}, upper {result['p_upper']:.4f}) "
@@ -12712,7 +12714,8 @@ def regime_discover_grades(
                        p["grade"]["confirmed"], p["grade"]["grade"],
                        p["grade"]["regime_limited"],
                        "not run" if p["spa"] is None else
-                       ("pass" if p["spa"]["passed"] else "FAMILY FAILED")]
+                       ("supported" if p["spa"]["passed"]
+                        else "UNSUPPORTED")]
                       for p in payload],
                 json_data={"graded": payload},
             )
@@ -12744,8 +12747,9 @@ def regime_discover_grades(
         if spa_failed:
             out.warning(
                 f"  ⚠ family failed selection-aware check "
-                f"(SPA p={spa_payload['p_consistent']:.4g} at level "
-                f"{spa_payload['level']:g}) — BH verdict and trust grade "
+                f"(SPA p={spa_payload['p_consistent']:.4g} > level "
+                f"{spa_payload['level']:g} — BH admitted what SPA cannot "
+                f"distinguish from search luck). BH verdict and trust grade "
                 f"unchanged; treat with caution, re-examine before scaling")
         for r in rows:
             marker = "descriptive" if r["descriptive"] else "forward"

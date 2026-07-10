@@ -118,12 +118,16 @@ class DiscoveryConfig:
 
 def check_budget_gate(conn, config: DiscoveryConfig,
                       dataset_version: str) -> Optional[Dict[str, Any]]:
-    """The SPA budget gate (FR-1009/1010): above-cap scale must be earned.
+    """The SPA budget gate (FR-1009/1010, research R9): above-cap scale must
+    be earned via BH/SPA coherence.
 
     Within the v1 caps, returns None — the gate does not exist for such runs.
-    Above either cap, the _SPA_GATE_RUNS most recent completed runs on the
-    same dataset version must each carry a passing latest SPA re-verdict;
-    returns the auditable satisfaction record for the pre-registration, or
+    Above either cap, the _SPA_GATE_RUNS most recent completed runs with a
+    non-empty family on the same dataset version (family-0 runs have nothing
+    for SPA to test and are skipped) must each carry a latest re-verdict AND
+    be coherent: zero admissions, or a SUPPORTED re-verdict (p ≤ level). The
+    dangerous state is admissions the selection-aware test cannot back.
+    Returns the auditable satisfaction record for the pre-registration, or
     raises DiscoveryError naming the gate and the satisfying command.
     """
     if config.budget <= V1_MAX_BUDGET and config.depth <= V1_MAX_DEPTH:
@@ -135,32 +139,42 @@ def check_budget_gate(conn, config: DiscoveryConfig,
                   if config.budget > V1_MAX_BUDGET
                   else f"depth {config.depth} > {V1_MAX_DEPTH}")
         recent = [r for r in ledger.list_runs(conn, status="complete")
-                  if r["dataset_version"] == dataset_version][:_SPA_GATE_RUNS]
+                  if r["dataset_version"] == dataset_version
+                  and (r["family_size"] or 0) > 0][:_SPA_GATE_RUNS]
         if len(recent) < _SPA_GATE_RUNS:
             raise DiscoveryError(
-                f"budget gate: {excess} requires passing SPA re-verdicts on the "
-                f"{_SPA_GATE_RUNS} most recent completed runs (dataset version "
-                f"{dataset_version!r}), but only {len(recent)} completed run(s) "
-                f"exist — run within the v1 caps first, then "
-                f"`gefion regime discover spa <run>`")
+                f"budget gate: {excess} requires BH/SPA-coherent re-verdicts "
+                f"on the {_SPA_GATE_RUNS} most recent completed runs with a "
+                f"non-empty family (dataset version {dataset_version!r}), but "
+                f"only {len(recent)} such run(s) exist — run within the v1 "
+                f"caps first, then `gefion regime discover spa <run>`")
         failing = []
         reverdict_ids = []
-        for r in recent:
-            latest = ledger.latest_spa_reverdict(conn, r["id"])
-            if latest is None:
-                failing.append(f"run {r['id']} '{r['name']}': SPA not yet run")
-            elif not latest["passed"]:
-                failing.append(
-                    f"run {r['id']} '{r['name']}': latest SPA FAILED "
-                    f"(p={latest['p_consistent']:.4g} at level {latest['level']:g})")
-            else:
-                reverdict_ids.append(latest["id"])
+        with conn.cursor() as cur:
+            for r in recent:
+                latest = ledger.latest_spa_reverdict(conn, r["id"])
+                cur.execute(
+                    "SELECT count(*) FROM regime_candidates "
+                    "WHERE run_id = %s AND verdict = 'admitted'", (r["id"],))
+                admitted = cur.fetchone()[0]
+                if latest is None:
+                    failing.append(
+                        f"run {r['id']} '{r['name']}': SPA not yet run")
+                elif admitted > 0 and not latest["passed"]:
+                    failing.append(
+                        f"run {r['id']} '{r['name']}': {admitted} admission(s) "
+                        f"but the latest SPA is UNSUPPORTED "
+                        f"(p={latest['p_consistent']:.4g} > level "
+                        f"{latest['level']:g}) — BH admitted what SPA cannot "
+                        f"distinguish from search luck")
+                else:
+                    reverdict_ids.append(latest["id"])
         if failing:
             raise DiscoveryError(
-                f"budget gate: {excess} requires a passing latest SPA "
-                f"re-verdict on each of the {_SPA_GATE_RUNS} most recent "
-                f"completed runs (dataset version {dataset_version!r}) — "
-                + "; ".join(failing)
+                f"budget gate: {excess} requires BH/SPA coherence (no "
+                f"unsupported admissions) on each of the {_SPA_GATE_RUNS} "
+                f"most recent completed non-empty runs (dataset version "
+                f"{dataset_version!r}) — " + "; ".join(failing)
                 + " — satisfy with `gefion regime discover spa <run>`")
         gate = {"gate": "spa", "runs": [r["id"] for r in recent],
                 "reverdict_ids": reverdict_ids}

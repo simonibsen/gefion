@@ -200,9 +200,11 @@ structural guardrails (see `docs/REGIMES.md` § Agentic discovery for the threat
    selection-aware SPA re-verdict (reconstructs the counted family, verifies against
    the ledger, joint stationary bootstrap; **mutating** — appends one durable row —
    and compute-heavy: confirm first). It may **refuse** on drift (price backfills):
-   report the refusal verbatim, never substitute a guess. A failing SPA beside an
-   admitted edge is a loud flag, **not a demotion** — the BH verdict and trust grade
-   stand; say both facts
+   report the refusal verbatim, never substitute a guess. Read the verdict correctly
+   (R9): a SMALL consistent p SUPPORTS the family (the best candidate survives the
+   search-aware test); "UNSUPPORTED" (large p) is only alarming beside admissions.
+   An UNSUPPORTED re-verdict beside an admitted edge is a loud flag, **not a
+   demotion** — the BH verdict and trust grade stand; say both facts
 6. Deep validation: pass `max_date` to `regime_discover_start` to discover as of a
    past vintage (procedure evidence — never a grade confirmation); `half:a`/`half:b`
    in the universe chain give a split-half robustness check (robustness, NOT

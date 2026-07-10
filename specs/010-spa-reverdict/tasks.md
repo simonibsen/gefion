@@ -88,8 +88,8 @@ doesn't; perturbing one price row → refusal naming the divergent unit.
 - [x] T022 Learning materials: `.claude/commands/gefion-learn.md` Module 10 aside (BH corrects the p-values you have; SPA models the search that produced them) + checkpoint (why is the drift refusal a feature?); curriculum drift test green
 - [x] T023 Observability pass: `OTEL_ENABLED=true` re-verdict on a dev run; `gefion span-check` — spans parented, no orphans; runtime sanity (B=1000, v1 family in seconds–minutes)
 - [x] T024 Full-suite pre-flight: drop `gefion_test`, complete suite against a fresh DB (exit code captured — the pipe-masking lesson); docs-drift + dictionary `--check` green
-- [ ] T025 Update `.specify/memory/progress.md`; PR the branch, merge on green
-- [ ] T026 Post-merge on sloth: `db-migrate`; `regime discover spa` over the completed prod runs (incl. the two admitted regimes — SC-1002 verbatim: verdicts recorded, zero ledger rows modified, checksums identical); report the verdicts to the owner; issue #87 updated (post-run re-verdict increment done; in-run gate + signal_source rungs remain)
+- [x] T025 Update `.specify/memory/progress.md`; PR the branch, merge on green
+- [x] T026 Post-merge on sloth: `db-migrate`; `regime discover spa` over the completed prod runs (incl. the two admitted regimes — SC-1002 verbatim: verdicts recorded, zero ledger rows modified, checksums identical); report the verdicts to the owner; issue #87 updated (post-run re-verdict increment done; in-run gate + signal_source rungs remain)
 
 ---
 
