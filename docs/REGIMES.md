@@ -321,8 +321,12 @@ deterministic, so CI proves the *machinery* (segregation, freeze, counting, fail
 as a stable regression guarantee. The measured false-admission rate at v1 defaults over a
 wider 100-seed noise scan was **1/100** — that ~1% is the configured error rate working
 as specified, not a defect; no gate with a nonzero admission rate is zero everywhere.
-The Reality-Check/SPA bootstrap fast-follow (FR-108) must land before per-cycle search
-budgets are raised beyond v1 defaults.
+The SPA re-verdict (spec 010) is that fast-follow, landed and **enforced in code**:
+`discover start` refuses `--budget > 200` or `--depth > 2` (the named v1 caps,
+`V1_MAX_BUDGET`/`V1_MAX_DEPTH`) unless the 2 most recent completed runs on the same
+dataset version each carry a passing latest SPA re-verdict; satisfaction is recorded
+as `{gate: "spa", runs, reverdict_ids}` in the new run's pre-registration. Within-cap
+starts are unaffected — the gate does not exist for them.
 
 An admitted
 candidate becomes an ordinary `regime_definitions` row (`origin='machine'`) with full 005

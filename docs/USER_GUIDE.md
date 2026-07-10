@@ -603,7 +603,10 @@ ledgers. See [REGIMES.md](REGIMES.md) § Agentic discovery for the threat model.
 Honest refusals at start: expressive tier without a declared `--fresh-holdout` reserve;
 an unfiltered universe without explicit `passthrough`; a run whose segregation cannot be
 proven is recorded with status `invalid` and produces no verdicts; a declared `--max-date`
-vintage that disagrees with the loaded data.
+vintage that disagrees with the loaded data; `--budget > 200` or `--depth > 2` (the v1
+caps) without a passing latest SPA re-verdict on the 2 most recent completed runs of the
+same dataset version — scale must be earned via `gefion regime discover spa <run>`, and
+satisfaction is recorded in the new run's pre-registration.
 
 Deep validation (see REGIMES.md): `--max-date` runs discovery as of a past vintage;
 `half:a`/`half:b` in the universe chain give a declared split-half robustness check

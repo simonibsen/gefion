@@ -71,8 +71,8 @@ doesn't; perturbing one price row → refusal naming the divergent unit.
 
 ## Phase 6: US4 — The budget gate is enforced in code (P2)
 
-- [ ] T018 [US4] Write `tests/test_spa_gate.py` (RED, DB): `discover start` with `budget > 200` or `depth > 2` and no passing latest SPA on the 2 most recent completed runs (same dataset version) → refused naming the gate and the satisfying command; with passing re-verdicts → accepted and `{gate: "spa", runs, reverdict_ids}` recorded in the new run's `search_space`; within-cap starts byte-identical to today (no gate interference)
-- [ ] T019 [US4] Implement `V1_MAX_BUDGET = 200` / `V1_MAX_DEPTH = 2` constants + the gate in the runner's config validation (`src/gefion/regimes/discovery/runner.py`), threaded through the CLI start path (GREEN)
+- [x] T018 [US4] Write `tests/test_spa_gate.py` (RED, DB): `discover start` with `budget > 200` or `depth > 2` and no passing latest SPA on the 2 most recent completed runs (same dataset version) → refused naming the gate and the satisfying command; with passing re-verdicts → accepted and `{gate: "spa", runs, reverdict_ids}` recorded in the new run's `search_space`; within-cap starts byte-identical to today (no gate interference)
+- [x] T019 [US4] Implement `V1_MAX_BUDGET = 200` / `V1_MAX_DEPTH = 2` constants + the gate in the runner's config validation (`src/gefion/regimes/discovery/runner.py`), threaded through the CLI start path (GREEN)
 
 ---
 
