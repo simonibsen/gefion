@@ -249,7 +249,8 @@ signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
 | `gefion regime show` | Show a regime definition |
 | `gefion regime compute` | Compute causal labels for a regime |
 | `gefion regime labels` | Summarize computed labels (bucket coverage) |
-| `gefion regime archive` | Archive a regime definition |
+| `gefion regime archive` | Archive a regime definition (recommended lifecycle exit) |
+| `gefion regime delete` | Delete a definition + labels (dry-run default; ledger never touched) |
 | `gefion regime export` | Export regime definitions to JSON |
 | `gefion regime import` | Import regime definitions from JSON |
 | `gefion regime discover start` | Pre-register + run an agentic discovery (bounded, nested, search-aware) |
@@ -259,6 +260,7 @@ signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
 | `gefion regime discover verdicts` | FDR survivors, shown with the family size |
 | `gefion regime discover spa` | Selection-aware SPA re-verdict over a run's counted family (append-only) |
 | `gefion regime discover diagnostics` | Limits hit (sample-dependent vs structural) |
+| `gefion regime discover delete` | Delete an invalid/test run + its ledger (dry-run default; admitted runs refuse) |
 | `gefion regime discover grades` | Forward-accruing trust grades per admitted edge |
 | `gefion regime discover grade-fold` | Re-test an admitted edge on a forward fold |
 | `gefion regime discover register` | Re-declare an admitted edge's grading grid (until evidence exists) |

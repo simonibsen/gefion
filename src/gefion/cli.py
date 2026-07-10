@@ -12258,6 +12258,56 @@ def regime_archive(
     out.success(f"Archived regime '{name}'")
 
 
+@regime_app.command("delete")
+def regime_delete(
+    name: str = typer.Argument(..., help="Regime name"),
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Actually delete (default: dry-run report)"),
+    force: bool = typer.Option(
+        False, "--force", help="Allow deleting a discovery-admitted "
+        "(machine-origin) regime; the candidate ledger is never touched"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete a regime definition and its labels (dry-run by default).
+
+    Reports the full blast radius first: label rows, discovery provenance if
+    machine-origin, and stored experiment results that reference the name
+    (those soft references are reported, never mutated — `regime archive` is
+    the recommended lifecycle exit because results stay resolvable by name).
+    """
+    from gefion.regimes.deletion import (RegimeDeleteError, execute_regime_delete,
+                                         plan_regime_delete)
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            if confirm:
+                plan = execute_regime_delete(conn, name, force=force)
+                conn.commit()
+            else:
+                plan = plan_regime_delete(conn, name)
+        except RegimeDeleteError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+    refs = plan["experiment_references"]
+    if confirm:
+        out.success(f"Deleted regime '{name}': {plan['labels_deleted']} label "
+                    f"row(s) removed with it")
+    else:
+        out.info(f"DRY-RUN — nothing deleted. Re-run with --confirm to execute.")
+        out.info(f"Regime '{name}' (origin {plan['regime']['origin']}, "
+                 f"status {plan['regime']['status']}): {plan['labels']} label row(s)")
+        if plan["machine_origin"]:
+            out.warning("  machine-origin (discovery-admitted): --force required; "
+                        "the candidate ledger is never touched either way")
+    if refs:
+        out.warning(f"  {len(refs)} stored experiment result(s) reference this "
+                    f"name and will keep doing so (reported, never mutated): "
+                    f"{[r['id'] for r in refs]}")
+    if out.json_mode:
+        out.json({**plan, "confirmed": confirm})
+
+
 @regime_app.command("export")
 def regime_export(
     directory: str = typer.Argument(..., help="Output directory"),
@@ -12633,6 +12683,47 @@ def regime_discover_spa(
              f"max divergence {ver['max_abs_divergence']:.2e}")
     if out.json_mode:
         out.json({"run_id": run_row["id"], **result})
+
+
+@discover_app.command("delete")
+def regime_discover_delete(
+    run: str = typer.Argument(..., help="Run id or name"),
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Actually delete (default: dry-run report)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete a discovery run and its ledger rows (dry-run by default).
+
+    For invalid/test runs. A run with ADMITTED candidates refuses always —
+    its ledger is the multiple-testing audit trail behind an admitted
+    artifact, and there is deliberately no --force for that.
+    """
+    from gefion.regimes.deletion import (RegimeDeleteError, execute_run_delete,
+                                         plan_run_delete)
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            run_row = _resolve_run(conn, run)
+            if confirm:
+                plan = execute_run_delete(conn, run_row["id"])
+                conn.commit()
+            else:
+                plan = plan_run_delete(conn, run_row["id"])
+        except (RegimeDeleteError, LedgerError) as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+    verb = "Deleted" if confirm else "DRY-RUN — nothing deleted. Would delete"
+    out.info(f"{verb} run {plan['run']['id']} '{plan['run']['name']}' "
+             f"(status {plan['run']['status']}): {plan['candidates']} candidate(s), "
+             f"{plan['trust_grades']} trust grade(s), {plan['diagnostics']} "
+             f"diagnostic(s), {plan['spa_reverdicts']} SPA re-verdict(s) — all "
+             f"via the run cascade")
+    if not confirm:
+        out.info("Re-run with --confirm to execute.")
+    if out.json_mode:
+        out.json({**plan, "confirmed": confirm})
 
 
 @discover_app.command("diagnostics")
