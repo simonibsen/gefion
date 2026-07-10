@@ -206,13 +206,17 @@ class TestBackupModule:
         assert isinstance(result, dict)
         assert "total_rows" in result or "tables" in result
 
-    def test_check_disk_space_returns_bool(self):
-        """check_disk_space should return whether enough space exists."""
-        from gefion.backup import check_disk_space
+    def test_check_disk_space_returns_result_object(self):
+        """check_disk_space returns a DiskSpaceCheck (issue #90): a bare bool
+        conflated 'insufficient' with 'could not check', producing the absurd
+        'Need ~0.0 MB' refusal. The result carries reason/free/required for
+        honest reporting."""
+        from gefion.backup import DiskSpaceCheck, check_disk_space
 
-        # Should work on any valid path
         result = check_disk_space("/tmp", required_bytes=1024)
-        assert isinstance(result, bool)
+        assert isinstance(result, DiskSpaceCheck)
+        assert result.ok
+        assert result.free_bytes > 0
 
 
 class TestBackupManifest:
@@ -262,3 +266,75 @@ class TestIncrementalBackup:
 
         result = runner.invoke(app, ["backup", "--help"])
         assert "--incremental" in result.output
+
+
+class TestDiskSpaceCheck:
+    """Issue #90: 'Insufficient disk space. Need ~0.0 MB' with tens of GB
+    free. Root cause: check_disk_space returned False for three distinct
+    situations (insufficient, unresolvable path, ANY exception) and the CLI
+    reported them all as insufficient space — with no 'have' figure, so the
+    message was absurd. The check must distinguish 'insufficient' from
+    'could not check', and report free space honestly."""
+
+    def test_sufficient_space_is_ok(self, tmp_path):
+        from gefion.backup import check_disk_space
+        result = check_disk_space(str(tmp_path / "b.tar.gz"), required_bytes=1024)
+        assert result.ok
+        assert result.free_bytes > 0
+
+    def test_insufficient_space_reports_need_and_have(self, tmp_path):
+        from gefion.backup import check_disk_space
+        result = check_disk_space(str(tmp_path / "b.tar.gz"),
+                                  required_bytes=10**18)  # 1 EB — nobody has this
+        assert not result.ok
+        assert result.reason == "insufficient"
+        assert result.free_bytes > 0            # the honest 'have' figure
+        assert result.required_bytes == 10**18
+
+    def test_uncheckable_path_is_not_reported_as_insufficient(self, monkeypatch):
+        """A failed check is 'unknown', never 'insufficient' — conflating them
+        produced the absurd March message."""
+        import shutil as _shutil
+        from gefion.backup import check_disk_space
+
+        def boom(_):
+            raise OSError("disk_usage exploded")
+
+        monkeypatch.setattr(_shutil, "disk_usage", boom)
+        result = check_disk_space("/somewhere/b.tar.gz", required_bytes=1024)
+        assert not result.ok
+        assert result.reason == "unknown"
+        assert "exploded" in result.detail
+
+    def test_cli_proceeds_with_warning_when_check_is_unknown(self, monkeypatch, tmp_path):
+        """Policy: refuse only on genuinely insufficient space; if the
+        pre-check itself fails, warn and attempt the backup (the write will
+        fail honestly if the disk really is full).
+
+        DB-guarded: the backup command connects before the disk check, so
+        this end-to-end path needs the test database (the pure-function
+        conflation case is covered DB-free above)."""
+        import os
+
+        import pytest
+
+        from gefion.db import schema
+
+        if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+            pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
+
+        import shutil as _shutil
+        from typer.testing import CliRunner
+        from gefion.cli import app
+
+        def boom(_):
+            raise OSError("disk_usage exploded")
+
+        monkeypatch.setattr(_shutil, "disk_usage", boom)
+        out = tmp_path / "b.tar.gz"
+        result = CliRunner().invoke(app, [
+            "backup", "--data-types", "definitions", "--output", str(out),
+            "--db-url", schema.test_db_url(), "--json"])
+        assert "Insufficient disk space" not in result.output
+        assert "could not verify" in result.output.lower() or \
+               "could not check" in result.output.lower()

@@ -11,6 +11,7 @@ Supports:
 import json
 import hashlib
 import shutil
+from dataclasses import dataclass
 from datetime import datetime, date
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -156,33 +157,56 @@ def estimate_backup_size(
         return result
 
 
-def check_disk_space(path: str, required_bytes: int) -> bool:
-    """Check if enough disk space is available at the given path.
+@dataclass
+class DiskSpaceCheck:
+    """Result of a disk-space pre-check (issue #90).
 
-    Args:
-        path: Directory path to check
-        required_bytes: Required space in bytes
+    Three honest outcomes instead of one lying boolean:
+      ok                       — enough space
+      reason == 'insufficient' — genuinely not enough (free/required carried)
+      reason == 'unknown'      — the CHECK failed (bad path, OS error); this is
+                                 not a space verdict and must never be reported
+                                 as 'insufficient'
+    """
+    ok: bool
+    reason: str = ""             # '' | 'insufficient' | 'unknown'
+    free_bytes: int = 0
+    required_bytes: int = 0
+    detail: str = ""
 
-    Returns:
-        True if enough space is available
+
+def check_disk_space(path: str, required_bytes: int) -> DiskSpaceCheck:
+    """Check whether enough disk space is available at the given path.
+
+    Returns a DiskSpaceCheck distinguishing 'insufficient' from 'could not
+    check' — conflating them produced the absurd "Insufficient disk space.
+    Need ~0.0 MB" with tens of GB free (issue #90).
     """
     try:
-        # Get the directory (create if needed for the check)
         check_path = Path(path)
         if check_path.is_file():
             check_path = check_path.parent
 
         # Find an existing parent directory
         while not check_path.exists():
-            check_path = check_path.parent
-            if check_path == check_path.parent:
-                return False  # Reached root without finding existing dir
+            parent = check_path.parent
+            if parent == check_path:
+                return DiskSpaceCheck(
+                    ok=False, reason="unknown", required_bytes=required_bytes,
+                    detail=f"no existing directory found on the path to {path!r}")
+            check_path = parent
 
         usage = shutil.disk_usage(str(check_path))
         # Add 10% buffer
-        return usage.free >= required_bytes * 1.1
-    except Exception:
-        return False
+        if usage.free >= required_bytes * 1.1:
+            return DiskSpaceCheck(ok=True, free_bytes=usage.free,
+                                  required_bytes=required_bytes)
+        return DiskSpaceCheck(ok=False, reason="insufficient",
+                              free_bytes=usage.free,
+                              required_bytes=required_bytes)
+    except Exception as exc:
+        return DiskSpaceCheck(ok=False, reason="unknown",
+                              required_bytes=required_bytes, detail=str(exc))
 
 
 def create_manifest(
