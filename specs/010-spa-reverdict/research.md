@@ -147,3 +147,34 @@ bound for size ≤ α; one planted-edge family must reject. Runtime target <60s.
 the assertion seed-stable rather than flaky. B=200 in CI is enough for size
 calibration at α=0.05 (p-value granularity 0.005); the shipped default stays
 B=1000.
+
+## R2a — Amendment (implementation): unit series for the mean-form core
+
+**Decision**: the statistical core implements the canonical **mean-form** SPA
+(studentized means of per-observation series), so each unit's series is defined
+to make its mean the test's alternative:
+
+- **tier-2 / bucket units**: the within-bucket per-date differential records
+  (`experimental_score − baseline_score` on dates the candidate's causal label
+  equals the bucket) — exactly the paired substrate the outer test averaged.
+- **tier-1 / interaction units**: the demeaned interaction moment
+  `z_t = (sig_t − s̄)(cond_t − c̄) · fwd_t` over the outer window, sign-aligned
+  with the stored coefficient (the unit's alternative is "the effect persists
+  in its discovered direction", mirroring how discovery follows a signal's
+  causal direction). E[z] > 0 corresponds to the discovered-direction
+  interaction moment.
+
+**Rationale**: R2's "recompute the statistic per resample" is preserved in
+spirit — the studentized mean of these series is the moment form of each
+tier's statistic — while keeping the proven, exactly-tested mean-form core
+(SPA over moment conditions is standard practice). Verification (R3) is
+unaffected: it recomputes the ORIGINAL tests via the run's own code paths.
+
+**Alternatives considered**: a per-unit statistic callback recomputing the full
+HAC regression per bootstrap resample (deferred — heavier machinery for v1
+with no change to the null logic; revisit if interaction-tier families
+dominate).
+
+**v1 scope note**: expressive-tier candidates (freeform/detector) are refused
+with a named limitation — their fitted detector state makes byte-faithful
+reconstruction a separate increment.
