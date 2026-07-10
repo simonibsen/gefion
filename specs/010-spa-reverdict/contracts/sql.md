@@ -1,9 +1,9 @@
 # SQL Contract — SPA Re-Verdict (010)
 
-**Status: APPROVED by owner 2026-07-09** (scope: exactly this one table and
-its index; future schema changes require separate approval). Applied at
-implementation via the two-file rule, gated behind schema tests written first,
-with the data dictionary regenerated in the same commit.
+**Status: PROPOSED — awaiting owner approval** (Schema Governance: propose,
+don't execute). Nothing below is written to `sql/schema.sql`,
+`sql/migrations/`, or any database until approved. Scope on approval: exactly
+this one table and its index.
 
 One new table. No changes to any existing table, column, or constraint.
 
