@@ -22,14 +22,14 @@ negative control.
 
 ## Phase 1: Setup
 
-- [ ] T001 Create `src/gefion/regimes/discovery/spa.py` scaffold (module docstring stating the SPA question vs BH; imports from `gefion.observability`) — algorithms arrive with their tests
+- [x] T001 Create `src/gefion/regimes/discovery/spa.py` scaffold (module docstring stating the SPA question vs BH; imports from `gefion.observability`) — algorithms arrive with their tests
 
 ## Phase 2: Foundational — the statistical core (pure, no DB) 🎯 hardest risk first
 
-- [ ] T002 Write `tests/test_spa_statistics.py` (part 1, RED): stationary bootstrap index paths — expected block length honored (mean geometric block ≈ target under seed), joint application (same path across units), determinism under seed, wrap-around correctness; Politis–White automatic block length on a seeded AR(1) series lands in the theoretically sensible range, floored at 1 and capped at n/3
-- [ ] T003 Implement the stationary bootstrap + Politis–White block length in `src/gefion/regimes/discovery/spa.py` (GREEN)
-- [ ] T004 Write `tests/test_spa_statistics.py` (part 2, RED): Hansen SPA over a synthetic unit matrix — (a) size: pure-noise units at α=0.05 reject within the exact binomial 99% bound over seeded repetitions; (b) power: one planted strong unit → small p_consistent; (c) ordering: p_lower ≤ p_consistent ≤ p_upper on every seeded case; (d) reproducibility: identical inputs+seed ⇒ byte-identical p-values; (e) family-of-one degrades gracefully to the single-unit test
-- [ ] T005 Implement the Hansen SPA statistic (studentized max, HAC scale consistent with the block length, consistent/lower/upper recentering) in `src/gefion/regimes/discovery/spa.py` (GREEN)
+- [x] T002 Write `tests/test_spa_statistics.py` (part 1, RED): stationary bootstrap index paths — expected block length honored (mean geometric block ≈ target under seed), joint application (same path across units), determinism under seed, wrap-around correctness; Politis–White automatic block length on a seeded AR(1) series lands in the theoretically sensible range, floored at 1 and capped at n/3
+- [x] T003 Implement the stationary bootstrap + Politis–White block length in `src/gefion/regimes/discovery/spa.py` (GREEN)
+- [x] T004 Write `tests/test_spa_statistics.py` (part 2, RED): Hansen SPA over a synthetic unit matrix — (a) size: pure-noise units at α=0.05 reject within the exact binomial 99% bound over seeded repetitions; (b) power: one planted strong unit → small p_consistent; (c) ordering: p_lower ≤ p_consistent ≤ p_upper on every seeded case; (d) reproducibility: identical inputs+seed ⇒ byte-identical p-values; (e) family-of-one degrades gracefully to the single-unit test
+- [x] T005 Implement the Hansen SPA statistic (studentized max, HAC scale consistent with the block length, consistent/lower/upper recentering) in `src/gefion/regimes/discovery/spa.py` (GREEN)
 
 **Checkpoint**: the statistics are proven correct in isolation — everything DB-ward consumes a trusted core.
 
@@ -42,12 +42,12 @@ verify against stored p-values, and produce the SPA verdict.
 **Independent test**: seeded synthetic run → planted edge rejects, noise
 doesn't; perturbing one price row → refusal naming the divergent unit.
 
-- [ ] T006 [US1] Write `tests/test_spa_reconstruction.py` (RED, DB): from a completed synthetic run (built with the 006 `discovery_synth` + runner over the test DB), rebuild `DiscoveryConfig` from `search_space`, the market via `signals.load_market_data` (dataset/universe/max-date), and the outer window from `segregation`; recompute every counted unit's test via the same `edges.*` functions; the recomputed p-values reproduce the stored ones within tolerance (1e-9 abs / 1e-6 rel); the unit set equals the BH family exactly (refused/uncounted excluded)
-- [ ] T007 [US1] Implement reconstruction (`spa.reconstruct_family(conn, run)`) in `src/gefion/regimes/discovery/spa.py`, calling the run's own code paths per research R1 (GREEN)
-- [ ] T008 [US2] Extend `tests/test_spa_reconstruction.py` (RED): perturb one outer-window price row → verification refuses naming the divergent unit(s) and magnitudes, and no verdict is produced; `family_size` 0 / no counted candidates → honest "nothing to test" refusal; outer window below the 20-observation floor → refusal naming the floor
-- [ ] T009 [US2] Implement verification + refusal taxonomy (`spa.verify`, `SpaRefusal`) (GREEN)
-- [ ] T010 [US1] Write `tests/test_spa_reverdict.py` (RED, DB): end-to-end `spa.reverdict(conn, run, iterations, seed)` on the synthetic runs — planted-edge run yields small p_consistent, noise run large; same seed ⇒ identical p-values; ledger and price rows byte-identical before/after (checksums, SC-1002)
-- [ ] T011 [US1] Implement the end-to-end re-verdict orchestration (reconstruct → verify → bootstrap → verdict) with spans (family size, iterations, block length, verification outcome, p-values) (GREEN)
+- [x] T006 [US1] Write `tests/test_spa_reconstruction.py` (RED, DB): from a completed synthetic run (built with the 006 `discovery_synth` + runner over the test DB), rebuild `DiscoveryConfig` from `search_space`, the market via `signals.load_market_data` (dataset/universe/max-date), and the outer window from `segregation`; recompute every counted unit's test via the same `edges.*` functions; the recomputed p-values reproduce the stored ones within tolerance (1e-9 abs / 1e-6 rel); the unit set equals the BH family exactly (refused/uncounted excluded)
+- [x] T007 [US1] Implement reconstruction (`spa.reconstruct_family(conn, run)`) in `src/gefion/regimes/discovery/spa.py`, calling the run's own code paths per research R1 (GREEN)
+- [x] T008 [US2] Extend `tests/test_spa_reconstruction.py` (RED): perturb one outer-window price row → verification refuses naming the divergent unit(s) and magnitudes, and no verdict is produced; `family_size` 0 / no counted candidates → honest "nothing to test" refusal; outer window below the 20-observation floor → refusal naming the floor
+- [x] T009 [US2] Implement verification + refusal taxonomy (`spa.verify`, `SpaRefusal`) (GREEN)
+- [x] T010 [US1] Write `tests/test_spa_reverdict.py` (RED, DB): end-to-end `spa.reverdict(conn, run, iterations, seed)` on the synthetic runs — planted-edge run yields small p_consistent, noise run large; same seed ⇒ identical p-values; ledger and price rows byte-identical before/after (checksums, SC-1002)
+- [x] T011 [US1] Implement the end-to-end re-verdict orchestration (reconstruct → verify → bootstrap → verdict) with spans (family size, iterations, block length, verification outcome, p-values) (GREEN)
 
 **Checkpoint**: MVP — a trustworthy selection-aware verdict exists for any stored run, with drift refusal proven.
 
