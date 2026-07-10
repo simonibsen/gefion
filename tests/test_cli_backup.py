@@ -309,7 +309,20 @@ class TestDiskSpaceCheck:
     def test_cli_proceeds_with_warning_when_check_is_unknown(self, monkeypatch, tmp_path):
         """Policy: refuse only on genuinely insufficient space; if the
         pre-check itself fails, warn and attempt the backup (the write will
-        fail honestly if the disk really is full)."""
+        fail honestly if the disk really is full).
+
+        DB-guarded: the backup command connects before the disk check, so
+        this end-to-end path needs the test database (the pure-function
+        conflation case is covered DB-free above)."""
+        import os
+
+        import pytest
+
+        from gefion.db import schema
+
+        if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+            pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
+
         import shutil as _shutil
         from typer.testing import CliRunner
         from gefion.cli import app
@@ -321,7 +334,7 @@ class TestDiskSpaceCheck:
         out = tmp_path / "b.tar.gz"
         result = CliRunner().invoke(app, [
             "backup", "--data-types", "definitions", "--output", str(out),
-            "--json"])
+            "--db-url", schema.test_db_url(), "--json"])
         assert "Insufficient disk space" not in result.output
         assert "could not verify" in result.output.lower() or \
                "could not check" in result.output.lower()
