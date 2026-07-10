@@ -78,8 +78,8 @@ doesn't; perturbing one price row → refusal naming the divergent unit.
 
 ## Phase 7: US5 — The negative control (P3)
 
-- [ ] T020 [US5] Write `tests/test_spa_negative_control.py` (RED): M=40 seeded pure-noise families through the FULL pipeline (synthetic runs → reconstruct → verify → SPA at B=200) — rejections at α=0.05 within the exact binomial 99% bound; one planted-edge family rejects; wall-clock under ~60s
-- [ ] T021 [US5] Wire the control into CI expectations (it runs in the normal suite; GREEN by construction of Phases 2–3 — any failure here is a real size/power defect)
+- [x] T020 [US5] Write `tests/test_spa_negative_control.py` (RED): M=40 seeded pure-noise families through the FULL pipeline (synthetic runs → reconstruct → verify → SPA at B=200) — rejections at α=0.05 within the exact binomial 99% bound; one planted-edge family rejects; wall-clock under ~60s
+- [x] T021 [US5] Wire the control into CI expectations (it runs in the normal suite; GREEN by construction of Phases 2–3 — any failure here is a real size/power defect)
 
 ---
 
