@@ -56,7 +56,7 @@ refusals (drift, missing data, empty family, short window); append-only records
 | IV. Observability | PASS | Spans: reconstruction (n units, verification outcome), bootstrap (iterations, block length), verdict (p-values). |
 | V. CLI Presentation | PASS | `out.*` helpers; `--json` clean payload. |
 | VI. Simplicity | PASS | No new dependency: the three algorithms (stationary bootstrap, automatic block length, SPA recentering) are short, well-specified numpy routines — a heavyweight stats package would be a bigger surface than the code. |
-| Schema Governance | **PENDING** | `spa_reverdicts` DDL proposed, not executed (contracts/sql.md). Recording tasks block on owner approval; the statistical core does not. |
+| Schema Governance | PASS | `spa_reverdicts` DDL approved by owner 2026-07-09 (contracts/sql.md). |
 | Secrets | PASS | None. |
 
 *Post-Phase-1 re-check: no new violations; the single pending item remains the DDL approval.*
