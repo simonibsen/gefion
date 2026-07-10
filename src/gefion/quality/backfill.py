@@ -44,13 +44,57 @@ def run(conn, entity_table: Optional[str] = None,
         created = _count_new(conn, entries)
         written = qfindings.record_findings(conn, entries, context="quality backfill") \
             if entries else 0
+        # Reconcile (issue #85): unresolved findings in this run's scope that
+        # no longer reproduce are superseded, never deleted — a catalog retune
+        # is self-cleaning.
+        resolved = _reconcile(conn, selected, entries)
         by_rule: Dict[str, int] = {}
         for e in entries:
             by_rule[e["result"].rule] = by_rule.get(e["result"].rule, 0) + 1
-        set_attributes(span, rows_examined=rows_examined, findings=written)
+        set_attributes(span, rows_examined=rows_examined, findings=written,
+                       resolved=resolved)
         return {"rows_examined": rows_examined,
-                "findings": {"created": created, "written": written},
+                "findings": {"created": created, "written": written,
+                             "resolved": resolved},
                 "by_rule": by_rule, "stored_values_changed": 0}
+
+
+# Rules this backfill actually evaluates — the only ones it may reconcile.
+# cross_field is write-path only (needs the provider payload) and must never
+# be resolved by a scan that didn't examine it.
+_BACKFILL_RULES = ("definitional_bound", "temporal_spike",
+                   "cross_sectional_outlier")
+
+
+def _reconcile(conn, selected, entries) -> int:
+    """Supersede unresolved findings, within this run's scope, that did not
+    reproduce in this scan (issue #85). Scope = the metrics examined × the
+    rules the backfill evaluates. Returns the number resolved."""
+    if not selected:
+        return 0
+    reproduced = {(e["entity_table"], e["entity_id"], e["metric"], e["date"],
+                   e["result"].rule) for e in entries}
+    metric_names = [m.name for m in selected]
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, entity_table, entity_id, metric, date, rule
+               FROM data_quality_findings
+               WHERE resolved_at IS NULL
+                 AND metric = ANY(%s) AND rule = ANY(%s)""",
+            (metric_names, list(_BACKFILL_RULES)),
+        )
+        stale = [fid for fid, et, eid, met, d, rule in cur.fetchall()
+                 if (et, eid, met, d, rule) not in reproduced]
+        for fid in stale:
+            cur.execute(
+                """UPDATE data_quality_findings
+                   SET resolved_at = NOW(),
+                       resolution = 'no longer reproduces under the current '
+                                    'catalog (quality backfill reconcile)'
+                   WHERE id = %s""",
+                (fid,),
+            )
+    return len(stale)
 
 
 def _count_new(conn, entries) -> int:

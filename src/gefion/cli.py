@@ -11960,6 +11960,7 @@ def quality_backfill_cmd(
     out.success(
         f"Examined {summary['rows_examined']} value(s): "
         f"{summary['findings']['created']} new finding(s), "
+        f"{summary['findings']['resolved']} stale finding(s) resolved, "
         f"{summary['stored_values_changed']} stored value(s) changed",
         data=summary)
 
