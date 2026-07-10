@@ -220,3 +220,270 @@ def _cross_unit_mean(d: np.ndarray, mask: np.ndarray) -> np.ndarray:
     block length is computed on (research R4)."""
     counts = np.maximum(mask.sum(axis=0), 1)
     return np.where(mask, d, 0.0).sum(axis=0) / counts
+
+
+# ---------------------------------------------------------------------------
+# Reconstruction + verification (010 T007/T009) — the honesty core
+# ---------------------------------------------------------------------------
+
+# Verification tolerance (research R3): floating-point/library noise only.
+_ABS_TOL = 1e-9
+_REL_TOL = 1e-6
+
+# Minimum outer-window observations for a meaningful block bootstrap (FR-1006)
+MIN_OUTER_OBSERVATIONS = 20
+
+
+class SpaRefusal(RuntimeError):
+    """Honest refusal: no verdict can be produced, with the reason named."""
+
+
+def _get_run(conn, run):
+    from gefion.regimes.discovery import ledger
+    return ledger.get_run(conn, run)
+
+
+def _rebuild_market(conn, run):
+    """The run's market view, via the SAME loader the run used (research R1)."""
+    import datetime as _dt
+
+    from gefion.regimes.discovery import universe as duniverse
+    from gefion.regimes.discovery.signals import load_market_data
+
+    ss = run["search_space"]
+    atom_features = sorted({a.get("feature") for a in ss.get("atoms", [])
+                            if a.get("feature")})
+    signals_list = list(ss.get("signals", []))
+    chain_spec = ",".join(ss.get("universe_filter", ["passthrough"]))
+    chain = duniverse.parse_filter_chain(chain_spec)
+    symbols = None
+    if any(f.kind != "passthrough" for f in chain):
+        with conn.cursor() as cur:
+            cur.execute("SELECT symbol FROM stocks ORDER BY symbol")
+            symbols = [r[0] for r in cur.fetchall()]
+        symbols = duniverse.apply_chain(chain, symbols, conn=conn)
+    max_date = ss.get("max_date")
+    return load_market_data(
+        conn, sorted(set(signals_list) | set(atom_features)),
+        horizon_days=int(ss.get("horizon_days", 1)),
+        dataset_version=run["dataset_version"],
+        symbols=symbols, optional_features=atom_features,
+        max_date=_dt.date.fromisoformat(max_date) if max_date else None)
+
+
+def _outer_window(run):
+    import datetime as _dt
+    seg = run["segregation"]
+    if run.get("reserve_consumed") and seg.get("reserve"):
+        block = seg["reserve"]
+        return (_dt.date.fromisoformat(block["start"]),
+                _dt.date.fromisoformat(block["end"]))
+    return (_dt.date.fromisoformat(seg["holdout_start"]),
+            _dt.date.fromisoformat(seg["holdout_end"]))
+
+
+def _recompute_candidate_tests(cand, ss, src, market, start, end):
+    """Recompute one counted candidate's outer tests via the run's own code
+    paths (edges.*) — a parallel reimplementation could never certify drift
+    vs divergence."""
+    from gefion.regimes.discovery import edges, grammar
+
+    tier = cand["tier"]
+    if tier == "interaction":
+        return [edges.tier1_interaction_test(
+                    src, signal=s,
+                    conditioning_feature=cand["provenance"]["atom_features"][0],
+                    start=start, end=end)
+                for s in ss["signals"]]
+    if tier == "grammar":
+        prov = cand["provenance"]
+        spec = grammar.Candidate(
+            expression=cand["expression"], bucketing=prov["bucketing"],
+            depth=int(prov.get("depth", 1)),
+            atom_features=tuple(prov.get("atom_features", ())))
+        labels = edges.causal_labels(spec, market,
+                                     window=int(ss.get("label_window", 60)))
+        tests = []
+        for s in ss["signals"]:
+            tests.extend(edges.tier2_bucket_tests(
+                src, signal=s, labels_by_date=labels, start=start, end=end,
+                min_effective_n=int(ss.get("min_effective_n", 20))))
+        return tests
+    raise SpaRefusal(
+        f"candidate {cand['candidate_hash']}: expressive-tier reconstruction "
+        "is not supported in v1 (fitted detector state) — see research R2a")
+
+
+def _unit_series(cand, ss, src, market, start, end, test):
+    """Per-observation relative-performance series for one unit (research
+    R2a): bucket units use the within-bucket differential records; interaction
+    units use the demeaned interaction moment, sign-aligned with the stored
+    coefficient."""
+    from gefion.regimes.discovery import edges, grammar
+
+    signal = test["signal"]
+    if cand["tier"] == "interaction":
+        cond_name = cand["provenance"]["atom_features"][0]
+        cond = dict(src.series(cond_name))
+        fwd = dict(src.market.forward_returns)
+        sig = dict(src.series(signal))
+        dates = sorted(d for d in sig
+                       if d in cond and d in fwd and start <= d <= end)
+        if not dates:
+            return [], []
+        s = np.array([sig[d] for d in dates])
+        c = np.array([cond[d] for d in dates])
+        r = np.array([fwd[d] for d in dates])
+        z = (s - s.mean()) * (c - c.mean()) * r
+        sign = 1.0 if float(test.get("coef") or 0.0) >= 0 else -1.0
+        return dates, list(sign * z)
+
+    # grammar bucket unit: within-bucket differential records
+    prov = cand["provenance"]
+    spec = grammar.Candidate(
+        expression=cand["expression"], bucketing=prov["bucketing"],
+        depth=int(prov.get("depth", 1)),
+        atom_features=tuple(prov.get("atom_features", ())))
+    labels = edges.causal_labels(spec, market,
+                                 window=int(ss.get("label_window", 60)))
+    bucket = test.get("bucket")
+    records = src.records(signal, start=start, end=end)
+    dates, values = [], []
+    for rec in records:
+        if labels.get(rec["date"]) == bucket:
+            dates.append(rec["date"])
+            values.append(rec["experimental_score"] - rec["baseline_score"])
+    return dates, values
+
+
+def _match(stored, recomputed, tier):
+    """Pair stored outer tests with recomputed ones by (signal[, bucket])."""
+    def key(t):
+        return (t.get("signal"), t.get("bucket")) if tier != "interaction" \
+            else (t.get("signal"),)
+    by_key = {key(t): t for t in recomputed}
+    return [(t, by_key.get(key(t))) for t in stored]
+
+
+def reconstruct_family(conn, run) -> Dict[str, Any]:
+    """Rebuild a completed run's counted family and VERIFY it against the
+    ledger before any verdict (FR-1004/1005). Read-only. Refuses honestly on
+    drift, an empty family, or an unsupported tier."""
+    from gefion.regimes.discovery import ledger
+    from gefion.regimes.discovery.signals import FeatureSignalSource
+
+    run_row = _get_run(conn, run)
+    with create_span("discovery.spa.reconstruct", run_id=run_row["id"]) as span:
+        if not run_row.get("family_size"):
+            raise SpaRefusal(
+                f"run {run_row['id']} has family_size "
+                f"{run_row.get('family_size')} — nothing to test")
+
+        ss = run_row["search_space"]
+        market = _rebuild_market(conn, run_row)
+        src = FeatureSignalSource(market, ss["signals"],
+                                  align_window=int(ss.get("align_window", 60)))
+        start, end = _outer_window(run_row)
+
+        units, divergent = [], []
+        for cand in ledger.list_candidates(conn, run_row["id"]):
+            results = cand.get("results") or {}
+            if not cand.get("counted_in_family") or not results.get("selected"):
+                continue
+            stored_tests = [t for t in results.get("tests", [])
+                            if t.get("pvalue") is not None]
+            if not stored_tests:
+                continue
+            recomputed = _recompute_candidate_tests(cand, ss, src, market,
+                                                    start, end)
+            for stored, recomp in _match(stored_tests, recomputed, cand["tier"]):
+                if recomp is None or recomp.get("pvalue") is None:
+                    divergent.append((cand["candidate_hash"], stored.get("signal"),
+                                      stored["pvalue"], None))
+                    continue
+                diff = abs(recomp["pvalue"] - stored["pvalue"])
+                if diff > max(_ABS_TOL, _REL_TOL * abs(stored["pvalue"])):
+                    divergent.append((cand["candidate_hash"], stored.get("signal"),
+                                      stored["pvalue"], recomp["pvalue"]))
+                    continue
+                dates, values = _unit_series(cand, ss, src, market, start, end,
+                                             {**stored, **recomp})
+                units.append({
+                    "candidate_hash": cand["candidate_hash"],
+                    "tier": cand["tier"],
+                    "signal": stored.get("signal"),
+                    "bucket": stored.get("bucket"),
+                    "stored_pvalue": stored["pvalue"],
+                    "recomputed_pvalue": recomp["pvalue"],
+                    "dates": dates,
+                    "values": values,
+                })
+
+        if divergent:
+            details = "; ".join(
+                f"{h} [{s}] stored p={sp:.6g} recomputed "
+                f"p={'MISSING' if rp is None else format(rp, '.6g')}"
+                for h, s, sp, rp in divergent[:5])
+            raise SpaRefusal(
+                f"reconstruction mismatch — {len(divergent)} unit(s) diverge "
+                f"beyond tolerance: {details}. The world has drifted since the "
+                "run (price backfill or environment change); no verdict can "
+                "honestly be produced.")
+        if not units:
+            raise SpaRefusal(f"run {run_row['id']}: no counted units survived "
+                             "reconstruction — nothing to test")
+
+        max_div = max(abs(u["recomputed_pvalue"] - u["stored_pvalue"])
+                      for u in units)
+        set_attributes(span, n_units=len(units), max_divergence=max_div)
+        return {"run": run_row, "units": units, "family_size": len(units),
+                "outer_window": (str(start), str(end)),
+                "verification": {"units": len(units),
+                                 "max_abs_divergence": max_div,
+                                 "all_match": True}}
+
+
+def reverdict(conn, run, iterations: int = 1000,
+              seed: Optional[int] = None, level: Optional[float] = None,
+              block_length: Optional[float] = None) -> Dict[str, Any]:
+    """The post-run SPA re-verdict (FR-1001..1006): reconstruct → verify →
+    joint stationary bootstrap → Hansen SPA. Read-only over ledger and market
+    rows; recording is the caller's step."""
+    fam = reconstruct_family(conn, run)
+    run_row = fam["run"]
+    with create_span("discovery.spa.reverdict", run_id=run_row["id"],
+                     iterations=iterations) as span:
+        all_dates = sorted({d for u in fam["units"] for d in u["dates"]})
+        n = len(all_dates)
+        if n < MIN_OUTER_OBSERVATIONS:
+            raise SpaRefusal(
+                f"outer window has {n} observation(s) — below the "
+                f"{MIN_OUTER_OBSERVATIONS}-observation floor for a block "
+                "bootstrap")
+        date_index = {d: i for i, d in enumerate(all_dates)}
+        units = fam["units"]
+        d_matrix = np.zeros((len(units), n))
+        mask = np.zeros((len(units), n), dtype=bool)
+        for k, u in enumerate(units):
+            for d, v in zip(u["dates"], u["values"]):
+                j = date_index[d]
+                d_matrix[k, j] = v
+                mask[k, j] = True
+
+        use_seed = int(seed if seed is not None else run_row["seed"])
+        result = spa_test(d_matrix, iterations=iterations, seed=use_seed,
+                          mask=mask, expected_block=block_length)
+        lvl = float(level if level is not None
+                    else run_row["search_space"].get("fdr_rate", 0.01))
+        out = {
+            **result,
+            "run_id": run_row["id"],
+            "run_name": run_row["name"],
+            "level": lvl,
+            "passed": result["p_consistent"] > lvl,
+            "outer_window": fam["outer_window"],
+            "verification": fam["verification"],
+        }
+        set_attributes(span, p_consistent=out["p_consistent"],
+                       passed=out["passed"], family_size=out["family_size"])
+        return out
