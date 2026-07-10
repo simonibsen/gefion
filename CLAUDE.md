@@ -152,6 +152,8 @@ Before exiting plan mode, verify:
 - PostgreSQL + TimescaleDB. ONE new table — `data_quality_findings` (008-data-quality)
 - Python 3.10+ (existing codebase) + numpy (metrics), existing `gefion.backtest` package (009-short-side-execution)
 - **None new.** Backtests run in-memory and return a result payload; (009-short-side-execution)
+- Python 3.10+ (existing codebase) + numpy (bootstrap + statistics — stationary bootstrap, (010-spa-reverdict)
+- ONE new table — `spa_reverdicts` (append-only per-run results; (010-spa-reverdict)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)
