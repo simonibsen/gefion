@@ -1044,7 +1044,9 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
   pre-registration, verifies the recomputed p-values reproduce the stored ones
   (refuses honestly on drift), runs Hansen's SPA with a joint stationary bootstrap,
   and records the result append-only beside the run. Never rewrites BH verdicts or
-  the ledger. **Mutating** (appends one durable row) and compute-heavy
+  the ledger. A SMALL consistent p SUPPORTS the family (R9); UNSUPPORTED is only
+  alarming beside admissions — report it as caution, never as a demotion.
+  **Mutating** (appends one durable row) and compute-heavy
   (reconstruction + B bootstrap iterations): confirm with the user before invoking.
 - `regime_discover_diagnostics` — the diagnostics ledger: limits hit with quantitative
   reasons, tagged sample-dependent (re-test on new data) vs structural (accumulate).

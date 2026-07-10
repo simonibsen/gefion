@@ -594,7 +594,7 @@ ledgers. See [REGIMES.md](REGIMES.md) § Agentic discovery for the threat model.
 - `gefion regime discover show <run>` — pre-registration, segregation boundaries, family size, status.
 - `gefion regime discover ledger <run> [--verdict V]` — the candidate ledger: every candidate evaluated, losers included (they are the FDR denominator).
 - `gefion regime discover verdicts <run>` — FDR survivors, always shown with the family size beside them.
-- `gefion regime discover spa <run> [--iterations 1000] [--seed N] [--level P] [--block-length X]` — selection-aware Superior Predictive Ability (SPA) re-verdict over the run's counted family: reconstructs each candidate's outer-window records via the run's own code paths, verifies the recomputed p-values reproduce the ledger's stored ones (refuses honestly on drift — a backfilled price series means a different world), then runs Hansen's SPA test with a joint stationary bootstrap. The result is recorded append-only beside the run; it never rewrites the BH verdicts or the ledger. Seed defaults to the run's own seed, level to the run's FDR rate.
+- `gefion regime discover spa <run> [--iterations 1000] [--seed N] [--level P] [--block-length X]` — selection-aware Superior Predictive Ability (SPA) re-verdict over the run's counted family: reconstructs each candidate's outer-window records via the run's own code paths, verifies the recomputed p-values reproduce the ledger's stored ones (refuses honestly on drift — a backfilled price series means a different world), then runs Hansen's SPA test with a joint stationary bootstrap. The result is recorded append-only beside the run; it never rewrites the BH verdicts or the ledger. Seed defaults to the run's own seed, level to the run's FDR rate. Read it correctly (R9): a SMALL consistent p (≤ level) SUPPORTS the family — the best candidate survives the search-aware test; a large p is only alarming beside admissions.
 - `gefion regime discover diagnostics <run> [--sample-dependent|--structural]` — the diagnostics ledger: every limit hit, with quantitative reasons.
 - `gefion regime discover grades [<candidate>]` — trust grades (forward folds; fold 1 = probation; descriptive backward slices flagged, never counted).
 - `gefion regime discover grade-fold <candidate> --fold N` — re-test an admitted edge on a forward fold window and record the outcome (confirmed, failed, or no-evidence — a power-refused fold is recorded but never counted toward the grade).
@@ -604,9 +604,10 @@ Honest refusals at start: expressive tier without a declared `--fresh-holdout` r
 an unfiltered universe without explicit `passthrough`; a run whose segregation cannot be
 proven is recorded with status `invalid` and produces no verdicts; a declared `--max-date`
 vintage that disagrees with the loaded data; `--budget > 200` or `--depth > 2` (the v1
-caps) without a passing latest SPA re-verdict on the 2 most recent completed runs of the
-same dataset version — scale must be earned via `gefion regime discover spa <run>`, and
-satisfaction is recorded in the new run's pre-registration.
+caps) unless the 2 most recent completed non-empty-family runs of the same dataset
+version are BH/SPA-coherent (no admissions the selection-aware test cannot support) —
+scale must be earned via `gefion regime discover spa <run>`, and satisfaction is
+recorded in the new run's pre-registration.
 
 Deep validation (see REGIMES.md): `--max-date` runs discovery as of a past vintage;
 `half:a`/`half:b` in the universe chain give a declared split-half robustness check

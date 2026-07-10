@@ -146,10 +146,11 @@ edge carries a visible flag in the grades view.
 1. **Given** a re-verdicted run, **When** `show` or `verdicts` renders,
    **Then** the SPA p-value, level, iterations, seed, and pass/fail appear
    beside the BH family size.
-2. **Given** an admitted edge whose run's family fails SPA, **When** grades
-   are displayed, **Then** the edge carries a loud "family failed
-   selection-aware check" flag — and its BH verdict and trust grade are
-   unchanged (no auto-demotion).
+2. **Given** an admitted edge whose run's latest re-verdict is unsupported
+   (`p_consistent > level`; research R9 — BH admitted what SPA cannot
+   distinguish from search luck), **When** grades are displayed, **Then** the
+   edge carries a loud "family failed selection-aware check" flag — and its
+   BH verdict and trust grade are unchanged (no auto-demotion).
 3. **Given** a run never re-verdicted, **When** `show` renders, **Then** the
    SPA field reads "not yet run" (absence is visible, not implied).
 
@@ -276,8 +277,9 @@ asserts the rejection rate at level α stays ≤ α (with the seeded margin).
 
 - **FR-1009**: `discover start` configuration validation MUST refuse budgets
   or grammar depth above the v1 caps unless the declared relevant prior runs
-  carry a passing latest SPA re-verdict; the refusal MUST name the gate and
-  the satisfying command. Within-cap configurations MUST be unaffected.
+  are BH/SPA-coherent — no unsupported admissions (zero admissions, or a
+  supported latest re-verdict; research R9); the refusal MUST name the gate
+  and the satisfying command. Within-cap configurations MUST be unaffected.
 - **FR-1010**: When the gate is satisfied, that fact (which runs, which
   re-verdict records) MUST be recorded in the new run's pre-registration.
 

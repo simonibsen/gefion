@@ -178,3 +178,40 @@ dominate).
 **v1 scope note**: expressive-tier candidates (freeform/detector) are refused
 with a named limitation — their fitted detector state makes byte-faithful
 reconstruction a separate increment.
+
+## R9 — Amendment: verdict orientation correction (2026-07-10, owner decision)
+
+**Finding** (surfaced by the first production re-verdicts): the approved
+`passed = p_consistent > level` read Hansen SPA backwards. SPA's null is "no
+candidate is genuinely superior — the best-looking one is explainable by
+search luck"; a SMALL p rejects that null, i.e. the family's best survives
+the search-aware test. The original orientation therefore flagged the run
+whose two admitted prod regimes SPA had just corroborated (p=0.005), while
+displaying PASS on vintage runs whose 5–6 admissions were indistinguishable
+from search luck (p≈0.24) — and the budget gate would have licensed scale on
+noise-consistent runs while blocking a run that found a corroborated edge.
+
+**Decision — coherence semantics**:
+
+- The recorded boolean means **supported**: `p_consistent ≤ level` — SPA can
+  support the family's best candidate against its own search. (Column name
+  `passed` retained; no DDL change.)
+- **Grades flag**: an admitted edge is flagged ("family failed
+  selection-aware check") when its run's latest re-verdict is UNSUPPORTED —
+  BH admitted what SPA cannot distinguish from search luck.
+- **Budget gate**: the relevant prior runs must be **BH/SPA-coherent**: no
+  unsupported admissions — a run is coherent iff it has zero admissions OR
+  its latest re-verdict is supported. A clean all-reject run with large p is
+  coherent and counts. Runs with `family_size` 0 cannot carry a re-verdict
+  (nothing to test) and are skipped when selecting the relevant prior runs.
+
+**Rationale**: neither "small p everywhere" nor "large p everywhere" is
+uniformly safe to gate on — an honest all-reject run can never produce a
+small p, and a noise machine always produces large ones. The dangerous state
+is specifically DISAGREEMENT in the admitting direction: admissions the
+selection-aware test cannot support. The gate binds on exactly that.
+
+**Alternatives considered**: simple inversion (`passed = p ≤ level`
+everywhere — rejected: honest all-reject runs could never license a raise);
+keeping the approved orientation documented as a noise-consistency check
+(rejected: it flags corroborated edges and lets noise machines through).

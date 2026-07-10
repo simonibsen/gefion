@@ -50,9 +50,11 @@ def _make_run(conn, name="sparev-run"):
 
 
 def _result(p=0.2):
+    # passed means SUPPORTED (research R9): SPA can support the family's best
+    # candidate against its own search -- small p is the supporting outcome.
     return {"p_consistent": p, "p_lower": p / 2, "p_upper": min(1.0, p * 1.5),
             "statistic": 1.7, "family_size": 3, "iterations": 200, "seed": 7,
-            "block_length": 4.5, "level": 0.01, "passed": p > 0.01,
+            "block_length": 4.5, "level": 0.01, "passed": p <= 0.01,
             "verification": {"units": 3, "max_abs_divergence": 1e-12,
                              "all_match": True}}
 
@@ -101,7 +103,7 @@ def test_recording_is_append_only(conn):
     assert len(rows) == 2                        # appended, nothing overwritten
     latest = latest_spa_reverdict(conn, run_id)
     assert latest["p_consistent"] == 0.005
-    assert latest["passed"] is False             # 0.005 <= 0.01
+    assert latest["passed"] is True              # supported: 0.005 <= 0.01 (R9)
     assert latest["verification"]["all_match"] is True
 
 
@@ -151,19 +153,20 @@ def test_show_and_verdicts_display_latest_spa(conn):
     from gefion.regimes.discovery.ledger import record_spa_reverdict
     run_id = _make_run(conn, "sparev-show-latest")
     record_spa_reverdict(conn, run_id, _result(p=0.40))
-    record_spa_reverdict(conn, run_id, _result(p=0.004))    # latest: FAIL at 0.01
+    record_spa_reverdict(conn, run_id, _result(p=0.004))    # latest: supported
     for cmd in ("show", "verdicts"):
         result = _cli(["regime", "discover", cmd, str(run_id)])
         assert result.exit_code == 0
         assert "SPA" in result.output
         assert "0.004" in result.output                     # latest, not first
-        assert "FAIL" in result.output
+        assert "supported" in result.output                 # R9 orientation
+        assert "FAIL" not in result.output
     # JSON payload carries the same fields (MCP reads this)
     result = _cli(["regime", "discover", "show", str(run_id), "--json"])
     import json as _json
     payload = _json.loads(result.output)
     assert payload["spa"]["p_consistent"] == 0.004
-    assert payload["spa"]["passed"] is False
+    assert payload["spa"]["passed"] is True                 # supported (R9)
 
 
 def test_grades_flag_admitted_edge_whose_family_failed_spa(conn):
@@ -182,14 +185,15 @@ def test_grades_flag_admitted_edge_whose_family_failed_spa(conn):
         cur.execute("INSERT INTO regime_trust_grades (candidate_id, fold, confirmed) "
                     "VALUES (%s, 1, TRUE)", (cand_id,))
     from gefion.regimes.discovery.ledger import record_spa_reverdict
-    record_spa_reverdict(conn, run_id, _result(p=0.004))    # FAIL at level 0.01
+    # UNSUPPORTED (R9): BH admitted, but the family's best is luck-consistent
+    record_spa_reverdict(conn, run_id, _result(p=0.30))
     result = _cli(["regime", "discover", "grades", str(cand_id)])
     assert result.exit_code == 0
     assert "failed selection-aware check" in result.output.lower()
-    assert "0.004" in result.output
+    assert "0.3" in result.output
     # loud flag, not a demotion: the grade line is intact
     assert "1/1" in result.output
-    # and a passing family carries no flag
-    record_spa_reverdict(conn, run_id, _result(p=0.30))     # latest now PASS
+    # and a supported family carries no flag (SPA corroborates the admission)
+    record_spa_reverdict(conn, run_id, _result(p=0.004))    # latest: supported
     result = _cli(["regime", "discover", "grades", str(cand_id)])
     assert "failed selection-aware check" not in result.output.lower()

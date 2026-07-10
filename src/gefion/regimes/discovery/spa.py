@@ -476,12 +476,15 @@ def reverdict(conn, run, iterations: int = 1000,
                           mask=mask, expected_block=block_length)
         lvl = float(level if level is not None
                     else run_row["search_space"].get("fdr_rate", 0.01))
+        # passed means SUPPORTED (research R9): a small p rejects SPA's null
+        # ("the best-looking candidate is explainable by search luck"), so
+        # the family's best survives the search-aware test.
         out = {
             **result,
             "run_id": run_row["id"],
             "run_name": run_row["name"],
             "level": lvl,
-            "passed": result["p_consistent"] > lvl,
+            "passed": result["p_consistent"] <= lvl,
             "outer_window": fam["outer_window"],
             "verification": fam["verification"],
         }

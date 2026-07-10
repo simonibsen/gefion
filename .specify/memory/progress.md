@@ -20,9 +20,11 @@
   show/verdicts (`SPA: not yet run` when absent) and grades (loud
   family-failed flag, never auto-demotion); MCP `regime_discover_spa`
 - Budget gate ENFORCED: `--budget > 200` or `--depth > 2` (V1_MAX_BUDGET/
-  V1_MAX_DEPTH) refused unless the 2 most recent completed runs (same
-  dataset version) carry passing latest re-verdicts; satisfaction recorded
-  as `{gate: "spa", runs, reverdict_ids}` in the new run's pre-registration
+  V1_MAX_DEPTH) refused unless the 2 most recent completed non-empty runs
+  (same dataset version) are BH/SPA-coherent — no unsupported admissions
+  (R9: supported = p <= level; small p backs the family's best against the
+  search); satisfaction recorded as `{gate: "spa", runs, reverdict_ids}`
+  in the new run's pre-registration
 - Standing negative control in CI: 40 seeded noise families in the
   production unit form (sign-aligned — measured nominal 3/60 vs raw 0/60)
   bounded by the exact binomial 99% bound; planted edge must reject; plus a
