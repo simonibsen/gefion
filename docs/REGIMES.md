@@ -253,6 +253,7 @@ gefion regime discover list                  # runs, status, family size
 gefion regime discover show first-hunt       # pre-registration + segregation
 gefion regime discover ledger first-hunt     # every candidate, every verdict
 gefion regime discover verdicts first-hunt   # survivors (if any) + family size
+gefion regime discover spa first-hunt        # selection-aware SPA re-verdict
 ```
 
 ### Counting the losers
@@ -275,6 +276,35 @@ admitted out of a 240-test family" and "1 admitted out of 3 tests" are very diff
 claims.
 
 **Expect mostly (often entirely) rejections.** A discovery loop that admits often is broken.
+
+### The selection-aware re-verdict (SPA, spec 010)
+
+The BH family controls the false-discovery rate over the tests that were run, but it
+does not model the *search* — the fact that the family exists because a procedure
+looked for winners. Hansen's Superior Predictive Ability (SPA) test does:
+`gefion regime discover spa <run>` asks "could the best-looking candidate in this
+family plausibly be the best of many lucky draws?" and answers with a studentized
+max-statistic bootstrap over the whole family jointly.
+
+Mechanics, and why they are honest:
+
+- **Reconstruction, not storage.** The ledger stores per-test summaries, not
+  per-observation series, so the re-verdict rebuilds each counted candidate's
+  outer-window records by calling the run's own code paths under its
+  pre-registration (seed, segregation, universe chain, max-date vintage).
+- **Verification before verdict.** The recomputed per-unit p-values must reproduce
+  the ledger's stored ones (tolerance 1e-9 abs / 1e-6 rel). A mismatch means the
+  world drifted — a price backfill, an environment change — and the command
+  **refuses**, naming the divergent units, rather than issuing a verdict from a
+  different world than the one the run saw.
+- **Joint stationary bootstrap.** Resampled time blocks (Politis–Romano, automatic
+  Politis–White block length) are shared across all candidates, preserving
+  cross-candidate dependence; the consistent p-value is the verdict, with
+  lower/upper variants as diagnostics.
+- **Append-only.** The result is recorded beside the run in `spa_reverdicts` —
+  re-runs add rows, "latest" is by timestamp, and the BH verdicts and candidate
+  ledger are never rewritten. An admitted edge whose family fails SPA is flagged
+  loudly, not auto-demoted.
 
 ### The standing negative control (CI)
 

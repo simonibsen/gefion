@@ -257,6 +257,7 @@ signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
 | `gefion regime discover show` | Inspect a run's pre-registration and segregation |
 | `gefion regime discover ledger` | Candidate ledger — every candidate, losers included |
 | `gefion regime discover verdicts` | FDR survivors, shown with the family size |
+| `gefion regime discover spa` | Selection-aware SPA re-verdict over a run's counted family (append-only) |
 | `gefion regime discover diagnostics` | Limits hit (sample-dependent vs structural) |
 | `gefion regime discover grades` | Forward-accruing trust grades per admitted edge |
 | `gefion regime discover grade-fold` | Re-test an admitted edge on a forward fold |

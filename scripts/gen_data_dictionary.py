@@ -293,6 +293,7 @@ TABLE_PURPOSE: Dict[str, str] = {
     "macro_series": "Macro-series catalog (VIX, CPI, rates …). One row per market-level series — the first non-stock entity table (spec 007). Rows are configuration: a new series is an INSERT, never DDL.",
     "macro_series_values": "Raw macro-series values keyed by (series_id, date). Required `value` + optional OHLC serves daily-OHLC and monthly-single-value series alike. Plain relational, not a hypertable.",
     "data_quality_findings": "Data-quality findings audit ledger (spec 008): one row per detection (rule, observed vs expected, trash/suspect verdict). No FKs by design — survives deletion of the entities it describes; supersede via resolution fields, never erase.",
+    "spa_reverdicts": "SPA re-verdict results (spec 010): one append-only row per `regime discover spa` execution — the selection-aware p-values (consistent/lower/upper) beside the run's BH family. Cascades with its run (derived analysis, re-runnable from the ledger).",
 }
 
 # Declared layer per data-flow table (spec 007 — the add-a-table checklist in

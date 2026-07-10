@@ -1921,6 +1921,33 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="regime_discover_spa",
+            description=(
+                "Selection-aware SPA re-verdict over a completed discovery run's counted "
+                "candidate family: reconstructs each unit from the ledger + pre-registration, "
+                "verifies recomputed p-values reproduce stored ones (refuses on drift), runs "
+                "Hansen's SPA with a joint stationary bootstrap, and records the result "
+                "append-only beside the run. Never rewrites BH verdicts or the ledger."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run": {"type": "string", "description": "Run id or name"},
+                    "iterations": {"type": "integer",
+                                   "description": "Bootstrap iterations (default 1000)"},
+                    "seed": {"type": "integer",
+                             "description": "Bootstrap seed (default: the run's own seed)"},
+                    "level": {"type": "number",
+                              "description": "Pass threshold on the consistent p-value "
+                                             "(default: the run's FDR rate)"},
+                    "block_length": {"type": "number",
+                                     "description": "Expected block length override "
+                                                    "(default: Politis-White automatic)"},
+                },
+                "required": ["run"],
+            },
+        ),
+        Tool(
             name="regime_discover_diagnostics",
             description=(
                 "The diagnostics ledger of a discovery run: every limit the search hit "
@@ -2321,6 +2348,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_ledger(arguments)
         elif name == "regime_discover_verdicts":
             result = await _regime_discover_verdicts(arguments)
+        elif name == "regime_discover_spa":
+            result = await _regime_discover_spa(arguments)
         elif name == "regime_discover_diagnostics":
             result = await _regime_discover_diagnostics(arguments)
         elif name == "regime_discover_grades":
@@ -5040,6 +5069,22 @@ async def _regime_discover_verdicts(args: Dict[str, Any]) -> Dict[str, Any]:
     """FDR survivors of a discovery run, with the family size beside them."""
     async def _run():
         return await GefionExecutor().run("regime", "discover", "verdicts", args["run"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _regime_discover_spa(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Selection-aware SPA re-verdict of a discovery run (append-only record)."""
+    async def _run():
+        cmd = ["regime", "discover", "spa", args["run"]]
+        if args.get("iterations"):
+            cmd.extend(["--iterations", str(args["iterations"])])
+        if args.get("seed") is not None:
+            cmd.extend(["--seed", str(args["seed"])])
+        if args.get("level") is not None:
+            cmd.extend(["--level", str(args["level"])])
+        if args.get("block_length") is not None:
+            cmd.extend(["--block-length", str(args["block_length"])])
+        return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
 

@@ -55,10 +55,10 @@ doesn't; perturbing one price row → refusal naming the divergent unit.
 
 ## Phase 4: Recording + the command (US1 completion + surfaces)
 
-- [ ] T012 [US1] Write `tests/test_spa_reverdict.py` (schema part, RED): after db-init, `spa_reverdicts` exists with the approved shape (FK CASCADE to runs, index, NOT NULLs); recording is append-only (two executions → two rows; nothing updated); `family_size` on the row equals the run's stored family_size
-- [ ] T013 [US1] Apply the approved DDL via the two-file rule: `sql/schema.sql` + `sql/migrations/20260710_000001_spa_reverdicts.sql`; add the `TABLE_PURPOSE` entry in `scripts/gen_data_dictionary.py`; regenerate `docs/DATA_DICTIONARY.md` in the same commit (GREEN)
-- [ ] T014 [US1] Ledger API: `record_spa_reverdict` / `latest_spa_reverdict` / `list_spa_reverdicts` in `src/gefion/regimes/discovery/ledger.py` (tests first in `tests/test_spa_reverdict.py`)
-- [ ] T015 [US1] CLI `gefion regime discover spa <run>` (`--iterations 1000`, `--seed` default run seed, `--level` default run FDR rate, `--block-length` expert override) in `src/gefion/cli.py`; refusals exit non-zero with the reason verbatim; MCP `regime_discover_spa` in `mcp-server/server.py` (source-inspection tests first); README row + USER_GUIDE + MCP_WORKFLOWS entries; docs-drift green
+- [x] T012 [US1] Write `tests/test_spa_reverdict.py` (schema part, RED): after db-init, `spa_reverdicts` exists with the approved shape (FK CASCADE to runs, index, NOT NULLs); recording is append-only (two executions → two rows; nothing updated); `family_size` on the row equals the run's stored family_size
+- [x] T013 [US1] Apply the approved DDL via the two-file rule: `sql/schema.sql` + `sql/migrations/20260710_000001_spa_reverdicts.sql`; add the `TABLE_PURPOSE` entry in `scripts/gen_data_dictionary.py`; regenerate `docs/DATA_DICTIONARY.md` in the same commit (GREEN)
+- [x] T014 [US1] Ledger API: `record_spa_reverdict` / `latest_spa_reverdict` / `list_spa_reverdicts` in `src/gefion/regimes/discovery/ledger.py` (tests first in `tests/test_spa_reverdict.py`)
+- [x] T015 [US1] CLI `gefion regime discover spa <run>` (`--iterations 1000`, `--seed` default run seed, `--level` default run FDR rate, `--block-length` expert override) in `src/gefion/cli.py`; refusals exit non-zero with the reason verbatim; MCP `regime_discover_spa` in `mcp-server/server.py` (source-inspection tests first); README row + USER_GUIDE + MCP_WORKFLOWS entries; docs-drift green
 
 ---
 

@@ -12554,6 +12554,64 @@ def regime_discover_verdicts(
                   "verdict_counts": by_verdict, "admitted": admitted})
 
 
+@discover_app.command("spa")
+def regime_discover_spa(
+    run: str = typer.Argument(..., help="Run id or name (must be completed)"),
+    iterations: int = typer.Option(
+        1000, "--iterations", "-B", help="Bootstrap iterations"),
+    seed: Optional[int] = typer.Option(
+        None, "--seed", help="Bootstrap seed (default: the run's own seed)"),
+    level: Optional[float] = typer.Option(
+        None, "--level", help="Pass threshold on the consistent p-value "
+        "(default: the run's FDR rate)"),
+    block_length: Optional[float] = typer.Option(
+        None, "--block-length", help="Expected block length override "
+        "(default: Politis-White automatic)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Selection-aware SPA re-verdict over the run's counted candidate family.
+
+    Reconstructs every counted candidate's outer-window records via the run's
+    own code paths, verifies the recomputed p-values reproduce the ledger's
+    stored ones (refusing on drift), then runs Hansen's SPA test with a joint
+    stationary bootstrap. The result is recorded append-only beside the run —
+    it never rewrites the BH verdicts or the ledger.
+    """
+    from gefion.regimes.discovery import ledger as dledger
+    from gefion.regimes.discovery import spa as dspa
+    from gefion.regimes.discovery.ledger import LedgerError
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        try:
+            run_row = _resolve_run(conn, run)
+        except LedgerError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+        try:
+            result = dspa.reverdict(
+                conn, run_row["id"], iterations=iterations, seed=seed,
+                level=level, block_length=block_length)
+        except dspa.SpaRefusal as exc:
+            out.error(f"SPA re-verdict refused: {exc}")
+            raise typer.Exit(1)
+        dledger.record_spa_reverdict(conn, run_row["id"], result)
+        conn.commit()
+    verdict = "PASS" if result["passed"] else "FAIL"
+    out.info(f"SPA re-verdict for run {run_row['id']} '{run_row['name']}': "
+             f"{verdict} — consistent p = {result['p_consistent']:.4f} "
+             f"(lower {result['p_lower']:.4f}, upper {result['p_upper']:.4f}) "
+             f"at level {result['level']}")
+    out.info(f"  family size {result['family_size']}, "
+             f"{result['iterations']} iterations, seed {result['seed']}, "
+             f"expected block length {result['block_length']:.2f}")
+    ver = result["verification"]
+    out.info(f"  verification: {ver['units']} units reconstructed, "
+             f"max divergence {ver['max_abs_divergence']:.2e}")
+    if out.json_mode:
+        out.json({"run_id": run_row["id"], **result})
+
+
 @discover_app.command("diagnostics")
 def regime_discover_diagnostics(
     run: str = typer.Argument(..., help="Run id or name"),
