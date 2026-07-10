@@ -1084,8 +1084,11 @@ a conviction.
 - `quality_catalog` — the validation catalog: covered metrics and the uncovered
   (unvalidated) columns. Read-only.
 - `quality_backfill` — **mutating (ledger only)**: validate stored history and
-  record findings for pre-existing garbage; changes no stored value. Confirm
-  first (may take minutes on full history).
+  record findings for pre-existing garbage; changes no stored value. Also
+  reconciles: unresolved findings in the run's scope that no longer reproduce
+  under the current catalog are auto-resolved (superseded, never deleted) — a
+  catalog retune is self-cleaning. Confirm first (may take minutes on full
+  history).
 - `quality_resolve` — **mutating**: supersede a finding (reason required; never
   deletes). Confirm first.
 - db-health / `health_check` gain a `data_quality` section automatically

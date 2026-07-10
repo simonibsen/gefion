@@ -152,3 +152,80 @@ def test_mcp_quality_surface_exists():
                  "quality_resolve"):
         assert f'name="{tool}"' in server
         assert f'name == "{tool}"' in server
+
+
+class TestBackfillReconcile:
+    """Issue #85: the backfill auto-resolves findings that no longer
+    reproduce under the current catalog (supersede, never delete) — so a
+    catalog retune is self-cleaning. Strictly scoped: only metrics the run
+    examined, only rules the backfill evaluates (cross_field is write-path
+    only and must never be reconciled here)."""
+
+    @staticmethod
+    def _seed_stale_finding(cur, sid, metric, rule="definitional_bound",
+                            d=None):
+        cur.execute(
+            """INSERT INTO data_quality_findings
+                   (entity_table, entity_id, metric, date, rule, verdict,
+                    observed, context)
+               VALUES ('stocks', %s, %s, %s, %s, 'trash', -999,
+                       'quality backfill')""",
+            (sid, metric, d or date(2026, 7, 8), rule))
+
+    def test_stale_finding_is_resolved_not_deleted(self, conn):
+        from gefion.quality import backfill, findings
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO stocks (symbol, name) VALUES ('QST10', 'X') "
+                        "RETURNING id")
+            sid = cur.fetchone()[0]
+            # beta 45 is INSIDE the current envelope (±50): the seeded finding
+            # simulates a conviction from an older, tighter catalog
+            cur.execute("INSERT INTO stocks_fundamentals (data_id, date, beta) "
+                        "VALUES (%s, %s, 45.0)", (sid, date(2026, 7, 8)))
+            self._seed_stale_finding(cur, sid, "beta")
+        summary = backfill.run(conn, entity_table="stocks", metric="beta")
+        assert summary["findings"]["resolved"] == 1
+        rows = findings.list_findings(conn, entity_table="stocks", entity_id=sid,
+                                      include_resolved=True)
+        assert len(rows) == 1                       # superseded, not erased
+        assert rows[0]["resolved_at"] is not None
+        assert "no longer reproduces" in rows[0]["resolution"]
+        # idempotent: nothing more to resolve on a second run
+        assert backfill.run(conn, entity_table="stocks",
+                            metric="beta")["findings"]["resolved"] == 0
+
+    def test_reconcile_is_scoped_to_the_run(self, conn):
+        from gefion.quality import backfill, findings
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO stocks (symbol, name) VALUES ('QST11', 'X') "
+                        "RETURNING id")
+            sid = cur.fetchone()[0]
+            cur.execute("INSERT INTO stocks_fundamentals (data_id, date, beta, "
+                        "pe_ratio) VALUES (%s, %s, 1.0, 20.0)",
+                        (sid, date(2026, 7, 8)))
+            self._seed_stale_finding(cur, sid, "beta")
+            self._seed_stale_finding(cur, sid, "pe_ratio")
+        backfill.run(conn, entity_table="stocks", metric="beta")
+        unresolved = findings.list_findings(conn, entity_table="stocks",
+                                            entity_id=sid)
+        assert [r["metric"] for r in unresolved] == ["pe_ratio"]   # out of scope
+
+    def test_reconcile_never_touches_cross_field_or_reproducing(self, conn):
+        from gefion.quality import backfill, findings
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO stocks (symbol, name) VALUES ('QST12', 'X') "
+                        "RETURNING id")
+            sid = cur.fetchone()[0]
+            # still-garbage beta: its finding must stay unresolved
+            cur.execute("INSERT INTO stocks_fundamentals (data_id, date, beta) "
+                        "VALUES (%s, %s, -503341.44)", (sid, date(2026, 7, 8)))
+            # cross_field is write-path-only — the backfill doesn't evaluate it
+            # and must not reconcile it
+            self._seed_stale_finding(cur, sid, "dividend_yield",
+                                     rule="cross_field")
+        summary = backfill.run(conn, entity_table="stocks")
+        rows = findings.list_findings(conn, entity_table="stocks", entity_id=sid)
+        rules = {r["rule"] for r in rows}
+        assert "definitional_bound" in rules        # still reproduces, unresolved
+        assert "cross_field" in rules               # untouched
+        assert all(r["resolved_at"] is None for r in rows)
