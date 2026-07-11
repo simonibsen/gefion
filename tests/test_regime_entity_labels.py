@@ -98,6 +98,7 @@ def world():
     macro-entity feature to prove the honest per-entity refusal."""
     c = _conn()
     schema.create_stocks_table(c)              # full columns, any test order
+    schema.create_feature_definitions_table(c)  # self-heals entity_table
     schema.create_computed_features_table(c)   # lazy table; don't rely on test order
     with c.cursor() as cur:
         _cleanup(cur)
