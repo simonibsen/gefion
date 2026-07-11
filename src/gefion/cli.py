@@ -8033,7 +8033,24 @@ def backtest_run(
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
-        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', 'volatility_contraction', 'ml_signal', or 'ml_filter'"
+        help="Strategy name: 'momentum', 'mean_reversion', 'ma_crossover', 'breakout', 'pairs_trading', 'rsi_divergence', 'volatility_contraction', 'ml_signal', 'ml_filter', or 'cross_sectional_decile'"
+    ),
+    top_liquid: Optional[int] = typer.Option(
+        None,
+        "--top-liquid",
+        help="Universe selector: top N symbols by recent dollar volume "
+             "(alternative to --symbols; asset_type Stock only)"
+    ),
+    gate_regime: Optional[str] = typer.Option(
+        None,
+        "--gate-regime",
+        help="cross_sectional_decile: act only while this regime's label "
+             "matches --gate-bucket (flat otherwise)"
+    ),
+    gate_bucket: Optional[str] = typer.Option(
+        None,
+        "--gate-bucket",
+        help="cross_sectional_decile: the regime bucket in which to hold a book"
     ),
     start_date: str = typer.Option(
         ...,
@@ -8261,6 +8278,17 @@ def backtest_run(
     """
     from datetime import datetime
     from gefion.backtest.data_loader import load_price_data_for_backtest
+
+    def _top_liquid_symbols(db_url_: str, n: int) -> str:
+        """Top-N symbols by recent dollar volume (the wide-universe door)."""
+        with psycopg.connect(db_url_) as _c, _c.cursor() as _cur:
+            _cur.execute(
+                """SELECT s.symbol FROM stock_ohlcv o JOIN stocks s ON s.id = o.data_id
+                   WHERE o.date >= (SELECT max(date) - INTERVAL '40 days' FROM stock_ohlcv)
+                     AND s.asset_type = 'Stock'
+                   GROUP BY s.symbol
+                   ORDER BY avg(o.close * o.volume) DESC NULLS LAST LIMIT %s""", (n,))
+            return ",".join(r[0] for r in _cur.fetchall())
     from gefion.backtest.engine import BacktestEngine
     from gefion.strategies.momentum import MomentumStrategy
     from gefion.strategies.mean_reversion import MeanReversionStrategy
@@ -8274,12 +8302,35 @@ def backtest_run(
     url = os.getenv("DATABASE_URL", SETTINGS.database_url)
 
     # Validate inputs
+    if top_liquid and not symbols:
+        symbols = _top_liquid_symbols(url, top_liquid)
+        emit(f"Universe: top {top_liquid} by dollar volume "
+             f"({symbols.count(',') + 1} symbols)", json_output=json_output)
     if not symbols and not exchange:
         emit_error(
-            "Must specify either --symbols or --exchange",
+            "Must specify either --symbols, --exchange, or --top-liquid",
             json_output=json_output
         )
         raise typer.Exit(1)
+    if strategy == "cross_sectional_decile" and bool(gate_regime) != bool(gate_bucket):
+        emit_error("--gate-regime and --gate-bucket go together",
+                   json_output=json_output)
+        raise typer.Exit(1)
+
+    def _load_gate_labels(regime_name: str):
+        """{date: label} for the gating regime — honest error if uncomputed."""
+        with psycopg.connect(url) as _c, _c.cursor() as _cur:
+            _cur.execute(
+                """SELECT l.date, l.label FROM regime_labels l
+                   JOIN regime_definitions d ON d.id = l.regime_id
+                   WHERE d.name = %s AND l.entity_id = 0""", (regime_name,))
+            rows = dict(_cur.fetchall())
+        if not rows:
+            emit_error(f"gate regime {regime_name!r} has no computed labels — "
+                       f"run `gefion regime compute {regime_name}` first",
+                       json_output=json_output)
+            raise typer.Exit(1)
+        return rows
 
     # Parse dates
     try:
@@ -8340,7 +8391,14 @@ def backtest_run(
         raise typer.Exit(1)
 
     # Initialize strategy
-    if strategy == "momentum":
+    if strategy == "cross_sectional_decile":
+        from gefion.strategies.cross_sectional import CrossSectionalDecileStrategy
+        strat = CrossSectionalDecileStrategy(
+            rebalance_days=rebalance_days,
+            gate_labels=_load_gate_labels(gate_regime) if gate_regime else None,
+            gate_bucket=gate_bucket,
+        )
+    elif strategy == "momentum":
         strat = MomentumStrategy(
             lookback_days=lookback_days,
             top_n=top_n,
@@ -8453,7 +8511,14 @@ def backtest_run(
             raise typer.Exit(1)
 
         # Create base strategy
-        if base_strategy == "momentum":
+        if base_strategy == "cross_sectional_decile":
+            from gefion.strategies.cross_sectional import CrossSectionalDecileStrategy
+            base_strat = CrossSectionalDecileStrategy(
+                rebalance_days=rebalance_days,
+                gate_labels=_load_gate_labels(gate_regime) if gate_regime else None,
+                gate_bucket=gate_bucket,
+            )
+        elif base_strategy == "momentum":
             base_strat = MomentumStrategy(
                 lookback_days=lookback_days,
                 top_n=top_n,
