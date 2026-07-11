@@ -145,3 +145,14 @@ def test_registered_in_builtin_strategies():
     from gefion.strategies.dispatcher import BUILTIN_STRATEGIES
     info = BUILTIN_STRATEGIES["cross_sectional_decile"]
     assert info["class_name"] == "CrossSectionalDecileStrategy"
+
+
+def test_accepts_bare_positions_dict():
+    """The comparison harness passes portfolio as a plain positions dict
+    (house convention) — pinned so compare_strategies keeps working."""
+    from gefion.strategies.cross_sectional import CrossSectionalDecileStrategy
+    strat = CrossSectionalDecileStrategy(rebalance_days=20, mode="long_short")
+    signals = strat.generate_signals(
+        dt.date(2024, 2, 9), {"OLD1": {"shares": 5, "avg_price": 1.0}},
+        _universe(), 100_000.0)
+    assert ("sell", "OLD1") in [(s["action"], s["symbol"]) for s in signals]

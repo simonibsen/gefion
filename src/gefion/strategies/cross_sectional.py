@@ -97,7 +97,11 @@ class CrossSectionalDecileStrategy:
             signals: List[Dict[str, Any]] = []
 
             # 1) close the ENTIRE existing book first (no stacking, ever)
-            for symbol, pos in sorted(portfolio.positions.items()):
+            # (comparison harness passes a bare positions dict — house
+            # convention, same as mean_reversion)
+            positions = (portfolio.positions
+                         if hasattr(portfolio, "positions") else portfolio)
+            for symbol, pos in sorted(positions.items()):
                 shares = pos["shares"]
                 if shares > 0:
                     signals.append({"action": "sell", "symbol": symbol,

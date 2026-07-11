@@ -102,7 +102,8 @@ def compare_strategies(
         def make_strategy_fn(strat, cash, strat_name):
             def strategy_fn(current_date, portfolio, prices):
                 # These strategies expect dict format prices and Portfolio object
-                dict_format_strategies = {"momentum", "ml_signal", "ml_filter"}
+                dict_format_strategies = {"momentum", "ml_signal", "ml_filter",
+                                          "cross_sectional_decile"}
                 if strat_name in dict_format_strategies:
                     price_data = prices  # Keep dict format
                     port_data = portfolio  # Keep Portfolio object
