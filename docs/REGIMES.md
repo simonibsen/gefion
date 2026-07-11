@@ -320,6 +320,11 @@ Mechanics, and why they are honest:
 - **Append-only.** The result is recorded beside the run in `spa_reverdicts` —
   re-runs add rows, "latest" is by timestamp, and the BH verdicts and candidate
   ledger are never rewritten.
+- **In-run by default (#87).** Every completed non-empty run computes its own
+  verdict at completion, against the run's live data (same process, same
+  world — verification passes by construction; tagged `in_run`). The budget
+  gate is therefore self-sustaining; the `discover spa` command remains the
+  door for retroactive checks and re-verdicts after the data changes.
 - **Reading the verdict (research R9).** A SMALL consistent p **supports** the
   family: SPA rejects "the best-looking candidate is explainable by search
   luck". A large p (UNSUPPORTED) is only alarming beside admissions — an
