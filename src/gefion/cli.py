@@ -8585,7 +8585,8 @@ def backtest_run(
 
         # Create wrapper function for strategy that matches BacktestEngine interface
         # Some strategies expect dict format, others expect flat list
-        dict_format_strategies = {"momentum", "ml_signal", "ml_filter"}
+        dict_format_strategies = {"momentum", "ml_signal", "ml_filter",
+                                  "cross_sectional_decile"}
 
         def strategy_fn(current_date, portfolio, prices):
             # Convert prices to format expected by strategy
