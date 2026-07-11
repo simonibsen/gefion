@@ -12870,8 +12870,10 @@ def regime_discover_verdicts(
     by_verdict: dict = {}
     for c in cands:
         by_verdict[c["verdict"]] = by_verdict.get(c["verdict"], 0) + 1
+    horizon = (run_row.get("search_space") or {}).get("horizon_days", 1)
     out.info(f"Run {run_row['id']} '{run_row['name']}': {len(admitted)} admitted "
-             f"out of {len(cands)} candidates — FDR family size {run_row['family_size']} "
+             f"out of {len(cands)} candidates at a {horizon}-day horizon — "
+             f"FDR family size {run_row['family_size']} "
              f"(every test counted, losers included)")
     out.info(spa_line)
     for c in admitted:
