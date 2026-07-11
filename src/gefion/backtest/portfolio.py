@@ -93,10 +93,15 @@ class Portfolio:
             # Update average price for existing position
             existing = self.positions[symbol]
             total_shares = existing["shares"] + shares
-            position_cost = (existing["shares"] * existing["avg_price"]) + base_cost
-            avg_price = position_cost / total_shares
-
-            self.positions[symbol] = {"shares": total_shares, "avg_price": avg_price}
+            if total_shares == 0:
+                # The buy exactly nets out an existing short (#108): the
+                # position is CLOSED — no shares exist to carry an average
+                # price. Cash already reflects both legs.
+                del self.positions[symbol]
+            else:
+                position_cost = (existing["shares"] * existing["avg_price"]) + base_cost
+                avg_price = position_cost / total_shares
+                self.positions[symbol] = {"shares": total_shares, "avg_price": avg_price}
         else:
             # Create new position
             self.positions[symbol] = {"shares": shares, "avg_price": price}
