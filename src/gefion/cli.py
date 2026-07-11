@@ -5975,6 +5975,165 @@ def drop_features_cmd(
             emit_error(f"Drop features failed: {exc}", json_output=json_output)
 
 
+def _toggle_row(table: str, name: str, column: str, value: bool,
+                db_url, json_output) -> None:
+    """Shared enable/disable door for feature functions/definitions (#89)."""
+    from gefion.output import get_output
+    out = get_output(json_output)
+    with create_span(f"cli.{table}-toggle", target=name, value=value):
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, [table])
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {table} SET {column} = %s WHERE name = %s",
+                        (value, name))
+                    if cur.rowcount == 0:
+                        out.error(f"no {table} row named {name!r}")
+                        raise typer.Exit(code=1)
+                conn.commit()
+        except typer.Exit:
+            raise
+        except Exception as exc:
+            out.error(f"Toggle failed: {exc}")
+            raise typer.Exit(code=1)
+    verb = "enabled" if value else "disabled"
+    out.success(f"{name}: {verb}")
+    if out.json_mode:
+        out.json({"name": name, column: value})
+
+
+@app.command("feat-fx-enable")
+def feat_fx_enable(
+    name: str = typer.Argument(..., help="Function name"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Enable a feature function (definitions referencing it become computable)."""
+    _toggle_row("feature_functions", name, "enabled", True, db_url, json_output)
+
+
+@app.command("feat-fx-disable")
+def feat_fx_disable(
+    name: str = typer.Argument(..., help="Function name"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Disable a feature function (its definitions show as orphaned in feat-def-validate)."""
+    _toggle_row("feature_functions", name, "enabled", False, db_url, json_output)
+
+
+@app.command("feat-def-enable")
+def feat_def_enable(
+    name: str = typer.Argument(..., help="Definition name"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Activate a feature definition."""
+    _toggle_row("feature_definitions", name, "active", True, db_url, json_output)
+
+
+@app.command("feat-def-disable")
+def feat_def_disable(
+    name: str = typer.Argument(..., help="Definition name"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Deactivate a feature definition (feat-compute skips it)."""
+    _toggle_row("feature_definitions", name, "active", False, db_url, json_output)
+
+
+_ORPHAN_SQL = """
+    SELECT d.id, d.name, d.function_name, d.active,
+           CASE WHEN f.name IS NULL THEN 'missing'
+                WHEN NOT bool_or(f.enabled) THEN 'disabled'
+                ELSE 'active' END AS function_status
+    FROM feature_definitions d
+    LEFT JOIN feature_functions f ON f.name = d.function_name
+    GROUP BY d.id, d.name, d.function_name, d.active, f.name
+"""
+
+
+def _find_orphans(conn):
+    with conn.cursor() as cur:
+        cur.execute(_ORPHAN_SQL)
+        return [{"id": i, "name": n, "function_name": fn, "active": a,
+                 "function_status": st}
+                for i, n, fn, a, st in cur.fetchall()
+                if st != "active"]
+
+
+@app.command("feat-def-validate")
+def feat_def_validate(
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Report orphaned definitions: function missing or disabled (read-only)."""
+    from gefion.output import get_output
+    out = get_output(json_output)
+    with create_span("cli.feat-def-validate"):
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_definitions", "feature_functions"])
+                orphans = _find_orphans(conn)
+        except Exception as exc:
+            out.error(f"Validate failed: {exc}")
+            raise typer.Exit(code=1)
+    if out.json_mode:
+        out.json({"orphans": orphans, "count": len(orphans)})
+        return
+    if orphans:
+        out.warning(f"{len(orphans)} orphaned definition(s):")
+        for o in orphans:
+            out.info(f"  {o['name']} -> {o['function_name']} "
+                     f"({o['function_status']}; active={o['active']})")
+        out.info("Fix: `gefion feat-def-fix --confirm` deactivates them "
+                 "(or re-enable/import the function).")
+    else:
+        out.success("All definitions reference an enabled function.")
+
+
+@app.command("feat-def-fix")
+def feat_def_fix(
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Actually deactivate orphans (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Deactivate orphaned definitions (dry-run by default; never deletes)."""
+    from gefion.output import get_output
+    out = get_output(json_output)
+    with create_span("cli.feat-def-fix", confirm=confirm):
+        try:
+            with db_connection(db_url) as conn:
+                init_schema_tables(conn, ["feature_definitions", "feature_functions"])
+                orphans = _find_orphans(conn)
+                fixed = 0
+                if confirm and orphans:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE feature_definitions SET active = FALSE "
+                            "WHERE id = ANY(%s) AND active",
+                            ([o["id"] for o in orphans],))
+                        fixed = cur.rowcount
+                    conn.commit()
+        except Exception as exc:
+            out.error(f"Fix failed: {exc}")
+            raise typer.Exit(code=1)
+    if out.json_mode:
+        out.json({"orphans": orphans, "fixed": fixed if confirm else 0,
+                  "confirmed": confirm})
+        return
+    if confirm:
+        out.success(f"Deactivated {fixed} orphaned definition(s) "
+                    f"(definitions kept — reactivate with feat-def-enable).")
+    else:
+        out.info(f"DRY-RUN — nothing changed. {len(orphans)} orphaned "
+                 f"definition(s) would be deactivated; re-run with --confirm.")
+        for o in orphans:
+            out.info(f"  {o['name']} -> {o['function_name']} ({o['function_status']})")
+
+
 @app.command("feat-def-list")
 def features_list(
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
@@ -5992,19 +6151,30 @@ def features_list(
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT id, name, function_name, source_table, source_column, store_table, store_column, active, created_at
-                        FROM feature_definitions
-                        ORDER BY name;
+                        SELECT d.id, d.name, d.function_name, d.source_table,
+                               d.source_column, d.store_table, d.store_column,
+                               d.active, d.created_at,
+                               CASE WHEN count(f.*) = 0 THEN 'missing'
+                                    WHEN NOT bool_or(f.enabled) THEN 'disabled'
+                                    ELSE 'active' END
+                        FROM feature_definitions d
+                        LEFT JOIN feature_functions f ON f.name = d.function_name
+                        GROUP BY d.id, d.name, d.function_name, d.source_table,
+                                 d.source_column, d.store_table, d.store_column,
+                                 d.active, d.created_at
+                        ORDER BY d.name;
                         """
                     )
                     rows = cur.fetchall()
 
                     data = []
-                    for fid, name, fn, source_table, source_column, store_table, store_column, active, created_at in rows:
+                    for (fid, name, fn, source_table, source_column, store_table,
+                         store_column, active, created_at, fn_status) in rows:
                         data.append(
                             {
                                 "name": name,
                                 "function": fn,
+                                "function_status": fn_status,
                                 "source_table": source_table,
                                 "source_column": source_column,
                                 "store_table": store_table,
@@ -6028,6 +6198,7 @@ def features_list(
                 [
                     d["name"] or "",
                     d["function"] or "",
+                    d.get("function_status") or "",
                     d.get("source_table") or "",
                     d.get("source_column") or "",
                     d["store_table"] or "",
@@ -6042,6 +6213,7 @@ def features_list(
                 columns=[
                     Column("Name", style="white", json_key="name"),
                     Column("Function", style="magenta", json_key="function"),
+                    Column("Fn Status", style="yellow", json_key="function_status"),
                     Column("Source", style="cyan", json_key="source_table"),
                     Column("Source Col", style="cyan", json_key="source_column"),
                     Column("Store", style="green", json_key="store_table"),
