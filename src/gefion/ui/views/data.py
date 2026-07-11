@@ -1,6 +1,8 @@
 """Data Management page - Update and manage market data."""
 
 import streamlit as st
+
+from gefion.ui.components.cli_output import render_cli_state
 import subprocess
 import sys
 from gefion.ui.components.chat import render_chat_widget
@@ -842,103 +844,6 @@ def render_status_section():
         st.error(f"Error loading status: {e}")
 
 
-def _render_cull_status(state):
-    """Render status for a data cull process — shows per-table progress and results."""
-    if state.is_running:
-        label = "Culling data..."
-    elif state.success:
-        label = "Cull complete"
-    else:
-        label = "Cull failed"
-
-    with st.expander(label, expanded=state.is_running or not state.success):
-        # Parse JSON output lines into progress events and final result
-        output_lines = getattr(state, 'output_lines', [])
-        progress_events = []
-        final_result = None
-
-        for line in output_lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                phase = data.get("phase", "")
-                if phase == "cull":
-                    progress_events.append(data)
-                elif phase == "vacuum":
-                    progress_events.append(data)
-                elif phase == "complete" or "deleted" in data:
-                    final_result = data
-                elif "tables" in data:
-                    final_result = data  # dry-run plan
-            except json.JSONDecodeError:
-                pass
-
-        # Show per-table progress (during run and after)
-        if progress_events:
-            total_steps = progress_events[-1].get("total_steps", len(progress_events))
-            current_step = progress_events[-1].get("step", len(progress_events))
-
-            if state.is_running:
-                st.progress(current_step / total_steps,
-                            text=f"Processing table {current_step}/{total_steps}")
-
-            for evt in progress_events:
-                if evt.get("phase") == "vacuum":
-                    if state.is_running:
-                        st.info("Vacuuming database to reclaim disk space...")
-                    else:
-                        st.markdown("- **vacuum**: complete")
-                elif evt.get("phase") == "cull":
-                    table = evt.get("table", "?")
-                    deleted = evt.get("deleted", 0)
-                    if deleted > 0:
-                        st.markdown(f"- **{table}**: {deleted:,} rows deleted")
-                    else:
-                        st.markdown(f"- ~~{table}~~: 0 rows")
-        elif state.is_running:
-            st.info("Deleting data in dependency order (predictions → features → OHLCV)...")
-
-        # Show final summary
-        if final_result:
-            if "deleted" in final_result:
-                deleted = final_result["deleted"]
-                total = final_result.get("total_rows", sum(deleted.values()) if isinstance(deleted, dict) else 0)
-                if isinstance(deleted, dict) and deleted:
-                    for table, count in deleted.items():
-                        if count > 0:
-                            st.markdown(f"- **{table}**: {count:,} rows deleted")
-                st.markdown(f"**Total: {total:,} rows deleted**")
-            elif "tables" in final_result:
-                for table, count in final_result["tables"].items():
-                    st.markdown(f"- **{table}**: {count:,} rows (dry run)")
-        elif not progress_events and not state.is_running:
-            # No structured events captured — show raw output or fallback
-            if output_lines:
-                for line in output_lines:
-                    line = line.strip()
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            msg = data.get("message", data.get("msg", ""))
-                            if msg:
-                                st.markdown(f"- {msg}")
-                        except json.JSONDecodeError:
-                            st.text(line)
-            else:
-                st.info("No data found to delete.")
-
-        if state.error_message:
-            st.error(state.error_message)
-
-    # Auto-refresh while running
-    if state.is_running:
-        import time
-        time.sleep(2)
-        st.rerun()
-
-
 def render_maintenance_section():
     """Render database maintenance section."""
     st.subheader("Database Maintenance")
@@ -1000,7 +905,7 @@ def render_maintenance_section():
         # Show cull process status if running or completed
         cull_state = get_process_state("data_cull")
         if cull_state.is_running or cull_state.completed:
-            _render_cull_status(cull_state)
+            render_cli_state(cull_state, "Data cull")
             if cull_state.completed:
                 col_clear, _ = st.columns([1, 3])
                 with col_clear:

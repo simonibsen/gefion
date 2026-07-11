@@ -3,6 +3,9 @@
 import json
 import logging
 import streamlit as st
+
+from gefion.ui.components.cli_output import (parse_output_lines,
+                                              render_structured)
 import sys
 import os
 import shlex
@@ -485,9 +488,9 @@ def render_freeform_output(key: str, mode: str):
                                 st.code(call["input"], language="json")
                         st.markdown("---")
         else:
-            output_lines = getattr(state, 'output_lines', [])
-            if output_lines:
-                st.markdown("\n".join(output_lines))
+            # CLI mode: unified structured rendering (issue #88)
+            parsed = parse_output_lines(getattr(state, 'output_lines', []) or [])
+            render_structured(parsed, state.is_running)
 
         if state.error_message:
             st.error(state.error_message)
