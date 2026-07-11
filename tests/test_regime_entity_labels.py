@@ -100,10 +100,10 @@ def world():
     schema.create_computed_features_table(c)   # lazy table; don't rely on test order
     with c.cursor() as cur:
         _cleanup(cur)
-        cur.execute("""INSERT INTO stocks (symbol, name, sector, asset_type) VALUES
-            ('ENTL1','A','Tech','Common Stock'),
-            ('ENTL2','B','Tech','Common Stock'),
-            ('ENTL3','C','Energy','Common Stock') RETURNING id""")
+        cur.execute("""INSERT INTO stocks (symbol, sector, asset_type) VALUES
+            ('ENTL1','Tech','Common Stock'),
+            ('ENTL2','Tech','Common Stock'),
+            ('ENTL3','Energy','Common Stock') RETURNING id""")
         ids = [r[0] for r in cur.fetchall()]
         cur.execute("INSERT INTO feature_definitions (name, function_name, entity_table) "
                     "VALUES ('entl_f', 'indicator', 'stocks') RETURNING id")

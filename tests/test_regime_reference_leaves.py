@@ -47,8 +47,8 @@ def world():
     schema.create_computed_features_table(c)   # lazy table; don't rely on test order
     with c.cursor() as cur:
         _cleanup(cur)
-        cur.execute("INSERT INTO stocks (symbol, name, asset_type) VALUES "
-                    "('REFL1','A','Common Stock') RETURNING id")
+        cur.execute("INSERT INTO stocks (symbol, asset_type) VALUES "
+                    "('REFL1','Common Stock') RETURNING id")
         sid = cur.fetchone()[0]
         fids = {}
         for feat in ("refl_f", "refl_g"):
