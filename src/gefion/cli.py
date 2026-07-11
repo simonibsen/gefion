@@ -5248,7 +5248,7 @@ def backup_data(
     data_types: str = typer.Option(
         "all",
         "--data-types",
-        help="Comma-separated data types: ohlcv, features, definitions, functions, strategies, ml, predictions, experiments, meta, all",
+        help="Comma-separated data types: ohlcv, features, definitions, functions, strategies, ml, predictions, experiments, regimes, quality, macro, meta, irreplaceable, all",
     ),
     start_date: Optional[str] = typer.Option(None, "--start-date", "--after", help="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = typer.Option(None, "--end-date", "--before", help="End date (YYYY-MM-DD)"),
@@ -5261,10 +5261,10 @@ def backup_data(
         help="Treat --output as a ROOT: write into <root>/<UTC timestamp>/ "
              "and apply tiered retention to the root's siblings after success"),
     keep_recent_days: int = typer.Option(
-        56, "--keep-recent-days", help="Retention: keep everything this recent"),
+        14, "--keep-recent-days", help="Retention: keep everything this recent"),
     keep_monthly: int = typer.Option(
-        12, "--keep-monthly", help="Retention: newest-per-month for this many months "
-                                   "(newest-per-year kept forever)"),
+        3, "--keep-monthly", help="Retention: newest-per-month for this many months "
+                                  "(newest-per-year kept forever)"),
     prune: bool = typer.Option(
         True, "--prune/--no-prune",
         help="Apply retention after a successful timestamped backup"),
@@ -5307,7 +5307,7 @@ def backup_data(
 def _backup_impl(
     output, data_types, start_date, end_date, symbols,
     incremental, compress, dry_run, db_url, json_output,
-    timestamped=False, keep_recent_days=56, keep_monthly=12, prune=True,
+    timestamped=False, keep_recent_days=14, keep_monthly=3, prune=True,
 ):
     """Implementation of backup command."""
     from datetime import datetime

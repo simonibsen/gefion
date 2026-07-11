@@ -31,7 +31,7 @@ def _mk(root: Path, stamp: str, created: D) -> Path:
 def test_recent_all_kept():
     from gefion.backup import select_survivors
     backups = [(NOW - dt.timedelta(days=i), f"b{i}") for i in range(0, 56, 7)]
-    keep, prune = select_survivors(backups, now=NOW)
+    keep, prune = select_survivors(backups, now=NOW, keep_recent_days=56)
     assert prune == []                              # all within 56 days
 
 
@@ -43,7 +43,7 @@ def test_older_thinned_to_newest_per_month():
         (D(2026, 4, 2), "apr2"), (D(2026, 4, 20), "apr20"),
         (NOW, "newest"),
     ]
-    keep, prune = select_survivors(backups, now=NOW)
+    keep, prune = select_survivors(backups, now=NOW, keep_monthly=12)
     kept = {p for _, p in keep}
     assert kept == {"mar15", "apr20", "newest"}     # newest per month + newest
     assert {p for _, p in prune} == {"mar1", "apr2"}
@@ -76,7 +76,7 @@ def test_apply_retention_prunes_and_reports(tmp_path):
     _mk(tmp_path, "old-mar1", D(2026, 3, 1))
     _mk(tmp_path, "old-mar15", D(2026, 3, 15))
     newest = _mk(tmp_path, "fresh", NOW)
-    report = apply_retention(str(tmp_path), now=NOW)
+    report = apply_retention(str(tmp_path), now=NOW, keep_monthly=12)
     assert (tmp_path / "old-mar15").exists()         # month anchor
     assert not (tmp_path / "old-mar1").exists()      # thinned
     assert newest.exists()
@@ -93,6 +93,38 @@ def test_unreadable_manifest_never_pruned(tmp_path):
     report = apply_retention(str(tmp_path), now=NOW)
     assert mystery.exists()                          # unknown != deletable
     assert str(mystery) in [str(p) for p in report["skipped_unreadable"]]
+
+
+# --- reproducibility-aware types --------------------------------------------------------
+
+def test_irreplaceable_type_covers_audit_ledgers():
+    """The data that CANNOT be reproduced (declarations + audit ledgers) has
+    its own tiny backup type; reproducible bulk (prices, features) does not
+    pollute it."""
+    from gefion.backup import DATA_TYPE_TABLES
+    tables = set(DATA_TYPE_TABLES["irreplaceable"])
+    for t in ("regime_definitions", "regime_discovery_runs", "regime_candidates",
+              "regime_trust_grades", "discovery_diagnostics", "spa_reverdicts",
+              "data_quality_findings", "feature_definitions", "feature_functions",
+              "experiments", "experiment_trials", "macro_series",
+              "macro_series_values"):
+        assert t in tables, t
+    for t in ("stock_ohlcv", "computed_features", "predictions"):
+        assert t not in tables, f"{t} is reproducible bulk"
+
+
+def test_regimes_type_exists_and_all_includes_it():
+    from gefion.backup import DATA_TYPE_TABLES
+    assert "regime_discovery_runs" in DATA_TYPE_TABLES["regimes"]
+    assert "spa_reverdicts" in DATA_TYPE_TABLES["all"]      # gap closed
+
+
+def test_sparse_defaults():
+    """Owner decision 2026-07-11: bulk is reproducible — default retention is
+    sparse (14d dense, 3 monthly, yearly forever)."""
+    from gefion.backup import RETAIN_RECENT_DAYS, RETAIN_MONTHLY_MONTHS
+    assert RETAIN_RECENT_DAYS == 14
+    assert RETAIN_MONTHLY_MONTHS == 3
 
 
 # --- CLI surface ------------------------------------------------------------------------

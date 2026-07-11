@@ -54,12 +54,37 @@ DATA_TYPE_TABLES = {
     "predictions": ["predictions", "prediction_outcomes", "model_performance"],
     "experiments": ["experiments", "experiment_trials"],
     "meta": ["schema_migrations", "volatility_thresholds"],
+    # Regime declarations + the discovery/SPA audit ledgers: the multiple-
+    # testing accounting can NEVER be reproduced (regime_labels are derived —
+    # recompute via `regime compute`).
+    "regimes": ["regime_definitions", "regime_discovery_runs",
+                "regime_candidates", "regime_trust_grades",
+                "discovery_diagnostics", "spa_reverdicts"],
+    "quality": ["data_quality_findings"],
+    "macro": ["macro_series", "macro_series_values"],
+    # Everything that cannot be re-fetched or recomputed — declarations,
+    # verdicts, and audit ledgers. Tiny by construction: reproducible bulk
+    # (prices, features, predictions) deliberately excluded.
+    "irreplaceable": [
+        "feature_definitions", "feature_functions",
+        "strategy_registry", "strategy_configs",
+        "experiments", "experiment_trials",
+        "ml_datasets", "ml_runs", "ml_models",
+        "regime_definitions", "regime_discovery_runs", "regime_candidates",
+        "regime_trust_grades", "discovery_diagnostics", "spa_reverdicts",
+        "data_quality_findings", "macro_series", "macro_series_values",
+        "schema_migrations", "volatility_thresholds",
+    ],
     "all": [
         "stocks", "stock_ohlcv", "computed_features", "feature_definitions", "feature_functions",
         "strategy_registry", "strategy_configs",
         "ml_datasets", "ml_runs", "ml_models",
         "predictions", "prediction_outcomes", "model_performance",
         "volatility_thresholds", "experiments", "experiment_trials",
+        "regime_definitions", "regime_labels", "regime_discovery_runs",
+        "regime_candidates", "regime_trust_grades", "discovery_diagnostics",
+        "spa_reverdicts", "data_quality_findings",
+        "macro_series", "macro_series_values",
         "schema_migrations",
     ],
 }
@@ -793,8 +818,11 @@ def verify_backup(backup_path: str) -> Dict[str, Any]:
 
 # --- smart retention (tiered GFS; #76 reaping story) ---------------------------------
 
-RETAIN_RECENT_DAYS = 56      # keep everything from the last ~8 weeks
-RETAIN_MONTHLY_MONTHS = 12   # then one per month for a year
+RETAIN_RECENT_DAYS = 14      # keep everything from the last 2 weeks
+RETAIN_MONTHLY_MONTHS = 3    # then one per month for a quarter
+# Sparse by owner decision (2026-07-11): the bulky data types are
+# reproducible (prices re-ingest, features recompute) — dense history buys
+# little. The irreplaceable ledgers get their own denser cadence instead.
 # beyond that: one per year, forever (cheap immortal anchors)
 
 

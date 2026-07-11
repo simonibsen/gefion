@@ -124,16 +124,21 @@ universe filters and sector-scoped work. Two guards now exist:
    30 2 * * *  data-update --timeframe auto --json && feat-compute --all-features --incremental --json
    # weekly: provider-garbage sweep over stored data
    40 3 * * 0  quality backfill --json
-   # weekly: timestamped backup with tiered retention (see below)
-   10 4 * * 0  backup -o ~/backups/gefion --timestamped --data-types all --json
+   # weekly: the IRREPLACEABLE data (declarations, verdicts, audit ledgers — tiny)
+   10 4 * * 0  backup -o ~/backups/gefion-ledgers --timestamped --data-types irreplaceable --json
+   # monthly: full backup (mostly reproducible bulk — prices re-ingest, features recompute)
+   20 4 1 * *  backup -o ~/backups/gefion-full --timestamped --data-types all --json
    ```
-4. **Backup retention** (smart, tiered): `backup --timestamped` treats `-o` as a
-   stable root, writes `<root>/<UTC stamp>/`, and after a *successful* dump thins
-   the siblings — everything kept for 56 days, newest-per-month for 12 months,
-   newest-per-year forever, the newest always immune, directories without a
-   readable manifest never touched (reported instead). Steady-state disk use is
-   bounded (~25–40 dumps) regardless of cadence; a failed backup never deletes
-   anything.
+4. **Backup retention** (smart, tiered, reproducibility-aware): `backup
+   --timestamped` treats `-o` as a stable root, writes `<root>/<UTC stamp>/`, and
+   after a *successful* dump thins the siblings — everything kept for 14 days,
+   newest-per-month for 3 months, newest-per-year forever; the newest always
+   immune; directories without a readable manifest never touched (reported
+   instead); a failed backup never deletes anything. Sparse defaults are
+   deliberate (owner, 2026-07-11): the bulk is reproducible, so the
+   `irreplaceable` data type (regime/discovery/SPA/quality ledgers, definitions,
+   experiments — the accounting that can never be recreated) gets its own weekly
+   cadence at trivial size, while full dumps are monthly.
 
 ## Staging on the prod host (optional)
 
