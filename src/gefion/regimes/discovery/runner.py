@@ -459,13 +459,22 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
     spa_result = None
     if family_size > 0:
         from gefion.regimes.discovery import spa as dspa
-        result = dspa.reverdict(conn, run_id, iterations=1000,
-                                seed=config.seed, market=market)
-        result["verification"]["in_run"] = True
-        ledger.record_spa_reverdict(conn, run_id, result)
-        spa_result = {k: result[k] for k in
-                      ("p_consistent", "p_lower", "p_upper", "level",
-                       "passed", "family_size", "block_length")}
+        try:
+            result = dspa.reverdict(conn, run_id, iterations=1000,
+                                    seed=config.seed, market=market)
+            result["verification"]["in_run"] = True
+            ledger.record_spa_reverdict(conn, run_id, result)
+            spa_result = {k: result[k] for k in
+                          ("p_consistent", "p_lower", "p_upper", "level",
+                           "passed", "family_size", "block_length")}
+        except dspa.SpaRefusal as exc:
+            # A refusal (e.g. expressive-tier reconstruction, v1 limitation)
+            # never fails a completed run — it lands in the diagnostics
+            # ledger, visible and structural, and the run simply carries no
+            # in-run verdict (the budget gate will say "SPA not yet run").
+            ledger.record_diagnostic(
+                conn, run_id, "spa_inrun_refused", {"reason": str(exc)},
+                sample_dependent=False)
 
     return {
         "run_id": run_id,
