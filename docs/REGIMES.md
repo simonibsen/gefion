@@ -44,8 +44,11 @@ They share only the intellectual move "condition, don't average." Everything bel
 ## Representation
 
 A regime is a **declarative expression tree (AST)**: leaves are atomic causal conditions
-(`comparison` over a feature, or a `reference` to another regime), nodes are boolean operators
-(`AND`/`OR`/`NOT`). Under composition, a leaf resolves at its own scope and the composite's
+(`comparison` over a feature, or a `reference` to another *stored* regime by name —
+resolved from its computed labels, with an explicit `bucket` for multi-bucket regimes;
+market-scope composites), nodes are boolean operators
+(`AND`/`OR`/`NOT`). Composites combine on the intersection of their children's dates —
+a date where any input is undefined or missing is not evidence either way. Under composition, a leaf resolves at its own scope and the composite's
 output scope is the **finest** scope involved. A sandboxed **detector-function leaf** is a gated
 escape hatch for detectors that can't be expressed declaratively (HMM, clustering) — admissible
 only under stricter validation (see spec 006, agentic discovery).
@@ -243,8 +246,9 @@ honest ways to learn more from history — neither may ever top up a forward gra
   **robustness** dimension — was the edge driven by a few names, microcaps, or one
   sector? — *not* independent validation: both halves live through the same market
   history, so the conditioning series and returns are strongly shared. It graduates
-  to true cross-sectional validation only for per-entity-scope regimes (005
-  follow-up), where held-out symbols are genuinely new evidence units.
+  to true cross-sectional validation only for per-entity-scope regimes, where
+  held-out symbols are genuinely new evidence units (per-entity label computation
+  landed with issue #86; the discovery loop itself still searches at market scope).
 
 ### Discovery inside experiment cycles
 

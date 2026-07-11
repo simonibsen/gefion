@@ -569,10 +569,10 @@ The **AI Actions** page (second item in the sidebar) is the primary interaction 
 Define, compute, and inspect market/sector/asset regimes for conditional evaluation. See
 [REGIMES.md](REGIMES.md) for concepts.
 
-- `gefion regime define --name <slug> --scope market|sector|industry|asset --expression <ast.json> --bucketing <buckets.json> [--min-dwell N]` — define and store a regime.
+- `gefion regime define --name <slug> --scope market|sector|industry|asset --expression <ast.json> --bucketing <buckets.json> [--min-dwell N]` — define and store a regime. Expressions compose comparison leaves AND stored regimes by name via reference leaves (`{"leaf": "reference", "regime": "vol-high", "bucket": "high"}` — bucket required for multi-bucket references; the referenced regime must be computed first; market-scope composites in this increment). Composite dates are the intersection of the children's — an unknown state is not evidence either way.
 - `gefion regime list [--scope S] [--status active|archived]` — list definitions.
 - `gefion regime show <name>` — show a definition (AST, bucketing, persistence, metadata).
-- `gefion regime compute <name> [--dataset V] [--window N]` — compute causal labels from referenced features.
+- `gefion regime compute <name> [--dataset V] [--window N]` — compute causal labels from referenced features. Market scope stores one label per date; `sector`/`industry`/`asset` scopes store per-entity labels (each stock carries its own series' label for asset scope, or its group's cross-sectional-median label for sector/industry — two stocks in different sectors on the same date can carry different labels).
 - `gefion regime labels <name>` — summarize computed labels (bucket coverage).
 - `gefion regime archive <name>` — archive a definition (the recommended lifecycle exit: stored experiment verdicts stay resolvable by name).
 - `gefion regime delete <name> [--confirm] [--force]` — delete a definition and its labels. Dry-run by default: reports label rows, discovery provenance, and stored experiment results referencing the name (soft references are reported, never mutated). Machine-origin (discovery-admitted) regimes require `--force`; the candidate ledger is never touched either way — removing the artifact must not remove the search accounting.

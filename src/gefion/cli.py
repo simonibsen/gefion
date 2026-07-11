@@ -12132,9 +12132,16 @@ def regime_compute(
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
 ) -> None:
-    """Compute causal labels for a regime from its referenced features."""
-    from gefion.regimes.definitions import load_definition
-    from gefion.regimes.labels import compute_and_store, load_market_feature_series
+    """Compute causal labels for a regime from its referenced features.
+
+    Market scope stores one label per date (entity 0); sector/industry/asset
+    scopes store per-entity labels — each stock carries its own (asset) or
+    its group's (sector/industry, cross-sectional median) label.
+    """
+    from gefion.regimes.definitions import iter_leaves, load_definition
+    from gefion.regimes.labels import (compute_and_store, compute_and_store_entities,
+                                       load_market_feature_series,
+                                       load_reference_series)
     out = get_output(json_output)
     with _regime_conn(db_url) as conn:
         defn = load_definition(conn, name)
@@ -12142,11 +12149,21 @@ def regime_compute(
             out.error(f"Regime '{name}' not found")
             raise typer.Exit(1)
         try:
-            features = load_market_feature_series(conn, defn)
+            if defn.scope == "market":
+                features = load_market_feature_series(conn, defn)
+                references = None
+                if any(leaf.get("leaf") == "reference"
+                       for leaf in iter_leaves(defn.expression)):
+                    references = load_reference_series(conn, defn)
+                n = compute_and_store(conn, defn, features, window=window,
+                                      dataset_version=dataset_version,
+                                      references=references)
+            else:
+                n = compute_and_store_entities(conn, defn, window=window,
+                                               dataset_version=dataset_version)
         except LookupError as exc:
             out.error(f"Cannot compute regime '{name}': {exc}")
             raise typer.Exit(1)
-        n = compute_and_store(conn, defn, features, window=window, dataset_version=dataset_version)
     out.success(f"Computed {n} labels for '{name}' (dataset={dataset_version})")
     if out.json_mode:
         out.json({"regime": name, "labels": n, "dataset_version": dataset_version})

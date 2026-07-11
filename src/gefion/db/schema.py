@@ -79,8 +79,13 @@ def create_stocks_table(conn: Connection) -> None:
                     asset_type TEXT,
                     updated_at TIMESTAMP
                 );
+                ALTER TABLE stocks ADD COLUMN IF NOT EXISTS status TEXT;
+                ALTER TABLE stocks ADD COLUMN IF NOT EXISTS name TEXT;
+                ALTER TABLE stocks ADD COLUMN IF NOT EXISTS sector TEXT;
+                ALTER TABLE stocks ADD COLUMN IF NOT EXISTS industry TEXT;
                 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS exchange TEXT;
                 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS asset_type TEXT;
+                ALTER TABLE stocks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
                 CREATE INDEX IF NOT EXISTS stocks_sector_idx ON stocks(sector);
                 CREATE INDEX IF NOT EXISTS stocks_industry_idx ON stocks(industry);
                 CREATE INDEX IF NOT EXISTS stocks_exchange_idx ON stocks(exchange) WHERE exchange IS NOT NULL;
