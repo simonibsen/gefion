@@ -54,6 +54,25 @@ ml_filter (strategy)    →  ml_filter_h7 (config: horizon_days=7)
 
 ### Rule-Based Strategies
 
+#### Cross-Sectional Decile (regime-gated)
+
+Long the top decile / short the bottom decile of the universe ranked by each
+stock's own causal stochastic-K; the whole book is closed at every rebalance
+(no position stacking — structural leverage safety), gross exposure capped at
+`allocation_pct` of initial cash. With `--gate-regime <name> --gate-bucket
+<label>` it acts ONLY while that market state holds and goes flat otherwise —
+the direct exploitation vehicle for a discovery-admitted conditional edge
+(e.g. the high-RSI-30 / 20-day finding of run 13).
+
+```bash
+gefion backtest run --top-liquid 300 --start-date 2023-01-01 --end-date 2026-06-30 \
+  --strategy cross_sectional_decile --mode long_short --rebalance-days 20 \
+  --gate-regime disc-vintage-2023-h20b-302ea9c0 --gate-bucket high
+```
+
+Parameters: `--rebalance-days` (default 20), gate flags; `--top-liquid N`
+selects the top-N dollar-volume universe without listing symbols.
+
 #### Momentum
 
 **Theory:** Stocks that have performed well tend to continue performing well

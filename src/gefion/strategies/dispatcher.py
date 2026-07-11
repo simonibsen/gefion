@@ -39,6 +39,16 @@ BUILTIN_STRATEGIES: Dict[str, Dict[str, Any]] = {
         "default_params": {"fast_period": 50, "slow_period": 200},
         "tags": ["trend-following", "moving-average"],
     },
+    "cross_sectional_decile": {
+        "module_path": "gefion.strategies.cross_sectional",
+        "class_name": "CrossSectionalDecileStrategy",
+        "default_params": {"signal_period": 14, "decile": 0.10,
+                           "rebalance_days": 20, "allocation_pct": 0.90},
+        "description": "Long top / short bottom decile by cross-sectional "
+                       "stochastic-K rank; whole book closed each rebalance; "
+                       "optionally regime-gated (flat out of state)",
+        "tags": ["cross-sectional", "long-short", "regime-gated"],
+    },
     "breakout": {
         "module_path": "gefion.strategies.breakout",
         "class_name": "BreakoutStrategy",
