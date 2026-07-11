@@ -5980,7 +5980,7 @@ def _toggle_row(table: str, name: str, column: str, value: bool,
     """Shared enable/disable door for feature functions/definitions (#89)."""
     from gefion.output import get_output
     out = get_output(json_output)
-    with create_span(f"cli.{table}-toggle", target=name, value=value):
+    with create_span(f"features.{table}.toggle", target=name, value=value):
         try:
             with db_connection(db_url) as conn:
                 init_schema_tables(conn, [table])
@@ -6010,7 +6010,8 @@ def feat_fx_enable(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """Enable a feature function (definitions referencing it become computable)."""
-    _toggle_row("feature_functions", name, "enabled", True, db_url, json_output)
+    with create_span("cli.feat-fx-enable", target=name):
+        _toggle_row("feature_functions", name, "enabled", True, db_url, json_output)
 
 
 @app.command("feat-fx-disable")
@@ -6020,7 +6021,8 @@ def feat_fx_disable(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """Disable a feature function (its definitions show as orphaned in feat-def-validate)."""
-    _toggle_row("feature_functions", name, "enabled", False, db_url, json_output)
+    with create_span("cli.feat-fx-disable", target=name):
+        _toggle_row("feature_functions", name, "enabled", False, db_url, json_output)
 
 
 @app.command("feat-def-enable")
@@ -6030,7 +6032,8 @@ def feat_def_enable(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """Activate a feature definition."""
-    _toggle_row("feature_definitions", name, "active", True, db_url, json_output)
+    with create_span("cli.feat-def-enable", target=name):
+        _toggle_row("feature_definitions", name, "active", True, db_url, json_output)
 
 
 @app.command("feat-def-disable")
@@ -6040,7 +6043,8 @@ def feat_def_disable(
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
     """Deactivate a feature definition (feat-compute skips it)."""
-    _toggle_row("feature_definitions", name, "active", False, db_url, json_output)
+    with create_span("cli.feat-def-disable", target=name):
+        _toggle_row("feature_definitions", name, "active", False, db_url, json_output)
 
 
 _ORPHAN_SQL = """
@@ -6147,7 +6151,7 @@ def features_list(
 
         try:
             with db_connection(db_url) as conn:
-                init_schema_tables(conn, ["feature_definitions"])
+                init_schema_tables(conn, ["feature_definitions", "feature_functions"])
                 with conn.cursor() as cur:
                     cur.execute(
                         """
