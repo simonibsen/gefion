@@ -124,21 +124,22 @@ universe filters and sector-scoped work. Two guards now exist:
    30 2 * * *  data-update --timeframe auto --json && feat-compute --all-features --incremental --json
    # weekly: provider-garbage sweep over stored data
    40 3 * * 0  quality backfill --json
-   # weekly: the IRREPLACEABLE data (declarations, verdicts, audit ledgers — tiny)
-   10 4 * * 0  backup -o ~/backups/gefion-ledgers --timestamped --data-types irreplaceable --json
-   # monthly: full backup (mostly reproducible bulk — prices re-ingest, features recompute)
-   20 4 1 * *  backup -o ~/backups/gefion-full --timestamped --data-types all --json
+   # weekly: ONE whole-database pg_dump (drift-proof: includes tables no
+   # curated list knows about; compressed custom format; restore = pg_restore)
+   10 4 * * 0  backup -o ~/backups/gefion --timestamped --whole-db --json
    ```
-4. **Backup retention** (smart, tiered, reproducibility-aware): `backup
-   --timestamped` treats `-o` as a stable root, writes `<root>/<UTC stamp>/`, and
-   after a *successful* dump thins the siblings — everything kept for 14 days,
-   newest-per-month for 3 months, newest-per-year forever; the newest always
-   immune; directories without a readable manifest never touched (reported
-   instead); a failed backup never deletes anything. Sparse defaults are
-   deliberate (owner, 2026-07-11): the bulk is reproducible, so the
-   `irreplaceable` data type (regime/discovery/SPA/quality ledgers, definitions,
-   experiments — the accounting that can never be recreated) gets its own weekly
-   cadence at trivial size, while full dumps are monthly.
+4. **Backup design** (owner decisions, 2026-07-11): the safety backbone is a
+   **whole-database `pg_dump`** (`--whole-db`) — curated table lists cannot rot
+   because nothing is listed; a new spec's tables are included the day they
+   exist. Retention is sparse and tiered (`--timestamped` root mode): everything
+   kept 14 days, newest-per-month for 3 months, newest-per-year forever; the
+   newest always immune; unreadable directories never pruned; a failed backup
+   never deletes anything. Sparse is safe because the bulk is reproducible
+   (prices re-ingest, features recompute). The parquet data types (incl.
+   `irreplaceable` and `regimes`) remain for **selective** export/restore, and
+   `tests/test_backup_retention.py` fails if any real table is missing from
+   both the type lists and the documented exemptions — the curated lists are
+   drift-checked even though the backbone no longer depends on them.
 
 ## Staging on the prod host (optional)
 

@@ -156,3 +156,53 @@ def test_cli_timestamped_backup_applies_retention(tmp_path):
     assert len(payload["retention"]["pruned"]) == 1  # older Feb-2024 twin
     subdirs = [d for d in tmp_path.iterdir() if d.is_dir()]
     assert len(subdirs) == 2                         # new stamped + anchor
+
+
+# --- whole-DB backbone + coverage drift (no hand-list can rot) --------------------------
+
+def test_whole_db_dump_and_manifest(tmp_path):
+    if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+        pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
+    import shutil as _sh
+    if not _sh.which("pg_dump"):
+        pytest.skip("pg_dump not on PATH")
+    from gefion.backup import dump_whole_db
+    from gefion.db import schema
+    result = dump_whole_db(schema.test_db_url(), str(tmp_path / "b1"))
+    dump = Path(result["dump_path"])
+    assert dump.exists() and dump.stat().st_size > 0
+    manifest = json.loads((tmp_path / "b1" / "manifest.json").read_text())
+    assert manifest["mode"] == "whole_db"
+    assert manifest["created_at"]
+
+
+def test_cli_whole_db_flag_and_honest_combo_refusal(tmp_path):
+    from typer.testing import CliRunner
+    from gefion.cli import app
+    r = CliRunner().invoke(app, ["backup", "--help"])
+    assert "--whole-db" in r.output
+    # filtering flags contradict whole-db: refuse, don't silently ignore
+    r = CliRunner().invoke(app, ["backup", "-o", str(tmp_path), "--whole-db",
+                                 "--data-types", "ohlcv"])
+    assert r.exit_code == 1
+    assert "whole-db" in r.output.lower()
+
+
+def test_data_type_lists_cover_every_real_table():
+    """Drift enforcement: a table existing in the database but absent from
+    DATA_TYPE_TABLES['all'] (and not explicitly exempted with a reason) fails
+    this test — hand-maintained lists are not allowed to rot silently (the
+    spa_reverdicts lesson)."""
+    if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+        pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
+    import psycopg
+    from gefion.backup import BACKUP_EXEMPT_TABLES, DATA_TYPE_TABLES
+    from gefion.db import schema
+    with psycopg.connect(schema.test_db_url()) as conn, conn.cursor() as cur:
+        cur.execute("""SELECT tablename FROM pg_tables WHERE schemaname='public'""")
+        real = {r[0] for r in cur.fetchall()}
+    covered = set(DATA_TYPE_TABLES["all"]) | set(BACKUP_EXEMPT_TABLES)
+    missing = sorted(real - covered)
+    assert not missing, (
+        f"tables with NO backup story: {missing} — add to DATA_TYPE_TABLES "
+        f"or BACKUP_EXEMPT_TABLES (with a reason)")

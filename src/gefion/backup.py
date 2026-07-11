@@ -52,7 +52,7 @@ DATA_TYPE_TABLES = {
     "strategies": ["strategy_registry", "strategy_configs"],
     "ml": ["ml_datasets", "ml_runs", "ml_models"],
     "predictions": ["predictions", "prediction_outcomes", "model_performance"],
-    "experiments": ["experiments", "experiment_trials"],
+    "experiments": ["experiments", "experiment_trials", "experiment_cycles"],
     "meta": ["schema_migrations", "volatility_thresholds"],
     # Regime declarations + the discovery/SPA audit ledgers: the multiple-
     # testing accounting can NEVER be reproduced (regime_labels are derived —
@@ -61,6 +61,7 @@ DATA_TYPE_TABLES = {
                 "regime_candidates", "regime_trust_grades",
                 "discovery_diagnostics", "spa_reverdicts"],
     "quality": ["data_quality_findings"],
+    "fundamentals": ["stocks_fundamentals", "quarterly_financials"],
     "macro": ["macro_series", "macro_series_values"],
     # Everything that cannot be re-fetched or recomputed — declarations,
     # verdicts, and audit ledgers. Tiny by construction: reproducible bulk
@@ -81,6 +82,7 @@ DATA_TYPE_TABLES = {
         "ml_datasets", "ml_runs", "ml_models",
         "predictions", "prediction_outcomes", "model_performance",
         "volatility_thresholds", "experiments", "experiment_trials",
+        "experiment_cycles", "stocks_fundamentals", "quarterly_financials",
         "regime_definitions", "regime_labels", "regime_discovery_runs",
         "regime_candidates", "regime_trust_grades", "discovery_diagnostics",
         "spa_reverdicts", "data_quality_findings",
@@ -912,3 +914,56 @@ def apply_retention(
                 "policy": {"keep_recent_days": keep_recent_days,
                            "keep_monthly": keep_monthly,
                            "yearly": "forever"}}
+
+
+# --- whole-DB backbone (drift-proof by construction) ----------------------------------
+
+# Tables deliberately NOT in any parquet data type, each with its reason.
+# The coverage drift test fails if a real table is in neither this set nor
+# DATA_TYPE_TABLES["all"] — hand lists are not allowed to rot silently.
+BACKUP_EXEMPT_TABLES = {
+    # (populated as exemptions are consciously decided; empty = everything
+    # real must be in the "all" list)
+}
+
+
+def dump_whole_db(db_url: str, output_dir: str) -> Dict[str, Any]:
+    """One pg_dump of the ENTIRE database (custom format, compressed).
+
+    The safety backbone: includes every table — including ones that did not
+    exist when any curated list was written — by construction. Parquet data
+    types remain for selective export/restore. Fails honestly if pg_dump is
+    missing or exits non-zero.
+    """
+    import subprocess
+
+    with create_span("backup.dump_whole_db", output_dir=output_dir) as span:
+        if shutil.which("pg_dump") is None:
+            raise RuntimeError(
+                "pg_dump not found on PATH — install postgresql-client "
+                "(the whole-db backup shells out to pg_dump)")
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        dump_path = out / "db.dump"
+        proc = subprocess.run(
+            ["pg_dump", "--format=custom", "--compress=6",
+             f"--file={dump_path}", db_url],
+            capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"pg_dump failed (exit {proc.returncode}): "
+                f"{proc.stderr.strip()[:500]}")
+        size = dump_path.stat().st_size
+        manifest = {
+            "mode": "whole_db",
+            "created_at": datetime.utcnow().isoformat(),
+            "dump_file": "db.dump",
+            "format": "pg_dump custom, compress=6",
+            "total_bytes": size,
+            "restore_hint": "pg_restore -d <db_url> db.dump",
+        }
+        with open(out / "manifest.json", "w") as f:
+            json.dump(manifest, f, indent=2)
+        set_attributes(span, total_bytes=size)
+        return {"dump_path": str(dump_path), "total_bytes": size,
+                "manifest": manifest}
