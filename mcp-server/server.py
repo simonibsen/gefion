@@ -681,6 +681,53 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="feature_function_toggle",
+            description=(
+                "Enable or disable a feature function (#89). Disabling orphans its "
+                "definitions (visible in feature_definitions_validate). MUTATING: "
+                "confirm with the user before invoking."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Function name"},
+                    "enabled": {"type": "boolean", "description": "true=enable, false=disable"},
+                },
+                "required": ["name", "enabled"],
+            },
+        ),
+        Tool(
+            name="feature_definition_toggle",
+            description=(
+                "Activate or deactivate a feature definition (feat-compute skips "
+                "inactive ones). MUTATING: confirm with the user before invoking."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Definition name"},
+                    "active": {"type": "boolean", "description": "true=enable, false=disable"},
+                },
+                "required": ["name", "active"],
+            },
+        ),
+        Tool(
+            name="feature_definitions_validate",
+            description=(
+                "Report orphaned feature definitions (function missing or disabled). "
+                "Read-only; pass fix=true + confirm=true to deactivate orphans "
+                "(dry-run report first, always)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "fix": {"type": "boolean", "description": "Run feat-def-fix instead"},
+                    "confirm": {"type": "boolean",
+                                "description": "With fix: actually deactivate (default dry-run)"},
+                },
+            },
+        ),
+        Tool(
             name="feature_functions_list",
             description=(
                 "List all registered feature functions. "
@@ -2250,6 +2297,12 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _features_list(arguments)
         elif name == "feature_show":
             result = await _feature_show(arguments)
+        elif name == "feature_function_toggle":
+            result = await _feature_function_toggle(arguments)
+        elif name == "feature_definition_toggle":
+            result = await _feature_definition_toggle(arguments)
+        elif name == "feature_definitions_validate":
+            result = await _feature_definitions_validate(arguments)
         elif name == "feature_functions_list":
             result = await _feature_functions_list(arguments)
         elif name == "feature_compute":
@@ -3153,6 +3206,34 @@ async def _feature_show(args: Dict[str, Any]) -> Dict[str, Any]:
     if not feature:
         return {'success': False, 'error': 'feature is required'}
     return await executor.run('feat-def-show', '--feature', feature, '--json')
+
+
+async def _feature_function_toggle(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Enable/disable a feature function (mutating)."""
+    async def _run():
+        cmd = "feat-fx-enable" if args["enabled"] else "feat-fx-disable"
+        return await GefionExecutor().run(cmd, args["name"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _feature_definition_toggle(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Activate/deactivate a feature definition (mutating)."""
+    async def _run():
+        cmd = "feat-def-enable" if args["active"] else "feat-def-disable"
+        return await GefionExecutor().run(cmd, args["name"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _feature_definitions_validate(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Orphaned-definition report; optional guarded fix."""
+    async def _run():
+        if args.get("fix"):
+            cmd = ["feat-def-fix"]
+            if args.get("confirm"):
+                cmd.append("--confirm")
+            return await GefionExecutor().run(*cmd)
+        return await GefionExecutor().run("feat-def-validate")
+    return await _execute_with_health_check(['postgres'], _run)
 
 
 async def _feature_functions_list(args: Dict[str, Any]) -> Dict[str, Any]:

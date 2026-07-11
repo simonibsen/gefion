@@ -275,7 +275,9 @@ gefion data-update --exchange NASDAQ --timeframe auto --refresh-existing
 - Processes symbols in small chunks to reduce DB pressure; keep writer workers low (default 1).
 
 ### Features management
-- List: `gefion feat-def-list --json`
+- List: `gefion feat-def-list --json` — includes each definition's `function_status` (`active`/`disabled`/`missing`).
+- Toggle: `gefion feat-fx-enable|feat-fx-disable <function>`, `gefion feat-def-enable|feat-def-disable <definition>` — no more JSON edit + reimport for lifecycle flips.
+- Validate: `gefion feat-def-validate` reports orphaned definitions (their function is missing or disabled); `gefion feat-def-fix [--confirm]` deactivates them (dry-run by default; definitions are kept, never deleted — reactivate with `feat-def-enable`).
 - Show one: `gefion feat-def-show --feature indicator_rsi_14 --json`
 - Run features (indicators): `gefion feat-compute --features indicator_rsi_14,indicator_macd --exchange NASDAQ --refresh-existing`
 

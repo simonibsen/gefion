@@ -150,11 +150,15 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | Command | Description |
 |---------|-------------|
 | `gefion feat-compute` | Compute features using the generic dispatcher |
-| `gefion feat-def-list` | List feature definitions |
+| `gefion feat-def-list` | List feature definitions (with function status) |
+| `gefion feat-def-enable` / `feat-def-disable` | Activate / deactivate a definition |
+| `gefion feat-def-validate` | Report orphaned definitions (function missing/disabled) |
+| `gefion feat-def-fix` | Deactivate orphans (dry-run default, `--confirm`) |
 | `gefion feat-def-show` | Show a single feature definition |
 | `gefion feat-def-import` | Import feature definitions from JSON files |
 | `gefion feat-def-export` | Export feature definitions to JSON files |
 | `gefion feat-fx-list` | List registered feature functions |
+| `gefion feat-fx-enable` / `feat-fx-disable` | Enable / disable a function |
 | `gefion feat-fx-import` | Import feature functions from JSON files |
 | `gefion feat-fx-export` | Export feature functions to JSON files |
 | `gefion feat-drop` | Drop feature definitions and their data |

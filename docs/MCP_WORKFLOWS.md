@@ -1131,6 +1131,11 @@ documented here or in a section above.
 - `features_list` — list feature definitions with metadata.
 - `feature_show` — one feature definition: function, params, source/store tables, entity table, active.
 - `feature_functions_list` — list registered feature functions (the computation bodies).
+- `feature_function_toggle` / `feature_definition_toggle` — enable/disable a function or
+  definition. **Mutating**: confirm with the user before invoking.
+- `feature_definitions_validate` — orphaned-definition report (function missing or
+  disabled); `fix=true` runs the guarded deactivation (dry-run unless `confirm=true` —
+  show the user the dry-run first).
 - `feature_definitions_export` / `feature_definitions_import` — sync feature definitions with `feature-definitions/*.json` (idempotent; exports carry `entity_table`).
 - `feature_functions_export` / `feature_functions_import` — sync feature functions with `feature-functions/*.json` (idempotent).
 - `volatility_compute` — per-stock adaptive volatility thresholds (trend-classifier labels).

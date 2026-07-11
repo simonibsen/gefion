@@ -53,6 +53,7 @@ Checkpoint: learner states the current data date range and stock count, and why 
 **Module 2 — Features**
 Concepts: feature definitions vs feature functions; file-based functions in `feature-functions/` imported via `feat-fx-import`; experimental vs active vs demoted lifecycle.
 Do: `gefion feat-def-list --json`; inspect one definition; UI Features page; look at `feature_functions` statuses and connect them to the experiment lifecycle.
+Aside (orphaned definitions): a definition references its function by *name* — disable or delete the function and the definition is orphaned (computable no more). `feat-def-validate` finds them; `feat-def-fix --confirm` deactivates (never deletes) them; `feat-def-list` shows each definition's function status.
 Checkpoint: learner explains how a feature goes experimental → active → (maybe) demoted, and where the code for an AI-generated feature lives.
 
 **Module 3 — ML pipeline**
