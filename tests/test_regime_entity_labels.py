@@ -97,6 +97,7 @@ def world():
     """3 stocks: two in Tech (opposite-signed series), one in Energy; one
     macro-entity feature to prove the honest per-entity refusal."""
     c = _conn()
+    schema.create_computed_features_table(c)   # lazy table; don't rely on test order
     with c.cursor() as cur:
         _cleanup(cur)
         cur.execute("""INSERT INTO stocks (symbol, name, sector, asset_type) VALUES

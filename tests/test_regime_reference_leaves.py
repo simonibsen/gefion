@@ -44,6 +44,7 @@ def _cleanup(cur):
 def world():
     """One stock, two features over 4 days: f = [+,+,-,-], g = [+,-,+,-]."""
     c = _conn()
+    schema.create_computed_features_table(c)   # lazy table; don't rely on test order
     with c.cursor() as cur:
         _cleanup(cur)
         cur.execute("INSERT INTO stocks (symbol, name, asset_type) VALUES "
