@@ -1743,6 +1743,7 @@ async def list_tools() -> List[Tool]:
                     "incremental": {"type": "boolean", "description": "Only backup data since last backup", "default": False},
                     "compress": {"type": "boolean", "description": "Compress output files", "default": True},
                     "dry_run": {"type": "boolean", "description": "Show size estimate without creating backup", "default": False},
+                    "timestamped": {"type": "boolean", "description": "Treat output as a ROOT: write <root>/<UTC stamp>/ and apply tiered retention (keep 56d dense, newest-per-month 12mo, newest-per-year forever) to siblings after success", "default": False},
                 },
                 "required": ["output"],
             },
@@ -3171,6 +3172,8 @@ async def _backup(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd.append('--no-compress')
     if args.get('dry_run'):
         cmd.append('--dry-run')
+    if args.get('timestamped'):
+        cmd.append('--timestamped')
 
     return await executor.run(*cmd)
 

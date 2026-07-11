@@ -116,6 +116,24 @@ universe filters and sector-scoped work. Two guards now exist:
    Logs in `~/cron-logs/`; a full fundamentals pass is ~6.2k OVERVIEW calls ≈ 90 min
    at the key's rate limit. Cron can silently break — that's why the db-health
    coverage check exists independently of it.
+3. **Nightly data pipeline** (installed 2026-07-11, operations phase): daily-7 —
+   an early-morning job ingests the *previous* session, and running all seven
+   days self-heals after holidays/outages with a near-instant no-op cost.
+   ```cron
+   # nightly: incremental prices then features (probation checks ride data-update)
+   30 2 * * *  data-update --timeframe auto --json && feat-compute --all-features --incremental --json
+   # weekly: provider-garbage sweep over stored data
+   40 3 * * 0  quality backfill --json
+   # weekly: timestamped backup with tiered retention (see below)
+   10 4 * * 0  backup -o ~/backups/gefion --timestamped --data-types all --json
+   ```
+4. **Backup retention** (smart, tiered): `backup --timestamped` treats `-o` as a
+   stable root, writes `<root>/<UTC stamp>/`, and after a *successful* dump thins
+   the siblings — everything kept for 56 days, newest-per-month for 12 months,
+   newest-per-year forever, the newest always immune, directories without a
+   readable manifest never touched (reported instead). Steady-state disk use is
+   bounded (~25–40 dumps) regardless of cadence; a failed backup never deletes
+   anything.
 
 ## Staging on the prod host (optional)
 

@@ -579,6 +579,10 @@ Define, compute, and inspect market/sector/asset regimes for conditional evaluat
 - `gefion regime archive <name>` — archive a definition (the recommended lifecycle exit: stored experiment verdicts stay resolvable by name).
 - `gefion regime delete <name> [--confirm] [--force]` — delete a definition and its labels. Dry-run by default: reports label rows, discovery provenance, and stored experiment results referencing the name (soft references are reported, never mutated). Machine-origin (discovery-admitted) regimes require `--force`; the candidate ledger is never touched either way — removing the artifact must not remove the search accounting.
 - `gefion regime export <dir>` / `gefion regime import <dir>` — JSON backup/restore of definitions.
+
+### Backups
+- `gefion backup -o <dir> [--data-types …] [--incremental] [--dry-run]` — parquet backup with manifest; `gefion restore -i <dir>` restores.
+- `gefion backup -o <root> --timestamped [--keep-recent-days 56] [--keep-monthly 12] [--no-prune]` — cron-friendly mode: writes `<root>/<UTC stamp>/` and applies tiered retention to the root after success (keep everything for 56 days; newest-per-month for 12 months; newest-per-year forever; the newest backup is always immune; unreadable directories are never pruned, only reported). A failed backup never triggers deletion.
 - `gefion regime interaction --signal <feat> --by <feat> [--horizon-days N]` — continuous-interaction test (does a signal's edge scale with a conditioning variable?).
 - `gefion experiment run --id N --by-regime <name>` — conditional holdout verdicts: a p-value per regime bucket, all entered into one flat Benjamini-Hochberg family (fail-closed on low-power buckets).
 - `gefion chart regime <name> --symbol <SYM> [--start-date D] [--end-date D]` — chart a symbol's price with regime-episode bands overlaid.

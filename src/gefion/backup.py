@@ -12,7 +12,7 @@ import json
 import hashlib
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -789,3 +789,98 @@ def verify_backup(backup_path: str) -> Dict[str, Any]:
 
         set_attributes(span, valid=results["valid"], table_count=len(results["tables"]))
         return results
+
+
+# --- smart retention (tiered GFS; #76 reaping story) ---------------------------------
+
+RETAIN_RECENT_DAYS = 56      # keep everything from the last ~8 weeks
+RETAIN_MONTHLY_MONTHS = 12   # then one per month for a year
+# beyond that: one per year, forever (cheap immortal anchors)
+
+
+def select_survivors(
+    backups: List[Tuple[datetime, str]],
+    now: Optional[datetime] = None,
+    keep_recent_days: int = RETAIN_RECENT_DAYS,
+    keep_monthly: int = RETAIN_MONTHLY_MONTHS,
+) -> Tuple[List[Tuple[datetime, str]], List[Tuple[datetime, str]]]:
+    """Tiered thinning (grandfather-father-son). Pure — no filesystem.
+
+    Survivors are the union of: everything within `keep_recent_days`; the
+    newest backup of each calendar month within `keep_monthly` months; the
+    newest backup of each calendar year (forever); and the newest backup
+    overall (always immune). Returns (keep, prune), each [(created, key)].
+    """
+    if now is None:
+        now = datetime.now()
+    if not backups:
+        return [], []
+    ordered = sorted(backups)
+    survivors = {ordered[-1][1]}                    # newest: always immune
+    recent_floor = now - timedelta(days=keep_recent_days)
+    monthly_floor = now - timedelta(days=31 * keep_monthly)
+    newest_per_month: Dict[Tuple[int, int], Tuple[datetime, str]] = {}
+    newest_per_year: Dict[int, Tuple[datetime, str]] = {}
+    for created, key in ordered:
+        if created >= recent_floor:
+            survivors.add(key)
+        month = (created.year, created.month)
+        if created >= monthly_floor:
+            if month not in newest_per_month or created > newest_per_month[month][0]:
+                newest_per_month[month] = (created, key)
+        if created.year not in newest_per_year \
+                or created > newest_per_year[created.year][0]:
+            newest_per_year[created.year] = (created, key)
+    survivors.update(k for _, k in newest_per_month.values())
+    survivors.update(k for _, k in newest_per_year.values())
+    keep = [(c, k) for c, k in ordered if k in survivors]
+    prune = [(c, k) for c, k in ordered if k not in survivors]
+    return keep, prune
+
+
+def apply_retention(
+    root: str,
+    now: Optional[datetime] = None,
+    keep_recent_days: int = RETAIN_RECENT_DAYS,
+    keep_monthly: int = RETAIN_MONTHLY_MONTHS,
+) -> Dict[str, Any]:
+    """Prune sibling backup directories under `root` per the tiered policy.
+
+    Fail-safe by construction: a directory without a readable manifest is
+    NEVER pruned (unknown is not deletable — it is reported instead), the
+    newest backup always survives, and everything pruned is named in the
+    result. Call this only after a successful new backup.
+    """
+    import shutil
+
+    with create_span("backup.apply_retention", root=root) as span:
+        root_path = Path(root)
+        dated: List[Tuple[datetime, str]] = []
+        unreadable: List[str] = []
+        for child in sorted(root_path.iterdir() if root_path.exists() else []):
+            if not child.is_dir():
+                continue
+            manifest = child / "manifest.json"
+            try:
+                created = datetime.fromisoformat(
+                    json.loads(manifest.read_text())["created_at"]
+                    .replace("Z", ""))
+                if created.tzinfo is not None:
+                    created = created.replace(tzinfo=None)
+                dated.append((created, str(child)))
+            except Exception:
+                unreadable.append(str(child))
+        keep, prune = select_survivors(dated, now=now,
+                                       keep_recent_days=keep_recent_days,
+                                       keep_monthly=keep_monthly)
+        pruned_paths = []
+        for _, path in prune:
+            shutil.rmtree(path)
+            pruned_paths.append(path)
+        set_attributes(span, kept=len(keep), pruned=len(pruned_paths),
+                       skipped_unreadable=len(unreadable))
+        return {"kept": len(keep), "pruned": pruned_paths,
+                "skipped_unreadable": unreadable,
+                "policy": {"keep_recent_days": keep_recent_days,
+                           "keep_monthly": keep_monthly,
+                           "yearly": "forever"}}

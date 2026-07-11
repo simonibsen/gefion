@@ -282,7 +282,7 @@ signals conditionally against it. See [docs/REGIMES.md](docs/REGIMES.md).
 | `gefion mcp-setup` | Configure the MCP server for use with AI assistants |
 | `gefion span-check` | Check recent traces for slow operations |
 | `gefion ui` | Launch Streamlit web UI |
-| `gefion backup` / `gefion restore` | Backup and restore database |
+| `gefion backup` / `gefion restore` | Backup and restore database (`--timestamped` root mode with tiered retention) |
 
 Full CLI reference with flags and examples: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 
