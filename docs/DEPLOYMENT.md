@@ -116,6 +116,30 @@ universe filters and sector-scoped work. Two guards now exist:
    Logs in `~/cron-logs/`; a full fundamentals pass is ~6.2k OVERVIEW calls ≈ 90 min
    at the key's rate limit. Cron can silently break — that's why the db-health
    coverage check exists independently of it.
+3. **Nightly data pipeline** (installed 2026-07-11, operations phase): daily-7 —
+   an early-morning job ingests the *previous* session, and running all seven
+   days self-heals after holidays/outages with a near-instant no-op cost.
+   ```cron
+   # nightly: incremental prices then features (probation checks ride data-update)
+   30 2 * * *  data-update --timeframe auto --json && feat-compute --all-features --incremental --json
+   # weekly: provider-garbage sweep over stored data
+   40 3 * * 0  quality backfill --json
+   # weekly: ONE whole-database pg_dump (drift-proof: includes tables no
+   # curated list knows about; compressed custom format; restore = pg_restore)
+   10 4 * * 0  backup -o ~/backups/gefion --timestamped --whole-db --json
+   ```
+4. **Backup design** (owner decisions, 2026-07-11): the safety backbone is a
+   **whole-database `pg_dump`** (`--whole-db`) — curated table lists cannot rot
+   because nothing is listed; a new spec's tables are included the day they
+   exist. Retention is sparse and tiered (`--timestamped` root mode): everything
+   kept 14 days, newest-per-month for 3 months, newest-per-year forever; the
+   newest always immune; unreadable directories never pruned; a failed backup
+   never deletes anything. Sparse is safe because the bulk is reproducible
+   (prices re-ingest, features recompute). The parquet data types (incl.
+   `irreplaceable` and `regimes`) remain for **selective** export/restore, and
+   `tests/test_backup_retention.py` fails if any real table is missing from
+   both the type lists and the documented exemptions — the curated lists are
+   drift-checked even though the backbone no longer depends on them.
 
 ## Staging on the prod host (optional)
 

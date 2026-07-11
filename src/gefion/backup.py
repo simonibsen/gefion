@@ -12,7 +12,7 @@ import json
 import hashlib
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -52,14 +52,41 @@ DATA_TYPE_TABLES = {
     "strategies": ["strategy_registry", "strategy_configs"],
     "ml": ["ml_datasets", "ml_runs", "ml_models"],
     "predictions": ["predictions", "prediction_outcomes", "model_performance"],
-    "experiments": ["experiments", "experiment_trials"],
+    "experiments": ["experiments", "experiment_trials", "experiment_cycles"],
     "meta": ["schema_migrations", "volatility_thresholds"],
+    # Regime declarations + the discovery/SPA audit ledgers: the multiple-
+    # testing accounting can NEVER be reproduced (regime_labels are derived —
+    # recompute via `regime compute`).
+    "regimes": ["regime_definitions", "regime_discovery_runs",
+                "regime_candidates", "regime_trust_grades",
+                "discovery_diagnostics", "spa_reverdicts"],
+    "quality": ["data_quality_findings"],
+    "fundamentals": ["stocks_fundamentals", "quarterly_financials"],
+    "macro": ["macro_series", "macro_series_values"],
+    # Everything that cannot be re-fetched or recomputed — declarations,
+    # verdicts, and audit ledgers. Tiny by construction: reproducible bulk
+    # (prices, features, predictions) deliberately excluded.
+    "irreplaceable": [
+        "feature_definitions", "feature_functions",
+        "strategy_registry", "strategy_configs",
+        "experiments", "experiment_trials",
+        "ml_datasets", "ml_runs", "ml_models",
+        "regime_definitions", "regime_discovery_runs", "regime_candidates",
+        "regime_trust_grades", "discovery_diagnostics", "spa_reverdicts",
+        "data_quality_findings", "macro_series", "macro_series_values",
+        "schema_migrations", "volatility_thresholds",
+    ],
     "all": [
         "stocks", "stock_ohlcv", "computed_features", "feature_definitions", "feature_functions",
         "strategy_registry", "strategy_configs",
         "ml_datasets", "ml_runs", "ml_models",
         "predictions", "prediction_outcomes", "model_performance",
         "volatility_thresholds", "experiments", "experiment_trials",
+        "experiment_cycles", "stocks_fundamentals", "quarterly_financials",
+        "regime_definitions", "regime_labels", "regime_discovery_runs",
+        "regime_candidates", "regime_trust_grades", "discovery_diagnostics",
+        "spa_reverdicts", "data_quality_findings",
+        "macro_series", "macro_series_values",
         "schema_migrations",
     ],
 }
@@ -789,3 +816,154 @@ def verify_backup(backup_path: str) -> Dict[str, Any]:
 
         set_attributes(span, valid=results["valid"], table_count=len(results["tables"]))
         return results
+
+
+# --- smart retention (tiered GFS; #76 reaping story) ---------------------------------
+
+RETAIN_RECENT_DAYS = 14      # keep everything from the last 2 weeks
+RETAIN_MONTHLY_MONTHS = 3    # then one per month for a quarter
+# Sparse by owner decision (2026-07-11): the bulky data types are
+# reproducible (prices re-ingest, features recompute) — dense history buys
+# little. The irreplaceable ledgers get their own denser cadence instead.
+# beyond that: one per year, forever (cheap immortal anchors)
+
+
+def select_survivors(
+    backups: List[Tuple[datetime, str]],
+    now: Optional[datetime] = None,
+    keep_recent_days: int = RETAIN_RECENT_DAYS,
+    keep_monthly: int = RETAIN_MONTHLY_MONTHS,
+) -> Tuple[List[Tuple[datetime, str]], List[Tuple[datetime, str]]]:
+    """Tiered thinning (grandfather-father-son). Pure — no filesystem.
+
+    Survivors are the union of: everything within `keep_recent_days`; the
+    newest backup of each calendar month within `keep_monthly` months; the
+    newest backup of each calendar year (forever); and the newest backup
+    overall (always immune). Returns (keep, prune), each [(created, key)].
+    """
+    if now is None:
+        now = datetime.now()
+    if not backups:
+        return [], []
+    ordered = sorted(backups)
+    survivors = {ordered[-1][1]}                    # newest: always immune
+    recent_floor = now - timedelta(days=keep_recent_days)
+    monthly_floor = now - timedelta(days=31 * keep_monthly)
+    newest_per_month: Dict[Tuple[int, int], Tuple[datetime, str]] = {}
+    newest_per_year: Dict[int, Tuple[datetime, str]] = {}
+    for created, key in ordered:
+        if created >= recent_floor:
+            survivors.add(key)
+        month = (created.year, created.month)
+        if created >= monthly_floor:
+            if month not in newest_per_month or created > newest_per_month[month][0]:
+                newest_per_month[month] = (created, key)
+        if created.year not in newest_per_year \
+                or created > newest_per_year[created.year][0]:
+            newest_per_year[created.year] = (created, key)
+    survivors.update(k for _, k in newest_per_month.values())
+    survivors.update(k for _, k in newest_per_year.values())
+    keep = [(c, k) for c, k in ordered if k in survivors]
+    prune = [(c, k) for c, k in ordered if k not in survivors]
+    return keep, prune
+
+
+def apply_retention(
+    root: str,
+    now: Optional[datetime] = None,
+    keep_recent_days: int = RETAIN_RECENT_DAYS,
+    keep_monthly: int = RETAIN_MONTHLY_MONTHS,
+) -> Dict[str, Any]:
+    """Prune sibling backup directories under `root` per the tiered policy.
+
+    Fail-safe by construction: a directory without a readable manifest is
+    NEVER pruned (unknown is not deletable — it is reported instead), the
+    newest backup always survives, and everything pruned is named in the
+    result. Call this only after a successful new backup.
+    """
+    import shutil
+
+    with create_span("backup.apply_retention", root=root) as span:
+        root_path = Path(root)
+        dated: List[Tuple[datetime, str]] = []
+        unreadable: List[str] = []
+        for child in sorted(root_path.iterdir() if root_path.exists() else []):
+            if not child.is_dir():
+                continue
+            manifest = child / "manifest.json"
+            try:
+                created = datetime.fromisoformat(
+                    json.loads(manifest.read_text())["created_at"]
+                    .replace("Z", ""))
+                if created.tzinfo is not None:
+                    created = created.replace(tzinfo=None)
+                dated.append((created, str(child)))
+            except Exception:
+                unreadable.append(str(child))
+        keep, prune = select_survivors(dated, now=now,
+                                       keep_recent_days=keep_recent_days,
+                                       keep_monthly=keep_monthly)
+        pruned_paths = []
+        for _, path in prune:
+            shutil.rmtree(path)
+            pruned_paths.append(path)
+        set_attributes(span, kept=len(keep), pruned=len(pruned_paths),
+                       skipped_unreadable=len(unreadable))
+        return {"kept": len(keep), "pruned": pruned_paths,
+                "skipped_unreadable": unreadable,
+                "policy": {"keep_recent_days": keep_recent_days,
+                           "keep_monthly": keep_monthly,
+                           "yearly": "forever"}}
+
+
+# --- whole-DB backbone (drift-proof by construction) ----------------------------------
+
+# Tables deliberately NOT in any parquet data type, each with its reason.
+# The coverage drift test fails if a real table is in neither this set nor
+# DATA_TYPE_TABLES["all"] — hand lists are not allowed to rot silently.
+BACKUP_EXEMPT_TABLES = {
+    # (populated as exemptions are consciously decided; empty = everything
+    # real must be in the "all" list)
+}
+
+
+def dump_whole_db(db_url: str, output_dir: str) -> Dict[str, Any]:
+    """One pg_dump of the ENTIRE database (custom format, compressed).
+
+    The safety backbone: includes every table — including ones that did not
+    exist when any curated list was written — by construction. Parquet data
+    types remain for selective export/restore. Fails honestly if pg_dump is
+    missing or exits non-zero.
+    """
+    import subprocess
+
+    with create_span("backup.dump_whole_db", output_dir=output_dir) as span:
+        if shutil.which("pg_dump") is None:
+            raise RuntimeError(
+                "pg_dump not found on PATH — install postgresql-client "
+                "(the whole-db backup shells out to pg_dump)")
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        dump_path = out / "db.dump"
+        proc = subprocess.run(
+            ["pg_dump", "--format=custom", "--compress=6",
+             f"--file={dump_path}", db_url],
+            capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"pg_dump failed (exit {proc.returncode}): "
+                f"{proc.stderr.strip()[:500]}")
+        size = dump_path.stat().st_size
+        manifest = {
+            "mode": "whole_db",
+            "created_at": datetime.utcnow().isoformat(),
+            "dump_file": "db.dump",
+            "format": "pg_dump custom, compress=6",
+            "total_bytes": size,
+            "restore_hint": "pg_restore -d <db_url> db.dump",
+        }
+        with open(out / "manifest.json", "w") as f:
+            json.dump(manifest, f, indent=2)
+        set_attributes(span, total_bytes=size)
+        return {"dump_path": str(dump_path), "total_bytes": size,
+                "manifest": manifest}

@@ -5248,7 +5248,7 @@ def backup_data(
     data_types: str = typer.Option(
         "all",
         "--data-types",
-        help="Comma-separated data types: ohlcv, features, definitions, functions, strategies, ml, predictions, experiments, meta, all",
+        help="Comma-separated data types: ohlcv, features, definitions, functions, strategies, ml, predictions, experiments, regimes, quality, macro, meta, irreplaceable, all",
     ),
     start_date: Optional[str] = typer.Option(None, "--start-date", "--after", help="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = typer.Option(None, "--end-date", "--before", help="End date (YYYY-MM-DD)"),
@@ -5256,6 +5256,23 @@ def backup_data(
     incremental: bool = typer.Option(False, "--incremental", help="Only backup data since last backup"),
     compress: bool = typer.Option(True, "--compress/--no-compress", help="Compress output files"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show size estimate without creating backup"),
+    whole_db: bool = typer.Option(
+        False, "--whole-db",
+        help="One pg_dump of the ENTIRE database (drift-proof: includes "
+             "tables no curated list knows about). Incompatible with "
+             "filtering flags."),
+    timestamped: bool = typer.Option(
+        False, "--timestamped",
+        help="Treat --output as a ROOT: write into <root>/<UTC timestamp>/ "
+             "and apply tiered retention to the root's siblings after success"),
+    keep_recent_days: int = typer.Option(
+        14, "--keep-recent-days", help="Retention: keep everything this recent"),
+    keep_monthly: int = typer.Option(
+        3, "--keep-monthly", help="Retention: newest-per-month for this many months "
+                                  "(newest-per-year kept forever)"),
+    prune: bool = typer.Option(
+        True, "--prune/--no-prune",
+        help="Apply retention after a successful timestamped backup"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
@@ -5282,25 +5299,60 @@ def backup_data(
         # Incremental backup (only new data since last backup)
         gefion backup -o ./backups/incremental --incremental
     """
-    with create_span("cli.backup", data_types=data_types, dry_run=dry_run):
+    with create_span("cli.backup", data_types=data_types, dry_run=dry_run,
+                     timestamped=timestamped):
         _backup_impl(
             output, data_types, start_date, end_date, symbols,
-            incremental, compress, dry_run, db_url, json_output
+            incremental, compress, dry_run, db_url, json_output,
+            timestamped=timestamped, keep_recent_days=keep_recent_days,
+            keep_monthly=keep_monthly, prune=prune, whole_db=whole_db,
         )
 
 
 def _backup_impl(
     output, data_types, start_date, end_date, symbols,
-    incremental, compress, dry_run, db_url, json_output
+    incremental, compress, dry_run, db_url, json_output,
+    timestamped=False, keep_recent_days=14, keep_monthly=3, prune=True,
+    whole_db=False,
 ):
     """Implementation of backup command."""
     from datetime import datetime
     from gefion.backup import (
-        estimate_backup_size, check_disk_space, create_backup,
+        apply_retention, estimate_backup_size, check_disk_space, create_backup,
         get_last_backup_info
     )
 
     url = _db_url(db_url)
+
+    # --timestamped: --output is the stable ROOT (the cron-friendly mode);
+    # each run writes a fresh <root>/<UTC stamp>/ and retention thins the
+    # siblings afterwards.
+    root = output
+    if timestamped:
+        output = output / datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+
+    if whole_db:
+        if data_types != "all" or start_date or end_date or symbols or incremental:
+            emit_error(
+                "--whole-db dumps EVERYTHING via pg_dump — filtering flags "
+                "(--data-types/--start-date/--end-date/--symbols/"
+                "--incremental) contradict it; drop them or drop --whole-db",
+                json_output=json_output)
+            raise typer.Exit(code=1)
+        from gefion.backup import dump_whole_db
+        try:
+            result = dump_whole_db(url, str(output))
+            if timestamped and prune:
+                result["retention"] = apply_retention(
+                    str(root), keep_recent_days=keep_recent_days,
+                    keep_monthly=keep_monthly)
+            size_mb = result["total_bytes"] / (1024 * 1024)
+            emit(f"Whole-DB backup complete: {size_mb:.1f} MB", data=result,
+                 json_output=json_output)
+        except Exception as exc:
+            emit_error(f"Backup failed: {exc}", json_output=json_output)
+            raise typer.Exit(code=1)
+        return
 
     # Parse data types
     types_list = [t.strip() for t in data_types.split(",")]
@@ -5381,9 +5433,22 @@ def _backup_impl(
                 compress=compress,
             )
 
+            # Retention runs ONLY after a successful backup (a failure must
+            # never trigger deletion) and only in timestamped-root mode.
+            if timestamped and prune:
+                result["retention"] = apply_retention(
+                    str(root), keep_recent_days=keep_recent_days,
+                    keep_monthly=keep_monthly)
+
             size_mb = result["total_bytes"] / (1024 * 1024)
+            retention_note = ""
+            if result.get("retention"):
+                r = result["retention"]
+                retention_note = (f" — retention: kept {r['kept']}, "
+                                  f"pruned {len(r['pruned'])}")
             emit(
-                f"Backup complete: {result['total_rows']:,} rows, {size_mb:.1f} MB",
+                f"Backup complete: {result['total_rows']:,} rows, "
+                f"{size_mb:.1f} MB{retention_note}",
                 data=result,
                 json_output=json_output,
             )
