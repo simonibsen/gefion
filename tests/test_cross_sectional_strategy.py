@@ -156,3 +156,15 @@ def test_accepts_bare_positions_dict():
         dt.date(2024, 2, 9), {"OLD1": {"shares": 5, "avg_price": 1.0}},
         _universe(), 100_000.0)
     assert ("sell", "OLD1") in [(s["action"], s["symbol"]) for s in signals]
+
+
+def test_dict_format_membership_pinned_in_both_copies():
+    """cli.py and comparison.py each carry a dict_format_strategies set (a
+    duplication worth consolidating someday); cross_sectional_decile must be
+    in BOTH or wide runs crash on flattened prices — pinned here."""
+    import pathlib
+    root = pathlib.Path(__file__).parent.parent / "src" / "gefion"
+    for f in (root / "cli.py", root / "backtest" / "comparison.py"):
+        src = f.read_text()
+        i = src.index("dict_format_strategies")
+        assert "cross_sectional_decile" in src[i:i + 200], f.name
