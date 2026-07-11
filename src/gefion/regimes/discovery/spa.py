@@ -365,10 +365,14 @@ def _match(stored, recomputed, tier):
     return [(t, by_key.get(key(t))) for t in stored]
 
 
-def reconstruct_family(conn, run) -> Dict[str, Any]:
+def reconstruct_family(conn, run, market=None) -> Dict[str, Any]:
     """Rebuild a completed run's counted family and VERIFY it against the
     ledger before any verdict (FR-1004/1005). Read-only. Refuses honestly on
-    drift, an empty family, or an unsupported tier."""
+    drift, an empty family, or an unsupported tier.
+
+    `market` (in-run gate, #87): the run's own live MarketData — skips the
+    DB rebuild; verification against the just-stored tests then proves
+    same-world by construction rather than by luck."""
     from gefion.regimes.discovery import ledger
     from gefion.regimes.discovery.signals import FeatureSignalSource
 
@@ -380,7 +384,8 @@ def reconstruct_family(conn, run) -> Dict[str, Any]:
                 f"{run_row.get('family_size')} — nothing to test")
 
         ss = run_row["search_space"]
-        market = _rebuild_market(conn, run_row)
+        if market is None:
+            market = _rebuild_market(conn, run_row)
         src = FeatureSignalSource(market, ss["signals"],
                                   align_window=int(ss.get("align_window", 60)))
         start, end = _outer_window(run_row)
@@ -445,13 +450,15 @@ def reconstruct_family(conn, run) -> Dict[str, Any]:
 
 def reverdict(conn, run, iterations: int = 1000,
               seed: Optional[int] = None, level: Optional[float] = None,
-              block_length: Optional[float] = None) -> Dict[str, Any]:
+              block_length: Optional[float] = None,
+              market=None) -> Dict[str, Any]:
     """The post-run SPA re-verdict (FR-1001..1006): reconstruct → verify →
     joint stationary bootstrap → Hansen SPA. Read-only over ledger and market
-    rows; recording is the caller's step."""
+    rows; recording is the caller's step. With `market`, runs against the
+    caller's live MarketData (the in-run gate)."""
     with create_span("discovery.spa.reverdict", run=str(run),
                      iterations=iterations) as span:
-        fam = reconstruct_family(conn, run)
+        fam = reconstruct_family(conn, run, market=market)
         run_row = fam["run"]
         set_attributes(span, run_id=run_row["id"])
         all_dates = sorted({d for u in fam["units"] for d in u["dates"]})

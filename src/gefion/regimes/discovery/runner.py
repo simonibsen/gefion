@@ -449,6 +449,33 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
 
     ledger.set_status(conn, run_id, "evaluated")
     ledger.set_status(conn, run_id, "complete")
+
+    # In-run SPA gate (#87): every completed non-empty run carries its own
+    # selection-aware verdict, computed against the run's LIVE market data
+    # (same process, same world — verification passes by construction) and
+    # recorded append-only. The budget gate becomes self-sustaining; the
+    # post-run `discover spa` command remains for re-checks after data
+    # changes. Family-0 runs skip: nothing to test.
+    spa_result = None
+    if family_size > 0:
+        from gefion.regimes.discovery import spa as dspa
+        try:
+            result = dspa.reverdict(conn, run_id, iterations=1000,
+                                    seed=config.seed, market=market)
+            result["verification"]["in_run"] = True
+            ledger.record_spa_reverdict(conn, run_id, result)
+            spa_result = {k: result[k] for k in
+                          ("p_consistent", "p_lower", "p_upper", "level",
+                           "passed", "family_size", "block_length")}
+        except dspa.SpaRefusal as exc:
+            # A refusal (e.g. expressive-tier reconstruction, v1 limitation)
+            # never fails a completed run — it lands in the diagnostics
+            # ledger, visible and structural, and the run simply carries no
+            # in-run verdict (the budget gate will say "SPA not yet run").
+            ledger.record_diagnostic(
+                conn, run_id, "spa_inrun_refused", {"reason": str(exc)},
+                sample_dependent=False)
+
     return {
         "run_id": run_id,
         "status": "complete",
@@ -457,6 +484,7 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
         "family_size": family_size,
         "n_admitted": len(admitted),
         "admitted": admitted,
+        "spa": spa_result,
     }
 
 
