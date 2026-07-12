@@ -303,6 +303,9 @@ into the stocks table. Adding one is configuration, not schema:
 ```bash
 # Ingest VIX from FRED (keyless, back to 1990) and materialize macro_vix
 gefion macro ingest --name vix --provider fred:VIXCLS --full
+# derived market-shape series (no provider — computed from our own cross-section):
+gefion macro derive                      # breadth_sma200 + dispersion_20, incremental
+gefion macro derive --series dispersion_20 --min-stocks 100
 
 # Catalog + coverage
 gefion macro list
@@ -327,6 +330,12 @@ out of research:
   trash. The rules live in a declarative catalog (`data-quality/catalog.yaml`),
   each bound carrying its definitional justification.
 - **Validation rides the write paths.** `fundamentals-update` and
+  Derived series (`macro derive`): `macro_breadth_sma200` (% of the Stock
+  universe above its own 200-day SMA — participation) and `macro_dispersion_20`
+  (cross-sectional std of 20-day returns — when stocks move together, selection
+  can't matter). Computed from our own data, idempotent and incremental; days
+  with a cross-section thinner than `--min-stocks` get NO value (honest gap).
+  Like `macro_vix`, they are immediately usable as discovery atoms — zero DDL.
   `macro ingest` validate as they store — the raw value lands verbatim and a
   finding is recorded; the write is never blocked.
 - **Convicted values are excluded at the feature-computation chokepoint.** A

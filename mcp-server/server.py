@@ -1969,6 +1969,29 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="macro_derive",
+            description=(
+                "Compute derived macro series from the stock cross-section: "
+                "breadth_sma200 (% of universe above its own 200-day SMA) and "
+                "dispersion_20 (cross-sectional std of 20-day returns). "
+                "Idempotent/incremental; thin days get no value. The series "
+                "become discovery atoms (macro_breadth_sma200, "
+                "macro_dispersion_20) with zero DDL. Mutating (writes feature "
+                "values) but derived and re-runnable."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "series": {"type": "string",
+                               "description": "Comma list or 'all' (default)"},
+                    "min_stocks": {"type": "integer",
+                                   "description": "Cross-section floor (default 100)"},
+                    "full": {"type": "boolean",
+                             "description": "Recompute from the beginning"},
+                },
+            },
+        ),
+        Tool(
             name="regime_delete",
             description=(
                 "Delete a regime definition and its labels. Dry-run by default "
@@ -2447,6 +2470,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_ledger(arguments)
         elif name == "regime_discover_verdicts":
             result = await _regime_discover_verdicts(arguments)
+        elif name == "macro_derive":
+            result = await _macro_derive(arguments)
         elif name == "regime_delete":
             result = await _regime_delete(arguments)
         elif name == "regime_discover_delete":
@@ -5202,6 +5227,20 @@ async def _regime_discover_verdicts(args: Dict[str, Any]) -> Dict[str, Any]:
     """FDR survivors of a discovery run, with the family size beside them."""
     async def _run():
         return await GefionExecutor().run("regime", "discover", "verdicts", args["run"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_derive(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Derived macro series (breadth/dispersion) — idempotent recompute."""
+    async def _run():
+        cmd = ["macro", "derive"]
+        if args.get("series"):
+            cmd.extend(["--series", args["series"]])
+        if args.get("min_stocks"):
+            cmd.extend(["--min-stocks", str(args["min_stocks"])])
+        if args.get("full"):
+            cmd.append("--full")
+        return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
 
