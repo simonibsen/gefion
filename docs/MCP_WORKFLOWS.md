@@ -1152,6 +1152,8 @@ documented here or in a section above.
 - `ml_train_classifier` — train the 5-class trend classifier.
 - `ml_train_ensemble` — train a multi-algorithm ensemble.
 - `ml_predict` — quantile predictions (q10/q50/q90) for symbols on a date.
+- `ml_predict_backfill` — point-in-time backfill for a VINTAGE model (spec 012): fills every post-cutoff trading day, resumable and lookahead-proof (refuses dates at or before the training cutoff).
+- `ml_materialize_signals` — expose a vintage model's predictions as discovery signals (spec 012): per-stock `pred_*` features named with the model identity plus the `model_outlook_q50` / `model_confidence_width` market bodies.
 - `ml_predict_classifier` — trend-class predictions with probabilities.
 - `ml_predict_ensemble` — weighted-average ensemble predictions.
 - `ml_eval` — calibration metrics (coverage, pinball loss, IQR) over stored predictions.

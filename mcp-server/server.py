@@ -373,6 +373,47 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="ml_predict_backfill",
+            description=(
+                "Point-in-time prediction backfill for a VINTAGE model (spec 012). "
+                "Fills every post-cutoff trading day the model hasn't predicted yet, "
+                "over the model's own dataset universe. Resumable (starts after the "
+                "last stored prediction), idempotent, and lookahead-proof: refuses "
+                "models without a recorded training cutoff and any end date at or "
+                "before it."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Vintage model name"},
+                    "model_version": {"type": "string", "description": "Vintage model version"},
+                    "end": {"type": "string", "description": "Backfill through this date (YYYY-MM-DD; default: latest price date)"},
+                },
+                "required": ["model_name", "model_version"],
+            },
+        ),
+
+        Tool(
+            name="ml_materialize_signals",
+            description=(
+                "Expose a vintage model's stored predictions as discovery signals "
+                "(spec 012): per-stock features named with the model identity "
+                "(pred_q50_h30__<model>_<version>) plus two market bodies "
+                "(model_outlook_q50, model_confidence_width) seeded into the "
+                "DB-resident market dispatcher — compute the series afterwards "
+                "with macro derive."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Vintage model name"},
+                    "model_version": {"type": "string", "description": "Vintage model version"},
+                },
+                "required": ["model_name", "model_version"],
+            },
+        ),
+
+        Tool(
             name="ml_eval",
             description=(
                 "Evaluate model performance on historical predictions. "
@@ -2293,6 +2334,10 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _ml_train(arguments)
         elif name == "ml_predict":
             result = await _ml_predict(arguments)
+        elif name == "ml_predict_backfill":
+            result = await _ml_predict_backfill(arguments)
+        elif name == "ml_materialize_signals":
+            result = await _ml_materialize_signals(arguments)
         elif name == "ml_eval":
             result = await _ml_eval(arguments)
         elif name == "ml_calibrate":
@@ -2654,6 +2699,28 @@ async def _ml_predict(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get('limit'):
             cmd.extend(['--limit', str(args['limit'])])
 
+    return await executor.run(*cmd)
+
+
+async def _ml_predict_backfill(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Point-in-time prediction backfill for a vintage model (spec 012)."""
+    cmd = [
+        'ml', 'predict-backfill',
+        '--model-name', args['model_name'],
+        '--model-version', args['model_version'],
+    ]
+    if args.get('end'):
+        cmd.extend(['--end', args['end']])
+    return await executor.run(*cmd)
+
+
+async def _ml_materialize_signals(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Expose a vintage model's predictions as discovery signals (spec 012)."""
+    cmd = [
+        'ml', 'materialize-signals',
+        '--model-name', args['model_name'],
+        '--model-version', args['model_version'],
+    ]
     return await executor.run(*cmd)
 
 

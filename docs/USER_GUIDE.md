@@ -116,6 +116,56 @@ gefion ml predict \
 
 Fetches features from `computed_features`, generates q10/q50/q90 predictions, stores in `quantile_predictions`.
 
+#### 3b. Vintage models and the point-in-time backfill (spec 012)
+
+A **vintage model** is trained strictly on data up to a declared cutoff:
+build the dataset with `--end-date YYYY-MM-DD` (prices/features are bounded
+at the cutoff; labels are bounded so no outcome window peeks past it) and
+the trained model records the cutoff durably in its provenance. Everything
+after the cutoff is then genuinely out-of-sample.
+
+```bash
+# 1. Vintage dataset: nothing after 2022-12-31 reaches training
+gefion ml dataset-build --name prod --version v2022   --exchange NASDAQ --horizons 30 --end-date 2022-12-31 --export
+
+# 2. Train (the cutoff lands in the model's provenance automatically)
+gefion ml train --dataset-name prod --dataset-version v2022   --model-name prod_model --model-version v2022 --algorithm quantile_regression
+
+# 3. Point-in-time backfill: one prediction per post-cutoff trading day
+gefion ml predict-backfill --model-name prod_model --model-version v2022
+```
+
+`ml predict-backfill` fills every post-cutoff trading day the model has not
+predicted yet, over the model's own dataset universe. It is resumable
+(starts after the last stored prediction — the nightly top-up is the same
+command), idempotent (the predictions primary key dedups), and
+lookahead-proof: a model without a recorded cutoff refuses, and `--end` at
+or before the cutoff refuses (in-sample predictions are not signals).
+
+#### 3c. Predictions as discovery signals
+
+`ml materialize-signals` exposes a vintage model's stored predictions
+through existing molds only — no new storage surfaces:
+
+```bash
+gefion ml materialize-signals --model-name prod_model --model-version v2022
+gefion macro derive --series model_outlook_q50,model_confidence_width
+```
+
+- Per-stock features named with the FULL model identity
+  (`pred_q10_h30__prod_model_v2022`, `pred_q50_…`, `pred_q90_…`) so two
+  vintages can never silently mix in a hunt.
+- Two market-level series seeded into the spec-011 DB-resident dispatcher
+  and computed by `macro derive` like breadth or dispersion:
+  `macro_model_outlook_q50` (cross-sectional median q50 forecast) and
+  `macro_model_confidence_width` (median q90−q10 spread — how unsure the
+  model is today). Gaps stay gaps; nothing is fabricated.
+
+These series are hunted with `regime discover start --signal-source
+model_predictions` — see the discovery section. The model predictions are
+signals **under test**, not validated forecasts; the meta-hunt is what
+judges when (if ever) to trust them.
+
 #### 4. Evaluate Performance
 
 Evaluate model calibration on historical predictions:
@@ -607,7 +657,7 @@ segregation (discovery never sees the outer holdout), a pre-registered bounded s
 space, one flat FDR family that counts every test including the losers, and auditable
 ledgers. See [REGIMES.md](REGIMES.md) § Agentic discovery for the threat model.
 
-- `gefion regime discover start --name <slug> --atoms <atoms.json> [--depth K] [--budget N] [--tier interaction|grammar|expressive]... [--signal-source features] [--grading-scheme walk_forward] [--universe-filter <chain>|passthrough] [--fresh-holdout START:END] [--freeform <asts.json>] [--principles <id,id>] [--reserve-justification TEXT] [--signal <feat>]... [--horizon-days N] [--holdout-weeks N] [--min-effective-n N] [--max-date YYYY-MM-DD] [--seed N] [--dataset V]` — pre-register and run a bounded discovery. Expect mostly rejections; that is correct behavior. The expressive tier (free-form ASTs via `--freeform`, principle-seeded detectors via `--principles`) requires a declared single-use `--fresh-holdout` reserve; re-declaring a consumed reserve requires `--reserve-justification`.
+- `gefion regime discover start --name <slug> --atoms <atoms.json> [--depth K] [--budget N] [--tier interaction|grammar|expressive]... [--signal-source features|model_predictions] [--coverage-floor 0.95] [--grading-scheme walk_forward] [--universe-filter <chain>|passthrough] [--fresh-holdout START:END] [--freeform <asts.json>] [--principles <id,id>] [--reserve-justification TEXT] [--signal <feat>]... [--horizon-days N] [--holdout-weeks N] [--min-effective-n N] [--max-date YYYY-MM-DD] [--seed N] [--dataset V]` — pre-register and run a bounded discovery. Expect mostly rejections; that is correct behavior. The expressive tier (free-form ASTs via `--freeform`, principle-seeded detectors via `--principles`) requires a declared single-use `--fresh-holdout` reserve; re-declaring a consumed reserve requires `--reserve-justification`.
 - `gefion regime discover list [--status S]` — list runs (status, family size, dataset).
 - `gefion regime discover show <run>` — pre-registration, segregation boundaries, family size, status.
 - `gefion regime discover ledger <run> [--verdict V]` — the candidate ledger: every candidate evaluated, losers included (they are the FDR denominator).
@@ -631,3 +681,31 @@ recorded in the new run's pre-registration.
 Deep validation (see REGIMES.md): `--max-date` runs discovery as of a past vintage;
 `half:a`/`half:b` in the universe chain give a declared split-half robustness check
 (robustness, not independence, at market scope).
+
+#### The model_predictions rung (spec 012 — the ML meta-question)
+
+`--signal-source model_predictions` hunts on the model's own predictions:
+"in which market states is the ML model actually predictive?" ML generates;
+statistics judges — the same pre-registration, one-family FDR, and in-run
+SPA machinery as every indicator hunt. Declare the model-derived series
+explicitly:
+
+```bash
+gefion regime discover start --name model-meta-hunt --atoms atoms.json   --signal-source model_predictions   --signal macro_model_outlook_q50 --signal macro_model_confidence_width   --horizon-days 20 --holdout-weeks 80
+```
+
+The rung's own refusals, all at pre-registration:
+
+- **Explicit signals only** — defaulting to all active features would
+  silently change the rung; indicator signals under this rung refuse.
+- **One vintage per hunt** — every declared signal must trace (through the
+  derived-series provenance chain) to the same model+version; the run row
+  records the model identity and training cutoff.
+- **Lookahead by construction** — any signal value at or before the
+  training cutoff refuses (it can only mean corrupted materialization).
+- **Coverage floor** (`--coverage-floor`, default 95%) — each signal must
+  cover that fraction of post-cutoff trading days; a thin series refuses
+  naming `gefion ml predict-backfill` as the fix.
+- **Conservative entanglement** — a model signal derives from ALL the
+  model's declared input features, so an atom conditioning on any of them
+  is refused as self-conditioning.

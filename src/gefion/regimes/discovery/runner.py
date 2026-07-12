@@ -96,6 +96,11 @@ class DiscoveryConfig:
     detectors: Sequence[Dict[str, Any]] = ()  # expressive: {name, code, feature, provenance?}
     reserve_justification: Optional[str] = None
     dataset_version: Optional[str] = None  # None -> from market data
+    # model_predictions rung (spec 012): resolved model identity + cutoff,
+    # recorded in the pre-registration; input_features feeds the conservative
+    # entanglement rule (an atom on ANY model input conditions it on itself).
+    signal_provenance: Optional[Dict[str, Any]] = None
+    signal_window: Optional[Dict[str, Any]] = None
 
     def validate(self) -> None:
         if not self.name or not self.signals:
@@ -210,6 +215,10 @@ def run_discovery(conn, config: DiscoveryConfig, market: MarketData) -> Dict[str
             **({"max_date": str(config.max_date)} if config.max_date else {}),
             "label_window": config.label_window,
             "align_window": config.align_window,
+            **({"model": config.signal_provenance}
+               if config.signal_provenance else {}),
+            **({"signal_window": config.signal_window}
+               if config.signal_window else {}),
         }
 
         if gate is not None:
@@ -276,6 +285,7 @@ def _screen_atoms(conn, run_id: int, config: DiscoveryConfig,
     """Availability (FR-121) and entanglement (FR-114) screens, both recorded."""
     usable: List[Dict[str, Any]] = []
     signal_set = set(config.signals)
+    model_inputs = set((config.signal_provenance or {}).get("input_features", []))
     for atom in atoms:
         feature = atom["feature"]
         if feature not in market.features:
@@ -289,6 +299,14 @@ def _screen_atoms(conn, run_id: int, config: DiscoveryConfig,
                 conn, run_id, kind="entangled",
                 detail={"feature": feature, "atom": atom,
                         "reason": "atom conditions on a target signal"},
+                sample_dependent=False)
+        elif feature in model_inputs:
+            ledger.record_diagnostic(
+                conn, run_id, kind="entangled",
+                detail={"feature": feature, "atom": atom,
+                        "reason": "atom conditions on a model input feature "
+                                  "(conservative entanglement rule: model "
+                                  "signals derive from ALL declared inputs)"},
                 sample_dependent=False)
         else:
             usable.append(atom)

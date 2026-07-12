@@ -545,6 +545,11 @@ def ml_dataset_build(
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
     lookback_days: int = typer.Option(200, help="Rolling window lookback days"),
+    end_date: Optional[str] = typer.Option(
+        None, "--end-date",
+        help="TRAINING CUTOFF (YYYY-MM-DD): nothing after this date enters "
+             "the dataset; labels whose forward window would cross it are "
+             "excluded (spec 012 vintage discipline)"),
     horizons: str = typer.Option("7,30,90", help="Comma-separated horizons in days"),
     weak_thresholds: str = typer.Option("0.02,0.05,0.10", help="Comma-separated weak thresholds (per horizon)"),
     strong_thresholds: str = typer.Option("0.05,0.10,0.20", help="Comma-separated strong thresholds (per horizon)"),
@@ -632,13 +637,15 @@ def ml_dataset_build(
         universe["limit"] = int(limit)
 
     label_spec = {"type": "forward_return_5class", "thresholds": thresholds_by_horizon}
-    split_spec = {"type": "walk_forward", "note": "TBD", "horizons_days": horizon_vals}
+    split_spec = {"type": "walk_forward", "note": "TBD", "horizons_days": horizon_vals,
+                  **({"end_date": end_date} if end_date else {})}
 
     # Create a subdirectory for this dataset (so features/labels don't collide)
     dataset_dir = out_dir / f"{name}_{version}"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = dataset_dir / "manifest.json"
     manifest = {
+        **({"end_date": end_date} if end_date else {}),
         "name": name,
         "version": version,
         "universe": universe,
@@ -1459,7 +1466,13 @@ def ml_train(
                     run_id,
                     dataset["id"],
                     algorithm,
-                    Json({"algorithm": algorithm}),
+                    # training_cutoff (spec 012): the vintage every downstream
+                    # door (backfill, discovery rung) validates against
+                    Json({"algorithm": algorithm,
+                          **({"training_cutoff":
+                              (dataset.get("split_spec") or {}).get("end_date")}
+                             if (dataset.get("split_spec") or {}).get("end_date")
+                             else {})}),
                     Json(all_train_metrics),
                     str(base_artifact_path),
                 ),
@@ -1482,6 +1495,124 @@ def ml_train(
         data={"model_id": model_id, "run_id": run_id, "artifact_uri": str(base_artifact_path), "horizons": horizons},
         json_output=json_output,
     )
+
+
+@ml_app.command("materialize-signals")
+def ml_materialize_signals(
+    model_name: str = typer.Option(..., help="Vintage model name"),
+    model_version: str = typer.Option(..., help="Vintage model version"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Expose a vintage model's stored predictions as discovery signals
+    (spec 012): per-stock features named with the model identity
+    (pred_q50_h30__<model>_<version>), plus the two market bodies
+    (model_outlook_q50, model_confidence_width) seeded create-if-absent —
+    compute them afterwards with `gefion macro derive`."""
+    from gefion.ml.signal_features import (SignalMaterializeError,
+                                           materialize_prediction_features)
+
+    with create_span("cli.ml-materialize-signals", model=model_name):
+        with psycopg.connect(_db_url(db_url)) as conn:
+            try:
+                result = materialize_prediction_features(
+                    conn, model_name, model_version)
+            except SignalMaterializeError as exc:
+                emit_error(str(exc), json_output=json_output)
+                raise typer.Exit(1)
+        emit(f"Materialized {sum(result['features'].values())} new feature "
+             f"rows across {len(result['features'])} prediction features "
+             f"(horizons {result['horizons']}, cutoff {result['cutoff']}); "
+             f"market bodies seeded: {', '.join(result['market_functions'])} "
+             f"— run `gefion macro derive --series "
+             f"{','.join(result['market_functions'])}` to compute the series",
+             data=result, json_output=json_output)
+
+
+@ml_app.command("predict-backfill")
+def ml_predict_backfill(
+    model_name: str = typer.Option(..., help="Vintage model name"),
+    model_version: str = typer.Option(..., help="Vintage model version"),
+    end: Optional[str] = typer.Option(
+        None, "--end", help="Backfill through this date (default: latest "
+                            "price date). Must be after the training cutoff."),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Point-in-time prediction backfill for a VINTAGE model (spec 012).
+
+    Fills every post-cutoff trading day the model hasn't predicted yet —
+    resumable (starts after the last stored prediction), idempotent (the
+    predictions primary key dedups), and lookahead-proof: dates at or before
+    the model's recorded training cutoff refuse by construction.
+    """
+    import time as _time
+    from datetime import timedelta as _td
+
+    with create_span("cli.ml-predict-backfill", model=model_name):
+        url = _db_url(db_url)
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT m.id, m.hyperparams->>'training_cutoff', d.universe "
+                "FROM ml_models m LEFT JOIN ml_datasets d ON d.id = m.dataset_id "
+                "WHERE m.name = %s AND m.version = %s",
+                (model_name, model_version))
+            row = cur.fetchone()
+            if row is None:
+                emit_error(f"model {model_name}:{model_version} not found — "
+                           f"train it first (`gefion ml train`)",
+                           json_output=json_output)
+                raise typer.Exit(1)
+            model_id, cutoff_s, ds_universe = row
+            if not cutoff_s:
+                emit_error(
+                    f"model {model_name}:{model_version} has no recorded "
+                    f"training cutoff — backfill requires a VINTAGE model "
+                    f"(rebuild the dataset with --end-date and retrain)",
+                    json_output=json_output)
+                raise typer.Exit(1)
+            cutoff = date.fromisoformat(cutoff_s)
+            if end:
+                end_d = date.fromisoformat(end)
+                if end_d <= cutoff:
+                    emit_error(
+                        f"--end {end} is at or before the training cutoff "
+                        f"{cutoff} — in-sample predictions are not signals "
+                        f"(lookahead by construction)",
+                        json_output=json_output)
+                    raise typer.Exit(1)
+            else:
+                cur.execute("SELECT max(date) FROM stock_ohlcv")
+                end_d = cur.fetchone()[0]
+            cur.execute("SELECT max(prediction_date) FROM predictions "
+                        "WHERE model_id = %s", (model_id,))
+            last = cur.fetchone()[0]
+            start_d = max(cutoff + _td(days=1),
+                          (last + _td(days=1)) if last else cutoff + _td(days=1))
+        if end_d is None or start_d > end_d:
+            emit(f"{model_name}:{model_version} predictions are up to date "
+                 f"(through {last})",
+                 data={"days_predicted": 0, "up_to_date": True},
+                 json_output=json_output)
+            return
+        # the model predicts over ITS OWN dataset universe (the honest
+        # default; ml predict requires an explicit universe)
+        from gefion.ml.dataset import resolve_universe_symbols
+        with psycopg.connect(url) as conn:
+            uni_symbols = resolve_universe_symbols(conn, ds_universe or {})
+        if not uni_symbols:
+            emit_error("model's dataset universe resolves to no symbols",
+                       json_output=json_output)
+            raise typer.Exit(1)
+        t0 = _time.monotonic()
+        ml_predict(model_name=model_name, model_version=model_version,
+                   prediction_date=None,
+                   start_date=start_d.isoformat(), end_date=end_d.isoformat(),
+                   symbols=",".join(uni_symbols), exchange=None, limit=None,
+                   db_url=db_url, json_output=json_output)
+        emit(f"Backfill window {start_d} → {end_d} done in "
+             f"{_time.monotonic() - t0:.0f}s (resumable; PK-idempotent)",
+             json_output=json_output)
 
 
 @ml_app.command("predict")
@@ -12792,7 +12923,12 @@ def regime_discover_start(
     tier: List[str] = typer.Option(["interaction"], "--tier",
                                    help="Tier(s) enabled: interaction|grammar|expressive"),
     signal_source: str = typer.Option("features", "--signal-source",
-                                      help="Declared signal universe (v1: features)"),
+                                      help="Declared signal universe: "
+                                           "features | model_predictions"),
+    coverage_floor: float = typer.Option(
+        0.95, "--coverage-floor",
+        help="model_predictions rung: minimum fraction of post-cutoff "
+             "trading days each signal must cover"),
     grading_scheme: str = typer.Option("walk_forward", "--grading-scheme",
                                        help="Declared trust-grading scheme"),
     universe_filter: Optional[str] = typer.Option(
@@ -12837,7 +12973,10 @@ def regime_discover_start(
     from gefion.regimes.discovery.grammar import GrammarError
     from gefion.regimes.discovery.runner import DiscoveryConfig, DiscoveryError, run_discovery
     from gefion.regimes.discovery.segregation import SegregationError
-    from gefion.regimes.discovery.signals import load_market_data
+    from gefion.regimes.discovery.signals import (ModelSignalError,
+                                                  check_model_signal_window,
+                                                  load_market_data,
+                                                  resolve_model_signal_provenance)
 
     out = get_output(json_output)
     try:
@@ -12884,13 +13023,26 @@ def regime_discover_start(
                     cur.execute("SELECT symbol FROM stocks ORDER BY symbol")
                     symbols = [r[0] for r in cur.fetchall()]
                 symbols = duniverse.apply_chain(chain, symbols, conn=conn)
+            if signal_source not in ("features", "model_predictions"):
+                out.error(f"Unknown signal source {signal_source!r} — "
+                          f"available: features, model_predictions")
+                raise typer.Exit(1)
             if signal:
                 signals_list = list(signal)
+            elif signal_source == "model_predictions":
+                out.error("signal_source=model_predictions requires explicit "
+                          "--signal names (the model-derived series, e.g. "
+                          "macro_model_outlook_q50) — defaulting to all "
+                          "active features would silently change the rung")
+                raise typer.Exit(1)
             else:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT name FROM feature_definitions WHERE active = true ORDER BY name")
                     signals_list = [r[0] for r in cur.fetchall()]
+            provenance = None
+            if signal_source == "model_predictions":
+                provenance = resolve_model_signal_provenance(conn, signals_list)
             detector_list = []
             if principles:
                 from gefion.experiments.principles import load_principles
@@ -12912,6 +13064,11 @@ def regime_discover_start(
                 horizon_days=horizon_days, dataset_version=dataset,
                 symbols=symbols, optional_features=atom_features,
                 max_date=vintage)
+            window_record = None
+            if provenance is not None:
+                window_record = check_model_signal_window(
+                    conn, market, signals_list, provenance,
+                    coverage_floor=coverage_floor)
             config = DiscoveryConfig(
                 name=name, seed=seed, atoms=atom_list, signals=signals_list,
                 depth=depth, budget=budget, tiers=tuple(tier),
@@ -12921,10 +13078,11 @@ def regime_discover_start(
                 max_date=vintage, fresh_holdout=reserve,
                 freeform=freeform_list, detectors=detector_list,
                 reserve_justification=reserve_justification,
-                dataset_version=dataset)
+                dataset_version=dataset,
+                signal_provenance=provenance, signal_window=window_record)
             summary = run_discovery(conn, config, market)
     except (GrammarError, DiscoveryError, duniverse.UniverseError,
-            SegregationError, LookupError) as exc:
+            SegregationError, LookupError, ModelSignalError) as exc:
         out.error(f"Discovery refused: {exc}")
         raise typer.Exit(1)
 

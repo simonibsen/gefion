@@ -122,6 +122,13 @@ universe filters and sector-scoped work. Two guards now exist:
    ```cron
    # nightly: incremental prices then features (probation checks ride data-update)
    30 2 * * *  data-update --timeframe auto --json && feat-compute --all-features --incremental --json
+   # nightly ML top-up (spec 012, after feat-compute): keep the vintage
+   # model's out-of-sample prediction span growing daily. predict-backfill
+   # resumes from the last stored prediction (a no-op costs seconds);
+   # macro derive is incremental. The derived series are the meta-hunt's
+   # signal universe, so a silent stall here shows up as a coverage refusal
+   # at the next hunt — the honest failure mode.
+   50 2 * * *  ml predict-backfill --model-name prod_model --model-version v2022 --json && macro derive --series model_outlook_q50,model_confidence_width --json
    # weekly: provider-garbage sweep over stored data
    40 3 * * 0  quality backfill --json
    # weekly: ONE whole-database pg_dump (drift-proof: includes tables no

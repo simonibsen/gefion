@@ -18,6 +18,129 @@ from gefion.observability import create_span, set_attributes
 from gefion.regimes.discovery.segregation import MarketData, Series
 
 
+class ModelSignalError(ValueError):
+    """The model_predictions rung refuses: wrong namespace, missing
+    materialization, vintage mixing, lookahead, or thin coverage."""
+
+
+def resolve_model_signal_provenance(conn, signals: List[str]) -> Dict[str, Any]:
+    """Resolve declared model-prediction signals to ONE model identity.
+
+    Every signal must be a derived macro series whose market function reads
+    only model-prediction features (the model-derived namespace). All signals
+    must trace to the same model+version — two vintages in one hunt would be
+    silent mixing. Returns {model_name, model_version, training_cutoff,
+    horizons_days, input_features} where input_features is the model's FULL
+    declared input list (the conservative entanglement rule, FR-1206).
+    """
+    import json as _json
+
+    with create_span("discovery.signals.resolve_model_provenance",
+                     n_signals=len(signals)) as span:
+        idents: Dict[tuple, str] = {}
+        horizons: set = set()
+        fix = ("expose model signals with `gefion ml materialize-signals "
+               "--model-name <m> --model-version <v>` then "
+               "`gefion macro derive --series model_outlook_q50,"
+               "model_confidence_width`")
+        with conn.cursor() as cur:
+            for sig in signals:
+                fn_name = sig[len("macro_"):] if sig.startswith("macro_") else None
+                row = None
+                if fn_name:
+                    cur.execute("SELECT inputs FROM feature_functions "
+                                "WHERE name = %s AND scope = 'market'",
+                                (fn_name,))
+                    row = cur.fetchone()
+                if row is None:
+                    raise ModelSignalError(
+                        f"signal {sig!r} is not a model-derived series — the "
+                        f"model_predictions rung consumes derived macro series "
+                        f"backed by model-prediction features only; {fix}")
+                inputs = row[0]
+                if isinstance(inputs, str):
+                    inputs = _json.loads(inputs)
+                feats = (inputs or {}).get("features") or []
+                if not feats:
+                    raise ModelSignalError(
+                        f"signal {sig!r}: its market function declares no "
+                        f"input features — not model-derived; {fix}")
+                for feat in feats:
+                    cur.execute("SELECT function_name, params "
+                                "FROM feature_definitions WHERE name = %s",
+                                (feat,))
+                    frow = cur.fetchone()
+                    params = frow[1] if frow else None
+                    if isinstance(params, str):
+                        params = _json.loads(params)
+                    if (frow is None or frow[0] != "model_prediction"
+                            or not params):
+                        raise ModelSignalError(
+                            f"signal {sig!r} reads {feat!r}, which is not a "
+                            f"model-prediction feature — the rung refuses "
+                            f"mixed or indicator-backed series; {fix}")
+                    idents[(params["model_name"], params["model_version"])] =                         params["training_cutoff"]
+                    horizons.add(params["horizon_days"])
+            if len(idents) > 1:
+                raise ModelSignalError(
+                    f"declared signals trace to {len(idents)} different model "
+                    f"vintages ({sorted(f'{n}:{v}' for n, v in idents)}) — one "
+                    f"hunt, one vintage (silent mixing is how lookahead hides)")
+            (mname, mver), cutoff = next(iter(idents.items()))
+            cur.execute(
+                """SELECT d.feature_names FROM ml_models m
+                   JOIN ml_datasets d ON d.id = m.dataset_id
+                   WHERE m.name = %s AND m.version = %s""", (mname, mver))
+            drow = cur.fetchone()
+        prov = {"model_name": mname, "model_version": mver,
+                "training_cutoff": cutoff,
+                "horizons_days": sorted(horizons),
+                "input_features": sorted(drow[0]) if drow and drow[0] else []}
+        set_attributes(span, model=f"{mname}:{mver}", cutoff=cutoff)
+        return prov
+
+
+def check_model_signal_window(conn, market: MarketData, signals: List[str],
+                              provenance: Dict[str, Any],
+                              coverage_floor: float = 0.95) -> Dict[str, Any]:
+    """The rung's causality + coverage gate (FR-1205/1207), pre-registration.
+
+    Lookahead: any signal value at or before the training cutoff can only
+    mean corrupted materialization — refuse. Coverage: each signal must cover
+    at least `coverage_floor` of the post-cutoff trading calendar up to the
+    last evaluable day; a thin series refuses naming the fixing commands.
+    Returns the auditable window record for the pre-registration.
+    """
+    cutoff = datetime.date.fromisoformat(provenance["training_cutoff"])
+    end = max(market.dates())
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(DISTINCT date) FROM stock_ohlcv "
+                    "WHERE date > %s AND date <= %s", (cutoff, end))
+        expected = cur.fetchone()[0]
+    record = {"training_cutoff": str(cutoff), "window_end": str(end),
+              "expected_days": expected, "coverage_floor": coverage_floor,
+              "coverage": {}}
+    for sig in signals:
+        series = market.features[sig]
+        first = series[0][0]
+        if first <= cutoff:
+            raise ModelSignalError(
+                f"signal {sig!r} has values at or before the training cutoff "
+                f"{cutoff} (first: {first}) — lookahead by construction; "
+                f"re-materialize the signals from a clean backfill")
+        have = sum(1 for d, _ in series if cutoff < d <= end)
+        coverage = have / expected if expected else 0.0
+        record["coverage"][sig] = round(coverage, 4)
+        if coverage < coverage_floor:
+            raise ModelSignalError(
+                f"signal {sig!r} covers {coverage:.1%} of the {expected} "
+                f"post-cutoff trading days (floor {coverage_floor:.0%}) — "
+                f"fill the gap with `gefion ml predict-backfill "
+                f"--model-name {provenance['model_name']} --model-version "
+                f"{provenance['model_version']}` then `gefion macro derive`")
+    return record
+
+
 class FeatureSignalSource:
     """Per-observation edge records from market-level feature signals."""
 

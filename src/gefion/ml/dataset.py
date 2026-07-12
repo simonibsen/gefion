@@ -159,6 +159,12 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
     if not symbols and (universe.get("exchange") or universe.get("limit")):
         symbols = resolve_universe_symbols(conn, universe)
 
+    # Vintage bound (spec 012): a declared end_date is the TRAINING CUTOFF —
+    # nothing after it may enter the dataset. Labels bound themselves: rows
+    # whose forward window would cross the cutoff get null returns (prices
+    # end there) and are dropped below.
+    end_date = manifest.get("end_date")
+
     # Export prices - stream directly for CSV, load for parquet
     emit_progress(f"Exporting prices for {len(symbols)} symbols...")
     price_rows: list[dict[str, Any]] = []
@@ -172,9 +178,10 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                     FROM stocks s
                     JOIN stock_ohlcv o ON o.data_id = s.id
                     WHERE s.symbol = ANY(%s)
+                      AND (%s::date IS NULL OR o.date <= %s)
                     ORDER BY s.symbol, o.date;
                     """,
-                    (list(symbols),),
+                    (list(symbols), end_date, end_date),
                 )
             else:
                 cur.execute(
@@ -182,8 +189,10 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                     SELECT s.symbol, o.date, o.open, o.high, o.low, o.close, o.adjusted_close, o.volume
                     FROM stocks s
                     JOIN stock_ohlcv o ON o.data_id = s.id
+                    WHERE (%s::date IS NULL OR o.date <= %s)
                     ORDER BY s.symbol, o.date;
-                    """
+                    """,
+                    (end_date, end_date),
                 )
 
             def price_mapper(row):
@@ -254,8 +263,10 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                 JOIN feature_definitions fd ON fd.id = cf.feature_id
                 JOIN stocks s ON s.id = cf.data_id
                 WHERE {where_clause}
+                  AND (%s::date IS NULL OR cf.date <= %s)
                 ORDER BY s.symbol, cf.date, fd.name;
             """
+            params.extend([end_date, end_date])
 
             if params:
                 cur.execute(sql, tuple(params))

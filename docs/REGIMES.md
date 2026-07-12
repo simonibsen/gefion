@@ -250,6 +250,31 @@ honest ways to learn more from history — neither may ever top up a forward gra
   held-out symbols are genuinely new evidence units (per-entity label computation
   landed with issue #86; the discovery loop itself still searches at market scope).
 
+### The model_predictions rung (spec 012 — the ML meta-question)
+
+`signal_source='model_predictions'` points the same machinery at the ML model
+itself: the hunted signals are market-level series derived from a **vintage
+model's** out-of-sample predictions (`macro_model_outlook_q50`, the
+cross-sectional median q50 forecast; `macro_model_confidence_width`, the
+median q90−q10 spread). ML generates; statistics judges. Causal honesty is
+the whole game here, so the rung adds four refusals on top of the standard
+stack, all at pre-registration:
+
+- **One vintage per hunt** — every declared signal must trace to the same
+  model+version through the derived-series provenance chain; the run row
+  records the model identity and its training cutoff.
+- **Lookahead by construction** — a signal value at or before the training
+  cutoff refuses (the model saw that world; a "prediction" there is memory).
+- **Coverage floor** — each signal must cover the declared fraction
+  (default 95%) of post-cutoff trading days, else the run refuses naming
+  `ml predict-backfill` as the fix.
+- **Conservative entanglement** — a model signal is treated as derived from
+  ALL the model's declared input features; conditioning atoms drawn from any
+  of them are refused (conditioning the model on itself).
+
+Until the meta-hunt admits something, model predictions are signals under
+test — nothing anywhere may treat them as validated forecasts.
+
 ### Discovery inside experiment cycles
 
 `gefion experiment propose --type regime_discovery` runs discovery under cycle budgets
