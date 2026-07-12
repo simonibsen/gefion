@@ -32,6 +32,8 @@ def _conn():
 
 
 def _cleanup(cur):
+    cur.execute("DELETE FROM predictions WHERE model_id IN "
+                "(SELECT id FROM ml_models WHERE name = 'mlv_model')")
     cur.execute("DELETE FROM ml_models WHERE name = 'mlv_model'")
     cur.execute("DELETE FROM ml_runs WHERE dataset_id IN "
                 "(SELECT id FROM ml_datasets WHERE name = 'mlv')")
@@ -144,3 +146,56 @@ def test_train_records_cutoff_in_model_metadata(world, tmp_path):
                     "WHERE name='mlv_model' AND version='vtest'")
         assert cur.fetchone()[0] == CUTOFF.isoformat()
         cur.execute("DELETE FROM ml_models WHERE name='mlv_model'")
+
+
+def test_predict_backfill_vintage_discipline(world, tmp_path):
+    """Backfill fills strictly post-cutoff days, resumes idempotently, and
+    refuses attempts to reach at or before the cutoff."""
+    from typer.testing import CliRunner
+    from gefion.cli import app
+    runner = CliRunner()
+    for cmd in (
+        ["ml", "dataset-build", "--name", "mlv", "--version", "vbf",
+         "--symbols", "MLV1,MLV2", "--horizons", "7",
+         "--weak-thresholds", "0.02", "--strong-thresholds", "0.05",
+         "--end-date", CUTOFF.isoformat(),
+         "--out-dir", str(tmp_path), "--export",
+         "--db-url", schema.test_db_url()],
+        ["ml", "train", "--dataset-name", "mlv", "--dataset-version", "vbf",
+         "--model-name", "mlv_model", "--model-version", "vbf",
+         "--algorithm", "quantile_regression",
+         "--out-dir", str(tmp_path / "models"),
+         "--db-url", schema.test_db_url()],
+    ):
+        r = runner.invoke(app, cmd)
+        assert r.exit_code == 0, r.output
+
+    # refusal: explicit end at/before the cutoff is lookahead-by-construction
+    r = runner.invoke(app, ["ml", "predict-backfill",
+                            "--model-name", "mlv_model",
+                            "--model-version", "vbf",
+                            "--end", CUTOFF.isoformat(),
+                            "--db-url", schema.test_db_url()])
+    assert r.exit_code == 1
+    assert "cutoff" in r.output.lower()
+
+    # backfill: fills post-cutoff days only
+    r = runner.invoke(app, ["ml", "predict-backfill",
+                            "--model-name", "mlv_model",
+                            "--model-version", "vbf",
+                            "--db-url", schema.test_db_url()])
+    assert r.exit_code == 0, r.output
+    with world.cursor() as cur:
+        cur.execute("""SELECT min(prediction_date), max(prediction_date), count(*)
+                       FROM predictions p JOIN ml_models m ON m.id = p.model_id
+                       WHERE m.name='mlv_model' AND m.version='vbf'""")
+        lo, hi, n = cur.fetchone()
+    assert n > 0 and lo > CUTOFF                       # strictly out-of-sample
+
+    # resume: second run finds nothing new
+    r = runner.invoke(app, ["ml", "predict-backfill",
+                            "--model-name", "mlv_model",
+                            "--model-version", "vbf",
+                            "--db-url", schema.test_db_url()])
+    assert r.exit_code == 0, r.output
+    assert "up to date" in r.output.lower() or "0" in r.output

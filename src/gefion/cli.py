@@ -1497,6 +1497,92 @@ def ml_train(
     )
 
 
+@ml_app.command("predict-backfill")
+def ml_predict_backfill(
+    model_name: str = typer.Option(..., help="Vintage model name"),
+    model_version: str = typer.Option(..., help="Vintage model version"),
+    end: Optional[str] = typer.Option(
+        None, "--end", help="Backfill through this date (default: latest "
+                            "price date). Must be after the training cutoff."),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Point-in-time prediction backfill for a VINTAGE model (spec 012).
+
+    Fills every post-cutoff trading day the model hasn't predicted yet —
+    resumable (starts after the last stored prediction), idempotent (the
+    predictions primary key dedups), and lookahead-proof: dates at or before
+    the model's recorded training cutoff refuse by construction.
+    """
+    import time as _time
+    from datetime import timedelta as _td
+
+    with create_span("cli.ml-predict-backfill", model=model_name):
+        url = _db_url(db_url)
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT m.id, m.hyperparams->>'training_cutoff', d.universe "
+                "FROM ml_models m LEFT JOIN ml_datasets d ON d.id = m.dataset_id "
+                "WHERE m.name = %s AND m.version = %s",
+                (model_name, model_version))
+            row = cur.fetchone()
+            if row is None:
+                emit_error(f"model {model_name}:{model_version} not found — "
+                           f"train it first (`gefion ml train`)",
+                           json_output=json_output)
+                raise typer.Exit(1)
+            model_id, cutoff_s, ds_universe = row
+            if not cutoff_s:
+                emit_error(
+                    f"model {model_name}:{model_version} has no recorded "
+                    f"training cutoff — backfill requires a VINTAGE model "
+                    f"(rebuild the dataset with --end-date and retrain)",
+                    json_output=json_output)
+                raise typer.Exit(1)
+            cutoff = date.fromisoformat(cutoff_s)
+            if end:
+                end_d = date.fromisoformat(end)
+                if end_d <= cutoff:
+                    emit_error(
+                        f"--end {end} is at or before the training cutoff "
+                        f"{cutoff} — in-sample predictions are not signals "
+                        f"(lookahead by construction)",
+                        json_output=json_output)
+                    raise typer.Exit(1)
+            else:
+                cur.execute("SELECT max(date) FROM stock_ohlcv")
+                end_d = cur.fetchone()[0]
+            cur.execute("SELECT max(prediction_date) FROM predictions "
+                        "WHERE model_id = %s", (model_id,))
+            last = cur.fetchone()[0]
+            start_d = max(cutoff + _td(days=1),
+                          (last + _td(days=1)) if last else cutoff + _td(days=1))
+        if end_d is None or start_d > end_d:
+            emit(f"{model_name}:{model_version} predictions are up to date "
+                 f"(through {last})",
+                 data={"days_predicted": 0, "up_to_date": True},
+                 json_output=json_output)
+            return
+        # the model predicts over ITS OWN dataset universe (the honest
+        # default; ml predict requires an explicit universe)
+        from gefion.ml.dataset import resolve_universe_symbols
+        with psycopg.connect(url) as conn:
+            uni_symbols = resolve_universe_symbols(conn, ds_universe or {})
+        if not uni_symbols:
+            emit_error("model's dataset universe resolves to no symbols",
+                       json_output=json_output)
+            raise typer.Exit(1)
+        t0 = _time.monotonic()
+        ml_predict(model_name=model_name, model_version=model_version,
+                   prediction_date=None,
+                   start_date=start_d.isoformat(), end_date=end_d.isoformat(),
+                   symbols=",".join(uni_symbols), exchange=None, limit=None,
+                   db_url=db_url, json_output=json_output)
+        emit(f"Backfill window {start_d} → {end_d} done in "
+             f"{_time.monotonic() - t0:.0f}s (resumable; PK-idempotent)",
+             json_output=json_output)
+
+
 @ml_app.command("predict")
 def ml_predict(
     model_name: str = typer.Option(..., help="Model name to use for predictions"),
