@@ -188,3 +188,90 @@ def test_thin_days_never_reach_the_body(world):
     out = run_market_function(world, _get_fn(world, "mdx_thin"),
                               start=None, min_stocks=50)   # floor above n=4
     assert out["values"] == [] and out["gaps"] >= 29
+
+
+# --- T009/T010: lifecycle (US2) --------------------------------------------------------
+
+def test_disabled_function_skipped_and_reported(world):
+    from typer.testing import CliRunner
+    from gefion.cli import app
+    from gefion.macro.derived import derive_series
+    derive_series(world, "breadth_sma200", min_stocks=2)
+    with world.cursor() as cur:
+        cur.execute("UPDATE feature_functions SET enabled = FALSE "
+                    "WHERE name = 'breadth_sma200'")
+    assert derive_series(world, "breadth_sma200", min_stocks=2) == -1
+    r = CliRunner().invoke(app, ["macro", "derive", "--series", "breadth_sma200",
+                                 "--min-stocks", "2", "--json",
+                                 "--db-url", schema.test_db_url()])
+    assert r.exit_code == 0, r.output
+    payload = json.loads(r.output)
+    assert payload["skipped_disabled"] == ["breadth_sma200"]
+    with world.cursor() as cur:                     # re-enable, resumes
+        cur.execute("UPDATE feature_functions SET enabled = TRUE "
+                    "WHERE name = 'breadth_sma200'")
+    assert derive_series(world, "breadth_sma200", min_stocks=2) >= 0
+
+
+def test_export_import_roundtrips_market_scope(world, tmp_path):
+    from gefion.cli import (export_functions_to_directory,
+                            import_functions_from_directory)
+    from gefion.macro.derived import derive_series
+    derive_series(world, "dispersion_20", min_stocks=2)
+    n = export_functions_to_directory(world, tmp_path, ["dispersion_20"])
+    assert n == 1
+    exported = json.loads(next(tmp_path.glob("dispersion_20*.json")).read_text())
+    assert exported["scope"] == "market"
+    with world.cursor() as cur:
+        cur.execute("DELETE FROM feature_functions WHERE name='dispersion_20'")
+    assert import_functions_from_directory(world, tmp_path, ["dispersion_20"]) == 1
+    with world.cursor() as cur:
+        cur.execute("SELECT scope, enabled FROM feature_functions "
+                    "WHERE name='dispersion_20'")
+        assert cur.fetchone() == ("market", True)
+
+
+def test_import_refuses_unknown_declared_inputs(world, tmp_path):
+    from gefion.cli import import_functions_from_directory
+    bad = {"name": "mdx_badinputs", "version": "v1", "language": "python",
+           "function_body": "def compute(rows):\n    return 1.0",
+           "scope": "market", "inputs": {"features": ["no_such_feature"]}}
+    (tmp_path / "mdx_badinputs_v1.json").write_text(json.dumps(bad))
+    # invalid files are skipped-and-counted-out, not silently imported
+    assert import_functions_from_directory(world, tmp_path, None) == 0
+    with world.cursor() as cur:
+        cur.execute("SELECT count(*) FROM feature_functions WHERE name='mdx_badinputs'")
+        assert cur.fetchone()[0] == 0
+
+
+# --- T011/T012: failure isolation (US3) -------------------------------------------------
+
+def test_partial_failure_is_isolated_and_exit_nonzero(world):
+    from typer.testing import CliRunner
+    from gefion.cli import app
+    from gefion.macro.derived import derive_series
+    # a broken DB body for dispersion; healthy breadth
+    derive_series(world, "breadth_sma200", min_stocks=2)
+    derive_series(world, "dispersion_20", min_stocks=2)
+    with world.cursor() as cur:
+        cur.execute("UPDATE feature_functions SET function_body = %s "
+                    "WHERE name = 'dispersion_20'",
+                    ("def compute(rows):\n    raise ValueError('broke')",))
+        cur.execute("""DELETE FROM computed_features WHERE feature_id =
+            (SELECT id FROM feature_definitions WHERE name='macro_dispersion_20')""")
+    r = CliRunner().invoke(app, ["macro", "derive", "--min-stocks", "2",
+                                 "--full", "--json",
+                                 "--db-url", schema.test_db_url()])
+    assert r.exit_code == 2, r.output               # partial failure
+    payload = json.loads(r.output)
+    assert "broke" in payload["failed"]["dispersion_20"]
+    assert payload["written"]["breadth_sma200"] > 0  # healthy one completed
+    with world.cursor() as cur:                      # failing one wrote ZERO
+        cur.execute("""SELECT count(*) FROM computed_features WHERE feature_id =
+            (SELECT id FROM feature_definitions WHERE name='macro_dispersion_20')""")
+        assert cur.fetchone()[0] == 0
+    # recovery via explicit reseed, then retry covers the full pending range
+    from gefion.macro.derived import reseed_function
+    reseed_function(world, "dispersion_20")
+    from gefion.macro.derived import derive_series as ds
+    assert ds(world, "dispersion_20", min_stocks=2) > 0

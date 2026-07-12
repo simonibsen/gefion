@@ -150,7 +150,7 @@ def _export_feature_functions(conn, names: Optional[List[str]] = None) -> list[d
             """
             SELECT name, version, status, description, language, function_body, inputs,
                    output_name, output_type, param_schema, defaults, dependencies,
-                   checksum, tags, min_app_version, enabled, created_by
+                   checksum, tags, min_app_version, enabled, created_by, scope
             FROM feature_functions
             {where}
             ORDER BY name, version;
@@ -181,6 +181,7 @@ def _export_feature_functions(conn, names: Optional[List[str]] = None) -> list[d
                 "min_app_version": r[14],
                 "enabled": r[15],
                 "created_by": r[16],
+                "scope": r[17] if len(r) > 17 else "stock",
             }
         )
     return data
@@ -5719,6 +5720,21 @@ def _upsert_feature_function(conn: psycopg.Connection, payload: dict) -> None:
     missing = [k for k in required if k not in payload]
     if missing:
         raise ValueError(f"Missing required keys for feature_function: {', '.join(missing)}")
+
+    if payload.get("scope") == "market":
+        # market bodies declare per-stock inputs; refuse unknown ones now
+        # rather than failing at derive time (011 contract)
+        declared = (payload.get("inputs") or {}).get("features", [])
+        with conn.cursor() as cur:
+            for feat in declared:
+                if feat == "ret_20":
+                    continue          # computed in-query
+                cur.execute("SELECT 1 FROM feature_definitions WHERE name = %s",
+                            (feat,))
+                if cur.fetchone() is None:
+                    raise ValueError(
+                        f"market function {payload['name']!r} declares unknown "
+                        f"input feature {feat!r}")
 
     upsert_feature_function_helper(conn, payload, return_id=False)
 
