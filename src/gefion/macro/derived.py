@@ -1,121 +1,138 @@
-"""Derived macro series: facts about the universe's SHAPE (breadth,
-dispersion) computed from our own cross-section — the information families
-no single-stock indicator carries.
+"""Derived macro series orchestration (spec 011, epic #114).
 
-Follows the macro mold exactly (see ingest.materialize_feature): each series
-is a `macro_series` catalog row plus a feature definition with
-`entity_table='macro_series'`, values in computed_features keyed by the
-series id — so a derived series becomes a discovery atom with ZERO DDL,
-like macro_vix.
+Market-level function bodies live IN THE DATABASE (feature_functions,
+scope='market') and execute through the standard sandboxed dispatcher —
+one per date over the stock cross-section. This module only orchestrates:
+seed (create-if-absent), wire (series row + feature definition), stream,
+store. The database body is the source of truth; `reseed_function` is the
+single explicit path that overwrites it from the repo seeds.
 
-Honesty: a day whose cross-section is thinner than `min_stocks` gets NO
-value (an honest gap, never a garbage number); recomputation is idempotent
-and incremental (ON CONFLICT DO NOTHING from the last computed date).
+Honesty: thin days (< min_stocks) never reach a body (gap, not garbage);
+a failing body writes NOTHING (write-on-success, isolated per function);
+recomputation is idempotent and incremental.
 """
+import json
 from typing import Any, Dict, Optional
 
 from gefion.observability import create_span, set_attributes
 
 from . import catalog
-
-# Each entry: description + the per-date SQL producing (date, value) rows.
-# %(min_stocks)s and %(start)s are bound parameters; the universe is
-# asset_type='Stock' only (ETFs/blank excluded — they dilute breadth).
-DERIVED_SERIES: Dict[str, Dict[str, Any]] = {
-    "breadth_sma200": {
-        "description": ("Breadth: % of Stock universe closing above its own "
-                        "200-day SMA (participation)"),
-        "sql": """
-            SELECT o.date, 100.0 * AVG((o.close > cf.value)::int)::float
-            FROM stock_ohlcv o
-            JOIN stocks s ON s.id = o.data_id AND s.asset_type = 'Stock'
-            JOIN computed_features cf
-              ON cf.data_id = o.data_id AND cf.date = o.date
-             AND cf.feature_id = (SELECT id FROM feature_definitions
-                                  WHERE name = 'indicator_sma_200')
-            WHERE o.close > 0 AND cf.value > 0 AND o.date > %(start)s
-            GROUP BY o.date
-            HAVING COUNT(*) >= %(min_stocks)s
-        """,
-    },
-    "dispersion_20": {
-        "description": ("Dispersion: cross-sectional std of 20-day returns "
-                        "(when stocks move together, selection can't matter)"),
-        "sql": """
-            WITH r AS (
-                SELECT o.date, o.data_id,
-                       o.close / NULLIF(LAG(o.close, 20) OVER (
-                           PARTITION BY o.data_id ORDER BY o.date), 0) - 1 AS ret
-                FROM stock_ohlcv o
-                JOIN stocks s ON s.id = o.data_id AND s.asset_type = 'Stock'
-                WHERE o.close > 0
-            )
-            SELECT date, STDDEV_POP(ret)::float
-            FROM r
-            WHERE ret IS NOT NULL AND date > %(start)s
-            GROUP BY date
-            HAVING COUNT(*) >= %(min_stocks)s
-        """,
-    },
-}
+from .market_bodies import SEED_BODIES
 
 
 class MacroDeriveError(ValueError):
-    """Unknown derived series or unusable inputs."""
+    """Unknown derived series or unusable configuration."""
 
 
 def ensure_macro_function(conn, name: str, description: str) -> None:
-    """Register the macro function NAME in the function registry.
-
-    Macro features are materialized by gefion.macro code paths, not the
-    feature-function dispatcher — but the registry must still know every
-    function name in use, or feat-def-validate/fix (the janitor) would
-    treat macro features as orphans and deactivate them."""
+    """Register an ingest-side macro function name (e.g. macro_value) so the
+    registry knows every function name in use (janitor safety)."""
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO feature_functions
                    (name, version, status, enabled, description, language,
-                    function_body)
+                    function_body, scope)
                VALUES (%s, 'v1', 'active', TRUE, %s, 'python',
-                       '# materialized by gefion.macro — not dispatched')
+                       '# materialized by gefion.macro — not dispatched',
+                       'stock')
                ON CONFLICT DO NOTHING""",
             (name, description))
 
 
-def derive_series(conn, name: str, min_stocks: int = 100,
-                  full: bool = False) -> int:
-    """Compute one derived macro series and upsert it into the feature store.
+def _seed_function(conn, name: str) -> None:
+    """Plant the seed body if absent. NEVER overwrites (DB wins)."""
+    spec = SEED_BODIES[name]
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO feature_functions
+                   (name, version, status, enabled, description, language,
+                    function_body, inputs, scope)
+               VALUES (%s, 'v1', 'active', TRUE, %s, 'python', %s, %s, 'market')
+               ON CONFLICT DO NOTHING""",
+            (name, spec["description"], spec["body"],
+             json.dumps(spec["inputs"])))
 
-    Returns the number of NEW rows written (0 when already current —
-    idempotent and incremental). `full` recomputes from the beginning
-    (values are pure functions of the cross-section, so this is safe)."""
-    from gefion.db.ingest import ensure_feature_definitions
 
-    spec = DERIVED_SERIES.get(name)
-    if spec is None:
+def reseed_function(conn, name: str) -> None:
+    """EXPLICITLY overwrite one DB body from the repo seed — the loud
+    recovery path for a mangled body. Never called implicitly."""
+    if name not in SEED_BODIES:
         raise MacroDeriveError(
             f"unknown derived series {name!r} — available: "
-            f"{sorted(DERIVED_SERIES)}")
+            f"{sorted(SEED_BODIES)}")
+    spec = SEED_BODIES[name]
+    with create_span("macro.derived.reseed", series=name):
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE feature_functions
+                   SET function_body = %s, inputs = %s, scope = 'market',
+                       enabled = TRUE
+                   WHERE name = %s""",
+                (spec["body"], json.dumps(spec["inputs"]), name))
+            if cur.rowcount == 0:
+                _seed_function(conn, name)
+        conn.commit()
+
+
+def _get_market_function(conn, name: str) -> Optional[Dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, name, function_body, inputs, enabled
+               FROM feature_functions WHERE name = %s AND scope = 'market'""",
+            (name,))
+        r = cur.fetchone()
+    if r is None:
+        return None
+    inputs = r[3]
+    if isinstance(inputs, str):
+        inputs = json.loads(inputs)
+    return {"id": r[0], "name": r[1], "function_body": r[2],
+            "inputs": inputs, "enabled": r[4]}
+
+
+def derive_series(conn, name: str, min_stocks: int = 100,
+                  full: bool = False) -> int:
+    """Compute one derived series via its DATABASE body. Returns new rows
+    written (0 when current). Raises MarketFunctionError on body failure
+    (nothing written for it), MacroDeriveError on unknown series, and
+    returns -1 for a disabled function (caller reports the skip)."""
+    from gefion.db.ingest import ensure_feature_definitions
+
+    if name not in SEED_BODIES and _get_market_function(conn, name) is None:
+        raise MacroDeriveError(
+            f"unknown derived series {name!r} — available: "
+            f"{sorted(SEED_BODIES)}")
 
     with create_span("macro.derived.derive", series=name,
                      min_stocks=min_stocks) as span:
-        ensure_macro_function(
-            conn, "macro_derived",
-            "Derived macro series (breadth/dispersion) — see gefion.macro.derived")
+        if name in SEED_BODIES:
+            _seed_function(conn, name)
+        fn = _get_market_function(conn, name)
+        if fn is None:
+            raise MacroDeriveError(
+                f"{name!r} exists but is not a market-scope function")
+        if not fn["enabled"]:
+            set_attributes(span, skipped_disabled=True)
+            return -1
+
         series_id = catalog.ensure_series(
             conn, name=name, provider="derived", kind="derived",
-            cadence="daily", description=spec["description"])
+            cadence="daily",
+            description=SEED_BODIES.get(name, {}).get("description"))
         feature_name = f"macro_{name}"
         ids = ensure_feature_definitions(conn, [{
-            "name": feature_name, "function_name": "macro_derived",
+            "name": feature_name, "function_name": name,
             "params": None, "source_table": "stock_ohlcv",
             "source_column": "close", "store_table": "computed_features",
             "store_column": "value", "store_type": "double precision",
             "active": True, "entity_table": "macro_series",
         }])
         feature_id = ids[feature_name]
-
         with conn.cursor() as cur:
+            # migrate pre-011 wiring (function_name was 'macro_derived')
+            cur.execute("UPDATE feature_definitions SET function_name = %s "
+                        "WHERE name = %s AND function_name <> %s",
+                        (name, feature_name, name))
             if full:
                 start = None
             else:
@@ -123,16 +140,28 @@ def derive_series(conn, name: str, min_stocks: int = 100,
                             "WHERE feature_id = %s AND data_id = %s",
                             (feature_id, series_id))
                 start = cur.fetchone()[0]
-            cur.execute(
-                f"""INSERT INTO computed_features (data_id, date, feature_id, value)
-                    SELECT %(series_id)s, q.date, %(feature_id)s, q.value
-                    FROM ({spec['sql']}) AS q(date, value)
-                    ON CONFLICT DO NOTHING""",
-                {"series_id": series_id, "feature_id": feature_id,
-                 "min_stocks": min_stocks,
-                 "start": start or __import__("datetime").date(1900, 1, 1)},
-            )
-            written = cur.rowcount
+
+        from gefion.features.dispatcher import run_market_function
+        result = run_market_function(conn, fn, start=start,
+                                     min_stocks=min_stocks)
+
+        written = 0
+        if result["values"]:
+            # incremental: append-only (DO NOTHING). --full: a deliberate
+            # recompute of history — the (possibly edited) body's output
+            # REPLACES stored values (that is what "recompute" means).
+            conflict = ("DO UPDATE SET value = EXCLUDED.value" if full
+                        else "DO NOTHING")
+            with conn.cursor() as cur:
+                cur.executemany(
+                    f"""INSERT INTO computed_features
+                           (data_id, date, feature_id, value)
+                       VALUES (%s, %s, %s, %s)
+                       ON CONFLICT (data_id, feature_id, date) {conflict}""",
+                    [(series_id, d, feature_id, v)
+                     for d, v in result["values"]],
+                )
+                written = cur.rowcount
         conn.commit()
-        set_attributes(span, rows_written=written)
+        set_attributes(span, rows_written=written, gaps=result["gaps"])
         return written

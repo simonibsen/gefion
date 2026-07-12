@@ -12193,33 +12193,60 @@ def macro_derive(
     full: bool = typer.Option(
         False, "--full", help="Recompute from the beginning (safe: pure "
                               "function of the cross-section)"),
+    reseed: Optional[str] = typer.Option(
+        None, "--reseed", help="EXPLICITLY overwrite one DB body from the "
+                               "repo seed (loud recovery path)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
 ) -> None:
     """Compute derived macro series (breadth, dispersion) from our own
     cross-section — market-shape facts that become discovery atoms with
     zero DDL, like macro_vix. Idempotent and incremental."""
-    from gefion.macro.derived import DERIVED_SERIES, MacroDeriveError, derive_series
+    from gefion.features.dispatcher import MarketFunctionError
+    from gefion.macro.derived import (SEED_BODIES, MacroDeriveError,
+                                      derive_series, reseed_function)
     from gefion.output import get_output
     out = get_output(json_output)
-    names = sorted(DERIVED_SERIES) if series == "all" \
+    if reseed:
+        with _regime_conn(db_url) as conn:
+            try:
+                reseed_function(conn, reseed)
+            except MacroDeriveError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+        out.warning(f"{reseed}: DB body OVERWRITTEN from repo seed "
+                    f"(the only implicit-edit-clobbering path, used explicitly)")
+    names = sorted(SEED_BODIES) if series == "all" \
         else [x.strip() for x in series.split(",") if x.strip()]
-    results = {}
+    results, failures, skipped = {}, {}, []
     with create_span("cli.macro-derive", series=",".join(names)):
         with _regime_conn(db_url) as conn:
             for name in names:
                 try:
-                    results[name] = derive_series(conn, name,
-                                                  min_stocks=min_stocks,
-                                                  full=full)
+                    n = derive_series(conn, name, min_stocks=min_stocks,
+                                      full=full)
                 except MacroDeriveError as exc:
                     out.error(str(exc))
                     raise typer.Exit(1)
+                except MarketFunctionError as exc:
+                    failures[name] = str(exc)
+                    continue
+                if n == -1:
+                    skipped.append(name)
+                else:
+                    results[name] = n
     if out.json_mode:
-        out.json({"written": results, "min_stocks": min_stocks})
+        out.json({"written": results, "skipped_disabled": skipped,
+                  "failed": failures, "min_stocks": min_stocks})
     else:
         for name, n in results.items():
             out.success(f"macro_{name}: {n} new value(s)")
+        for name in skipped:
+            out.warning(f"macro_{name}: SKIPPED (function disabled)")
+        for name, reason in failures.items():
+            out.error(f"macro_{name}: FAILED — {reason} (zero values written)")
+    if failures:
+        raise typer.Exit(2)
 
 
 @macro_app.command("list")
