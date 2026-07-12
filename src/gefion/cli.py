@@ -5589,7 +5589,7 @@ def list_functions(
             with db_connection(db_url) as conn:
                 init_schema_tables(conn, ["feature_functions"])
                 with conn.cursor() as cur:
-                    select_cols = "name, version, status, language, enabled, description, tags, updated_at"
+                    select_cols = "name, version, status, language, enabled, description, tags, updated_at, scope"
                     if show_body:
                         select_cols += ", function_body"
                     params: Dict[str, object] = {}
@@ -5619,9 +5619,10 @@ def list_functions(
                     "description": r[5],
                     "tags": list(r[6]) if r[6] is not None else None,
                     "updated_at": r[7].isoformat() if len(r) > 7 and r[7] else None,
+                    "scope": r[8] if len(r) > 8 else "stock",
                 }
-                if show_body and len(r) > 8:
-                    entry["function_body"] = r[8]
+                if show_body and len(r) > 9:
+                    entry["function_body"] = r[9]
                 data.append(entry)
 
             if not data:

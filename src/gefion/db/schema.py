@@ -233,6 +233,7 @@ def create_feature_functions_table(conn: Connection) -> None:
                 tags TEXT[],
                 min_app_version TEXT,
                 enabled BOOLEAN DEFAULT TRUE,
+                scope TEXT NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market')),
                 called_by TEXT,
                 created_by TEXT,
                 created_at TIMESTAMP DEFAULT NOW(),
@@ -244,6 +245,10 @@ def create_feature_functions_table(conn: Connection) -> None:
         # Create composite index for efficient lookups by (enabled, status, name)
         # This optimizes the common query pattern in dispatcher:
         # WHERE enabled = TRUE AND status = 'active' AND name = %s
+        cur.execute(
+            "ALTER TABLE feature_functions ADD COLUMN IF NOT EXISTS scope TEXT "
+            "NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market'));"
+        )
         cur.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_feature_functions_enabled_status_name
