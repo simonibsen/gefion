@@ -1497,6 +1497,38 @@ def ml_train(
     )
 
 
+@ml_app.command("materialize-signals")
+def ml_materialize_signals(
+    model_name: str = typer.Option(..., help="Vintage model name"),
+    model_version: str = typer.Option(..., help="Vintage model version"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
+) -> None:
+    """Expose a vintage model's stored predictions as discovery signals
+    (spec 012): per-stock features named with the model identity
+    (pred_q50_h30__<model>_<version>), plus the two market bodies
+    (model_outlook_q50, model_confidence_width) seeded create-if-absent —
+    compute them afterwards with `gefion macro derive`."""
+    from gefion.ml.signal_features import (SignalMaterializeError,
+                                           materialize_prediction_features)
+
+    with create_span("cli.ml-materialize-signals", model=model_name):
+        with psycopg.connect(_db_url(db_url)) as conn:
+            try:
+                result = materialize_prediction_features(
+                    conn, model_name, model_version)
+            except SignalMaterializeError as exc:
+                emit_error(str(exc), json_output=json_output)
+                raise typer.Exit(1)
+        emit(f"Materialized {sum(result['features'].values())} new feature "
+             f"rows across {len(result['features'])} prediction features "
+             f"(horizons {result['horizons']}, cutoff {result['cutoff']}); "
+             f"market bodies seeded: {', '.join(result['market_functions'])} "
+             f"— run `gefion macro derive --series "
+             f"{','.join(result['market_functions'])}` to compute the series",
+             data=result, json_output=json_output)
+
+
 @ml_app.command("predict-backfill")
 def ml_predict_backfill(
     model_name: str = typer.Option(..., help="Vintage model name"),
