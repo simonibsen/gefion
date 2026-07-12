@@ -64,6 +64,24 @@ class MacroDeriveError(ValueError):
     """Unknown derived series or unusable inputs."""
 
 
+def ensure_macro_function(conn, name: str, description: str) -> None:
+    """Register the macro function NAME in the function registry.
+
+    Macro features are materialized by gefion.macro code paths, not the
+    feature-function dispatcher — but the registry must still know every
+    function name in use, or feat-def-validate/fix (the janitor) would
+    treat macro features as orphans and deactivate them."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO feature_functions
+                   (name, version, status, enabled, description, language,
+                    function_body)
+               VALUES (%s, 'v1', 'active', TRUE, %s, 'python',
+                       '# materialized by gefion.macro — not dispatched')
+               ON CONFLICT DO NOTHING""",
+            (name, description))
+
+
 def derive_series(conn, name: str, min_stocks: int = 100,
                   full: bool = False) -> int:
     """Compute one derived macro series and upsert it into the feature store.
@@ -81,6 +99,9 @@ def derive_series(conn, name: str, min_stocks: int = 100,
 
     with create_span("macro.derived.derive", series=name,
                      min_stocks=min_stocks) as span:
+        ensure_macro_function(
+            conn, "macro_derived",
+            "Derived macro series (breadth/dispersion) — see gefion.macro.derived")
         series_id = catalog.ensure_series(
             conn, name=name, provider="derived", kind="derived",
             cadence="daily", description=spec["description"])

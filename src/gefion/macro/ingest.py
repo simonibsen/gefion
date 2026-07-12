@@ -111,6 +111,10 @@ def materialize_feature(conn, name: str,
     from gefion.db.ingest import ensure_feature_definitions
 
     with create_span("macro.ingest.materialize_feature", series=name) as span:
+        from gefion.macro.derived import ensure_macro_function
+        ensure_macro_function(
+            conn, "macro_value",
+            "Ingested macro series values — see gefion.macro.ingest")
         series = catalog.get_series(conn, name)
         if series is None:
             raise MacroIngestError(f"no macro series named {name!r} — "
