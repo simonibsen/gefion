@@ -32,6 +32,9 @@ def _conn():
 
 
 def _cleanup(cur):
+    cur.execute("DELETE FROM ml_models WHERE name = 'mlv_model'")
+    cur.execute("DELETE FROM ml_runs WHERE dataset_id IN "
+                "(SELECT id FROM ml_datasets WHERE name = 'mlv')")
     cur.execute("DELETE FROM ml_datasets WHERE name = 'mlv'")
     cur.execute("DELETE FROM computed_features WHERE data_id IN "
                 "(SELECT id FROM stocks WHERE symbol LIKE 'MLV%')")
@@ -113,3 +116,31 @@ def test_dataset_end_date_bounds_everything(world, tmp_path):
         "a label's outcome window must not peek past the cutoff")
     # and labels near the boundary genuinely exist (not over-truncated)
     assert max_label >= CUTOFF - dt.timedelta(days=horizon + 5)
+
+
+def test_train_records_cutoff_in_model_metadata(world, tmp_path):
+    """The trained model's stored provenance carries the training cutoff —
+    every downstream door (backfill, discovery rung) validates against it."""
+    from typer.testing import CliRunner
+    from gefion.cli import app
+    runner = CliRunner()
+    r = runner.invoke(app, [
+        "ml", "dataset-build", "--name", "mlv", "--version", "vtrain",
+        "--symbols", "MLV1,MLV2", "--horizons", "7",
+        "--weak-thresholds", "0.02", "--strong-thresholds", "0.05",
+        "--end-date", CUTOFF.isoformat(),
+        "--out-dir", str(tmp_path), "--export",
+        "--db-url", schema.test_db_url()])
+    assert r.exit_code == 0, r.output
+    r = runner.invoke(app, [
+        "ml", "train", "--dataset-name", "mlv", "--dataset-version", "vtrain",
+        "--model-name", "mlv_model", "--model-version", "vtest",
+        "--algorithm", "quantile_regression",
+        "--out-dir", str(tmp_path / "models"),
+        "--db-url", schema.test_db_url()])
+    assert r.exit_code == 0, r.output
+    with world.cursor() as cur:
+        cur.execute("SELECT hyperparams->>'training_cutoff' FROM ml_models "
+                    "WHERE name='mlv_model' AND version='vtest'")
+        assert cur.fetchone()[0] == CUTOFF.isoformat()
+        cur.execute("DELETE FROM ml_models WHERE name='mlv_model'")

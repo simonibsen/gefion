@@ -637,7 +637,8 @@ def ml_dataset_build(
         universe["limit"] = int(limit)
 
     label_spec = {"type": "forward_return_5class", "thresholds": thresholds_by_horizon}
-    split_spec = {"type": "walk_forward", "note": "TBD", "horizons_days": horizon_vals}
+    split_spec = {"type": "walk_forward", "note": "TBD", "horizons_days": horizon_vals,
+                  **({"end_date": end_date} if end_date else {})}
 
     # Create a subdirectory for this dataset (so features/labels don't collide)
     dataset_dir = out_dir / f"{name}_{version}"
@@ -1465,7 +1466,13 @@ def ml_train(
                     run_id,
                     dataset["id"],
                     algorithm,
-                    Json({"algorithm": algorithm}),
+                    # training_cutoff (spec 012): the vintage every downstream
+                    # door (backfill, discovery rung) validates against
+                    Json({"algorithm": algorithm,
+                          **({"training_cutoff":
+                              (dataset.get("split_spec") or {}).get("end_date")}
+                             if (dataset.get("split_spec") or {}).get("end_date")
+                             else {})}),
                     Json(all_train_metrics),
                     str(base_artifact_path),
                 ),
