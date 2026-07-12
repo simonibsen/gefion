@@ -125,8 +125,10 @@ the trained model records the cutoff durably in its provenance. Everything
 after the cutoff is then genuinely out-of-sample.
 
 ```bash
-# 1. Vintage dataset: nothing after 2022-12-31 reaches training
-gefion ml dataset-build --name prod --version v2022   --exchange NASDAQ --horizons 30 --end-date 2022-12-31 --export
+# 1. Vintage dataset: nothing after 2022-12-31 reaches training.
+#    --start-date is a plain window bound (recency/size, no causality
+#    weight); --end-date is the cutoff and carries all the causality.
+gefion ml dataset-build --name prod --version v2022   --exchange NASDAQ --horizons 30   --start-date 2020-01-01 --end-date 2022-12-31 --export
 
 # 2. Train (the cutoff lands in the model's provenance automatically)
 gefion ml train --dataset-name prod --dataset-version v2022   --model-name prod_model --model-version v2022 --algorithm quantile_regression

@@ -164,6 +164,9 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
     # whose forward window would cross the cutoff get null returns (prices
     # end there) and are dropped below.
     end_date = manifest.get("end_date")
+    # Window start (spec 012 follow-up): a plain recency/size bound — no
+    # causality weight, just "what the model saw" provenance.
+    start_date = manifest.get("start_date")
 
     # Export prices - stream directly for CSV, load for parquet
     emit_progress(f"Exporting prices for {len(symbols)} symbols...")
@@ -179,9 +182,10 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                     JOIN stock_ohlcv o ON o.data_id = s.id
                     WHERE s.symbol = ANY(%s)
                       AND (%s::date IS NULL OR o.date <= %s)
+                      AND (%s::date IS NULL OR o.date >= %s)
                     ORDER BY s.symbol, o.date;
                     """,
-                    (list(symbols), end_date, end_date),
+                    (list(symbols), end_date, end_date, start_date, start_date),
                 )
             else:
                 cur.execute(
@@ -190,9 +194,10 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                     FROM stocks s
                     JOIN stock_ohlcv o ON o.data_id = s.id
                     WHERE (%s::date IS NULL OR o.date <= %s)
+                      AND (%s::date IS NULL OR o.date >= %s)
                     ORDER BY s.symbol, o.date;
                     """,
-                    (end_date, end_date),
+                    (end_date, end_date, start_date, start_date),
                 )
 
             def price_mapper(row):
@@ -264,9 +269,10 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                 JOIN stocks s ON s.id = cf.data_id
                 WHERE {where_clause}
                   AND (%s::date IS NULL OR cf.date <= %s)
+                  AND (%s::date IS NULL OR cf.date >= %s)
                 ORDER BY s.symbol, cf.date, fd.name;
             """
-            params.extend([end_date, end_date])
+            params.extend([end_date, end_date, start_date, start_date])
 
             if params:
                 cur.execute(sql, tuple(params))

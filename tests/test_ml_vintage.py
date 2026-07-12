@@ -120,6 +120,35 @@ def test_dataset_end_date_bounds_everything(world, tmp_path):
     assert max_label >= CUTOFF - dt.timedelta(days=horizon + 5)
 
 
+def test_dataset_start_date_bounds_window(world, tmp_path):
+    """--start-date bounds the training window from below — a plain data-window
+    choice (unlike --end-date it carries no causality weight), recorded in the
+    manifest so provenance shows exactly what the model saw."""
+    from typer.testing import CliRunner
+    from gefion.cli import app
+    START = D(2024, 1, 20)
+    r = CliRunner().invoke(app, [
+        "ml", "dataset-build", "--name", "mlv", "--version", "vstart",
+        "--symbols", "MLV1,MLV2", "--horizons", "7",
+        "--weak-thresholds", "0.02", "--strong-thresholds", "0.05",
+        "--start-date", START.isoformat(), "--end-date", CUTOFF.isoformat(),
+        "--out-dir", str(tmp_path), "--export",
+        "--db-url", schema.test_db_url()])
+    assert r.exit_code == 0, r.output
+    manifest_path = next(tmp_path.rglob("manifest.json"))
+    root = manifest_path.parent
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["start_date"] == START.isoformat()
+    assert manifest["end_date"] == CUTOFF.isoformat()
+    for csv_name in ("prices.csv", "features.csv", "labels.csv"):
+        with open(root / csv_name) as f:
+            rows = list(csv.DictReader(f))
+        assert rows, f"empty export: {csv_name}"
+        assert min(dt.date.fromisoformat(r_["date"]) for r_ in rows) >= START
+    max_price, _ = _max_date(root / "prices.csv")
+    assert max_price <= CUTOFF                    # end bound still holds
+
+
 def test_train_records_cutoff_in_model_metadata(world, tmp_path):
     """The trained model's stored provenance carries the training cutoff —
     every downstream door (backfill, discovery rung) validates against it."""

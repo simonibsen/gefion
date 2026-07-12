@@ -545,6 +545,11 @@ def ml_dataset_build(
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
     lookback_days: int = typer.Option(200, help="Rolling window lookback days"),
+    start_date: Optional[str] = typer.Option(
+        None, "--start-date",
+        help="Training window start (YYYY-MM-DD): a plain data-window bound "
+             "(recency/size), recorded in the manifest — unlike --end-date "
+             "it carries no causality weight"),
     end_date: Optional[str] = typer.Option(
         None, "--end-date",
         help="TRAINING CUTOFF (YYYY-MM-DD): nothing after this date enters "
@@ -638,6 +643,7 @@ def ml_dataset_build(
 
     label_spec = {"type": "forward_return_5class", "thresholds": thresholds_by_horizon}
     split_spec = {"type": "walk_forward", "note": "TBD", "horizons_days": horizon_vals,
+                  **({"start_date": start_date} if start_date else {}),
                   **({"end_date": end_date} if end_date else {})}
 
     # Create a subdirectory for this dataset (so features/labels don't collide)
@@ -645,6 +651,7 @@ def ml_dataset_build(
     dataset_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = dataset_dir / "manifest.json"
     manifest = {
+        **({"start_date": start_date} if start_date else {}),
         **({"end_date": end_date} if end_date else {}),
         "name": name,
         "version": version,
