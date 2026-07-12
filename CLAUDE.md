@@ -154,6 +154,7 @@ Before exiting plan mode, verify:
 - **None new.** Backtests run in-memory and return a result payload; (009-short-side-execution)
 - Python 3.10+ (existing codebase) + numpy (bootstrap + statistics — stationary bootstrap, (010-spa-reverdict)
 - ONE new table — `spa_reverdicts` (append-only per-run results; (010-spa-reverdict)
+- ONE new column — `feature_functions.scope` ('stock'|'market', (011-market-dispatcher)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)
