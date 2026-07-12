@@ -16,6 +16,11 @@ from gefion.observability import create_span, set_attributes
 QUANTILES = ("q10", "q50", "q90")
 
 
+def _next_month(d):
+    import datetime as _dt
+    return (d.replace(day=1) + _dt.timedelta(days=32)).replace(day=1)
+
+
 class SignalMaterializeError(ValueError):
     """Unknown model, missing vintage cutoff, or no predictions to expose."""
 
@@ -83,21 +88,40 @@ def materialize_prediction_features(conn, model_name: str,
                     "store_type": "double precision", "active": True,
                     "entity_table": "stocks",
                 }])
+                # Batched by month: one statement over the full span
+                # decompresses years of prediction chunks in a single
+                # transaction and can OOM the server. Each batch commits
+                # alone; a crash mid-way resumes idempotently (PK dedup).
+                written[feat] = 0
                 with conn.cursor() as cur:
                     cur.execute(
-                        """INSERT INTO computed_features
-                               (data_id, date, feature_id, value)
-                           SELECT p.data_id, p.prediction_date, %(fid)s,
-                                  (p.prediction_values->>%(q)s)::double precision
-                           FROM predictions p
-                           WHERE p.model_id = %(mid)s
-                             AND p.horizon_days = %(h)s
-                             AND p.prediction_type = 'quantile'
-                             AND p.prediction_values->>%(q)s IS NOT NULL
-                           ON CONFLICT (data_id, feature_id, date) DO NOTHING""",
-                        {"fid": ids[feat], "q": q, "mid": model["id"],
-                         "h": horizon})
-                    written[feat] = cur.rowcount
+                        "SELECT date_trunc('month', min(prediction_date)), "
+                        "       max(prediction_date) FROM predictions "
+                        "WHERE model_id = %s", (model["id"],))
+                    lo, hi = cur.fetchone()
+                batch = lo
+                while batch is not None and batch.date() <= hi:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """INSERT INTO computed_features
+                                   (data_id, date, feature_id, value)
+                               SELECT p.data_id, p.prediction_date, %(fid)s,
+                                      (p.prediction_values->>%(q)s)::double precision
+                               FROM predictions p
+                               WHERE p.model_id = %(mid)s
+                                 AND p.horizon_days = %(h)s
+                                 AND p.prediction_type = 'quantile'
+                                 AND p.prediction_date >= %(batch)s
+                                 AND p.prediction_date
+                                     < %(batch)s + interval '1 month'
+                                 AND p.prediction_values->>%(q)s IS NOT NULL
+                               ON CONFLICT (data_id, feature_id, date)
+                               DO NOTHING""",
+                            {"fid": ids[feat], "q": q, "mid": model["id"],
+                             "h": horizon, "batch": batch})
+                        written[feat] += cur.rowcount
+                    conn.commit()
+                    batch = _next_month(batch)
         seeded = seed_model_market_bodies(
             conn, model_name, model_version, horizons[0], model["cutoff"])
         conn.commit()
