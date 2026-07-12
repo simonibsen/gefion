@@ -42,9 +42,7 @@ memory = one date batch (~6k rows × declared columns).
 - **V. Consistent CLI Presentation**: PASS — existing output component.
 - **VI. Simplicity**: PASS with justification — no second executor, no new
   tables; the one new column is the minimal discriminator.
-- **Schema Governance**: **GATE** — `scope` column DDL proposed in
-  data-model.md; two-file rule + dictionary regen; **owner approval required
-  before any DDL applies** (DDL work halts until granted).
+- **Schema Governance**: **PASS** — `scope` column DDL **approved by owner 2026-07-12** (data-model.md); apply via two-file rule + dictionary regen.
 
 ## Project Structure
 

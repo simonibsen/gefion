@@ -1,6 +1,6 @@
 # Data Model — Market-Level Dispatcher Mode (011)
 
-## DDL PROPOSAL (owner approval required — not applied)
+## DDL — **APPROVED by owner 2026-07-12** (apply via two-file rule + dictionary regen)
 
 One column on the existing registry, two-file rule + dictionary regen on approval:
 
