@@ -145,3 +145,17 @@ def test_cli_and_mcp_surfaces():
     server = (pathlib.Path(__file__).parent.parent / "mcp-server"
               / "server.py").read_text()
     assert 'name="macro_derive"' in server
+
+
+def test_macro_functions_registered_no_orphans(world):
+    """The function registry must know every function name in use — else
+    feat-def-fix (our own janitor) would deactivate macro features as
+    orphans. derive_series registers 'macro_derived'; materialize registers
+    'macro_value'."""
+    from gefion.macro.derived import derive_series
+    derive_series(world, "breadth_sma200", min_stocks=2)
+    with world.cursor() as cur:
+        cur.execute("SELECT enabled FROM feature_functions "
+                    "WHERE name = 'macro_derived'")
+        row = cur.fetchone()
+    assert row and row[0] is True
