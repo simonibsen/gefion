@@ -545,6 +545,11 @@ def ml_dataset_build(
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
     lookback_days: int = typer.Option(200, help="Rolling window lookback days"),
+    end_date: Optional[str] = typer.Option(
+        None, "--end-date",
+        help="TRAINING CUTOFF (YYYY-MM-DD): nothing after this date enters "
+             "the dataset; labels whose forward window would cross it are "
+             "excluded (spec 012 vintage discipline)"),
     horizons: str = typer.Option("7,30,90", help="Comma-separated horizons in days"),
     weak_thresholds: str = typer.Option("0.02,0.05,0.10", help="Comma-separated weak thresholds (per horizon)"),
     strong_thresholds: str = typer.Option("0.05,0.10,0.20", help="Comma-separated strong thresholds (per horizon)"),
@@ -639,6 +644,7 @@ def ml_dataset_build(
     dataset_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = dataset_dir / "manifest.json"
     manifest = {
+        **({"end_date": end_date} if end_date else {}),
         "name": name,
         "version": version,
         "universe": universe,
