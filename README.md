@@ -139,6 +139,7 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion data entity-delete` | Delete an entity + its feature values (dry-run by default) |
 | `gefion data listing-meta` | Backfill stocks.exchange/asset_type from the listing |
 | `gefion macro ingest` | Ingest a macro series (VIX, CPI, …) + materialize its feature |
+| `gefion macro derive` | Compute derived market-shape series (breadth, dispersion) from the cross-section |
 | `gefion macro list` | Macro-series catalog with value coverage |
 | `gefion quality findings` | List data-quality findings (provider-garbage detections) |
 | `gefion quality catalog` | Validation catalog: covered metrics + uncovered columns |

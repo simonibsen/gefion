@@ -12180,6 +12180,47 @@ def macro_ingest(
             raise typer.Exit(1)
 
 
+@macro_app.command("derive")
+def macro_derive(
+    series: str = typer.Option(
+        "all", "--series",
+        help="Comma list of derived series (breadth_sma200, dispersion_20) "
+             "or 'all'"),
+    min_stocks: int = typer.Option(
+        100, "--min-stocks",
+        help="Days with a thinner cross-section get NO value (honest gap)"),
+    full: bool = typer.Option(
+        False, "--full", help="Recompute from the beginning (safe: pure "
+                              "function of the cross-section)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Compute derived macro series (breadth, dispersion) from our own
+    cross-section — market-shape facts that become discovery atoms with
+    zero DDL, like macro_vix. Idempotent and incremental."""
+    from gefion.macro.derived import DERIVED_SERIES, MacroDeriveError, derive_series
+    from gefion.output import get_output
+    out = get_output(json_output)
+    names = sorted(DERIVED_SERIES) if series == "all" \
+        else [x.strip() for x in series.split(",") if x.strip()]
+    results = {}
+    with create_span("cli.macro-derive", series=",".join(names)):
+        with _regime_conn(db_url) as conn:
+            for name in names:
+                try:
+                    results[name] = derive_series(conn, name,
+                                                  min_stocks=min_stocks,
+                                                  full=full)
+                except MacroDeriveError as exc:
+                    out.error(str(exc))
+                    raise typer.Exit(1)
+    if out.json_mode:
+        out.json({"written": results, "min_stocks": min_stocks})
+    else:
+        for name, n in results.items():
+            out.success(f"macro_{name}: {n} new value(s)")
+
+
 @macro_app.command("list")
 def macro_list(
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
