@@ -246,6 +246,7 @@ If the arguments don't match a mode keyword, interpret the user's intent and rou
 | "define a market regime" | `regime_define` → `regime_compute` → `regime_labels` |
 | "discover regimes" / "hunt for regimes" | confirm, then `regime_discover_start` → `regime_discover_verdicts` |
 | "what did discovery find" | `regime_discover_ledger` + `regime_discover_diagnostics` (losers included) |
+| "when does the model work" / "is the ML model predictive" | the spec-012 meta-hunt: `ml_predict_backfill` → `ml_materialize_signals` → `macro derive` → `regime discover start --signal-source model_predictions` (CLI; declare `--signal macro_model_outlook_q50 --signal macro_model_confidence_width`) |
 | "can I trust this discovered regime" | `regime_discover_grades` (forward folds only) |
 | "delete this stock/series" | `entity_delete` dry-run → show plan → confirm with user → `entity_delete` with `confirm=true` |
 | "add VIX" / "ingest a macro series" | confirm, then `macro_ingest` → `macro_list` to verify coverage |
