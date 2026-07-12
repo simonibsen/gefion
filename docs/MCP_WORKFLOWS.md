@@ -1087,8 +1087,10 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
   AlphaVantage INDEX_DATA is premium and not entitled on the current key).
   **Mutating**, and `full=true` backfills decades — confirm with the user first.
 - `macro_derive` — derived market-shape series (breadth_sma200, dispersion_20)
-  computed from the stock cross-section; idempotent/incremental, thin days get
-  no value. Mutating but derived and re-runnable.
+  computed by DATABASE-resident sandboxed bodies (spec 011) over the stock
+  cross-section; idempotent/incremental, thin days get no value; disabled
+  functions skip-and-report; failing bodies write nothing. Mutating but
+  derived and re-runnable.
 - `macro_list` — the macro-series catalog with per-series value coverage
   (first/last date, row count) and materialization status (read-only).
 

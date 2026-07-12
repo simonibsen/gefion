@@ -157,6 +157,12 @@ disk-artifact reaping.
 
 ## Patterns & Gotchas (living reference)
 
+- **DB-is-source-of-truth functions (spec 011)**: market-level function
+  bodies live in `feature_functions` (scope='market'); repo code
+  (`gefion/macro/market_bodies.py`) is seed-only (create-if-absent — never
+  clobbers operator edits; `macro derive --reseed` is the explicit recovery).
+  The legacy SQL lives on FROZEN inside the equality-gate test
+  (`test_macro_derived.py`) as a permanent regression reference.
 - **UI rendering of CLI processes** (issue #88): don't write bespoke output
   renderers in views — `gefion.ui.components.cli_output.render_cli_output(key,
   title)` (or `render_cli_state(state, title)`) gives any launched CLI command
