@@ -150,7 +150,7 @@ def _export_feature_functions(conn, names: Optional[List[str]] = None) -> list[d
             """
             SELECT name, version, status, description, language, function_body, inputs,
                    output_name, output_type, param_schema, defaults, dependencies,
-                   checksum, tags, min_app_version, enabled, created_by
+                   checksum, tags, min_app_version, enabled, created_by, scope
             FROM feature_functions
             {where}
             ORDER BY name, version;
@@ -181,6 +181,7 @@ def _export_feature_functions(conn, names: Optional[List[str]] = None) -> list[d
                 "min_app_version": r[14],
                 "enabled": r[15],
                 "created_by": r[16],
+                "scope": r[17] if len(r) > 17 else "stock",
             }
         )
     return data
@@ -5589,7 +5590,7 @@ def list_functions(
             with db_connection(db_url) as conn:
                 init_schema_tables(conn, ["feature_functions"])
                 with conn.cursor() as cur:
-                    select_cols = "name, version, status, language, enabled, description, tags, updated_at"
+                    select_cols = "name, version, status, language, enabled, description, tags, updated_at, scope"
                     if show_body:
                         select_cols += ", function_body"
                     params: Dict[str, object] = {}
@@ -5619,9 +5620,10 @@ def list_functions(
                     "description": r[5],
                     "tags": list(r[6]) if r[6] is not None else None,
                     "updated_at": r[7].isoformat() if len(r) > 7 and r[7] else None,
+                    "scope": r[8] if len(r) > 8 else "stock",
                 }
-                if show_body and len(r) > 8:
-                    entry["function_body"] = r[8]
+                if show_body and len(r) > 9:
+                    entry["function_body"] = r[9]
                 data.append(entry)
 
             if not data:
@@ -5718,6 +5720,21 @@ def _upsert_feature_function(conn: psycopg.Connection, payload: dict) -> None:
     missing = [k for k in required if k not in payload]
     if missing:
         raise ValueError(f"Missing required keys for feature_function: {', '.join(missing)}")
+
+    if payload.get("scope") == "market":
+        # market bodies declare per-stock inputs; refuse unknown ones now
+        # rather than failing at derive time (011 contract)
+        declared = (payload.get("inputs") or {}).get("features", [])
+        with conn.cursor() as cur:
+            for feat in declared:
+                if feat == "ret_20":
+                    continue          # computed in-query
+                cur.execute("SELECT 1 FROM feature_definitions WHERE name = %s",
+                            (feat,))
+                if cur.fetchone() is None:
+                    raise ValueError(
+                        f"market function {payload['name']!r} declares unknown "
+                        f"input feature {feat!r}")
 
     upsert_feature_function_helper(conn, payload, return_id=False)
 
@@ -12192,33 +12209,60 @@ def macro_derive(
     full: bool = typer.Option(
         False, "--full", help="Recompute from the beginning (safe: pure "
                               "function of the cross-section)"),
+    reseed: Optional[str] = typer.Option(
+        None, "--reseed", help="EXPLICITLY overwrite one DB body from the "
+                               "repo seed (loud recovery path)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
 ) -> None:
     """Compute derived macro series (breadth, dispersion) from our own
     cross-section — market-shape facts that become discovery atoms with
     zero DDL, like macro_vix. Idempotent and incremental."""
-    from gefion.macro.derived import DERIVED_SERIES, MacroDeriveError, derive_series
+    from gefion.features.dispatcher import MarketFunctionError
+    from gefion.macro.derived import (SEED_BODIES, MacroDeriveError,
+                                      derive_series, reseed_function)
     from gefion.output import get_output
     out = get_output(json_output)
-    names = sorted(DERIVED_SERIES) if series == "all" \
+    if reseed:
+        with _regime_conn(db_url) as conn:
+            try:
+                reseed_function(conn, reseed)
+            except MacroDeriveError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+        out.warning(f"{reseed}: DB body OVERWRITTEN from repo seed "
+                    f"(the only implicit-edit-clobbering path, used explicitly)")
+    names = sorted(SEED_BODIES) if series == "all" \
         else [x.strip() for x in series.split(",") if x.strip()]
-    results = {}
+    results, failures, skipped = {}, {}, []
     with create_span("cli.macro-derive", series=",".join(names)):
         with _regime_conn(db_url) as conn:
             for name in names:
                 try:
-                    results[name] = derive_series(conn, name,
-                                                  min_stocks=min_stocks,
-                                                  full=full)
+                    n = derive_series(conn, name, min_stocks=min_stocks,
+                                      full=full)
                 except MacroDeriveError as exc:
                     out.error(str(exc))
                     raise typer.Exit(1)
+                except MarketFunctionError as exc:
+                    failures[name] = str(exc)
+                    continue
+                if n == -1:
+                    skipped.append(name)
+                else:
+                    results[name] = n
     if out.json_mode:
-        out.json({"written": results, "min_stocks": min_stocks})
+        out.json({"written": results, "skipped_disabled": skipped,
+                  "failed": failures, "min_stocks": min_stocks})
     else:
         for name, n in results.items():
             out.success(f"macro_{name}: {n} new value(s)")
+        for name in skipped:
+            out.warning(f"macro_{name}: SKIPPED (function disabled)")
+        for name, reason in failures.items():
+            out.error(f"macro_{name}: FAILED — {reason} (zero values written)")
+    if failures:
+        raise typer.Exit(2)
 
 
 @macro_app.command("list")

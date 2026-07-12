@@ -37,6 +37,8 @@ def _cleanup(cur):
     cur.execute("DELETE FROM feature_definitions WHERE name LIKE 'macro_breadth%' "
                 "OR name LIKE 'macro_dispersion%' OR name LIKE 'mder_%'")
     cur.execute("DELETE FROM macro_series WHERE name IN ('breadth_sma200','dispersion_20')")
+    cur.execute("DELETE FROM feature_functions WHERE name IN "
+                "('breadth_sma200','dispersion_20')")  # test owns its bodies
     cur.execute("DELETE FROM stock_ohlcv WHERE data_id IN "
                 "(SELECT id FROM stocks WHERE symbol LIKE 'MDER%')")
     cur.execute("DELETE FROM stocks WHERE symbol LIKE 'MDER%'")
@@ -147,15 +149,87 @@ def test_cli_and_mcp_surfaces():
     assert 'name="macro_derive"' in server
 
 
-def test_macro_functions_registered_no_orphans(world):
-    """The function registry must know every function name in use — else
-    feat-def-fix (our own janitor) would deactivate macro features as
-    orphans. derive_series registers 'macro_derived'; materialize registers
-    'macro_value'."""
+def test_series_function_rows_registered_no_orphans(world):
+    """011: each derived series has its OWN market-scope registry row (name-
+    matched), and its feature definition references it — zero orphans."""
     from gefion.macro.derived import derive_series
     derive_series(world, "breadth_sma200", min_stocks=2)
     with world.cursor() as cur:
-        cur.execute("SELECT enabled FROM feature_functions "
-                    "WHERE name = 'macro_derived'")
+        cur.execute("SELECT enabled, scope FROM feature_functions "
+                    "WHERE name = 'breadth_sma200'")
         row = cur.fetchone()
-    assert row and row[0] is True
+        assert row and row[0] is True and row[1] == "market"
+        cur.execute("SELECT function_name FROM feature_definitions "
+                    "WHERE name = 'macro_breadth_sma200'")
+        assert cur.fetchone()[0] == "breadth_sma200"
+
+
+def test_db_body_is_source_of_truth(world):
+    """011 US1: edit the body in the DB -> the edited logic runs; reseeding
+    never happens implicitly (create-if-absent)."""
+    from gefion.macro.derived import derive_series
+    derive_series(world, "breadth_sma200", min_stocks=2)
+    with world.cursor() as cur:
+        cur.execute("UPDATE feature_functions SET function_body = "
+                    "'def compute(rows):\n    return 42.0' "
+                    "WHERE name = 'breadth_sma200'")
+    n = derive_series(world, "breadth_sma200", min_stocks=2, full=True)
+    assert n > 0
+    with world.cursor() as cur:
+        cur.execute("""SELECT DISTINCT cf.value FROM computed_features cf
+            JOIN feature_definitions fd ON fd.id = cf.feature_id
+            WHERE fd.name='macro_breadth_sma200'""")
+        vals = {float(r[0]) for r in cur.fetchall()}
+    assert vals == {42.0}                       # DB body executed, not seed
+    # and a redeploy-style reseed attempt (plain derive) does NOT restore it
+    derive_series(world, "breadth_sma200", min_stocks=2)
+    with world.cursor() as cur:
+        cur.execute("SELECT function_body FROM feature_functions "
+                    "WHERE name='breadth_sma200'")
+        assert "42.0" in cur.fetchone()[0]
+    # explicit reseed DOES restore, loudly (CLI flag)
+    from gefion.macro.derived import reseed_function
+    reseed_function(world, "breadth_sma200")
+    with world.cursor() as cur:
+        cur.execute("SELECT function_body FROM feature_functions "
+                    "WHERE name='breadth_sma200'")
+        assert "42.0" not in cur.fetchone()[0]
+    derive_series(world, "breadth_sma200", min_stocks=2, full=True)
+
+
+def test_equality_gate_legacy_sql_vs_dispatcher(world):
+    """011 SC-1101 (permanent regression): the DB python bodies reproduce the
+    frozen legacy SQL exactly on the same world."""
+    from gefion.macro.derived import derive_series
+    LEGACY = {
+      "breadth_sma200": """
+        SELECT o.date, 100.0 * AVG((o.close > cf.value)::int)::float
+        FROM stock_ohlcv o
+        JOIN stocks s ON s.id = o.data_id AND s.asset_type = 'Stock'
+        JOIN computed_features cf ON cf.data_id = o.data_id AND cf.date = o.date
+         AND cf.feature_id = (SELECT id FROM feature_definitions
+                              WHERE name = 'indicator_sma_200')
+        WHERE o.close > 0 AND cf.value > 0
+        GROUP BY o.date HAVING COUNT(*) >= 2""",
+      "dispersion_20": """
+        WITH r AS (
+            SELECT o.date, o.close / NULLIF(LAG(o.close, 20) OVER (
+                PARTITION BY o.data_id ORDER BY o.date), 0) - 1 AS ret
+            FROM stock_ohlcv o
+            JOIN stocks s ON s.id = o.data_id AND s.asset_type = 'Stock'
+            WHERE o.close > 0)
+        SELECT date, STDDEV_POP(ret)::float FROM r
+        WHERE ret IS NOT NULL GROUP BY date HAVING COUNT(*) >= 2""",
+    }
+    for name, sql in LEGACY.items():
+        derive_series(world, name, min_stocks=2, full=True)
+        with world.cursor() as cur:
+            cur.execute(sql)
+            legacy = {d: v for d, v in cur.fetchall()}
+            cur.execute("""SELECT cf.date, cf.value FROM computed_features cf
+                JOIN feature_definitions fd ON fd.id = cf.feature_id
+                WHERE fd.name = %s""", (f"macro_{name}",))
+            new = {d: v for d, v in cur.fetchall()}
+        assert set(new) == set(legacy), f"{name}: date sets differ"
+        for d in legacy:
+            assert abs(new[d] - legacy[d]) < 1e-9, f"{name} @ {d}"

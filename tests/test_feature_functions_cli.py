@@ -29,8 +29,8 @@ def test_functions_list(monkeypatch):
                         return "2024-01-01T00:00:00"
 
                 return [
-                    ("obv", "1.0.0", "active", "python_expr", True, "desc", ["vol"], _Row(), "def compute(): return 1"),
-                    ("obv", "0.9.0", "deprecated", "python_expr", False, None, None, None, "def compute(): return 0"),
+                    ("obv", "1.0.0", "active", "python_expr", True, "desc", ["vol"], _Row(), "stock", "def compute(): return 1"),
+                    ("obv", "0.9.0", "deprecated", "python_expr", False, None, None, None, "stock", "def compute(): return 0"),
                 ]
 
             class _Row:
@@ -38,8 +38,8 @@ def test_functions_list(monkeypatch):
                     return "2024-01-01T00:00:00"
 
             return [
-                ("obv", "1.0.0", "active", "python_expr", True, "desc", ["vol"], _Row()),
-                ("obv", "0.9.0", "deprecated", "python_expr", False, None, None, None),
+                ("obv", "1.0.0", "active", "python_expr", True, "desc", ["vol"], _Row(), "stock"),
+                ("obv", "0.9.0", "deprecated", "python_expr", False, None, None, None, "stock"),
             ]
 
     class FakeConn:

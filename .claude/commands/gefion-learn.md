@@ -54,7 +54,8 @@ Checkpoint: learner states the current data date range and stock count, and why 
 Concepts: feature definitions vs feature functions; file-based functions in `feature-functions/` imported via `feat-fx-import`; experimental vs active vs demoted lifecycle.
 Do: `gefion feat-def-list --json`; inspect one definition; UI Features page; look at `feature_functions` statuses and connect them to the experiment lifecycle.
 Aside (orphaned definitions): a definition references its function by *name* — disable or delete the function and the definition is orphaned (computable no more). `feat-def-validate` finds them; `feat-def-fix --confirm` deactivates (never deletes) them; `feat-def-list` shows each definition's function status.
-Checkpoint: learner explains how a feature goes experimental → active → (maybe) demoted, and where the code for an AI-generated feature lives.
+Aside (market-level functions, spec 011): market-shape series (breadth, dispersion) are ALSO database-resident functions now — scope `market`, same sandbox, same lifecycle — receiving one day's whole cross-section instead of one stock's history; edit the body in the DB and `macro derive --full` recomputes, no deploy.
+Checkpoint: learner explains how a feature goes experimental → active → (maybe) demoted, and where the code for an AI-generated feature lives — and where MARKET-level function code lives (the database, seeded once from the repo).
 
 **Module 3 — ML pipeline**
 Concepts: dataset manifests (`datasets/<name>_<version>/manifest.json`, features/labels/prices parquet), horizons, quantile models (q10/q50/q90), train → predict → eval. Trend-class labels come from per-stock adaptive `volatility` thresholds (`gefion volatility compute`), not fixed cutoffs — a 2% move is noise for a volatile name and a signal for a stable one.

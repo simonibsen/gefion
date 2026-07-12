@@ -939,7 +939,8 @@ def exec_sandboxed(body: str, *callable_names: str) -> Dict[str, Callable]:
     return out
 
 
-def _exec_in_sandbox(body: str, warn_context: Optional[str]) -> Optional[Dict[str, Any]]:
+def _exec_in_sandbox(body: str, warn_context: Optional[str],
+                     raise_errors: bool = False) -> Optional[Dict[str, Any]]:
     """Exec `body` in the restricted environment; return its locals, or None
     (with a warning when warn_context is given) on failure."""
     # Create a safe __import__ that only allows whitelisted modules
@@ -1045,6 +1046,8 @@ def _exec_in_sandbox(body: str, warn_context: Optional[str]) -> Optional[Dict[st
     try:
         exec(body, safe_globals, local_env)
     except Exception as exc:
+        if raise_errors:
+            raise
         if warn_context:
             warnings.warn(f"Failed to exec {warn_context}: {exc}")
         return None
@@ -1354,3 +1357,142 @@ def _fetch_from_generic_table(
 
 
 # Register generic compute function
+
+
+# --- market-level execution mode (spec 011, epic #114) --------------------------------
+
+class MarketFunctionError(RuntimeError):
+    """A market-scope body failed: sandbox refusal, raise, or wrong shape.
+    Isolated per function — the caller writes NOTHING for this function."""
+
+
+def run_market_function(conn, fn_row: Dict[str, Any], start=None,
+                        min_stocks: int = 100,
+                        itersize: int = 50_000) -> Dict[str, Any]:
+    """Execute one scope='market' registry function over the stock
+    cross-section, per date, in the standard sandbox (spec 011).
+
+    The body must define `compute(rows) -> float | None` (see
+    specs/011-market-dispatcher/contracts/function-contract.md). Streams ONE
+    ordered query; a date's rows are grouped in memory (bounded: one date in
+    flight); dates thinner than `min_stocks` never reach the body (gap by
+    policy). None/NaN/inf results are gaps; raises and wrong-shaped returns
+    are MarketFunctionError (write-on-success is the caller's contract).
+    """
+    import math
+
+    with create_span("features.dispatcher.market_function",
+                     function=fn_row["name"], min_stocks=min_stocks) as span:
+        env = None
+        try:
+            env = _exec_in_sandbox(fn_row["function_body"], None,
+                                   raise_errors=True)
+        except Exception as exc:
+            raise MarketFunctionError(
+                f"{fn_row['name']}: body failed to load: {exc}") from exc
+        compute = (env or {}).get("compute")
+        if not callable(compute):
+            raise MarketFunctionError(
+                f"{fn_row['name']}: body must define compute(rows)")
+
+        inputs = ((fn_row.get("inputs") or {}).get("features")
+                  if fn_row.get("inputs") else None) or []
+        # validate declared features and collect ids (parameterized)
+        feature_ids: Dict[str, int] = {}
+        with conn.cursor() as cur:
+            for feat in inputs:
+                if feat == "ret_20":
+                    continue          # computed in-query, not a stored feature
+                cur.execute("SELECT id FROM feature_definitions WHERE name = %s",
+                            (feat,))
+                row = cur.fetchone()
+                if row is None:
+                    raise MarketFunctionError(
+                        f"{fn_row['name']}: declared input {feat!r} is not a "
+                        f"known feature definition")
+                feature_ids[feat] = row[0]
+
+        join_sql, select_sql = "", ""
+        params: Dict[str, Any] = {"start": start}
+        for i, (feat, fid) in enumerate(feature_ids.items()):
+            a = f"cf{i}"
+            join_sql += (f" LEFT JOIN computed_features {a} ON {a}.data_id = o.data_id "
+                         f"AND {a}.date = o.date AND {a}.feature_id = %({a}_id)s")
+            select_sql += f", {a}.value AS f{i}"
+            params[f"{a}_id"] = fid
+        ret20 = "ret_20" in inputs
+        ret_sql = (", o.close / NULLIF(LAG(o.close, 20) OVER "
+                   "(PARTITION BY o.data_id ORDER BY o.date), 0) - 1 AS ret_20"
+                   if ret20 else "")
+
+        sql = f"""
+            SELECT o.date, s.symbol, o.close, o.high, o.low, o.volume
+                   {select_sql}{ret_sql}
+            FROM stock_ohlcv o
+            JOIN stocks s ON s.id = o.data_id AND s.asset_type = 'Stock'
+            {join_sql}
+            WHERE o.close > 0 AND (%(start)s::date IS NULL OR o.date > %(start)s)
+            ORDER BY o.date
+        """
+        feat_names = list(feature_ids.keys())
+
+        def _rows_to_dicts(batch):
+            out = []
+            for r in batch:
+                d = {"symbol": r[1], "close": float(r[2]),
+                     "high": float(r[3]) if r[3] is not None else None,
+                     "low": float(r[4]) if r[4] is not None else None,
+                     "volume": int(r[5]) if r[5] is not None else None}
+                for i, feat in enumerate(feat_names):
+                    v = r[6 + i]
+                    if v is not None:
+                        d[feat] = float(v)
+                if ret20:
+                    v = r[6 + len(feat_names)]
+                    if v is not None:
+                        d["ret_20"] = float(v)
+                out.append(d)
+            return out
+
+        values, gaps = [], 0
+
+        def _finish(date, day_rows):
+            nonlocal gaps
+            if len(day_rows) < min_stocks:
+                gaps += 1
+                return
+            try:
+                result = compute(_rows_to_dicts(day_rows))
+            except Exception as exc:
+                raise MarketFunctionError(
+                    f"{fn_row['name']}: compute raised on {date}: {exc}") from exc
+            if result is None:
+                gaps += 1
+                return
+            if isinstance(result, bool) or not isinstance(result, (int, float)):
+                raise MarketFunctionError(
+                    f"{fn_row['name']}: compute returned "
+                    f"{type(result).__name__!r} on {date} — must be float or None")
+            result = float(result)
+            if not math.isfinite(result):
+                gaps += 1
+                return
+            values.append((date, result))
+
+        # server-side (named) cursor needs a transaction even under autocommit
+        with conn.transaction(), \
+             conn.cursor(name=f"market_fn_{fn_row['id']}") as cur:
+            cur.itersize = itersize
+            cur.execute(sql, params)
+            cur_date, day_rows = None, []
+            for row in cur:
+                if row[0] != cur_date:
+                    if cur_date is not None:
+                        _finish(cur_date, day_rows)
+                    cur_date, day_rows = row[0], []
+                day_rows.append(row)
+            if cur_date is not None:
+                _finish(cur_date, day_rows)
+
+        set_attributes(span, values=len(values), gaps=gaps)
+        return {"values": values, "gaps": gaps}

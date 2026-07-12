@@ -249,6 +249,7 @@ Primary key: `id`
 | `checksum` | TEXT | ✓ |  |  |
 | `tags` | TEXT[] | ✓ |  |  |
 | `min_app_version` | TEXT | ✓ |  |  |
+| `scope` | TEXT |  |  |  |
 | `enabled` | BOOLEAN | ✓ |  |  |
 | `created_by` | TEXT | ✓ |  |  |
 | `called_by` | TEXT | ✓ |  |  |
