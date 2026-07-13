@@ -9,6 +9,68 @@ Contract: specs/011-market-dispatcher/contracts/function-contract.md —
 `compute(rows)` gets ONE date's cross-section, returns float or None.
 """
 
+def sector_slug(sector: str) -> str:
+    """Deterministic slug: lowercase, every non-alphanumeric run -> single
+    underscore, trimmed. Collisions between DISTINCT sectors are refused
+    loudly at seeding, never merged."""
+    import re
+    return re.sub(r"[^a-z0-9]+", "_", sector.strip().lower()).strip("_")
+
+
+def sector_signal_bodies(sector: str, min_members: int = 30) -> dict:
+    """Generated market bodies for ONE sector (spec 013): relative strength
+    (median member ret_20 minus median all-rows ret_20) and internal breadth
+    (% of members above their own 200-day SMA). MIN_MEMBERS is written into
+    the body — the declared, operator-editable floor; a thinner (sector,
+    date) returns None (gap, never a value). NULL-sector rows are excluded
+    from membership but kept in the all-rows market baseline."""
+    slug = sector_slug(sector)
+    rs_body = (
+        'def compute(rows):\n'
+        f'    """Median member ret_20 minus median ALL-rows ret_20 ({sector})."""\n'
+        f'    MIN_MEMBERS = {min_members}\n'
+        '    def median(xs):\n'
+        '        xs = sorted(xs)\n'
+        '        n = len(xs)\n'
+        '        mid = n // 2\n'
+        '        return xs[mid] if n % 2 else (xs[mid - 1] + xs[mid]) / 2.0\n'
+        '    market = [r["ret_20"] for r in rows if r.get("ret_20") is not None]\n'
+        '    members = [r["ret_20"] for r in rows\n'
+        f'               if r.get("sector") == {sector!r}\n'
+        '               and r.get("ret_20") is not None]\n'
+        '    if len(members) < MIN_MEMBERS or not market:\n'
+        '        return None\n'
+        '    return median(members) - median(market)\n'
+    )
+    breadth_body = (
+        'def compute(rows):\n'
+        f'    """% of {sector} members above their own 200-day SMA."""\n'
+        f'    MIN_MEMBERS = {min_members}\n'
+        '    members = [r for r in rows\n'
+        f'               if r.get("sector") == {sector!r}\n'
+        '               and r.get("indicator_sma_200") is not None\n'
+        '               and r["indicator_sma_200"] > 0]\n'
+        '    if len(members) < MIN_MEMBERS:\n'
+        '        return None\n'
+        '    hits = sum(1 for r in members if r["close"] > r["indicator_sma_200"])\n'
+        '    return 100.0 * hits / len(members)\n'
+    )
+    return {
+        f"sector_rs_{slug}": {
+            "description": (f"Sector relative strength: median 20-day return "
+                            f"of {sector} members minus market median"),
+            "inputs": {"features": ["ret_20"]},
+            "body": rs_body,
+        },
+        f"sector_breadth_{slug}": {
+            "description": (f"Sector breadth: % of {sector} members closing "
+                            f"above their own 200-day SMA"),
+            "inputs": {"features": ["indicator_sma_200"]},
+            "body": breadth_body,
+        },
+    }
+
+
 def model_signal_bodies(model_name: str, model_version: str,
                         horizon: int, cutoff: str) -> dict:
     """Generated market bodies for one vintage model's prediction signals

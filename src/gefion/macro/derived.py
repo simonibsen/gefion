@@ -74,6 +74,79 @@ def reseed_function(conn, name: str) -> None:
         conn.commit()
 
 
+def all_derived_series(conn) -> list:
+    """Every derivable series name: repo SEED_BODIES plus every
+    scope='market' function in the DATABASE (spec 013, R4) — the DB is the
+    source of truth, so 'all' can never silently exclude a seeded series
+    (sector, model, future). Disabled functions are INCLUDED so the derive
+    skip path reports them — a kill switch should be visible, not silent."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT name FROM feature_functions WHERE scope = 'market'")
+        db_names = {r[0] for r in cur.fetchall()}
+    return sorted(set(SEED_BODIES) | db_names)
+
+
+def seed_sector_functions(conn, sectors: Optional[list] = None,
+                          min_members: int = 100,
+                          body_floor: int = 30) -> Dict[str, Any]:
+    """Seed generated sector bodies create-if-absent (spec 013).
+
+    Census from stocks.sector (asset_type='Stock', NULL excluded). Sectors
+    under `min_members` members are skipped-and-reported; `sectors`
+    restricts to named ones and unknown names refuse listing the census;
+    two sectors mapping to one slug refuse loudly (never merged). The DB
+    body wins on re-run — this door never overwrites an operator edit.
+    """
+    from .market_bodies import sector_signal_bodies, sector_slug
+
+    with create_span("macro.derived.seed_sectors",
+                     min_members=min_members) as span:
+        with conn.cursor() as cur:
+            cur.execute("SELECT sector, count(*) FROM stocks "
+                        "WHERE asset_type = 'Stock' AND sector IS NOT NULL "
+                        "GROUP BY sector ORDER BY sector")
+            census = {r[0]: r[1] for r in cur.fetchall()}
+        if sectors is not None:
+            unknown = [x for x in sectors if x not in census]
+            if unknown:
+                raise MacroDeriveError(
+                    f"unknown sector(s) {unknown} — census: "
+                    f"{sorted(census)}")
+            census = {k: v for k, v in census.items() if k in sectors}
+        slugs: Dict[str, str] = {}
+        for sector in census:
+            slug = sector_slug(sector)
+            if slug in slugs:
+                raise MacroDeriveError(
+                    f"sectors {slugs[slug]!r} and {sector!r} both slug to "
+                    f"{slug!r} — refusing to merge distinct sectors")
+            slugs[slug] = sector
+        seeded, existing, skipped_thin = [], [], {}
+        with conn.cursor() as cur:
+            for sector, members in sorted(census.items()):
+                if members < min_members:
+                    skipped_thin[sector] = members
+                    continue
+                for name, spec in sector_signal_bodies(
+                        sector, min_members=body_floor).items():
+                    cur.execute(
+                        """INSERT INTO feature_functions
+                               (name, version, status, enabled, description,
+                                language, function_body, inputs, scope)
+                           VALUES (%s, 'v1', 'active', TRUE, %s, 'python',
+                                   %s, %s, 'market')
+                           ON CONFLICT DO NOTHING""",
+                        (name, spec["description"], spec["body"],
+                         json.dumps(spec["inputs"])))
+                    (seeded if cur.rowcount else existing).append(name)
+        conn.commit()
+        set_attributes(span, seeded=len(seeded), existing=len(existing),
+                       skipped=len(skipped_thin))
+        return {"seeded": seeded, "existing": existing,
+                "skipped_thin": skipped_thin,
+                "census": census}
+
+
 def _get_market_function(conn, name: str) -> Optional[Dict[str, Any]]:
     with conn.cursor() as cur:
         cur.execute(

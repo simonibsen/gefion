@@ -1426,7 +1426,8 @@ def run_market_function(conn, fn_row: Dict[str, Any], start=None,
                    if ret20 else "")
 
         sql = f"""
-            SELECT o.date, s.symbol, o.close, o.high, o.low, o.volume
+            SELECT o.date, s.symbol, o.close, o.high, o.low, o.volume,
+                   s.sector
                    {select_sql}{ret_sql}
             FROM stock_ohlcv o
             JOIN stocks s ON s.id = o.data_id AND s.asset_type = 'Stock'
@@ -1442,13 +1443,14 @@ def run_market_function(conn, fn_row: Dict[str, Any], start=None,
                 d = {"symbol": r[1], "close": float(r[2]),
                      "high": float(r[3]) if r[3] is not None else None,
                      "low": float(r[4]) if r[4] is not None else None,
-                     "volume": int(r[5]) if r[5] is not None else None}
+                     "volume": int(r[5]) if r[5] is not None else None,
+                     "sector": r[6]}
                 for i, feat in enumerate(feat_names):
-                    v = r[6 + i]
+                    v = r[7 + i]
                     if v is not None:
                         d[feat] = float(v)
                 if ret20:
-                    v = r[6 + len(feat_names)]
+                    v = r[7 + len(feat_names)]
                     if v is not None:
                         d["ret_20"] = float(v)
                 out.append(d)

@@ -251,6 +251,7 @@ If the arguments don't match a mode keyword, interpret the user's intent and rou
 | "delete this stock/series" | `entity_delete` dry-run → show plan → confirm with user → `entity_delete` with `confirm=true` |
 | "add VIX" / "ingest a macro series" | confirm, then `macro_ingest` → `macro_list` to verify coverage |
 | "what macro series do we have" | `macro_list` |
+| "sector rotation" / "which sectors lead" / "hunt on sector states" | `macro seed-sectors` → `macro derive --series all` → `regime discover start` with `macro_sector_rs_*`/`macro_sector_breadth_*` tercile atoms (CLI) |
 | "is this data trustworthy" / "any bad data" | `quality_findings` (show the verdict tier — suspect ≠ trash) |
 | "flag garbage in stored data" | confirm, then `quality_backfill` → `quality_findings` |
 | "what data quality rules exist" | `quality_catalog` |

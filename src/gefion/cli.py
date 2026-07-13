@@ -12335,6 +12335,47 @@ def macro_ingest(
             raise typer.Exit(1)
 
 
+@macro_app.command("seed-sectors")
+def macro_seed_sectors(
+    sectors: Optional[str] = typer.Option(
+        None, "--sectors", help="Comma list of sector names (default: every "
+                                "sector meeting --min-members)"),
+    min_members: int = typer.Option(
+        100, "--min-members",
+        help="Census floor: sectors with fewer members get NO bodies"),
+    body_floor: int = typer.Option(
+        30, "--body-floor",
+        help="Per-date MIN_MEMBERS written into each generated body "
+             "(thinner days are gaps)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Seed generated sector-signal bodies (spec 013): relative strength and
+    breadth per sector, discovered from stocks.sector — create-if-absent
+    (an edited DB body is never overwritten). Compute afterwards with
+    `gefion macro derive --series all`."""
+    from gefion.macro.derived import MacroDeriveError, seed_sector_functions
+    from gefion.output import get_output
+    out = get_output(json_output)
+    with create_span("cli.macro-seed-sectors"):
+        with _regime_conn(db_url) as conn:
+            try:
+                result = seed_sector_functions(
+                    conn,
+                    sectors=[x.strip() for x in sectors.split(",")] if sectors else None,
+                    min_members=min_members, body_floor=body_floor)
+            except MacroDeriveError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    thin = result["skipped_thin"]
+    out.success(
+        f"Seeded {len(result['seeded'])} sector function(s), "
+        f"{len(result['existing'])} already present (DB wins), "
+        f"{len(thin)} sector(s) skipped under the {min_members}-member floor"
+        + (f" ({', '.join(sorted(thin))})" if thin else ""),
+        data=result)
+
+
 @macro_app.command("derive")
 def macro_derive(
     series: str = typer.Option(
@@ -12357,7 +12398,7 @@ def macro_derive(
     cross-section — market-shape facts that become discovery atoms with
     zero DDL, like macro_vix. Idempotent and incremental."""
     from gefion.features.dispatcher import MarketFunctionError
-    from gefion.macro.derived import (SEED_BODIES, MacroDeriveError,
+    from gefion.macro.derived import (MacroDeriveError, all_derived_series,
                                       derive_series, reseed_function)
     from gefion.output import get_output
     out = get_output(json_output)
@@ -12370,11 +12411,15 @@ def macro_derive(
                 raise typer.Exit(1)
         out.warning(f"{reseed}: DB body OVERWRITTEN from repo seed "
                     f"(the only implicit-edit-clobbering path, used explicitly)")
-    names = sorted(SEED_BODIES) if series == "all" \
+    explicit = None if series == "all" \
         else [x.strip() for x in series.split(",") if x.strip()]
     results, failures, skipped = {}, {}, []
-    with create_span("cli.macro-derive", series=",".join(names)):
+    with create_span("cli.macro-derive", series=series):
         with _regime_conn(db_url) as conn:
+            # 'all' = repo seeds UNION enabled DB market functions (013 R4):
+            # the DB is the source of truth, so seeded series (sector,
+            # model, future) are covered without touching any cron line.
+            names = explicit if explicit is not None else all_derived_series(conn)
             for name in names:
                 try:
                     n = derive_series(conn, name, min_stocks=min_stocks,

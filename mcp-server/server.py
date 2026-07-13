@@ -2214,6 +2214,29 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="macro_seed_sectors",
+            description=(
+                "Seed generated sector-signal bodies (spec 013): relative "
+                "strength and breadth per sector, discovered from "
+                "stocks.sector — create-if-absent, an edited DB body is "
+                "never overwritten. Compute afterwards with macro derive "
+                "--series all. MUTATING."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sectors": {"type": "string",
+                                "description": "Comma list of sector names "
+                                               "(default: every sector meeting min_members)"},
+                    "min_members": {"type": "integer",
+                                    "description": "Census floor (default 100)"},
+                    "body_floor": {"type": "integer",
+                                   "description": "Per-date MIN_MEMBERS written "
+                                                  "into each body (default 30)"},
+                },
+            },
+        ),
+        Tool(
             name="macro_list",
             description=(
                 "List the macro-series catalog with value coverage (first/last "
@@ -2535,6 +2558,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _entity_delete(arguments)
         elif name == "macro_ingest":
             result = await _macro_ingest(arguments)
+        elif name == "macro_seed_sectors":
+            result = await _macro_seed_sectors(arguments)
         elif name == "macro_list":
             result = await _macro_list(arguments)
         elif name == "quality_findings":
@@ -5412,6 +5437,18 @@ async def _macro_ingest(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.append("--include-flagged")
         return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_seed_sectors(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Seed sector-signal market bodies (spec 013, mutating)."""
+    cmd = ["macro", "seed-sectors"]
+    if args.get("sectors"):
+        cmd.extend(["--sectors", str(args["sectors"])])
+    if args.get("min_members") is not None:
+        cmd.extend(["--min-members", str(args["min_members"])])
+    if args.get("body_floor") is not None:
+        cmd.extend(["--body-floor", str(args["body_floor"])])
+    return await executor.run(*cmd)
 
 
 async def _macro_list(args: Dict[str, Any]) -> Dict[str, Any]:
