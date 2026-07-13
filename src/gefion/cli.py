@@ -13583,15 +13583,33 @@ def regime_discover_accrue_folds(
         with _regime_conn(db_url) as conn:
             due = due_folds(conn)
             trust = [f for f in due if f["trust_bearing"]]
-            vintage_only = [f for f in due if not f["trust_bearing"]]
+            # vintage folds can number in the thousands (2005-era sweep
+            # candidates) — summarize per candidate, never enumerate
+            by_cand: dict = {}
+            for f in due:
+                if f["trust_bearing"]:
+                    continue
+                c = by_cand.setdefault(f["candidate_id"], {
+                    "candidate_id": f["candidate_id"], "run_id": f["run_id"],
+                    "folds_available": 0,
+                    "first_window_start": str(f["window_start"]),
+                    "last_window_end": str(f["window_end"])})
+                c["folds_available"] += 1
+                c["last_window_end"] = str(f["window_end"])
+            vintage_only = sorted(by_cand.values(),
+                                  key=lambda c: c["candidate_id"])
+            n_vintage = sum(c["folds_available"] for c in vintage_only)
             if dry_run:
                 out.success(
                     f"{len(trust)} trust-bearing fold(s) due, "
-                    f"{len(vintage_only)} vintage-span fold(s) available "
-                    f"(descriptive only) — dry run, nothing graded",
-                    data={"due": [{**f, "window_start": str(f["window_start"]),
-                                   "window_end": str(f["window_end"])}
-                                  for f in due]})
+                    f"{n_vintage} vintage-span fold(s) available across "
+                    f"{len(vintage_only)} candidate(s) (descriptive only) — "
+                    f"dry run, nothing graded",
+                    data={"due_trust_bearing": [
+                              {**f, "window_start": str(f["window_start"]),
+                               "window_end": str(f["window_end"])}
+                              for f in trust],
+                          "vintage_available": vintage_only})
                 return
             scheme = get_scheme("walk_forward")
             markets: dict = {}
@@ -13628,17 +13646,15 @@ def regime_discover_accrue_folds(
              f"({sum(1 for g in graded if g['confirmed'])} confirmed), "
              f"{len(refused)} no-evidence (recorded, not counted)"]
     if vintage_only:
-        lines.append(f"{len(vintage_only)} vintage-span fold(s) available as "
+        lines.append(f"{n_vintage} vintage-span fold(s) across "
+                     f"{len(vintage_only)} candidate(s) available as "
                      f"descriptive procedure evidence — grade deliberately "
                      f"with `regime discover grade-fold` if wanted")
     if errors:
         lines.append(f"{len(errors)} fold(s) errored: {errors}")
     out.success("; ".join(lines),
                 data={"graded": graded, "no_evidence": refused,
-                      "vintage_available": [
-                          {**f, "window_start": str(f["window_start"]),
-                           "window_end": str(f["window_end"])}
-                          for f in vintage_only],
+                      "vintage_available": vintage_only,
                       "errors": errors})
     if errors:
         raise typer.Exit(2)
