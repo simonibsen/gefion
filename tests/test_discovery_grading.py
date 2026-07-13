@@ -62,6 +62,13 @@ def _admitted_run(conn, name, effect_through=None, seed=8, fold_length_days=150)
         # effective-N floor — fold width is declared, not guessed
         fold_length_days=fold_length_days)
     summary = runner.run_discovery(conn, cfg, _market_from(truncate_universe(full, 500)))
+    # align the run's execution stamp with its simulated world: these tests
+    # manufacture a past holdout, which the vintage guard would otherwise
+    # (correctly) treat as operator-seen data and demote folds to descriptive
+    with conn.cursor() as cur:
+        cur.execute("""UPDATE regime_discovery_runs
+                       SET created_at = (segregation->>'holdout_end')::date
+                       WHERE id = %s""", (summary["run_id"],))
     admitted = ledger.list_candidates(conn, summary["run_id"], verdict="admitted")
     assert len(admitted) == 1, "grading tests need one admitted edge"
     return full, summary, admitted[0]

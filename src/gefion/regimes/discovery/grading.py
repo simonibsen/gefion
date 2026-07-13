@@ -31,6 +31,54 @@ class GradingError(ValueError):
     """Raised on an invalid grading operation."""
 
 
+def due_folds(conn, today: Optional[datetime.date] = None) -> list:
+    """Every fully-elapsed, ungraded fold across ALL admitted edges (#105).
+
+    Due-ness anchors at the run's recorded holdout_end. `trust_bearing` is
+    the vintage guard: True only when the fold window ends after the run
+    EXECUTED — pre-execution windows (a --max-date run's post-vintage span)
+    are procedure evidence, reported but never auto-graded as forward
+    results. Folds with ANY recorded row (evidence, no-evidence, or
+    descriptive) are not due; a no-evidence row is re-run only manually.
+    """
+    today = today or datetime.date.today()
+    out = []
+    with create_span("discovery.grading.due_folds") as span:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT c.id, c.run_id, c.provenance,
+                          r.segregation->>'holdout_end', r.created_at
+                   FROM regime_candidates c
+                   JOIN regime_discovery_runs r ON r.id = c.run_id
+                   WHERE c.verdict = 'admitted'
+                   ORDER BY c.id""")
+            candidates = cur.fetchall()
+            for cand_id, run_id, prov, holdout_end_s, created_at in candidates:
+                fold_days = int(((prov or {}).get("grading") or {}).get(
+                    "fold_length_days", DEFAULT_FOLD_LENGTH_DAYS))
+                holdout_end = datetime.date.fromisoformat(holdout_end_s)
+                executed = (created_at.date()
+                            if hasattr(created_at, "date") else created_at)
+                cur.execute("SELECT fold FROM regime_trust_grades "
+                            "WHERE candidate_id = %s", (cand_id,))
+                graded = {r[0] for r in cur.fetchall()}
+                fold = 1
+                while True:
+                    end = holdout_end + datetime.timedelta(days=fold * fold_days)
+                    if end >= today:
+                        break
+                    if fold not in graded:
+                        start = holdout_end + datetime.timedelta(
+                            days=(fold - 1) * fold_days + 1)
+                        out.append({"candidate_id": cand_id, "run_id": run_id,
+                                    "fold": fold, "window_start": start,
+                                    "window_end": end,
+                                    "trust_bearing": end > executed})
+                    fold += 1
+        set_attributes(span, due=len(out))
+    return out
+
+
 def get_scheme(name: str) -> "WalkForwardGrading":
     """Resolve a declared grading scheme (pre-registered per run)."""
     if name not in _SCHEMES:
@@ -167,6 +215,13 @@ class WalkForwardGrading:
                 run["segregation"]["holdout_end"])
             start = discovery_end + datetime.timedelta(days=(fold - 1) * fold_days + 1)
             end = discovery_end + datetime.timedelta(days=fold * fold_days)
+            # Vintage guard: a fold window that ended before the RUN EXECUTED
+            # lies in data the operator had already seen when declaring
+            # --max-date — procedure evidence only. It records with the
+            # descriptive flag: visible, never counted, never grid-locking.
+            executed = run["created_at"]
+            executed = executed.date() if hasattr(executed, "date") else executed
+            descriptive = end <= executed
             in_window = [d for d in market.dates() if start <= d <= end]
             if not in_window:
                 raise GradingError(
@@ -217,18 +272,23 @@ class WalkForwardGrading:
                 # replaceable no-evidence row, excluded from the grade.
                 detail["refused"] = True
                 self._insert(conn, candidate_id, fold, confirmed=False,
-                             descriptive=False, detail=detail)
-                set_attributes(span, refused=True)
+                             descriptive=descriptive, detail=detail)
+                set_attributes(span, refused=True, descriptive=descriptive)
                 return {"refused": True, "confirmed": None, "fold": fold,
-                        "detail": detail}
+                        "descriptive": descriptive, "detail": detail}
 
             # judged on the evaluable re-tests; unpowered ones stay visible
             confirmed = all(t["pvalue"] <= FOLD_CONFIRM_PVALUE for t in evaluable)
-            self.record_forward_result(conn, candidate_id, fold, confirmed,
-                                       detail=detail)
-            set_attributes(span, confirmed=confirmed)
+            if descriptive:
+                detail["vintage_span"] = True
+                self.record_descriptive(conn, candidate_id, fold, confirmed,
+                                        detail=detail)
+            else:
+                self.record_forward_result(conn, candidate_id, fold, confirmed,
+                                           detail=detail)
+            set_attributes(span, confirmed=confirmed, descriptive=descriptive)
             return {"refused": False, "confirmed": confirmed, "fold": fold,
-                    "detail": detail}
+                    "descriptive": descriptive, "detail": detail}
 
     # -- the grade -----------------------------------------------------------------
 

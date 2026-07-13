@@ -132,6 +132,9 @@ universe filters and sector-scoped work. Two guards now exist:
    # Note: the 30 2 nightly line's plain `macro derive` covers ALL derived
    # series since spec 013 ('all' = repo seeds + every DB market function),
    # so sector and model series refresh nightly with no further cron edits.
+   # weekly: grade any due forward folds (trust accrual; vintage-span
+   # folds are reported, never auto-graded — see USER_GUIDE)
+   20 4 * * 0  regime discover accrue-folds --json
    # weekly: provider-garbage sweep over stored data
    40 3 * * 0  quality backfill --json
    # weekly: ONE whole-database pg_dump (drift-proof: includes tables no

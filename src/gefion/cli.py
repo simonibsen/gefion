@@ -13557,6 +13557,93 @@ def regime_discover_grade_fold(
         out.json(outcome)
 
 
+@discover_app.command("accrue-folds")
+def regime_discover_accrue_folds(
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="List due folds without grading"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Grade every due forward fold across all admitted edges (#105).
+
+    A fold is due when its window (anchored at the run's recorded holdout
+    end) has fully elapsed with no recorded outcome. TRUST-BEARING folds
+    (window ends after the run executed) are graded via the standard
+    evaluate_fold path; vintage-span folds (--max-date runs — the operator
+    had seen that data) are reported only, never auto-graded. Idempotent:
+    graded folds are never re-run; safe as a scheduled job.
+    """
+    from gefion.regimes.definitions import iter_leaves
+    from gefion.regimes.discovery.grading import (GradingError, due_folds,
+                                                  get_scheme)
+    from gefion.regimes.discovery.signals import load_market_data
+    out = get_output(json_output)
+    graded, refused, errors, vintage_only = [], [], {}, []
+    with create_span("cli.discover-accrue-folds") as span:
+        with _regime_conn(db_url) as conn:
+            due = due_folds(conn)
+            trust = [f for f in due if f["trust_bearing"]]
+            vintage_only = [f for f in due if not f["trust_bearing"]]
+            if dry_run:
+                out.success(
+                    f"{len(trust)} trust-bearing fold(s) due, "
+                    f"{len(vintage_only)} vintage-span fold(s) available "
+                    f"(descriptive only) — dry run, nothing graded",
+                    data={"due": [{**f, "window_start": str(f["window_start"]),
+                                   "window_end": str(f["window_end"])}
+                                  for f in due]})
+                return
+            scheme = get_scheme("walk_forward")
+            markets: dict = {}
+            for f in trust:
+                cand_id = f["candidate_id"]
+                try:
+                    if cand_id not in markets:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                """SELECT c.expression, c.results, r.search_space
+                                   FROM regime_candidates c
+                                   JOIN regime_discovery_runs r ON r.id = c.run_id
+                                   WHERE c.id = %s""", (cand_id,))
+                            expression, results, space = cur.fetchone()
+                        signals = sorted({t["signal"] for t in
+                                          (results or {}).get("tests", [])})
+                        refs = sorted({leaf["feature"]
+                                       for leaf in iter_leaves(expression)
+                                       if leaf.get("feature")})
+                        markets[cand_id] = (load_market_data(
+                            conn, sorted(set(signals) | set(refs)),
+                            horizon_days=int(space.get("horizon_days", 1)),
+                            dataset_version=space.get("dataset", "dev")))
+                    outcome = scheme.evaluate_fold(
+                        conn, markets[cand_id], cand_id, fold=f["fold"])
+                    (refused if outcome.get("refused") else graded).append(
+                        {"candidate_id": cand_id, "fold": f["fold"],
+                         "confirmed": outcome.get("confirmed")})
+                except (GradingError, LookupError) as exc:
+                    errors[f"{cand_id}:{f['fold']}"] = str(exc)
+        set_attributes(span, graded=len(graded), refused=len(refused),
+                       errors=len(errors), vintage=len(vintage_only))
+    lines = [f"Graded {len(graded)} fold(s) "
+             f"({sum(1 for g in graded if g['confirmed'])} confirmed), "
+             f"{len(refused)} no-evidence (recorded, not counted)"]
+    if vintage_only:
+        lines.append(f"{len(vintage_only)} vintage-span fold(s) available as "
+                     f"descriptive procedure evidence — grade deliberately "
+                     f"with `regime discover grade-fold` if wanted")
+    if errors:
+        lines.append(f"{len(errors)} fold(s) errored: {errors}")
+    out.success("; ".join(lines),
+                data={"graded": graded, "no_evidence": refused,
+                      "vintage_available": [
+                          {**f, "window_start": str(f["window_start"]),
+                           "window_end": str(f["window_end"])}
+                          for f in vintage_only],
+                      "errors": errors})
+    if errors:
+        raise typer.Exit(2)
+
+
 @discover_app.command("show")
 def regime_discover_show(
     run: str = typer.Argument(..., help="Run id or name"),

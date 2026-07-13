@@ -209,6 +209,18 @@ and it can only accrue **forward**:
 - An edge that fails an early fold is flagged **regime-limited**: transient alpha is
   captured, not trusted as durable (FR-123).
 
+### Fold accrual and the vintage guard
+
+`regime discover accrue-folds` closes the operational loop: noticing that a
+probation window has completed is the machine's job (weekly cron), while
+verdict logic stays the pre-registered evaluate-fold path. The **vintage
+guard** rides in the evaluator itself: a fold window that ended before the
+run EXECUTED lies in data the operator had already seen when declaring
+`--max-date`, so it can only ever record with the descriptive flag —
+visible procedure evidence, never counted in the grade, never grid-locking.
+Only calendar-forward windows (after the human's knowledge was frozen too)
+bear trust.
+
 ### Reading the diagnostics ledger
 
 Every limit the search hits is recorded with a quantitative reason
