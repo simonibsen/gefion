@@ -356,8 +356,13 @@ into the stocks table. Adding one is configuration, not schema:
 # Ingest VIX from FRED (keyless, back to 1990) and materialize macro_vix
 gefion macro ingest --name vix --provider fred:VIXCLS --full
 # derived market-shape series (no provider — computed from our own cross-section):
-gefion macro derive                      # breadth_sma200 + dispersion_20, incremental
+gefion macro derive                      # ALL derived series (repo seeds + every DB market function), incremental
 gefion macro derive --series dispersion_20 --min-stocks 100
+
+# Sector-state series (spec 013): per-sector relative strength + breadth,
+# sectors discovered from stocks.sector (no hardcoded taxonomy)
+gefion macro seed-sectors                # census-driven; sectors under --min-members (100) skipped
+gefion macro derive --series all         # sector series compute like any derived series
 
 # Catalog + coverage
 gefion macro list
@@ -388,6 +393,18 @@ out of research:
   can't matter). Computed from our own data, idempotent and incremental; days
   with a cross-section thinner than `--min-stocks` get NO value (honest gap).
   Like `macro_vix`, they are immediately usable as discovery atoms — zero DDL.
+  Sector series (spec 013): `macro_sector_rs_<slug>` (sector median 20-day
+  return minus market median) and `macro_sector_breadth_<slug>` (% of members
+  above their own 200-day SMA), one pair per sector meeting the census floor;
+  slugs normalize deterministically ("FINANCIAL SERVICES" → financial_services)
+  and collisions between distinct sectors refuse. Each generated body carries
+  its own MIN_MEMBERS floor (default 30) — a (sector, date) thinner than that
+  is a gap, and NULL-sector stocks belong to no sector while staying in the
+  market baseline. `--series all` covers repo seeds plus every enabled DB
+  market function, so newly seeded series join the nightly refresh with no
+  cron edits. Honesty caveat: current sector metadata labels the past — a
+  stock reclassified in 2024 counts as its 2024 sector in 2015 aggregates
+  (membership-vintage approximation, same class as adjusted-price restatement).
   `macro ingest` validate as they store — the raw value lands verbatim and a
   finding is recorded; the write is never blocked.
 - **Convicted values are excluded at the feature-computation chokepoint.** A

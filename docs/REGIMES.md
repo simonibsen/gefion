@@ -275,6 +275,20 @@ stack, all at pre-registration:
 Until the meta-hunt admits something, model predictions are signals under
 test — nothing anywhere may treat them as validated forecasts.
 
+### Sector-state vocabulary (spec 013)
+
+Sector aggregates widen the conditioning vocabulary beyond whole-market
+states: `macro_sector_rs_<slug>` (is this sector beating the market?) and
+`macro_sector_breadth_<slug>` (is the strength broad within the sector?) are
+ordinary features, so tercile atoms pre-register them with zero changes to
+any discovery guarantee. Two honesty notes: each generated body declares its
+own MIN_MEMBERS floor (thin sector-days are gaps, never values), and current
+sector membership labels the past — a stock reclassified in 2024 counts as
+its 2024 sector in 2015 aggregates. That is the membership-vintage
+approximation (no outcome leakage — sector labels do not encode future
+returns — but not tick-perfect history), recorded beside the adjusted-price
+caveat.
+
 ### Discovery inside experiment cycles
 
 `gefion experiment propose --type regime_discovery` runs discovery under cycle budgets

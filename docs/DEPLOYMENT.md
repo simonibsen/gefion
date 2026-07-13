@@ -129,6 +129,9 @@ universe filters and sector-scoped work. Two guards now exist:
    # signal universe, so a silent stall here shows up as a coverage refusal
    # at the next hunt — the honest failure mode.
    50 2 * * *  ml predict-backfill --model-name prod_model --model-version v2022 --json && macro derive --series model_outlook_q50,model_confidence_width --json
+   # Note: the 30 2 nightly line's plain `macro derive` covers ALL derived
+   # series since spec 013 ('all' = repo seeds + every DB market function),
+   # so sector and model series refresh nightly with no further cron edits.
    # weekly: provider-garbage sweep over stored data
    40 3 * * 0  quality backfill --json
    # weekly: ONE whole-database pg_dump (drift-proof: includes tables no
