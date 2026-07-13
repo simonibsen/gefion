@@ -44,6 +44,8 @@ def _cleanup(cur):
                 "OR name LIKE 'ssx%'")
     cur.execute("DELETE FROM macro_series WHERE name LIKE 'sector_%' "
                 "OR name LIKE 'ssx%'")
+    cur.execute("DELETE FROM computed_features WHERE data_id IN "
+                "(SELECT id FROM stocks WHERE symbol LIKE 'SSX%')")
     cur.execute("DELETE FROM stock_ohlcv WHERE data_id IN "
                 "(SELECT id FROM stocks WHERE symbol LIKE 'SSX%')")
     cur.execute("DELETE FROM stocks WHERE symbol LIKE 'SSX%'")

@@ -39,6 +39,8 @@ def _cleanup(cur):
                 "OR name = 'dsa_signal'")
     cur.execute("DELETE FROM feature_functions WHERE name LIKE 'sector_%'")
     cur.execute("DELETE FROM macro_series WHERE name LIKE 'sector_%'")
+    cur.execute("DELETE FROM computed_features WHERE data_id IN "
+                "(SELECT id FROM stocks WHERE symbol LIKE 'DSA%')")
     cur.execute("DELETE FROM stock_ohlcv WHERE data_id IN "
                 "(SELECT id FROM stocks WHERE symbol LIKE 'DSA%')")
     cur.execute("DELETE FROM stocks WHERE symbol LIKE 'DSA%'")
