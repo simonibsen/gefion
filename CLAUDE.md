@@ -155,6 +155,7 @@ Before exiting plan mode, verify:
 - Python 3.10+ (existing codebase) + numpy (bootstrap + statistics — stationary bootstrap, (010-spa-reverdict)
 - ONE new table — `spa_reverdicts` (append-only per-run results; (010-spa-reverdict)
 - ONE new column — `feature_functions.scope` ('stock'|'market', (011-market-dispatcher)
+- PostgreSQL + TimescaleDB — existing tables only (013-sector-signals)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)
