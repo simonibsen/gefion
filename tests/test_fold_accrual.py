@@ -174,6 +174,24 @@ def test_accrue_grades_trust_bearing_only(world):
     assert "vintage" in r.output.lower() or "descriptive" in r.output.lower()
 
 
+def test_accrue_reports_vintage_as_summary_not_enumeration(world):
+    """Thousands of elapsed vintage folds (2005-era sweep candidates) must
+    not bloat the report: vintage availability is summarized per candidate
+    (count + span), never enumerated fold-by-fold."""
+    from typer.testing import CliRunner
+    from gefion.cli import app
+    r = CliRunner().invoke(app, ["regime", "discover", "accrue-folds",
+                                 "--dry-run", "--json",
+                                 "--db-url", schema.test_db_url()])
+    assert r.exit_code == 0, r.output
+    payload = json.loads(r.output.strip().splitlines()[-1])
+    vint = [v for v in payload["vintage_available"]
+            if v["candidate_id"] == world["vintage"]]
+    assert len(vint) == 1                       # one row per candidate
+    assert vint[0]["folds_available"] == 3
+    assert "first_window_start" in vint[0] and "last_window_end" in vint[0]
+
+
 def test_accrue_is_idempotent(world):
     from typer.testing import CliRunner
     from gefion.cli import app
