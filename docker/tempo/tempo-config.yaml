@@ -19,8 +19,12 @@ compactor:
   compaction:
     compaction_window: 1h
     max_block_bytes: 100_000_000
-    block_retention: 1h
-    compacted_block_retention: 10m
+    # 14 days: the #120 performance audit ranks slow spans over ~2 weeks of
+    # real cron/operator usage — 1h retention made prod Tempo useless for
+    # anything but live debugging. Local zstd blocks at this span volume
+    # are a few MB/day; disk is not a concern on either host.
+    block_retention: 336h
+    compacted_block_retention: 1h
 
 storage:
   trace:

@@ -116,7 +116,14 @@ universe filters and sector-scoped work. Two guards now exist:
    Logs in `~/cron-logs/`; a full fundamentals pass is ~6.2k OVERVIEW calls ≈ 90 min
    at the key's rate limit. Cron can silently break — that's why the db-health
    coverage check exists independently of it.
-3. **Nightly data pipeline** (installed 2026-07-11, operations phase): daily-7 —
+3. **Cron observability (#120 Phase 0, 2026-07-13)**: cron lines run with
+   OTEL enabled (they source `.env`, which sets `OTEL_ENABLED=true`; the
+   old per-line `OTEL_ENABLED=false` overrides are removed). The exporter
+   is a batched OTLP processor — async and bounded, it drops spans rather
+   than blocking a job if Tempo is down. Tempo retention is 14 days
+   (`block_retention: 336h`) so the performance audit can rank slow spans
+   over real recurring usage; at this span volume that is a few MB/day.
+4. **Nightly data pipeline** (installed 2026-07-11, operations phase): daily-7 —
    an early-morning job ingests the *previous* session, and running all seven
    days self-heals after holidays/outages with a near-instant no-op cost.
    ```cron
