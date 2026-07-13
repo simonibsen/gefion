@@ -59,6 +59,7 @@ def world():
     schema.create_feature_definitions_table(c)
     schema.create_computed_features_table(c)
     schema.create_feature_functions_table(c)
+    schema.create_macro_series_tables(c)
     rng = np.random.default_rng(13)
     with c.cursor() as cur:
         _cleanup(cur)

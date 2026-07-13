@@ -65,6 +65,7 @@ def world():
     schema.create_feature_definitions_table(c)
     schema.create_computed_features_table(c)
     schema.create_feature_functions_table(c)
+    schema.create_macro_series_tables(c)
     with c.cursor() as cur:
         _cleanup(cur)
         ids = {}

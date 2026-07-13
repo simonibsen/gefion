@@ -210,6 +210,36 @@ def create_feature_definitions_table(conn: Connection) -> None:
     conn.commit()
 
 
+def create_macro_series_tables(conn: Connection) -> None:
+    """Macro home (spec 007): series catalog + raw values. Mirrors
+    sql/schema.sql; idempotent — fixtures touching macro_series call this
+    (CI collection order can run after a schema-reset test)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS macro_series (
+                id           SERIAL PRIMARY KEY,
+                name         TEXT UNIQUE NOT NULL,
+                provider     TEXT NOT NULL,
+                kind         TEXT NOT NULL,
+                cadence      TEXT NOT NULL CHECK (cadence IN ('daily','weekly','monthly')),
+                description  TEXT,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS macro_series_values (
+                series_id    INTEGER NOT NULL REFERENCES macro_series(id) ON DELETE CASCADE,
+                date         DATE NOT NULL,
+                value        NUMERIC(14,6) NOT NULL,
+                open         NUMERIC(14,6),
+                high         NUMERIC(14,6),
+                low          NUMERIC(14,6),
+                PRIMARY KEY (series_id, date)
+            );
+            """
+        )
+    conn.commit()
+
+
 def create_feature_functions_table(conn: Connection) -> None:
     """Function registry for reusable feature functions."""
     with conn.cursor() as cur:
