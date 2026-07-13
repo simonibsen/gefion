@@ -93,6 +93,33 @@ def _mk_fn(conn, name, body, inputs=None, enabled=True):
              json.dumps(inputs) if inputs else None))
 
 
+def test_cross_section_rows_carry_sector(world):
+    """Spec 013: the streamed cross-section exposes stocks.sector so sector
+    bodies can filter members; NULL sector arrives as None (excluded by the
+    body, never by the stream)."""
+    with world.cursor() as cur:
+        cur.execute("UPDATE stocks SET sector = 'TECHNOLOGY' "
+                    "WHERE symbol IN ('MDX1','MDX2')")
+        cur.execute("UPDATE stocks SET sector = NULL "
+                    "WHERE symbol IN ('MDX3','MDX4')")
+    try:
+        _mk_fn(world, "mdx_sector_probe", """def compute(rows):
+    tech = sum(1 for r in rows if r.get("sector") == "TECHNOLOGY")
+    nulls = sum(1 for r in rows if r.get("sector") is None)
+    return float(tech * 100 + nulls)
+""")
+        from gefion.features.dispatcher import run_market_function
+        fn = _get_fn(world, "mdx_sector_probe")
+        result = run_market_function(world, fn, min_stocks=1)
+        assert result["values"], "no values computed"
+        assert all(v == 202.0 for _, v in result["values"]), (
+            "each date must see 2 TECHNOLOGY rows and 2 NULL-sector rows")
+    finally:
+        with world.cursor() as cur:
+            cur.execute("UPDATE stocks SET sector = NULL WHERE symbol LIKE 'MDX%'")
+            cur.execute("DELETE FROM feature_functions WHERE name = 'mdx_sector_probe'")
+
+
 # --- T001: schema ---------------------------------------------------------------------
 
 def test_scope_column_exists_defaults_and_checks(world):
