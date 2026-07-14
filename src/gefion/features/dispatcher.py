@@ -566,6 +566,17 @@ def _fetch_feature_definitions(
         store_column
     FROM feature_definitions
     WHERE active = TRUE
+      -- per-stock sweep: only stock-scope functions are dispatchable here.
+      -- 'market' bodies run per-date over the cross-section (spec 011) and
+      -- 'materialized' markers are written by their own pipeline (macro
+      -- ingest/derive, ml predict); attempting either per symbol fails and
+      -- costs a source fetch. Definitions with no registry row (code-registry
+      -- functions like 'indicator') stay eligible.
+      AND NOT EXISTS (
+          SELECT 1 FROM feature_functions ff
+          WHERE ff.name = feature_definitions.function_name
+            AND ff.scope <> 'stock'
+      )
     """
 
     params = []
