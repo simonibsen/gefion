@@ -40,7 +40,7 @@ def test_writer_uses_sync_commit_flag(monkeypatch):
     ])
     monkeypatch.setattr(dispatcher, "_resolve_compute_function", lambda conn, fn: lambda rows, specs: rows)
 
-    def fake_insert(conn, data_id, rows, feature_map, update_existing=False, batch_size=2000, sync_commit=False):
+    def fake_insert(conn, data_id, rows, feature_map, update_existing=False, skip_before=None, batch_size=2000, sync_commit=False):
         calls["sync_commit"] = sync_commit
         return len(rows)
 

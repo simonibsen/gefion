@@ -16,7 +16,7 @@ def test_compute_features_with_writer_queue_uses_queue(monkeypatch):
 
     calls = {}
 
-    def fake_insert(conn, data_id, rows, feature_map, update_existing=False, batch_size=2000, sync_commit=False):
+    def fake_insert(conn, data_id, rows, feature_map, update_existing=False, skip_before=None, batch_size=2000, sync_commit=False):
         calls["insert"] = True
         return len(rows)
 

@@ -191,12 +191,14 @@ def _compute_features_impl(
     cache: Dict[str, Any] = {}
     cache_lock = threading.Lock() if parallel_functions else None
 
-    def enqueue_or_write(rows, feature_map):
+    def enqueue_or_write(rows, feature_map, skip_before=None):
         if write_queue is not None:
             q_start = time.monotonic()
             evt = threading.Event()
             writer_events.append(evt)
-            write_queue.put({"rows": rows, "feature_map": feature_map, "queue_ts": q_start, "event": evt})
+            write_queue.put({"rows": rows, "feature_map": feature_map,
+                             "skip_before": skip_before,
+                             "queue_ts": q_start, "event": evt})
             if timings is not None and timings_lock is not None:
                 elapsed = time.monotonic() - q_start
                 with timings_lock:
@@ -208,6 +210,7 @@ def _compute_features_impl(
             rows=rows,
             feature_map=feature_map,
             update_existing=update_existing,
+            skip_before=skip_before,
             batch_size=feature_batch_size,
         )
 
@@ -242,6 +245,7 @@ def _compute_features_impl(
                                 rows=item["rows"],
                                 feature_map=item["feature_map"],
                                 update_existing=update_existing,
+                                skip_before=item.get("skip_before"),
                                 batch_size=feature_batch_size,
                                 sync_commit=sync_commit,
                             )
@@ -621,7 +625,7 @@ def _process_function_group_with_connection(
     update_existing: bool,
     latest_by_feature: Dict[int, Optional[date]],
     feature_batch_size: int,
-    writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int]], int]] = None,
+    writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int], Optional[date]], int]] = None,
     timings: Optional[Dict[str, float]] = None,
     timings_lock: Optional[threading.Lock] = None,
     cache: Optional[Dict[str, Any]] = None,
@@ -664,7 +668,7 @@ def _process_function_group(
     update_existing: bool,
     latest_by_feature: Dict[int, Optional[date]],
     feature_batch_size: int,
-    writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int]], int]] = None,
+    writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int], Optional[date]], int]] = None,
     timings: Optional[Dict[str, float]] = None,
     timings_lock: Optional[threading.Lock] = None,
     cache: Optional[Dict[str, Any]] = None,
@@ -702,7 +706,7 @@ def _process_function_group_impl(
     update_existing: bool,
     latest_by_feature: Dict[int, Optional[date]],
     feature_batch_size: int,
-    writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int]], int]],
+    writer: Optional[Callable[[List[Dict[str, Any]], Mapping[str, int], Optional[date]], int]],
     timings: Optional[Dict[str, float]],
     timings_lock: Optional[threading.Lock],
     cache: Optional[Dict[str, Any]],
@@ -729,11 +733,17 @@ def _process_function_group_impl(
 
     for source_key, source_features in grouped_by_source.items():
         try:
-            start_date: Optional[date] = None
+            # Incremental means "write only new dates", NOT "compute from only
+            # new rows": windowed functions (SMA-200, RSI-14, ...) need full
+            # history to produce values identical to a full recompute — a
+            # post-cutoff fetch starves the window and they silently no-op
+            # (prod features went stale for 8 trading days, 2026-07). So fetch
+            # everything and let insert skip rows at or before the cutoff.
+            skip_before: Optional[date] = None
             if incremental:
                 dates = [latest_by_feature.get(f[0]) for f in source_features if f[0] in latest_by_feature]
                 dates = [d for d in dates if d is not None]
-                start_date = min(dates) if dates else None
+                skip_before = min(dates) if dates else None
             # Fetch source data
             fetch_start = time.monotonic()
             with create_span(
@@ -741,14 +751,23 @@ def _process_function_group_impl(
                 source_table=source_key[0],
                 source_column=source_key[1],
                 data_id=data_id,
-                incremental=start_date is not None
+                incremental=skip_before is not None
             ):
+                if skip_before is not None:
+                    # cheap guard: no source rows past the cutoff -> nothing
+                    # to write, skip the full-history fetch and compute
+                    new_rows = _fetch_source_data(
+                        conn, data_id, source_key, source_features,
+                        start_date=skip_before)
+                    if not new_rows:
+                        set_attributes(get_current_span(), row_count=0,
+                                       up_to_date=True)
+                        continue
                 source_rows = _fetch_source_data(
                     conn,
                     data_id,
                     source_key,
                     source_features,
-                    start_date=start_date,
                 )
                 set_attributes(get_current_span(), row_count=len(source_rows))
             if timings is not None and timings_lock is not None:
@@ -829,7 +848,8 @@ def _process_function_group_impl(
                         row_count=len(computed_rows),
                         feature_count=len(feature_map)
                     ):
-                        inserted = writer(computed_rows, feature_map)
+                        inserted = writer(computed_rows, feature_map,
+                                          skip_before)
                     if timings is not None and timings_lock is not None:
                         elapsed = time.monotonic() - write_start
                         with timings_lock:
@@ -848,6 +868,7 @@ def _process_function_group_impl(
                             rows=computed_rows,
                             feature_map=feature_map,
                             update_existing=update_existing,
+                            skip_before=skip_before,
                             batch_size=feature_batch_size,
                         )
                     if timings is not None and timings_lock is not None:
