@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS feature_functions (
     checksum TEXT,                 -- hash of body+version
     tags TEXT[],                   -- e.g., {volume, indicator}
     min_app_version TEXT,
-    scope TEXT NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market')),  -- 011: per-stock vs market-level body
+    scope TEXT NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market','materialized')),  -- 011: per-stock vs market body; 'materialized' = written by its own pipeline, never dispatched
     enabled BOOLEAN DEFAULT TRUE,
     created_by TEXT,
     called_by TEXT,                -- parent meta-function for plugin architecture
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS feature_functions (
     updated_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(name, version)
 );
-ALTER TABLE feature_functions ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market'));
+ALTER TABLE feature_functions ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market','materialized'));
 
 -- =============================================================================
 -- TIME-SERIES TABLES (HYPERTABLES)

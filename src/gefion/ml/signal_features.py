@@ -61,6 +61,11 @@ def materialize_prediction_features(conn, model_name: str,
 
     with create_span("ml.signal_features.materialize", model=model_name,
                      version=model_version) as span:
+        from gefion.macro.derived import ensure_materialized_function
+        ensure_materialized_function(
+            conn, "model_prediction",
+            "vintage-model prediction quantiles (spec 012)",
+            materialized_by="gefion.ml")
         model = _load_vintage_model(conn, model_name, model_version)
         with conn.cursor() as cur:
             cur.execute(

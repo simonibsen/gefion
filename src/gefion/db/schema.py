@@ -263,7 +263,7 @@ def create_feature_functions_table(conn: Connection) -> None:
                 tags TEXT[],
                 min_app_version TEXT,
                 enabled BOOLEAN DEFAULT TRUE,
-                scope TEXT NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market')),
+                scope TEXT NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market','materialized')),
                 called_by TEXT,
                 created_by TEXT,
                 created_at TIMESTAMP DEFAULT NOW(),
@@ -277,7 +277,7 @@ def create_feature_functions_table(conn: Connection) -> None:
         # WHERE enabled = TRUE AND status = 'active' AND name = %s
         cur.execute(
             "ALTER TABLE feature_functions ADD COLUMN IF NOT EXISTS scope TEXT "
-            "NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market'));"
+            "NOT NULL DEFAULT 'stock' CHECK (scope IN ('stock','market','materialized'));"
         )
         cur.execute(
             """

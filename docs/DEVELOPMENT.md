@@ -163,6 +163,17 @@ disk-artifact reaping.
   clobbers operator edits; `macro derive --reseed` is the explicit recovery).
   The legacy SQL lives on FROZEN inside the equality-gate test
   (`test_macro_derived.py`) as a permanent regression reference.
+- **Function scopes — three, not two** (#120 trace review): `feature_functions.scope`
+  is `'stock'` (dispatched per symbol by the sweep), `'market'` (dispatched per date
+  over the cross-section, spec 011), or `'materialized'` (never dispatched — values
+  written by their own pipeline: macro ingest/derive, ml predict; the row exists so
+  the registry knows every function name in use). Anything that creates a
+  feature_definition whose values come from elsewhere MUST register a marker via
+  `gefion.macro.derived.ensure_materialized_function` — a definition whose
+  function_name has no registry row is presumed stock-scope and swept per symbol,
+  which is how ~124k futile attempts/night happened. Also: `sql/schema.sql` is the
+  fresh-install snapshot — fresh DBs record migrations WITHOUT executing them
+  (baseline), so a migration that changes DDL must land in schema.py AND schema.sql.
 - **UI rendering of CLI processes** (issue #88): don't write bespoke output
   renderers in views — `gefion.ui.components.cli_output.render_cli_output(key,
   title)` (or `render_cli_state(state, title)`) gives any launched CLI command

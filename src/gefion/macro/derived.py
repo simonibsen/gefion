@@ -24,19 +24,22 @@ class MacroDeriveError(ValueError):
     """Unknown derived series or unusable configuration."""
 
 
-def ensure_macro_function(conn, name: str, description: str) -> None:
-    """Register an ingest-side macro function name (e.g. macro_value) so the
-    registry knows every function name in use (janitor safety)."""
+def ensure_materialized_function(conn, name: str, description: str,
+                                 materialized_by: str = "gefion.macro") -> None:
+    """Register a marker row for a function whose values are written by its
+    own pipeline (macro ingest/derive, ml predict) so the registry knows
+    every function name in use (janitor safety). scope='materialized' keeps
+    it out of BOTH dispatch paths — the per-stock sweep and `derive`."""
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO feature_functions
                    (name, version, status, enabled, description, language,
                     function_body, scope)
                VALUES (%s, 'v1', 'active', TRUE, %s, 'python',
-                       '# materialized by gefion.macro — not dispatched',
-                       'stock')
+                       %s, 'materialized')
                ON CONFLICT DO NOTHING""",
-            (name, description))
+            (name, description,
+             f"# materialized by {materialized_by} — not dispatched"))
 
 
 def _seed_function(conn, name: str) -> None:
