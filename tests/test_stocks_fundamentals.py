@@ -106,7 +106,7 @@ class TestFundamentalsParser:
         }
         result = parse_overview(overview)
         assert result["name"] == "Apple Inc"
-        assert result["sector"] == "Technology"
+        assert result["sector"] == "TECHNOLOGY"  # taxonomy-normalized (TRIM+UPPER)
         assert result["market_cap"] == 3000000000000
         assert result["pe_ratio"] == pytest.approx(28.5)
         assert result["operating_margin"] == pytest.approx(0.302)

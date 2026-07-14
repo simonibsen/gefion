@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import date as date_type
 from typing import Dict, List, Mapping, Optional
 
+from gefion.quality.taxonomy import normalize_industry, normalize_sector
+
 Endpoint = Dict[str, object]
 
 # Minimal catalog of supported endpoints and required params.
@@ -176,8 +178,8 @@ def parse_overview(overview: Mapping[str, object]) -> Dict[str, object]:
     return {
         "symbol": overview.get("Symbol"),
         "name": overview.get("Name") or None,
-        "sector": overview.get("Sector") or None,
-        "industry": overview.get("Industry") or None,
+        "sector": normalize_sector(overview.get("Sector")),
+        "industry": normalize_industry(overview.get("Industry")),
         "exchange": overview.get("Exchange") or None,
         "asset_type": overview.get("AssetType") or None,
         "market_cap": _safe_int(overview.get("MarketCapitalization")),

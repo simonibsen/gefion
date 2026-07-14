@@ -1112,6 +1112,11 @@ a conviction.
   under the current catalog are auto-resolved (superseded, never deleted) — a
   catalog retune is self-cleaning. Confirm first (may take minutes on full
   history).
+- `quality_normalize_taxonomy` — normalize stored sector/industry taxonomy:
+  provider sentinels (`NONE`, `OTHER`) → NULL, vendor aliases (`FINANCIALS`,
+  `CAPITAL MARKETS`) → canonical sector. Dry-run by default (reports every
+  mapping with row counts); **mutating with `apply=true`** — rewrites
+  `stocks.sector`/`industry`. Confirm first.
 - `quality_resolve` — **mutating**: supersede a finding (reason required; never
   deletes). Confirm first.
 - db-health / `health_check` gain a `data_quality` section automatically

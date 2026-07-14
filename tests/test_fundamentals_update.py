@@ -646,7 +646,7 @@ def test_one_bad_symbol_cannot_sink_the_batch(db_conn):
         assert summary["write_errors"] == 1
         with db_conn.cursor() as cur:
             cur.execute("SELECT sector FROM stocks WHERE id = %s", (good_id,))
-            assert cur.fetchone()[0] == "Tech"  # the good row landed
+            assert cur.fetchone()[0] == "TECH"  # the good row landed (normalized)
             cur.execute(
                 "SELECT count(*) FROM stocks_fundamentals WHERE data_id = %s",
                 (good_id,))

@@ -415,6 +415,18 @@ out of research:
 gefion macro ingest --name vix                    # a VIX <= 0 is excluded from macro_vix
 gefion macro ingest --name vix --include-flagged  # carry convicted values in anyway
 ```
+- **Taxonomy normalization.** Sector/industry strings are normalized at
+  ingest: provider sentinels (`NONE`, `OTHER`, `N/A`) become NULL — an
+  unclassifiable instrument (SPAC unit, senior note, warrant) belongs to no
+  sector rather than to a fake `NONE` group — and known vendor-taxonomy
+  strays map to the canonical sector (`FINANCIALS`, `CAPITAL MARKETS` →
+  `FINANCIAL SERVICES`). Everything else is trimmed and uppercased so case
+  variance can never split a sector group. For rows stored before this
+  existed, `quality normalize-taxonomy` reports (dry-run default) and fixes:
+```bash
+gefion quality normalize-taxonomy          # dry-run: every mapping + row count
+gefion quality normalize-taxonomy --apply  # rewrite stocks.sector/industry
+```
 
 ### Entity deletion (first-class, registry-driven)
 Anything created must be cleanly deletable with its associated data. `data
