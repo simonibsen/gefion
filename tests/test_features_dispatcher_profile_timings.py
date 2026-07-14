@@ -46,7 +46,7 @@ def test_compute_features_returns_timings_when_profile(monkeypatch):
 
     monkeypatch.setattr(dispatcher, "_resolve_compute_function", lambda conn, fn: fake_compute)
 
-    def fake_insert(conn, data_id, rows, feature_map, update_existing=False, batch_size=2000, sync_commit=False):
+    def fake_insert(conn, data_id, rows, feature_map, update_existing=False, skip_before=None, batch_size=2000, sync_commit=False):
         time.sleep(0.01)
         return len(rows)
 

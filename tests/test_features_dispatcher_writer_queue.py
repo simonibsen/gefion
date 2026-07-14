@@ -9,7 +9,7 @@ def test_process_function_group_with_writer_queue(monkeypatch):
     def fake_fetch(conn, data_id, source_key, features, start_date=None):
         return [{"date": date(2025, 1, 1), "value": 1.0}]
 
-    def fake_insert(conn, data_id, rows, feature_map, update_existing=False, batch_size=2000):
+    def fake_insert(conn, data_id, rows, feature_map, update_existing=False, skip_before=None, batch_size=2000):
         rows_written["called"] = True
         rows_written["rows"] = rows
         rows_written["feature_map"] = feature_map
@@ -34,7 +34,7 @@ def test_process_function_group_with_writer_queue(monkeypatch):
         update_existing=False,
         latest_by_feature={},
         feature_batch_size=2000,
-        writer=lambda rows, fm: fake_insert(None, 1, rows, fm),
+        writer=lambda rows, fm, skip_before=None: fake_insert(None, 1, rows, fm),
     )
 
     assert result["inserted"] == 1
