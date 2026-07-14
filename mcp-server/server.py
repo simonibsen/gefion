@@ -2291,6 +2291,24 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="quality_normalize_taxonomy",
+            description=(
+                "Normalize stored sector/industry taxonomy: provider sentinels "
+                "('NONE', 'OTHER') become NULL, vendor-taxonomy aliases "
+                "('FINANCIALS', 'CAPITAL MARKETS') map to the canonical sector. "
+                "Dry-run by default (reports every mapping + row count). "
+                "**Mutating with apply=true** — rewrites stocks.sector/industry; "
+                "operator confirms first."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "apply": {"type": "boolean",
+                              "description": "Write the changes (default: dry-run)"},
+                },
+            },
+        ),
+        Tool(
             name="quality_resolve",
             description=(
                 "Supersede a data-quality finding (sets resolution; never "
@@ -2568,6 +2586,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _quality_catalog(arguments)
         elif name == "quality_backfill":
             result = await _quality_backfill(arguments)
+        elif name == "quality_normalize_taxonomy":
+            result = await _quality_normalize_taxonomy(arguments)
         elif name == "quality_resolve":
             result = await _quality_resolve(arguments)
         else:
@@ -5486,6 +5506,16 @@ async def _quality_backfill(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--entity-table", str(args["entity_table"])])
         if args.get("metric"):
             cmd.extend(["--metric", str(args["metric"])])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _quality_normalize_taxonomy(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize stored sector/industry taxonomy (mutating with apply=true)."""
+    async def _run():
+        cmd = ["quality", "normalize-taxonomy"]
+        if args.get("apply"):
+            cmd.append("--apply")
         return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 

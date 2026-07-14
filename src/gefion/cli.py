@@ -7366,6 +7366,8 @@ def _write_fundamentals_results(conn, results) -> Dict[str, int]:
     a bad row rolls back alone, is counted and logged, and the batch lands.
     """
     import logging
+
+    from gefion.quality.taxonomy import normalize_industry, normalize_sector
     log = logging.getLogger(__name__)
 
     # Data-quality catalog (spec 008): loaded once, guarded — a catalog problem
@@ -7386,8 +7388,8 @@ def _write_fundamentals_results(conn, results) -> Dict[str, int]:
         if err or was_skipped:
             continue
         name = overview.get("Name", "")
-        sector = overview.get("Sector", "")
-        industry = overview.get("Industry", "")
+        sector = normalize_sector(overview.get("Sector"))
+        industry = normalize_industry(overview.get("Industry"))
         stock_exchange = overview.get("Exchange", "")
         fundamentals = None
         try:
@@ -12550,6 +12552,30 @@ def quality_backfill_cmd(
         f"{summary['findings']['resolved']} stale finding(s) resolved, "
         f"{summary['stored_values_changed']} stored value(s) changed",
         data=summary)
+
+
+@quality_app.command("normalize-taxonomy")
+def quality_normalize_taxonomy_cmd(
+    apply: bool = typer.Option(False, "--apply",
+                               help="Write the changes (default: dry-run report)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Normalize stored sector/industry taxonomy (sentinels → NULL, aliases →
+    canonical). Dry-run by default; --apply rewrites stocks.sector/industry."""
+    from gefion.quality import taxonomy
+    out = get_output(json_output)
+    with _regime_conn(db_url) as conn:
+        summary = taxonomy.backfill(conn, apply=apply)
+    if not out.json_mode:
+        for c in summary["changes"]:
+            out.info(f"{c['column']}: {c['from']!r} -> {c['to']!r} "
+                     f"({c['count']} row(s))")
+    verb = "changed" if apply else "would change"
+    out.success(f"{summary['rows_changed']} row(s) {verb} across "
+                f"{len(summary['changes'])} mapping(s)"
+                f"{'' if apply else ' — dry-run, use --apply to write'}",
+                data=summary)
 
 
 @quality_app.command("resolve")
