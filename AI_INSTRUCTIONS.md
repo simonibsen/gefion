@@ -20,20 +20,22 @@
 - Write the test first
 - Then continue with implementation
 
-### 2. NEVER Mention AI Tools
-**Forbidden in:**
-- Commit messages
-- Code comments (unless specifically requested by user)
-- Documentation
-- Pull request descriptions
-- Git commit Co-Authored-By tags
+### 2. AI Attribution: Trailers Yes, Chatter No
+**The commit author must be the human developer** (git `user.name`/`user.email`
+— the commit-msg hook enforces this). AI assistance is credited through the
+standard trailer, which every Claude-assisted commit keeps:
 
-**Forbidden terms:**
-- Claude, AI, GPT, LLM, assistant
-- "automated", "generated", "AI-generated"
-- Any references to AI authorship
+```
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+```
 
-**Write commits as if the human developer wrote everything.**
+PR descriptions may carry the standard generated-with footer.
+
+**Still forbidden — AI chatter in the artifact itself:**
+- Code comments narrating the AI's process ("added by Claude", "AI-generated")
+- Documentation prose referencing AI authorship
+- Commit bodies explaining what the assistant did rather than what the change
+  does and why it was needed
 
 ### 3. When Tests Fail
 **Priority order:**
