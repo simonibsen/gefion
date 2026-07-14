@@ -127,18 +127,21 @@ universe filters and sector-scoped work. Two guards now exist:
    an early-morning job ingests the *previous* session, and running all seven
    days self-heals after holidays/outages with a near-instant no-op cost.
    ```cron
-   # nightly: incremental prices then features (probation checks ride data-update)
-   30 2 * * *  data-update --timeframe auto --json && feat-compute --all-features --incremental --json
-   # nightly ML top-up (spec 012, after feat-compute): keep the vintage
-   # model's out-of-sample prediction span growing daily. predict-backfill
-   # resumes from the last stored prediction (a no-op costs seconds);
-   # macro derive is incremental. The derived series are the meta-hunt's
-   # signal universe, so a silent stall here shows up as a coverage refusal
-   # at the next hunt — the honest failure mode.
-   50 2 * * *  ml predict-backfill --model-name prod_model --model-version v2022 --json && macro derive --series model_outlook_q50,model_confidence_width --json
-   # Note: the 30 2 nightly line's plain `macro derive` covers ALL derived
-   # series since spec 013 ('all' = repo seeds + every DB market function),
-   # so sector and model series refresh nightly with no further cron edits.
+   # nightly pipeline — ONE dependency-ordered chain (2026-07-14):
+   # prices -> features -> ML prediction top-up (spec 012) -> derive all series
+   30 2 * * *  data-update --timeframe auto --json && feat-compute --all-features --incremental --json && { ml predict-backfill --model-name prod_model --model-version v2022 --json || true; } && macro derive --json
+   # predict-backfill resumes from the last stored prediction (a no-op
+   # costs seconds) and runs BEFORE derive so the model series pick up the
+   # new day; it is non-blocking (|| true) so a prediction failure never
+   # stops the sector/market series refresh. The derived series are the
+   # meta-hunt's signal universe, so a silent stall shows up as a coverage
+   # refusal at the next hunt — the honest failure mode.
+   # History: the top-up was a separate 02:50 cron; once the chain outgrew
+   # 20 minutes it fired mid-chain ("No trading days with features") and
+   # predictions lagged trading days. Folded into the chain 2026-07-14.
+   # Note: plain `macro derive` covers ALL derived series since spec 013
+   # ('all' = repo seeds + every DB market function), so sector and model
+   # series refresh nightly with no further cron edits.
    # weekly: grade any due forward folds (trust accrual; vintage-span
    # folds are reported, never auto-graded — see USER_GUIDE)
    20 4 * * 0  regime discover accrue-folds --json
