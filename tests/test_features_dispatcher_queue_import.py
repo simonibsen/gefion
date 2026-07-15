@@ -9,7 +9,7 @@ def test_compute_features_with_writer_queue_uses_queue(monkeypatch):
     ])
     monkeypatch.setattr(dispatcher, "_group_by_function_name", lambda defs: {"indicator": defs})
     monkeypatch.setattr(dispatcher, "_latest_dates_for_features", lambda conn, data_id, feature_ids: {})
-    monkeypatch.setattr(dispatcher, "_fetch_source_data", lambda conn, data_id, source_key, features, start_date=None: [
+    monkeypatch.setattr(dispatcher, "_fetch_source_data", lambda conn, data_id, source_key, features, start_date=None, **kw: [
         {"date": "2025-01-01", "feat1": 1.0}
     ])
     monkeypatch.setattr(dispatcher, "_resolve_compute_function", lambda conn, fn: lambda rows, specs: rows)
