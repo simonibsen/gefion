@@ -49,10 +49,12 @@ def _load_vintage_model(conn, model_name: str, model_version: str) -> Dict[str, 
 
 
 def materialize_prediction_features(conn, model_name: str,
-                                    model_version: str) -> Dict[str, Any]:
+                                    model_version: str,
+                                    full: bool = False) -> Dict[str, Any]:
     """Expose stored quantile predictions as per-stock computed features,
     one feature per (quantile, horizon), idempotent and incremental (the
-    computed_features primary key dedups). Then seed the market bodies.
+    computed_features primary key dedups; the month scan resumes at the
+    last materialized month unless full=True). Then seed the market bodies.
 
     Returns {"features": {name: new_rows}, "horizons": [...], "cutoff": ...,
     "market_functions": [...]}.
@@ -104,6 +106,20 @@ def materialize_prediction_features(conn, model_name: str,
                         "       max(prediction_date) FROM predictions "
                         "WHERE model_id = %s", (model["id"],))
                     lo, hi = cur.fetchone()
+                    if not full:
+                        # Incremental (nightly): resume at the month of the
+                        # last materialized row — rescanning all of history
+                        # was an hour-plus nightly tail (#120). Sound because
+                        # predict-backfill appends strictly forward; the
+                        # partial month redoes cheaply (PK dedup). full=True
+                        # is the deliberate whole-history rescan.
+                        cur.execute(
+                            "SELECT date_trunc('month', max(date)) "
+                            "FROM computed_features WHERE feature_id = %s",
+                            (ids[feat],))
+                        row = cur.fetchone()
+                        if row and row[0] is not None and lo is not None:
+                            lo = max(lo, row[0])
                 batch = lo
                 while batch is not None and batch.date() <= hi:
                     with conn.cursor() as cur:

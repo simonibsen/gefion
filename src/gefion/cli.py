@@ -1508,6 +1508,10 @@ def ml_train(
 def ml_materialize_signals(
     model_name: str = typer.Option(..., help="Vintage model name"),
     model_version: str = typer.Option(..., help="Vintage model version"),
+    full: bool = typer.Option(
+        False, "--full",
+        help="Rescan ALL prediction history (default resumes at the last "
+             "materialized month)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result as JSON"),
 ) -> None:
@@ -1515,7 +1519,8 @@ def ml_materialize_signals(
     (spec 012): per-stock features named with the model identity
     (pred_q50_h30__<model>_<version>), plus the two market bodies
     (model_outlook_q50, model_confidence_width) seeded create-if-absent —
-    compute them afterwards with `gefion macro derive`."""
+    compute them afterwards with `gefion macro derive`. Incremental by
+    default; --full is the deliberate whole-history rescan."""
     from gefion.ml.signal_features import (SignalMaterializeError,
                                            materialize_prediction_features)
 
@@ -1523,7 +1528,7 @@ def ml_materialize_signals(
         with psycopg.connect(_db_url(db_url)) as conn:
             try:
                 result = materialize_prediction_features(
-                    conn, model_name, model_version)
+                    conn, model_name, model_version, full=full)
             except SignalMaterializeError as exc:
                 emit_error(str(exc), json_output=json_output)
                 raise typer.Exit(1)

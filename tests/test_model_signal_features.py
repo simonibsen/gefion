@@ -287,3 +287,46 @@ def test_materialize_refuses_unknown_and_unvintaged(world):
     finally:
         with world.cursor() as cur:
             cur.execute("DELETE FROM ml_models WHERE name = 'msf_novintage'")
+
+
+def test_materialize_incremental_starts_at_last_month(world):
+    """Nightly materialize must not rescan all of prediction history (#120:
+    the full scan became an hour-plus nightly tail). Incremental (default)
+    starts at the month of the last materialized feature row — sound because
+    predict-backfill appends strictly forward; full=True remains the
+    deliberate full rescan. Runs LAST: it mutates old feature rows."""
+    from gefion.ml.signal_features import materialize_prediction_features
+
+    # ensure fully materialized, then hollow out the FIRST month
+    materialize_prediction_features(world, MODEL, VERSION)
+    with world.cursor() as cur:
+        cur.execute("""SELECT date_trunc('month', min(cf.date))::date,
+                              date_trunc('month', max(cf.date))::date
+                       FROM computed_features cf
+                       JOIN feature_definitions fd ON fd.id = cf.feature_id
+                       WHERE fd.name = ANY(%s)""", (PRED_FEATURES,))
+        first_month, last_month = cur.fetchone()
+        assert first_month < last_month  # world spans multiple months
+        cur.execute("""DELETE FROM computed_features cf
+                       USING feature_definitions fd
+                       WHERE fd.id = cf.feature_id AND fd.name = ANY(%s)
+                         AND cf.date < %s""",
+                    (PRED_FEATURES, first_month + dt.timedelta(days=31)))
+
+    def _first_month_rows():
+        with world.cursor() as cur:
+            cur.execute("""SELECT count(*) FROM computed_features cf
+                           JOIN feature_definitions fd ON fd.id = cf.feature_id
+                           WHERE fd.name = ANY(%s) AND cf.date
+                                 < %s""",
+                        (PRED_FEATURES, first_month + dt.timedelta(days=31)))
+            return cur.fetchone()[0]
+
+    assert _first_month_rows() == 0
+    # incremental: scan starts at the last materialized month — the hole
+    # in an EARLIER month is deliberately out of scope
+    materialize_prediction_features(world, MODEL, VERSION)
+    assert _first_month_rows() == 0
+    # full: the deliberate rescan refills it
+    materialize_prediction_features(world, MODEL, VERSION, full=True)
+    assert _first_month_rows() > 0
