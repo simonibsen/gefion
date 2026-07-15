@@ -127,9 +127,12 @@ universe filters and sector-scoped work. Two guards now exist:
    an early-morning job ingests the *previous* session, and running all seven
    days self-heals after holidays/outages with a near-instant no-op cost.
    ```cron
-   # nightly pipeline — ONE dependency-ordered chain (2026-07-14):
+   # nightly pipeline — ONE dependency-ordered chain (2026-07-14/15):
    # prices -> features -> ML prediction top-up (spec 012) -> derive all series
-   30 2 * * *  data-update --timeframe auto --json && feat-compute --all-features --incremental --json && { ml predict-backfill --model-name prod_model --model-version v2022 --json || true; } && macro derive --json
+   # data-update runs --skip-features (#120 item 1a): its local-mode feature
+   # phase duplicated the chained dispatcher-mode feat-compute at ~3.5x the
+   # cost — ONE feature pass, on the fast path.
+   30 2 * * *  data-update --timeframe auto --skip-features --json && feat-compute --all-features --incremental --json && { ml predict-backfill --model-name prod_model --model-version v2022 --json || true; } && macro derive --json
    # predict-backfill resumes from the last stored prediction (a no-op
    # costs seconds), re-materializes the pred_* feature rows (the signal
    # surface derive reads), and runs BEFORE derive so the model series pick

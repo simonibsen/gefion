@@ -7594,6 +7594,11 @@ def update_all(
     calls_per_minute: int = typer.Option(75, help="AlphaVantage rate limit (premium default)"),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     since: Optional[str] = typer.Option(None, "--since", help="Only load data since this date (YYYY-MM-DD). Rows before this date are discarded."),
+    skip_features: bool = typer.Option(
+        False, "--skip-features",
+        help="Skip the feature-computation phase (prices/metadata only) — "
+             "run `gefion feat-compute --all-features --incremental` "
+             "afterwards, as the nightly chain does"),
     listings_file: Optional[Path] = typer.Option(None, help="Optional path to listings CSV/JSON (bypass network fetch)"),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress updates"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
@@ -7637,14 +7642,16 @@ def update_all(
         _update_all_impl(
             exchange, status, timeframe, feature_batch_size, refresh_existing,
             refresh, limit, max_workers, writer_workers, calls_per_minute,
-            db_url, listings_file, progress, json_output, since
+            db_url, listings_file, progress, json_output, since,
+            skip_features=skip_features,
         )
 
 
 def _update_all_impl(
     exchange, status, timeframe, feature_batch_size, refresh_existing,
     refresh, limit, max_workers, writer_workers, calls_per_minute,
-    db_url, listings_file, progress, json_output, since=None
+    db_url, listings_file, progress, json_output, since=None,
+    skip_features=False,
 ):
     """Implementation of data-update (separated for tracing)."""
     url = _db_url(db_url)
@@ -7895,7 +7902,22 @@ def _update_all_impl(
     feature_errors = 0
     feat_live: Optional[Live] = None
     feature_reporter: Optional[ProgressReporter] = None
-    if active_feature_defs == 0:
+    if skip_features:
+        # #120 item 1a: the nightly chain runs the (3.5x faster)
+        # dispatcher-mode feat-compute right after this command — running
+        # the local-mode phase here too computed every feature twice.
+        with create_span(
+            "data_update.feature_compute",
+            skipped=True,
+            skip_features=True,
+        ):
+            emit("Features: skipped (--skip-features) — run "
+                 "`gefion feat-compute --all-features --incremental`",
+                 data={"phase": "features", "done": 0, "total": 0,
+                       "percent": 100,
+                       "message": "skipped by --skip-features"},
+                 json_output=json_output)
+    elif active_feature_defs == 0:
         with create_span(
             "data_update.feature_compute",
             symbol_count=len(all_symbols),
@@ -7927,7 +7949,7 @@ def _update_all_impl(
             if feat_live:
                 feat_live.__enter__()
     try:
-        if active_feature_defs != 0:
+        if not skip_features and active_feature_defs != 0:
             with create_span(
                 "data_update.feature_compute",
                 symbol_count=len(all_symbols),

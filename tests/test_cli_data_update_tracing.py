@@ -142,6 +142,45 @@ def test_data_update_skips_feature_compute_when_no_active_defs(monkeypatch):
     assert feature_spans[0].attrs.get("skipped") is True
 
 
+def test_data_update_skip_features_flag(monkeypatch):
+    """--skip-features: the features phase never runs even with active
+    definitions — the nightly chain delegates to the (3.5x faster)
+    dispatcher-mode feat-compute instead of running the local-mode pass
+    twice (#120 item 1a). The skip is honest: its span says skip_features,
+    not 'no active definitions'."""
+    spans: list[DummySpan] = []
+    _install_common_stubs(monkeypatch, symbols=["AAA", "BBB"],
+                          active_feature_defs=2, spans=spans)
+
+    def fail_compute(*args, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("compute_features must not run with --skip-features")
+
+    monkeypatch.setattr(cli, "compute_features", fail_compute)
+
+    cli._update_all_impl(
+        exchange=None,
+        status="Active",
+        timeframe="auto",
+        feature_batch_size=200,
+        refresh_existing=False,
+        refresh=False,
+        limit=None,
+        max_workers=None,
+        writer_workers=None,
+        calls_per_minute=75,
+        db_url="postgresql://example",
+        listings_file=None,
+        progress=False,
+        json_output=True,
+        skip_features=True,
+    )
+
+    feature_spans = [span for span in spans if span.name == "data_update.feature_compute"]
+    assert len(feature_spans) == 1
+    assert feature_spans[0].attrs.get("skipped") is True
+    assert feature_spans[0].attrs.get("skip_features") is True
+
+
 def test_data_update_creates_feature_symbol_spans(monkeypatch):
     spans: list[DummySpan] = []
     _install_common_stubs(monkeypatch, symbols=["AAA", "BBB"], active_feature_defs=2, spans=spans)
