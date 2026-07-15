@@ -126,6 +126,25 @@ def _materialize(runner):
                                "--db-url", schema.test_db_url()])
 
 
+def test_backfill_materializes_its_own_signals(world):
+    """predict-backfill must leave the pred_* FEATURE rows current, not just
+    the predictions table — the nightly chain derives the model series from
+    the features, and a backfill that stops at the predictions table lets
+    them silently go stale (prod, 2026-07-14: predictions through 07-13,
+    features through 07-10, model series wrote 0). This test runs FIRST in
+    the file: no explicit materialize-signals has happened yet."""
+    with world.cursor() as cur:
+        cur.execute("""SELECT count(*) FROM predictions p
+                       JOIN ml_models m ON m.id = p.model_id
+                       WHERE m.name = %s AND m.version = %s""", (MODEL, VERSION))
+        n_preds = cur.fetchone()[0]
+        assert n_preds > 0
+        cur.execute("""SELECT count(*) FROM computed_features cf
+                       JOIN feature_definitions fd ON fd.id = cf.feature_id
+                       WHERE fd.name = ANY(%s)""", (PRED_FEATURES,))
+        assert cur.fetchone()[0] == 3 * n_preds
+
+
 def test_materialize_creates_prediction_features(world):
     """Predictions become per-stock features named with the model identity;
     values match the stored quantiles row-for-row (nothing fabricated)."""
