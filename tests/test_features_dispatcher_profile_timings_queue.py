@@ -34,7 +34,7 @@ def test_compute_features_timings_include_queue_and_writer(monkeypatch):
     ])
     monkeypatch.setattr(dispatcher, "_group_by_function_name", lambda defs: {"indicator": defs})
     monkeypatch.setattr(dispatcher, "_latest_dates_for_features", lambda conn, data_id, feature_ids: {})
-    monkeypatch.setattr(dispatcher, "_fetch_source_data", lambda conn, data_id, source_key, features, start_date=None: [
+    monkeypatch.setattr(dispatcher, "_fetch_source_data", lambda conn, data_id, source_key, features, start_date=None, **kw: [
         {"date": date(2025, 1, 1), "feat1": 1.0}
     ])
 

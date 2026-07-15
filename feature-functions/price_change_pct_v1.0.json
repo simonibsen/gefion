@@ -5,7 +5,12 @@
   "description": "Calculate percentage price change from previous period. Example custom feature using DB-first approach.",
   "language": "python",
   "function_body": "import pandas as pd\n\ndef compute(rows, specs):\n    \"\"\"\n    Calculate percentage price change from previous period.\n    \n    Args:\n        rows: Price data rows with 'date', 'close', etc.\n        specs: Feature specs (not used in this example)\n    \n    Returns:\n        List of rows with date and price_change_pct values\n    \"\"\"\n    if not rows:\n        return []\n    \n    df = pd.DataFrame(rows)\n    if df.empty or 'close' not in df.columns:\n        return []\n    \n    df = df.sort_values('date')\n    df['price_change_pct'] = df['close'].pct_change() * 100\n    \n    results = []\n    for _, row in df.iterrows():\n        if pd.notna(row['price_change_pct']):\n            results.append({\n                'date': row['date'],\n                'price_change_pct': float(row['price_change_pct'])\n            })\n    \n    return results\n",
-  "inputs": null,
+  "inputs": {
+    "lookback": {
+      "mode": "window",
+      "min_bars": 5
+    }
+  },
   "output_name": "value",
   "output_type": "double precision",
   "param_schema": null,

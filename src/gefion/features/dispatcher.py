@@ -39,6 +39,33 @@ from gefion.observability import create_span, set_attributes, add_event, get_cur
 # Function cache for resolved DB functions
 _FUNCTION_CACHE: Dict[str, Callable] = {}
 _FUNCTION_CACHE_SOURCE: Dict[str, str] = {}
+_LOOKBACK_CACHE: Dict[str, Optional[Dict[str, Any]]] = {}
+
+
+def _function_lookback_declaration(conn: psycopg.Connection,
+                                   function_name: str) -> Optional[Dict[str, Any]]:
+    """The function's declared inputs["lookback"], or None (= full history).
+    Cached per run — one query per function group, not per symbol."""
+    if function_name in _LOOKBACK_CACHE:
+        return _LOOKBACK_CACHE[function_name]
+    declaration = None
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT inputs FROM feature_functions
+               WHERE name = %s AND enabled = TRUE AND status = 'active'
+               ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+               LIMIT 1""",
+            (function_name,))
+        row = cur.fetchone()
+    if row and row[0]:
+        inputs = row[0]
+        if isinstance(inputs, str):
+            import json as _json
+            inputs = _json.loads(inputs)
+        if isinstance(inputs, dict):
+            declaration = inputs.get("lookback")
+    _LOOKBACK_CACHE[function_name] = declaration
+    return declaration
 
 
 def compute_features(
@@ -117,6 +144,7 @@ def _compute_features_impl(
     # Ensure fresh resolution per run (cache still used within this call)
     _FUNCTION_CACHE.clear()
     _FUNCTION_CACHE_SOURCE.clear()
+    _LOOKBACK_CACHE.clear()
 
     # Memory safety check (if psutil available)
     if PSUTIL_AVAILABLE:
@@ -734,16 +762,37 @@ def _process_function_group_impl(
     for source_key, source_features in grouped_by_source.items():
         try:
             # Incremental means "write only new dates", NOT "compute from only
-            # new rows": windowed functions (SMA-200, RSI-14, ...) need full
-            # history to produce values identical to a full recompute — a
-            # post-cutoff fetch starves the window and they silently no-op
-            # (prod features went stale for 8 trading days, 2026-07). So fetch
-            # everything and let insert skip rows at or before the cutoff.
+            # new rows": windowed functions (SMA-200, RSI-14, ...) need
+            # pre-cutoff history to produce values identical to a full
+            # recompute — a post-cutoff fetch starves the window and they
+            # silently no-op (prod features went stale for 8 trading days,
+            # 2026-07). How MUCH history the body needs is its own contract:
+            # the registry row's inputs["lookback"] declaration (#120 item
+            # 1b); undeclared means full history — the honest default, and
+            # the only correct one for path-dependent bodies (PSAR).
             skip_before: Optional[date] = None
             if incremental:
                 dates = [latest_by_feature.get(f[0]) for f in source_features if f[0] in latest_by_feature]
                 dates = [d for d in dates if d is not None]
                 skip_before = min(dates) if dates else None
+
+            # Prepare compute specs from feature definitions
+            compute_specs = [
+                {
+                    'name': f[1],  # feature name
+                    'feature_id': f[0],  # feature id
+                    **f[3],  # params (type, window, etc.)
+                }
+                for f in source_features
+            ]
+
+            lookback_rows: Optional[int] = None
+            if skip_before is not None:
+                from gefion.features.lookback import lookback_bars
+                lookback_rows = lookback_bars(
+                    _function_lookback_declaration(conn, function_name),
+                    compute_specs)
+
             # Fetch source data
             fetch_start = time.monotonic()
             with create_span(
@@ -751,11 +800,12 @@ def _process_function_group_impl(
                 source_table=source_key[0],
                 source_column=source_key[1],
                 data_id=data_id,
-                incremental=skip_before is not None
+                incremental=skip_before is not None,
+                lookback_rows=lookback_rows or 0,
             ):
                 if skip_before is not None:
                     # cheap guard: no source rows past the cutoff -> nothing
-                    # to write, skip the full-history fetch and compute
+                    # to write, skip the history fetch and compute
                     new_rows = _fetch_source_data(
                         conn, data_id, source_key, source_features,
                         start_date=skip_before)
@@ -768,6 +818,8 @@ def _process_function_group_impl(
                     data_id,
                     source_key,
                     source_features,
+                    lookback_before=skip_before,
+                    lookback_rows=lookback_rows,
                 )
                 set_attributes(get_current_span(), row_count=len(source_rows))
             if timings is not None and timings_lock is not None:
@@ -777,16 +829,6 @@ def _process_function_group_impl(
 
             if not source_rows:
                 continue
-
-            # Prepare compute specs from feature definitions
-            compute_specs = [
-                {
-                    'name': f[1],  # feature name
-                    'feature_id': f[0],  # feature id
-                    **f[3],  # params (type, window, etc.)
-                }
-                for f in source_features
-            ]
 
             # Call compute function
             try:
@@ -1225,6 +1267,8 @@ def _fetch_source_data(
     source_key: Tuple[str, str],
     features: List[Tuple],
     start_date: Optional[date] = None,
+    lookback_before: Optional[date] = None,
+    lookback_rows: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Fetch source data based on source_table and source_column.
@@ -1232,21 +1276,27 @@ def _fetch_source_data(
     Handles different source types:
     - stock_ohlcv: Direct column access
     - computed_features: Requires feature_id lookup
+
+    lookback_before + lookback_rows bound the fetch to the LAST N rows at or
+    before the cutoff plus everything after it (#120 item 1b) — the window
+    the function declared it needs to reproduce full-history values.
     """
     source_table, source_column = source_key
 
     if source_table == 'computed_features':
         return _fetch_from_computed_features(
-            conn, data_id, features, start_date
+            conn, data_id, features, start_date, lookback_before, lookback_rows
         )
     elif source_table == 'stock_ohlcv':
         return _fetch_from_stock_ohlcv(
-            conn, data_id, source_column, start_date
+            conn, data_id, source_column, start_date, lookback_before,
+            lookback_rows
         )
     else:
         # Generic table fetch
         return _fetch_from_generic_table(
-            conn, data_id, source_table, source_column, start_date
+            conn, data_id, source_table, source_column, start_date,
+            lookback_before, lookback_rows
         )
 
 
@@ -1255,6 +1305,8 @@ def _fetch_from_computed_features(
     data_id: int,
     features: List[Tuple],
     start_date: Optional[date],
+    lookback_before: Optional[date] = None,
+    lookback_rows: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Fetch from computed_features table.
@@ -1283,18 +1335,33 @@ def _fetch_from_computed_features(
     source_feature_id = row[0]
 
     # Fetch computed feature values
-    query = """
-    SELECT date, value
-    FROM computed_features
-    WHERE data_id = %s AND feature_id = %s
-    """
-    query_params = [data_id, source_feature_id]
+    if lookback_before is not None and lookback_rows is not None:
+        query = """
+        SELECT date, value FROM (
+            (SELECT date, value FROM computed_features
+             WHERE data_id = %s AND feature_id = %s AND date <= %s
+             ORDER BY date DESC LIMIT %s)
+            UNION ALL
+            (SELECT date, value FROM computed_features
+             WHERE data_id = %s AND feature_id = %s AND date > %s)
+        ) w ORDER BY date
+        """
+        query_params = [data_id, source_feature_id, lookback_before,
+                        lookback_rows, data_id, source_feature_id,
+                        lookback_before]
+    else:
+        query = """
+        SELECT date, value
+        FROM computed_features
+        WHERE data_id = %s AND feature_id = %s
+        """
+        query_params = [data_id, source_feature_id]
 
-    if start_date:
-        query += " AND date > %s"
-        query_params.append(start_date)
+        if start_date:
+            query += " AND date > %s"
+            query_params.append(start_date)
 
-    query += " ORDER BY date"
+        query += " ORDER BY date"
 
     with conn.cursor() as cur:
         cur.execute(query, query_params)
@@ -1311,22 +1378,40 @@ def _fetch_from_stock_ohlcv(
     data_id: int,
     column: str,
     start_date: Optional[date],
+    lookback_before: Optional[date] = None,
+    lookback_rows: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Fetch from stock_ohlcv table."""
     # For OHLC-based features, we fetch all price columns
     # Column parameter specifies which column is primary, but we fetch all for flexibility
-    query = """
-    SELECT date, open, high, low, close, adjusted_close, volume
-    FROM stock_ohlcv
-    WHERE data_id = %s
-    """
-    query_params = [data_id]
+    cols = "date, open, high, low, close, adjusted_close, volume"
+    if lookback_before is not None and lookback_rows is not None:
+        # bounded: last N rows at/before the cutoff + everything after
+        query = f"""
+        SELECT {cols} FROM (
+            (SELECT {cols} FROM stock_ohlcv
+             WHERE data_id = %s AND date <= %s
+             ORDER BY date DESC LIMIT %s)
+            UNION ALL
+            (SELECT {cols} FROM stock_ohlcv
+             WHERE data_id = %s AND date > %s)
+        ) w ORDER BY date
+        """
+        query_params = [data_id, lookback_before, lookback_rows,
+                        data_id, lookback_before]
+    else:
+        query = f"""
+        SELECT {cols}
+        FROM stock_ohlcv
+        WHERE data_id = %s
+        """
+        query_params = [data_id]
 
-    if start_date:
-        query += " AND date > %s"
-        query_params.append(start_date)
+        if start_date:
+            query += " AND date > %s"
+            query_params.append(start_date)
 
-    query += " ORDER BY date"
+        query += " ORDER BY date"
 
     with conn.cursor() as cur:
         cur.execute(query, query_params)
@@ -1352,20 +1437,35 @@ def _fetch_from_generic_table(
     table: str,
     column: str,
     start_date: Optional[date],
+    lookback_before: Optional[date] = None,
+    lookback_rows: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Fetch from a generic table."""
     # Compose with sql.Composed parts — str()-ing a Composed yields its repr,
     # not SQL (the bug this path carried until spec 008 began relying on it).
-    parts = [sql.SQL("SELECT date, {column} FROM {table} WHERE data_id = %s").format(
-        table=sql.Identifier(table), column=sql.Identifier(column))]
-    query_params: List[Any] = [data_id]
+    if lookback_before is not None and lookback_rows is not None:
+        query = sql.SQL(
+            "SELECT date, {column} FROM ("
+            "(SELECT date, {column} FROM {table}"
+            " WHERE data_id = %s AND date <= %s ORDER BY date DESC LIMIT %s)"
+            " UNION ALL "
+            "(SELECT date, {column} FROM {table}"
+            " WHERE data_id = %s AND date > %s)"
+            ") w ORDER BY date"
+        ).format(table=sql.Identifier(table), column=sql.Identifier(column))
+        query_params: List[Any] = [data_id, lookback_before, lookback_rows,
+                                   data_id, lookback_before]
+    else:
+        parts = [sql.SQL("SELECT date, {column} FROM {table} WHERE data_id = %s").format(
+            table=sql.Identifier(table), column=sql.Identifier(column))]
+        query_params = [data_id]
 
-    if start_date:
-        parts.append(sql.SQL(" AND date > %s"))
-        query_params.append(start_date)
+        if start_date:
+            parts.append(sql.SQL(" AND date > %s"))
+            query_params.append(start_date)
 
-    parts.append(sql.SQL(" ORDER BY date"))
-    query = sql.SQL(" ").join(parts)
+        parts.append(sql.SQL(" ORDER BY date"))
+        query = sql.SQL(" ").join(parts)
 
     with conn.cursor() as cur:
         cur.execute(query, query_params)

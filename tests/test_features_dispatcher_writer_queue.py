@@ -6,7 +6,7 @@ from gefion.features.dispatcher import _process_function_group
 def test_process_function_group_with_writer_queue(monkeypatch):
     rows_written = {}
 
-    def fake_fetch(conn, data_id, source_key, features, start_date=None):
+    def fake_fetch(conn, data_id, source_key, features, start_date=None, **kw):
         return [{"date": date(2025, 1, 1), "value": 1.0}]
 
     def fake_insert(conn, data_id, rows, feature_map, update_existing=False, skip_before=None, batch_size=2000):
