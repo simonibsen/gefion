@@ -1551,7 +1551,10 @@ def ml_predict_backfill(
     Fills every post-cutoff trading day the model hasn't predicted yet —
     resumable (starts after the last stored prediction), idempotent (the
     predictions primary key dedups), and lookahead-proof: dates at or before
-    the model's recorded training cutoff refuse by construction.
+    the model's recorded training cutoff refuse by construction. Finishes by
+    re-materializing the model's prediction FEATURES (pred_q*_h*__<model>)
+    so the signal surface never lags the predictions table — the nightly
+    `macro derive` reads the features, not the predictions.
     """
     import time as _time
     from datetime import timedelta as _td
@@ -1596,7 +1599,30 @@ def ml_predict_backfill(
             last = cur.fetchone()[0]
             start_d = max(cutoff + _td(days=1),
                           (last + _td(days=1)) if last else cutoff + _td(days=1))
+        def _materialize_signals():
+            # Predictions are signals only once they exist as features
+            # (pred_q*), which is what the nightly derive joins. Skipping
+            # this let the feature surface silently lag the predictions
+            # table (prod 2026-07-14). Idempotent, month-batched (#119).
+            from gefion.ml.signal_features import (
+                SignalMaterializeError, materialize_prediction_features)
+            try:
+                with psycopg.connect(url) as mconn:
+                    mat = materialize_prediction_features(
+                        mconn, model_name, model_version)
+            except SignalMaterializeError as exc:
+                emit_error(f"prediction signals NOT materialized: {exc}",
+                           json_output=json_output)
+                raise typer.Exit(1)
+            new_rows = sum(mat["features"].values())
+            if new_rows:
+                emit(f"Signals materialized: {new_rows} new feature row(s)",
+                     data={"materialized": mat["features"]},
+                     json_output=json_output)
+
         if end_d is None or start_d > end_d:
+            if last is not None:
+                _materialize_signals()  # features can lag current predictions
             emit(f"{model_name}:{model_version} predictions are up to date "
                  f"(through {last})",
                  data={"days_predicted": 0, "up_to_date": True},
@@ -1617,6 +1643,7 @@ def ml_predict_backfill(
                    start_date=start_d.isoformat(), end_date=end_d.isoformat(),
                    symbols=",".join(uni_symbols), exchange=None, limit=None,
                    db_url=db_url, json_output=json_output)
+        _materialize_signals()
         emit(f"Backfill window {start_d} → {end_d} done in "
              f"{_time.monotonic() - t0:.0f}s (resumable; PK-idempotent)",
              json_output=json_output)

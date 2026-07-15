@@ -1457,15 +1457,25 @@ def run_market_function(conn, fn_row: Dict[str, Any], start=None,
                    "(PARTITION BY o.data_id ORDER BY o.date), 0) - 1 AS ret_20"
                    if ret20 else "")
 
+        # ret_20 is a SQL window (LAG 20) over THIS stream — filtering the
+        # stream to date > start starves the lag and history-dependent
+        # bodies silently emit nothing (same defect class as #129, market
+        # path). Warm the window up with 60 calendar days (≥ ~40 trading
+        # days ≥ the 20-row lag) before the cutoff; emit only dates after it.
+        params["warmup"] = (start - timedelta(days=60)) if start else None
         sql = f"""
-            SELECT o.date, s.symbol, o.close, o.high, o.low, o.volume,
-                   s.sector
-                   {select_sql}{ret_sql}
-            FROM stock_ohlcv o
-            JOIN stocks s ON s.id = o.data_id AND s.asset_type = 'Stock'
-            {join_sql}
-            WHERE o.close > 0 AND (%(start)s::date IS NULL OR o.date > %(start)s)
-            ORDER BY o.date
+            SELECT * FROM (
+                SELECT o.date, s.symbol, o.close, o.high, o.low, o.volume,
+                       s.sector
+                       {select_sql}{ret_sql}
+                FROM stock_ohlcv o
+                JOIN stocks s ON s.id = o.data_id AND s.asset_type = 'Stock'
+                {join_sql}
+                WHERE o.close > 0
+                  AND (%(warmup)s::date IS NULL OR o.date > %(warmup)s)
+            ) w
+            WHERE (%(start)s::date IS NULL OR w.date > %(start)s)
+            ORDER BY w.date
         """
         feat_names = list(feature_ids.keys())
 
