@@ -4503,6 +4503,74 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                 except Exception:
                     health["dimension_coverage"] = {"error": "unavailable"}
 
+                # Feature freshness (#120, 2026-07 incident): incremental
+                # compute silently no-opped for 8 trading days and nothing
+                # surfaced it. Measure the STALEST active stock feature —
+                # not the freshest; PSAR stayed current through the incident
+                # and a max() would have read "healthy" — against the latest
+                # price bar, on a reference symbol (indexed point lookups,
+                # not a hypertable scan).
+                try:
+                    cur.execute(
+                        """SELECT o.data_id, max(o.date) FROM stock_ohlcv o
+                           WHERE o.date = (SELECT max(date) FROM stock_ohlcv)
+                           GROUP BY o.data_id ORDER BY o.data_id LIMIT 1""")
+                    ref = cur.fetchone()
+                    if ref is None:
+                        health["feature_freshness"] = {"error": "no price bars"}
+                    else:
+                        ref_id, bars_latest = ref
+                        cur.execute(
+                            """SELECT fd.id, fd.name FROM feature_definitions fd
+                               WHERE fd.active AND fd.entity_table = 'stocks'
+                                 AND NOT EXISTS (
+                                     SELECT 1 FROM feature_functions ff
+                                     WHERE ff.name = fd.function_name
+                                       AND ff.scope <> 'stock')""")
+                        defs = cur.fetchall()
+                        stalest_name, stalest_date = None, None
+                        for fid, fname in defs:
+                            cur.execute(
+                                "SELECT max(date) FROM computed_features "
+                                "WHERE feature_id = %s AND data_id = %s",
+                                (fid, ref_id))
+                            row = cur.fetchone()
+                            latest = row[0] if row else None
+                            if latest is None:
+                                continue  # never computed for ref: not staleness
+                            if stalest_date is None or latest < stalest_date:
+                                stalest_name, stalest_date = fname, latest
+                        sessions_behind = 0
+                        if stalest_date is not None:
+                            cur.execute(
+                                "SELECT count(DISTINCT date) FROM stock_ohlcv "
+                                "WHERE data_id = %s AND date > %s",
+                                (ref_id, stalest_date))
+                            sessions_behind = cur.fetchone()[0]
+                        cur.execute("SELECT symbol FROM stocks WHERE id = %s",
+                                    (ref_id,))
+                        ref_symbol = cur.fetchone()[0]
+                        health["feature_freshness"] = {
+                            "reference_symbol": ref_symbol,
+                            "bars_latest": str(bars_latest),
+                            "stalest_feature": stalest_name,
+                            "stalest_date": (str(stalest_date)
+                                             if stalest_date else None),
+                            "sessions_behind": sessions_behind,
+                        }
+                        # 1 session behind is normal intraday (last night's
+                        # bars compute next chain); >1 means the pipeline
+                        # stalled — the alarm the 2026-07 incident lacked.
+                        if sessions_behind > 1:
+                            warnings.append(
+                                f"feature store lags price bars by "
+                                f"{sessions_behind} sessions (stalest: "
+                                f"{stalest_name} at {stalest_date} vs bars "
+                                f"{bars_latest}) — run `gefion feat-compute "
+                                f"--all-features --incremental`")
+                except Exception:
+                    health["feature_freshness"] = {"error": "unavailable"}
+
                 # Entity integrity (spec 007): with the hard FK retired,
                 # orphaned feature values are detectable-not-impossible —
                 # detection must therefore be loud and always on.
