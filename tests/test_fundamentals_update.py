@@ -511,11 +511,12 @@ def test_fundamentals_update_parallel_execution():
     from gefion.alphavantage.client import AlphaVantageClient
     import time
 
-    call_times = []
+    call_spans = []
 
     def slow_fetch(symbol):
-        call_times.append(time.monotonic())
+        started = time.monotonic()
         time.sleep(0.05)  # 50ms per call
+        call_spans.append((started, time.monotonic()))
         return {"Name": f"{symbol} Inc", "Sector": "Tech", "Industry": "Software"}
 
     stocks = [(i, f"SYM{i}", None) for i in range(6)]
@@ -540,21 +541,24 @@ def test_fundamentals_update_parallel_execution():
         with patch("gefion.cli.db_connection", side_effect=mock_connection):
             # Patch fetch_overview on the class prototype so all instances pick it up
             with patch.object(AlphaVantageClient, "fetch_overview", side_effect=slow_fetch):
-                start = time.monotonic()
                 _fundamentals_update_impl(
                     exchange=None, limit=None, max_age_days=30,
                     force=True, calls_per_minute=75, db_url="postgresql://test",
                     json_output=True, workers=3,
                 )
-                elapsed = time.monotonic() - start
 
-    # With 6 calls at 50ms each:
-    # Sequential: ~300ms minimum
-    # Parallel (3 workers): ~100ms minimum
-    assert len(call_times) == 6, f"All 6 symbols should be fetched, got {len(call_times)}"
-    # With 3 workers, should complete in roughly half the sequential time
-    assert elapsed < 0.25, (
-        f"With 3 workers, 6x50ms calls should complete in <250ms, took {elapsed*1000:.0f}ms"
+    assert len(call_spans) == 6, f"All 6 symbols should be fetched, got {len(call_spans)}"
+    # Parallelism is proven by call intervals OVERLAPPING, not by wall-clock
+    # (a loaded CI runner can make a parallel run slower than the serial
+    # 300ms theoretical, which flaked this test twice on 2026-07-16).
+    overlaps = sum(
+        1 for i, (s1, e1) in enumerate(call_spans)
+        for (s2, e2) in call_spans[i + 1:]
+        if s1 < e2 and s2 < e1
+    )
+    assert overlaps >= 2, (
+        f"With 3 workers, call intervals must overlap (serial execution "
+        f"would have zero overlaps); got {overlaps}"
     )
 
 
