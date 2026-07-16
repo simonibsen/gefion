@@ -120,8 +120,9 @@ def test_declared_lookback_reproduces_full_history(path):
         pytest.skip(f"no real-world specs mapped for {path.stem}")
     bars = lookback_bars(declaration, specs)
     if bars is None:
-        # full-history functions (PSAR, forward-fill) have no window contract
-        assert path.stem in ("indicator_psar", "forward_fill_quarterly"), (
+        # full-history functions have no window contract (PSAR earned its
+        # converging declaration via reversal-re-anchoring + stress tests)
+        assert path.stem == "forward_fill_quarterly", (
             f"{path.stem} declares no lookback — every windowable seed "
             f"function must declare one (#120 item 1b)")
         return

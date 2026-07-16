@@ -19,6 +19,13 @@ Modes:
 
 Both bounded modes apply max(min_bars, ...) + buffer; min_bars covers
 bodies with hardcoded parameters (MACD's 12/26/9 never appear in specs).
+
+Even PSAR — path-dependent in principle — declares converging(min_bars
+500): its state (trend, extreme point, capped acceleration factor)
+re-anchors within a couple of trend reversals, and 500 bars is
+bit-identical to full history on both monotonic-trend and whipsaw stress
+series (see the equality gate). A truly unbounded body simply stays
+undeclared.
 """
 from __future__ import annotations
 

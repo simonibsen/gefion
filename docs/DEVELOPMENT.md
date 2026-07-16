@@ -166,8 +166,9 @@ disk-artifact reaping.
 - **Declared lookback** (#120 item 1b): a stock-scope function's registry row may
   declare `inputs.lookback` — `{"mode": "window"}` (exact rolling windows),
   `{"mode": "converging"}` (EMA/RSI/MACD/ADX; multiplier 25 puts the truncation
-  term below ~1e-10), or undeclared/`{"mode": "full"}` = full history (the honest
-  default; PSAR is path-dependent and must never declare a bound). The equality
+  term below ~1e-10; PSAR converging min_bars 500 — its state re-anchors within
+  a couple of reversals), or undeclared/`{"mode": "full"}` = full history (the
+  honest default for anything genuinely unbounded). The equality
   gate (`tests/test_windowed_lookback.py`) enforces that every declaring seed
   body reproduces full-history values from its window at rtol 1e-9 — when you
   add a windowable function, declare its lookback AND map its real specs there.
