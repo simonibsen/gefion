@@ -141,7 +141,8 @@ class HyperparameterExperiment:
         is touched exactly once, here (FR-019).
         """
         from gefion.experiments.types.holdout_eval import (
-            holdout_masks, paired_result, per_symbol_pinball, require_holdout_window)
+            holdout_masks, observations_by_date, paired_result, per_row_pinball,
+            per_symbol_pinball, require_holdout_window)
 
         require_holdout_window(self.holdout_start, self.holdout_end)
         with create_span("experiments.hyperparameter.evaluate_holdout",
@@ -155,23 +156,28 @@ class HyperparameterExperiment:
 
             y_hold = y[hold].reset_index(drop=True)
             symbols_hold = meta["symbol"][hold].reset_index(drop=True)
+            dates_hold = meta["date"][hold].reset_index(drop=True)
 
             exp_model = train_quantile_model(
                 X[train], y[train], algorithm=self.model_type,
                 hyperparams=params, quantiles=self.quantiles)
+            exp_preds = predict_quantiles(exp_model, X[hold])
             exp_scores = per_symbol_pinball(
-                predict_quantiles(exp_model, X[hold]), y_hold, symbols_hold,
-                self.quantiles)
+                exp_preds, y_hold, symbols_hold, self.quantiles)
 
             base_model = train_quantile_model(
                 X[train], y[train], algorithm=self.model_type,
                 hyperparams=None, quantiles=self.quantiles)
+            base_preds = predict_quantiles(base_model, X[hold])
             base_scores = per_symbol_pinball(
-                predict_quantiles(base_model, X[hold]), y_hold, symbols_hold,
-                self.quantiles)
+                base_preds, y_hold, symbols_hold, self.quantiles)
 
             result = paired_result(base_scores, exp_scores,
                                    int(train.sum()), int(hold.sum()))
+            result["observations"] = observations_by_date(
+                per_row_pinball(base_preds, y_hold, self.quantiles),
+                per_row_pinball(exp_preds, y_hold, self.quantiles),
+                dates_hold)
             set_attributes(span, n_symbols=result["n_symbols"])
             return result
 

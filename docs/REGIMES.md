@@ -83,9 +83,18 @@ gefion chart regime vol-regime --symbol SPY         # price with episode bands
 each bucket earns its own one-sided holdout p-value, and every (regime × bucket) test enters
 one **flat Benjamini-Hochberg family** — the added multiple testing is corrected, never
 hidden. Fail-closed: a bucket below the effective-sample floor, or with undefined labels,
-gets **no p-value and cannot survive**. Experiment types that do not emit per-observation
-holdout scores report "conditional evaluation unavailable" honestly instead of fabricating
-a verdict.
+gets **no p-value and cannot survive**.
+
+One observation is **one holdout trading day** — regime labels attach to dates, and the
+per-bucket paired test consumes the observations directly, so finer (stock-day) grain
+would inflate significance through cross-sectional correlation. The holdout-capable
+types all emit observations: `feature_engineering`, `hyperparameter`, and
+`model_comparison` score each day as the cross-sectional mean pinball loss per arm;
+`label_engineering` uses its per-date signal-contest portfolio returns. The remaining
+types report "conditional evaluation unavailable" honestly instead of fabricating a
+verdict: `feature_selection` and `pipeline` evaluate by cross-validation only (no
+holdout stage exists to score), and `strategy_params` returns aggregate backtest
+metrics — regime-conditioning a strategy is served by `backtest run --by-regime`.
 
 Every operation is reachable via CLI, MCP (`regime_*` tools), and the UI **Regimes** page.
 

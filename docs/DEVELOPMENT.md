@@ -341,7 +341,9 @@ configuration, not schema:
   t-test (`ttest_rel` when score lists are equal length); the caller declares direction —
   `"less"` for loss-like scores, `"greater"` for return-like; NaN (identical arms) → 1.0.
   Default holdout scores are **per-symbol** (`paired_result`); regime-conditional
-  evaluation needs **per-observation** scores with dates (`paired_result_by_date`).
+  evaluation needs **per-date** observations (`observations_by_date` — one record per
+  holdout trading day, cross-sectional mean per arm; per-row grain would hand the
+  bucket t-test thousands of cross-sectionally correlated pairs).
 - **Shell: `cp` may be aliased to `cp -i`** — a scripted overwrite can silently no-op on
   the interactive prompt. Restore files with `git checkout -- <file>` or the Edit tool,
   not `cp`.

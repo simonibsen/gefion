@@ -124,7 +124,7 @@ class LabelEngineeringExperiment:
                     grp.nlargest(min(top_n, len(grp)), "exp_q50")["realized"].mean()))
                 base_scores.append(float(
                     grp.nlargest(min(top_n, len(grp)), "base_q50")["realized"].mean()))
-                dates.append(str(d))
+                dates.append(pd.Timestamp(d).date().isoformat())
 
             result = {
                 "baseline_scores": base_scores,
@@ -135,6 +135,12 @@ class LabelEngineeringExperiment:
                 "alternative": "greater",
                 "score_kind": "portfolio_forward_return",
                 "top_n": top_n,
+                # The contest scores are already per-date — they ARE the
+                # observations regime-conditional evaluation consumes (#86)
+                "observations": [
+                    {"date": d, "baseline_score": b, "experimental_score": e}
+                    for d, b, e in zip(dates, base_scores, exp_scores)
+                ],
             }
             set_attributes(span, n_dates=len(dates), holdout_rows=int(hold.sum()))
             return result

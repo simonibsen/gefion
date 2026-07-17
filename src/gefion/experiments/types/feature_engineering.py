@@ -256,18 +256,22 @@ class FeatureEngineeringExperiment:
             X_exp = X.copy()
             X_exp[feature_col] = self._compute_feature_column(params)
 
+            from gefion.experiments.types.holdout_eval import (
+                observations_by_date, per_row_pinball)
+
             y_hold = y[hold].reset_index(drop=True)
             symbols_hold = meta["symbol"][hold].reset_index(drop=True)
+            dates_hold = meta["date"][hold].reset_index(drop=True)
 
             exp_model = train_quantile_model(
                 X_exp[train], y[train], algorithm=self.algorithm, quantiles=self.quantiles)
-            exp_scores = self._per_symbol_pinball(
-                predict_quantiles(exp_model, X_exp[hold]), y_hold, symbols_hold)
+            exp_preds = predict_quantiles(exp_model, X_exp[hold])
+            exp_scores = self._per_symbol_pinball(exp_preds, y_hold, symbols_hold)
 
             base_model = train_quantile_model(
                 X[train], y[train], algorithm=self.algorithm, quantiles=self.quantiles)
-            base_scores = self._per_symbol_pinball(
-                predict_quantiles(base_model, X[hold]), y_hold, symbols_hold)
+            base_preds = predict_quantiles(base_model, X[hold])
+            base_scores = self._per_symbol_pinball(base_preds, y_hold, symbols_hold)
 
             symbols = sorted(set(base_scores) & set(exp_scores))
             result = {
@@ -277,6 +281,10 @@ class FeatureEngineeringExperiment:
                 "n_symbols": len(symbols),
                 "holdout_rows": int(hold.sum()),
                 "train_rows": int(train.sum()),
+                "observations": observations_by_date(
+                    per_row_pinball(base_preds, y_hold, self.quantiles),
+                    per_row_pinball(exp_preds, y_hold, self.quantiles),
+                    dates_hold),
             }
             set_attributes(span, n_symbols=len(symbols), holdout_rows=int(hold.sum()))
             return result

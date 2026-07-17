@@ -90,17 +90,32 @@ def per_row_pinball(preds: pd.DataFrame, y: pd.Series, quantiles: List[float]) -
     return np.mean(losses, axis=0)
 
 
-def paired_result_by_date(base_row_loss, exp_row_loss, dates, holdout_rows: int) -> Dict:
-    """Per-observation paired scores with dates — the input to regime-conditional
-    evaluation (spec 005). base_row_loss/exp_row_loss are aligned row-level losses for
-    the two arms over the same holdout rows."""
-    with create_span("experiments.holdout_eval.paired_result_by_date") as span:
+def observations_by_date(base_row_loss, exp_row_loss, dates) -> List[Dict]:
+    """Per-date paired observations — the input to regime-conditional evaluation
+    (spec 005, #86). base_row_loss/exp_row_loss are aligned row-level scores for
+    the two arms over the same holdout rows.
+
+    The statistical unit is one holdout trading day: rows sharing a date are
+    aggregated to their cross-sectional mean per arm. Regime labels attach to
+    dates, and the per-bucket paired t-test consumes observations directly —
+    per-row (stock-day) grain would hand it thousands of cross-sectionally
+    correlated pairs and fabricate significance. Dates are ISO strings so the
+    observations survive the results-JSONB round trip.
+    """
+    with create_span("experiments.holdout_eval.observations_by_date") as span:
+        frame = pd.DataFrame({
+            "date": [pd.Timestamp(d).date().isoformat() for d in dates],
+            "base": np.asarray(base_row_loss, dtype=float),
+            "exp": np.asarray(exp_row_loss, dtype=float),
+        })
+        by_date = frame.groupby("date", sort=True).mean()
         observations = [
-            {"date": d, "baseline_score": float(b), "experimental_score": float(e)}
-            for d, b, e in zip(dates, base_row_loss, exp_row_loss)
+            {"date": d, "baseline_score": float(row["base"]),
+             "experimental_score": float(row["exp"])}
+            for d, row in by_date.iterrows()
         ]
-        set_attributes(span, n_observations=len(observations), holdout_rows=holdout_rows)
-        return {"observations": observations, "holdout_rows": holdout_rows}
+        set_attributes(span, n_observations=len(observations))
+        return observations
 
 
 def require_holdout_window(holdout_start, holdout_end) -> None:
