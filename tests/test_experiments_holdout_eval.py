@@ -408,21 +408,160 @@ class TestRunnerPassesHoldoutToLabelEngineering:
         assert 'alternative' in source
 
 
-# --- per-date holdout scores for regime-conditional evaluation (005 T034) ---
+# --- per-observation holdout scores for regime-conditional evaluation (#86) ---
+#
+# The statistical unit is ONE HOLDOUT TRADING DAY: regime labels attach to
+# dates, and the per-bucket paired t-test in regimes.conditional consumes the
+# observations directly — per-row (stock-day) grain would hand it thousands
+# of cross-sectionally correlated pairs and fabricate significance.
 
-def test_paired_result_by_date_produces_per_observation_records():
-    import pandas as pd
-    from datetime import date
-    from gefion.experiments.types.holdout_eval import per_row_pinball, paired_result_by_date
 
-    y = pd.Series([1.0, 2.0, 3.0])
-    preds = pd.DataFrame({"q10": [0.9, 2.1, 2.8], "q50": [1.0, 2.0, 3.0], "q90": [1.1, 1.9, 3.2]})
-    base_loss = per_row_pinball(preds, y, [0.1, 0.5, 0.9])
-    assert len(base_loss) == 3  # one loss per row (not grouped by symbol)
+class TestObservationsByDate:
+    def test_per_row_pinball_is_row_level(self):
+        from gefion.experiments.types.holdout_eval import per_row_pinball
 
-    dates = [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)]
-    out = paired_result_by_date(base_loss, base_loss, dates, holdout_rows=3)
-    assert "observations" in out and len(out["observations"]) == 3
-    rec = out["observations"][0]
-    assert set(rec) == {"date", "baseline_score", "experimental_score"}
-    assert rec["date"] == dates[0]
+        y = pd.Series([1.0, 2.0, 3.0])
+        preds = pd.DataFrame({"q10": [0.9, 2.1, 2.8], "q50": [1.0, 2.0, 3.0],
+                              "q90": [1.1, 1.9, 3.2]})
+        assert len(per_row_pinball(preds, y, [0.1, 0.5, 0.9])) == 3
+
+    def test_aggregates_rows_into_one_observation_per_date(self):
+        from gefion.experiments.types.holdout_eval import observations_by_date
+
+        dates = [date(2024, 1, 2), date(2024, 1, 2),
+                 date(2024, 1, 3), date(2024, 1, 3)]
+        base = [0.02, 0.04, 0.10, 0.20]
+        exp = [0.01, 0.03, 0.10, 0.30]
+
+        obs = observations_by_date(base, exp, dates)
+
+        assert [o["date"] for o in obs] == ["2024-01-02", "2024-01-03"]
+        assert set(obs[0]) == {"date", "baseline_score", "experimental_score"}
+        assert obs[0]["baseline_score"] == pytest.approx(0.03)
+        assert obs[0]["experimental_score"] == pytest.approx(0.02)
+        assert obs[1]["baseline_score"] == pytest.approx(0.15)
+        assert obs[1]["experimental_score"] == pytest.approx(0.20)
+
+    def test_dates_are_json_safe_iso_strings(self):
+        """Observations land in the experiments.results JSONB column and
+        round-trip back through the CLI's date.fromisoformat."""
+        from gefion.experiments.types.holdout_eval import observations_by_date
+
+        dates = pd.to_datetime(["2024-01-03", "2024-01-02"])  # Timestamps, unsorted
+        obs = observations_by_date([1.0, 2.0], [1.0, 2.0], dates)
+
+        assert [o["date"] for o in obs] == ["2024-01-02", "2024-01-03"]
+        assert all(isinstance(o["date"], str) for o in obs)
+        assert all(isinstance(o["baseline_score"], float) for o in obs)
+
+
+def _assert_per_date_observations(result, n_dates):
+    obs = result["observations"]
+    assert len(obs) == n_dates  # one observation per holdout trading day
+    assert all(set(o) == {"date", "baseline_score", "experimental_score"}
+               for o in obs)
+    dates = [o["date"] for o in obs]
+    assert all(isinstance(d, str) for d in dates)
+    assert dates == sorted(dates) and len(set(dates)) == n_dates
+
+
+class TestEvaluatorsEmitObservations:
+    """Every holdout-capable experiment type must emit per-date observations
+    so `experiment run --by-regime` can produce conditional verdicts (#86)."""
+
+    def test_feature_engineering_emits_observations(self, tiny_dataset):
+        from gefion.experiments.types.feature_engineering import FeatureEngineeringExperiment
+
+        dates = tiny_dataset["dates"]
+        exp = FeatureEngineeringExperiment(
+            name="obs-fe", principle_id="p", null_hypothesis="h",
+            feature_config={"function_name": "variance_ratio"},
+            source_column="close", algorithm="lightgbm",
+            cv_config={"n_splits": 3, "embargo_pct": 0.0},
+            dataset_uri=tiny_dataset["uri"], horizon_days=7,
+            quantiles=[0.1, 0.5, 0.9],
+            holdout_start=dates[-30], holdout_end=dates[-1],
+        )
+
+        result = exp.evaluate_holdout({"window": 10})
+
+        _assert_per_date_observations(result, 30)
+
+    def test_hyperparameter_emits_observations(self, tiny_dataset):
+        from gefion.experiments.types.hyperparameter import HyperparameterExperiment
+
+        dates = tiny_dataset["dates"]
+        exp = HyperparameterExperiment(
+            name="obs-hp", model_type="lightgbm",
+            search_space={"max_depth": {"type": "int", "low": 2, "high": 6}},
+            cv_config={"n_splits": 3, "embargo_pct": 0.0},
+            dataset_uri=tiny_dataset["uri"], horizon_days=7,
+            quantiles=[0.1, 0.5, 0.9],
+            holdout_start=dates[-30], holdout_end=dates[-1],
+        )
+
+        result = exp.evaluate_holdout({"max_depth": 3, "n_estimators": 60})
+
+        _assert_per_date_observations(result, 30)
+
+    def test_model_comparison_emits_observations(self, tiny_dataset):
+        from gefion.experiments.types.model_comparison import ModelComparisonExperiment
+
+        dates = tiny_dataset["dates"]
+        exp = ModelComparisonExperiment(
+            name="obs-mc", model_types=["lightgbm", "xgboost"],
+            cv_config={"n_splits": 3, "embargo_pct": 0.0},
+            dataset_uri=tiny_dataset["uri"], horizon_days=7,
+            quantiles=[0.1, 0.5, 0.9],
+            holdout_start=dates[-30], holdout_end=dates[-1],
+        )
+
+        # Incumbent-wins shortcut path must still emit (identical) observations
+        result = exp.evaluate_holdout({"model_type": "lightgbm"})
+
+        _assert_per_date_observations(result, 30)
+        for o in result["observations"]:
+            assert o["baseline_score"] == pytest.approx(o["experimental_score"])
+
+    def test_label_engineering_emits_observations(self, tiny_dataset):
+        from gefion.experiments.types.label_engineering import LabelEngineeringExperiment
+
+        dates = tiny_dataset["dates"]
+        exp = LabelEngineeringExperiment(
+            name="obs-le", principle_id="p", null_hypothesis="h",
+            label_type="winsorized", algorithm="lightgbm",
+            cv_config={"n_splits": 3, "embargo_pct": 0.0},
+            dataset_uri=tiny_dataset["uri"], horizon_days=7,
+            quantiles=[0.1, 0.5, 0.9],
+            holdout_start=dates[-30], holdout_end=dates[-1],
+        )
+
+        result = exp.evaluate_holdout({"label_type": "winsorized"})
+
+        _assert_per_date_observations(result, 30)
+        # Observations ARE the per-date contest scores, in date order
+        assert [o["baseline_score"] for o in result["observations"]] == \
+            pytest.approx(result["baseline_scores"])
+        assert [o["experimental_score"] for o in result["observations"]] == \
+            pytest.approx(result["experimental_scores"])
+
+
+class TestRunnerPersistsObservations:
+    """run() must store observations + score direction in the holdout summary
+    and surface the summary in its return payload — the CLI --by-regime path
+    reads results["holdout"]["observations"] from that payload (#86)."""
+
+    def test_run_stores_observations_and_alternative(self):
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+
+        source = inspect.getsource(ExperimentRunner.run)
+        assert '"observations"' in source
+        assert '"alternative"' in source
+
+    def test_run_returns_holdout_summary(self):
+        import inspect
+        from gefion.experiments.core import ExperimentRunner
+
+        source = inspect.getsource(ExperimentRunner.run)
+        assert '"holdout"' in source

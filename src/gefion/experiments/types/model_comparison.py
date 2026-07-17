@@ -8,6 +8,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 
 from gefion.experiments.core import ExperimentConfig
 from gefion.experiments.types.hyperparameter import PurgedKFold
@@ -56,8 +57,8 @@ class ModelComparisonExperiment:
         yields p=1.0 — no improvement to promote, correctly rejected.
         """
         from gefion.experiments.types.holdout_eval import (
-            holdout_masks, load_all_cached, paired_result, per_symbol_pinball,
-            require_holdout_window)
+            holdout_masks, load_all_cached, observations_by_date, paired_result,
+            per_row_pinball, per_symbol_pinball, require_holdout_window)
 
         require_holdout_window(self.holdout_start, self.holdout_end)
         winner = params.get("model_type", self.baseline_model_type)
@@ -72,20 +73,28 @@ class ModelComparisonExperiment:
 
             y_hold = y[hold].reset_index(drop=True)
             symbols_hold = meta["symbol"][hold].reset_index(drop=True)
+            dates_hold = meta["date"][hold].reset_index(drop=True)
 
-            def _scores(algorithm: str) -> Dict[str, float]:
+            def _preds(algorithm: str) -> pd.DataFrame:
                 model = train_quantile_model(
                     X[train], y[train], algorithm=algorithm, quantiles=self.quantiles)
-                return per_symbol_pinball(
-                    predict_quantiles(model, X[hold]), y_hold, symbols_hold,
-                    self.quantiles)
+                return predict_quantiles(model, X[hold])
 
-            exp_scores = _scores(winner)
+            exp_preds = _preds(winner)
+            base_preds = (exp_preds if winner == self.baseline_model_type
+                          else _preds(self.baseline_model_type))
+            exp_scores = per_symbol_pinball(
+                exp_preds, y_hold, symbols_hold, self.quantiles)
             base_scores = (exp_scores if winner == self.baseline_model_type
-                           else _scores(self.baseline_model_type))
+                           else per_symbol_pinball(
+                               base_preds, y_hold, symbols_hold, self.quantiles))
 
             result = paired_result(base_scores, exp_scores,
                                    int(train.sum()), int(hold.sum()))
+            result["observations"] = observations_by_date(
+                per_row_pinball(base_preds, y_hold, self.quantiles),
+                per_row_pinball(exp_preds, y_hold, self.quantiles),
+                dates_hold)
             set_attributes(span, n_symbols=result["n_symbols"])
             return result
 

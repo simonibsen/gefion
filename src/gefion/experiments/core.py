@@ -666,6 +666,7 @@ class ExperimentRunner:
             # Holdout evaluation (FR-019): the holdout is touched exactly
             # once, here, to produce the p-value the FDR gate requires.
             # Failure leaves holdout_p_value NULL, which fails closed.
+            holdout_summary = None
             if hasattr(evaluator, "evaluate_holdout") and getattr(
                     evaluator, "holdout_start", None) is not None:
                 try:
@@ -678,7 +679,7 @@ class ExperimentRunner:
                         # for losses, "greater" for return-like scores
                         alternative=holdout_result.get("alternative", "less"),
                     )
-                    self._store_holdout_result(experiment_id, p_value, {
+                    holdout_summary = {
                         "p_value": p_value,
                         "n_units": holdout_result.get("n_symbols",
                                                       holdout_result.get("n_dates")),
@@ -690,7 +691,15 @@ class ExperimentRunner:
                         "experimental_mean": float(
                             sum(holdout_result["experimental_scores"])
                             / len(holdout_result["experimental_scores"])),
-                    })
+                        "alternative": holdout_result.get("alternative", "less"),
+                    }
+                    # Per-date observations feed regime-conditional verdicts
+                    # (spec 005, #86); one record per holdout trading day
+                    if holdout_result.get("observations"):
+                        holdout_summary["observations"] = \
+                            holdout_result["observations"]
+                    self._store_holdout_result(
+                        experiment_id, p_value, holdout_summary)
                     logger.info(
                         f"Holdout evaluation for experiment {experiment_id}: "
                         f"p={p_value:.5f}")
@@ -708,7 +717,7 @@ class ExperimentRunner:
                 goal_achieved=goal_achieved if goal_type else None,
             )
 
-            return {
+            result_payload = {
                 "experiment_id": experiment_id,
                 "status": "completed",
                 "completed_trials": completed_trials,
@@ -716,6 +725,11 @@ class ExperimentRunner:
                 "best_score": best_score,
                 "goal_achieved": goal_achieved if goal_type else None,
             }
+            # Surface the holdout summary so callers (CLI --by-regime) can
+            # reach the observations without a second DB read
+            if holdout_summary is not None:
+                result_payload["holdout"] = holdout_summary
+            return result_payload
 
         except Exception as e:
             # Mark experiment as failed
