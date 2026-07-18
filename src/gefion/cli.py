@@ -6407,6 +6407,80 @@ def feat_def_disable(
         _toggle_row("feature_definitions", name, "active", False, db_url, json_output)
 
 
+@app.command("feat-def-delete")
+def feat_def_delete(
+    name: str = typer.Argument(..., help="Definition name"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the delete (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete a feature definition and its computed values (#76 door).
+    Dry-run by default. Refuses while a regime expression references the
+    feature (its labels would become unrecomputable); dataset provenance
+    is reported, never mutated. The routed function survives — it has its
+    own door (feat-fx-delete)."""
+    from gefion.features.deletion import (execute_definition_delete,
+                                          plan_definition_delete)
+    out = get_output(json_output)
+    with create_span("cli.feat-def-delete", target=name, confirm=confirm):
+        with _regime_conn(db_url) as conn:
+            try:
+                plan = plan_definition_delete(conn, name)
+                if not confirm:
+                    out.success("DRY-RUN (pass --confirm to execute)",
+                                data={"plan": plan})
+                    if not out.json_mode:
+                        out.info(f"would delete {plan['values']} value(s) + "
+                                 f"the definition {name!r}")
+                        if plan["regime_references"]:
+                            out.warning("regime references BLOCK: "
+                                        f"{plan['regime_references']}")
+                        if plan["dataset_references"]:
+                            out.info("dataset provenance (soft, untouched): "
+                                     f"{plan['dataset_references']}")
+                    return
+                deleted = execute_definition_delete(conn, name)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"definition {name!r} deleted ({deleted['values']} value(s))",
+                data={"deleted": deleted})
+
+
+@app.command("feat-fx-delete")
+def feat_fx_delete(
+    name: str = typer.Argument(..., help="Function name"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the delete (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete a feature function (#76 door). Dry-run by default; refuses
+    while any definition routes to it (delete those first — dependency
+    order). The candidate ledger is never touched: the audit survives the
+    artifact."""
+    from gefion.features.deletion import (execute_function_delete,
+                                          plan_function_delete)
+    out = get_output(json_output)
+    with create_span("cli.feat-fx-delete", target=name, confirm=confirm):
+        with _regime_conn(db_url) as conn:
+            try:
+                plan = plan_function_delete(conn, name)
+                if not confirm:
+                    out.success("DRY-RUN (pass --confirm to execute)",
+                                data={"plan": plan})
+                    if not out.json_mode and plan["routed_definitions"]:
+                        out.warning("routed definitions BLOCK: "
+                                    f"{plan['routed_definitions']}")
+                    return
+                deleted = execute_function_delete(conn, name)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"function {name!r} deleted", data={"deleted": deleted})
+
+
 _ORPHAN_SQL = """
     SELECT d.id, d.name, d.function_name, d.active,
            CASE WHEN f.name IS NULL THEN 'missing'

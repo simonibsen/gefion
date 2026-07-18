@@ -761,6 +761,43 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="feature_definition_delete",
+            description=(
+                "Delete a feature definition and its computed values (#76 "
+                "deletion door). Dry-run by default (confirm=true executes). "
+                "Refuses while a regime expression references the feature; "
+                "dataset provenance is reported, never mutated. DESTRUCTIVE "
+                "— only at explicit user direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Definition name"},
+                    "confirm": {"type": "boolean",
+                                "description": "Execute (default: dry-run report)"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="feature_function_delete",
+            description=(
+                "Delete a feature function (#76 deletion door). Dry-run by "
+                "default (confirm=true executes); refuses while any "
+                "definition routes to it. The candidate ledger survives "
+                "(audit). DESTRUCTIVE — only at explicit user direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Function name"},
+                    "confirm": {"type": "boolean",
+                                "description": "Execute (default: dry-run report)"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
             name="feature_definition_toggle",
             description=(
                 "Activate or deactivate a feature definition (feat-compute skips "
@@ -2576,6 +2613,10 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _feature_show(arguments)
         elif name == "feature_function_toggle":
             result = await _feature_function_toggle(arguments)
+        elif name == "feature_definition_delete":
+            result = await _feature_definition_delete(arguments)
+        elif name == "feature_function_delete":
+            result = await _feature_function_delete(arguments)
         elif name == "feature_definition_toggle":
             result = await _feature_definition_toggle(arguments)
         elif name == "feature_definitions_validate":
@@ -3547,6 +3588,26 @@ async def _feature_function_toggle(args: Dict[str, Any]) -> Dict[str, Any]:
     async def _run():
         cmd = "feat-fx-enable" if args["enabled"] else "feat-fx-disable"
         return await GefionExecutor().run(cmd, args["name"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _feature_definition_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Definition deletion — dry-run default, refusals surface verbatim."""
+    async def _run():
+        cmd = ["feat-def-delete", args["name"]]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _feature_function_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Function deletion — dry-run default, refusals surface verbatim."""
+    async def _run():
+        cmd = ["feat-fx-delete", args["name"]]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
 
