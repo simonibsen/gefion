@@ -1121,6 +1121,19 @@ body, declared inputs, provenance, seeded sandbox dry-run) → decision.
   inputs and dependency cycles refuse at registration; derive runs
   composites after their inputs. Mutating (registers the function).
 
+### Deletion doors (#76 audit — all DESTRUCTIVE, human-directed only)
+
+All dry-run by default (`confirm=true` executes); audit ledgers are never
+touched by any of them.
+
+- `ml_delete_model` — model + owned artifacts (predictions, outcomes,
+  performance, materialized signals); active models need `force=true`.
+- `experiment_delete` — experiment + trials + owned experimental features;
+  promoted experiments/features refuse always (deliberately no force).
+- `feature_definition_delete` — values then definition; regime references
+  refuse; dataset provenance reported, never mutated.
+- `feature_function_delete` — refuses while any definition routes to it.
+
 ## Data quality (spec 008)
 
 Provider-garbage detection: definitionally impossible or self-contradictory

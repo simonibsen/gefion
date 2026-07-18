@@ -6448,6 +6448,45 @@ def feat_def_delete(
                 data={"deleted": deleted})
 
 
+@app.command("charts-clean")
+def charts_clean(
+    keep_days: int = typer.Option(30, "--keep-days",
+                                  help="Chart HTML older than this is reaped"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the reap (default: dry-run)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Reap old chart HTML from the chart output dir (#76 disk story).
+    Dry-run by default: reports file count + bytes, deletes nothing.
+    Only *.html chart files are in scope — anything else is untouched."""
+    import time as _time
+
+    from gefion.charts.output import get_chart_output_dir
+    out = get_output(json_output)
+    with create_span("cli.charts-clean", keep_days=keep_days,
+                     confirm=confirm) as span:
+        chart_dir = get_chart_output_dir()
+        cutoff = _time.time() - keep_days * 86400
+        stale = [p for p in chart_dir.glob("*.html")
+                 if p.stat().st_mtime < cutoff]
+        total_bytes = sum(p.stat().st_size for p in stale)
+        if confirm:
+            for p in stale:
+                p.unlink()
+        set_attributes(span, files=len(stale), bytes=total_bytes,
+                       executed=confirm)
+    payload = {"dry_run": not confirm, "files": len(stale),
+               "bytes": total_bytes, "keep_days": keep_days,
+               "directory": str(chart_dir)}
+    if out.json_mode:
+        out.json(payload)
+    else:
+        verb = "reaped" if confirm else "would reap (pass --confirm)"
+        out.success(f"{verb}: {len(stale)} chart file(s), "
+                    f"{total_bytes / 1024:.0f} KiB older than {keep_days}d "
+                    f"in {chart_dir}")
+
+
 @app.command("feat-fx-delete")
 def feat_fx_delete(
     name: str = typer.Argument(..., help="Function name"),

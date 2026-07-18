@@ -151,9 +151,15 @@ on RESTRICT FKs or orphan dependents.
    RESTRICT for accounting), never defaulted by omission.
 
 Landed doors: `data cull`, `data entity-delete` (007), `regime delete` +
-`regime discover delete` (#75/#76). Known gaps (tracked on #76): per-model ML
-artifact delete, experiment delete, feature definition/function delete,
-disk-artifact reaping.
+`regime discover delete` (#75/#76), `ml delete-model`, `experiment delete`,
+`feat-def-delete` + `feat-fx-delete`, `charts-clean` (#76 close-out). The
+audit is complete: every created artifact has a deletion story. Notable
+refusal semantics: promoted experiments/features refuse ALWAYS (production
+influence is an audit fact, no --force exists); regime-referenced features
+refuse until the regime is archived/deleted; functions refuse while routed;
+active models are a --force gate. Disk: chart HTML reaps via `charts-clean`;
+exports are git-tracked backups by design (no reaper); dataset artifacts
+belong to their `ml_datasets` rows.
 
 ## Patterns & Gotchas (living reference)
 

@@ -137,6 +137,11 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion financials-backfill` | Backfill quarterly financials (income, balance sheet, cash flow, earnings) |
 | `gefion data cull` | Delete old data in dependency order |
 | `gefion data entity-delete` | Delete an entity + its feature values (dry-run by default) |
+| `gefion ml delete-model` | Delete a model + its owned artifacts (dry-run default; active = --force) |
+| `gefion experiment delete` | Delete an experiment + trials + experimental features (promoted refuse) |
+| `gefion feat-def-delete` | Delete a definition + its values (regime references refuse) |
+| `gefion feat-fx-delete` | Delete a function (refuses while definitions route to it) |
+| `gefion charts-clean` | Reap old chart HTML from the chart dir (dry-run default) |
 | `gefion data listing-meta` | Backfill stocks.exchange/asset_type from the listing |
 | `gefion macro ingest` | Ingest a macro series (VIX, CPI, …) + materialize its feature |
 | `gefion macro derive` | Compute derived market-shape series (breadth, dispersion) from the cross-section |
