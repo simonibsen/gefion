@@ -3969,6 +3969,46 @@ def ml_predict_ensemble(
         )
 
 
+@ml_app.command("delete-model")
+def ml_delete_model(
+    name: str = typer.Option(..., "--name", help="Model name"),
+    version: str = typer.Option(..., "--version", help="Model version"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the delete (default: dry-run)"),
+    force: bool = typer.Option(False, "--force",
+                               help="Delete even an ACTIVE (production) model"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete one model and its OWNED artifacts (predictions, outcomes,
+    performance, materialized signal features) in dependency order.
+    Dry-run by default: reports the full blast radius and changes nothing.
+    Training runs and datasets are reusable inputs — never deleted here."""
+    from gefion.ml.deletion import execute_model_delete, plan_model_delete
+    out = get_output(json_output)
+    with create_span("cli.ml-delete-model", model=f"{name}:{version}",
+                     confirm=confirm):
+        with _regime_conn(db_url) as conn:
+            try:
+                plan = plan_model_delete(conn, name, version)
+                if not confirm:
+                    out.success("DRY-RUN (pass --confirm to execute)",
+                                data={"plan": plan})
+                    if not out.json_mode:
+                        out.info(f"model {name}:{version} "
+                                 f"({'ACTIVE' if plan['active'] else 'inactive'})")
+                        out.info(f"would delete: {plan['predictions']} prediction(s), "
+                                 f"{plan['prediction_outcomes']} outcome(s), "
+                                 f"{plan['model_performance']} performance row(s), "
+                                 f"{len(plan['materialized_signals'])} signal feature(s)")
+                    return
+                deleted = execute_model_delete(conn, name, version, force=force)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"model {name}:{version} deleted", data={"deleted": deleted})
+
+
 @ml_app.command("e2e-test")
 def ml_e2e_test(
     exchange: str = typer.Option("NASDAQ", help="Exchange to test with"),

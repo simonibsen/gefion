@@ -607,6 +607,29 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="ml_delete_model",
+            description=(
+                "Delete one ML model and its OWNED artifacts (predictions, "
+                "outcomes, performance rows, materialized signal features) in "
+                "dependency order (#76 deletion door). Dry-run by default "
+                "(confirm=true executes); an ACTIVE model refuses without "
+                "force=true. Training runs/datasets are never deleted. "
+                "DESTRUCTIVE — only at explicit user direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Model name"},
+                    "version": {"type": "string", "description": "Model version"},
+                    "confirm": {"type": "boolean",
+                                "description": "Execute (default: dry-run report)"},
+                    "force": {"type": "boolean",
+                              "description": "Delete even an active model"},
+                },
+                "required": ["name", "version"],
+            },
+        ),
+        Tool(
             name="ml_e2e_test",
             description=(
                 "Run end-to-end ML pipeline test. Tests the complete workflow: "
@@ -2516,6 +2539,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _ml_train_ensemble(arguments)
         elif name == "ml_predict_ensemble":
             result = await _ml_predict_ensemble(arguments)
+        elif name == "ml_delete_model":
+            result = await _ml_delete_model(arguments)
         elif name == "ml_e2e_test":
             result = await _ml_e2e_test(arguments)
         elif name == "query_predictions":
@@ -3050,6 +3075,19 @@ async def _ml_predict_ensemble(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(['--limit', str(args['limit'])])
 
     return await executor.run(*cmd)
+
+
+async def _ml_delete_model(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Per-model artifact deletion — dry-run default, refusals surface."""
+    async def _run():
+        cmd = ["ml", "delete-model", "--name", args["name"],
+               "--version", args["version"]]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        if args.get("force"):
+            cmd.append("--force")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
 
 
 async def _ml_e2e_test(args: Dict[str, Any]) -> Dict[str, Any]:
