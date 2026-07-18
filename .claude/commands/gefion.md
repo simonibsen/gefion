@@ -251,6 +251,10 @@ If the arguments don't match a mode keyword, interpret the user's intent and rou
 | "delete this stock/series" | `entity_delete` dry-run → show plan → confirm with user → `entity_delete` with `confirm=true` |
 | "add VIX" / "ingest a macro series" | confirm, then `macro_ingest` → `macro_list` to verify coverage |
 | "what macro series do we have" | `macro_list` |
+| "propose a new market series" / "generate a breadth/dispersion variant" | `macro_propose` (kind cross_section, or composite with `--series`) — the candidate QUEUES for review; never promise it will run |
+| "any candidates to review" / "what did the machine propose" | `macro_candidate_list` → `macro_candidate_show` (the packet: body, inputs, provenance, dry-run) |
+| user explicitly approves/rejects a reviewed candidate | `macro_candidate_approve` / `macro_candidate_reject` — HUMAN-DIRECTED only; never call these unprompted, the gate is theirs |
+| "combine VIX and breadth into one indicator" / macro-of-macro | `macro_register_composite` (owner-authored) → `macro_derive` — inputs must exist; cycles refuse |
 | "sector rotation" / "which sectors lead" / "hunt on sector states" | `macro seed-sectors` → `macro derive --series all` → `regime discover start` with `macro_sector_rs_*`/`macro_sector_breadth_*` tercile atoms (CLI) |
 | "is this data trustworthy" / "any bad data" | `quality_findings` (show the verdict tier — suspect ≠ trash) |
 | "flag garbage in stored data" | confirm, then `quality_backfill` → `quality_findings` |

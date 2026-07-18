@@ -115,6 +115,28 @@ quarterly_financials (
 - `feature_definitions`: configuration of what to compute (`name`, `function_name`, `params`, `source_table`, `source_column`, `store_table`, `entity_table`, `active`)
 - `computed_features`: tall store for outputs (`data_id`, `date`, `feature_id`, `value`), composite index on `data_id, feature_id, date DESC`
 - `macro_series` / `macro_series_values`: catalog + raw values for market-level series (VIX, CPI, rates) — the first non-stock entity home
+- `market_function_candidates`: the waiting room for machine-generated market-scope bodies (spec 014) — candidates live here, never in `feature_functions`, until a human approves; pending/rejected generated code has no execution path by construction. Audit-ledger semantics: rejection retains the row; no FK on `promoted_function_id` so the ledger survives function deletion
+
+### Generated market functions and composites (spec 014)
+
+Two flows sit on top of the market dispatcher (spec 011):
+
+1. **The owner gate.** The cycle runner (or `macro propose`) generates
+   candidate market-scope bodies (Claude subprocess or templates) into
+   `market_function_candidates` with provenance and a seeded sandbox
+   dry-run. `macro candidate approve` promotes atomically —
+   `feature_functions` row (scope `market`, active) plus its paired
+   macro-home `feature_definitions` row — so the nightly `derive --series
+   all` adopts it with zero configuration. Every derive door refuses
+   unpromoted candidates by name.
+2. **Composite mode (macro-of-macro).** A market function whose `inputs`
+   declare `{"series": [...]}` executes through `run_composite_function`:
+   per date the body receives that date's stored values of its declared
+   macro series and returns one value or a gap. The input shape is the
+   executor discriminator — no new scope value. Cycles refuse at
+   registration; `macro derive` runs composites after their inputs
+   (topological order); a composite whose input's producer is disabled is
+   a reported skip.
 
 ### Entity resolution (spec 007)
 

@@ -119,12 +119,12 @@ semantics, approve, observe nightly computation.
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T030 [P] Learning materials: gate + composite aside in .claude/commands/gefion-learn.md
-- [ ] T031 [P] Operator skill routing for new MCP tools in .claude/commands/gefion.md
-- [ ] T032 [P] docs/ARCHITECTURE.md (candidate flow + composite mode) and DATA_DICTIONARY regen for the new table
-- [ ] T033 Trace verification: gefion span-check over propose/review/derive paths (orphaned spans are defects); fix any slow spans surfaced by the Tempo hook
-- [ ] T034 Pre-flight: drop gefion_test, full suite green against a fresh DB (ENABLE_DB_TESTS=1); docs-drift test covers all new commands/tools
-- [ ] T035 Quickstart validation: walk specs/014-generated-market-features/quickstart.md end-to-end on dev
+- [X] T030 [P] Learning materials: gate + composite aside in .claude/commands/gefion-learn.md
+- [X] T031 [P] Operator skill routing for new MCP tools in .claude/commands/gefion.md
+- [X] T032 [P] docs/ARCHITECTURE.md (candidate flow + composite mode) and DATA_DICTIONARY regen for the new table
+- [X] T033 Trace verification: gefion span-check over propose/review/derive paths (orphaned spans are defects); fix any slow spans surfaced by the Tempo hook
+- [X] T034 Pre-flight: drop gefion_test, full suite green against a fresh DB (ENABLE_DB_TESTS=1); docs-drift test covers all new commands/tools
+- [X] T035 Quickstart validation: walk specs/014-generated-market-features/quickstart.md end-to-end on dev
 
 ---
 

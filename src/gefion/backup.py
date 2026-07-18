@@ -48,7 +48,9 @@ DATA_TYPE_TABLES = {
     "ohlcv": ["stocks", "stock_ohlcv"],
     "features": ["computed_features"],
     "definitions": ["feature_definitions"],
-    "functions": ["feature_functions"],
+    # Candidate ledger (014): generated bodies + review decisions —
+    # provenance and the audit trail cannot be reproduced
+    "functions": ["feature_functions", "market_function_candidates"],
     "strategies": ["strategy_registry", "strategy_configs"],
     "ml": ["ml_datasets", "ml_runs", "ml_models"],
     "predictions": ["predictions", "prediction_outcomes", "model_performance"],
@@ -74,10 +76,12 @@ DATA_TYPE_TABLES = {
         "regime_definitions", "regime_discovery_runs", "regime_candidates",
         "regime_trust_grades", "discovery_diagnostics", "spa_reverdicts",
         "data_quality_findings", "macro_series", "macro_series_values",
+        "market_function_candidates",
         "schema_migrations", "volatility_thresholds",
     ],
     "all": [
         "stocks", "stock_ohlcv", "computed_features", "feature_definitions", "feature_functions",
+        "market_function_candidates",
         "strategy_registry", "strategy_configs",
         "ml_datasets", "ml_runs", "ml_models",
         "predictions", "prediction_outcomes", "model_performance",
