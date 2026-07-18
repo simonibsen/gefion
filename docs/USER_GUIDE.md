@@ -521,6 +521,25 @@ gefion feat-def-delete NAME                    # values then definition;
                                                #   regime references refuse
 gefion feat-fx-delete NAME                     # refuses while routed
 gefion charts-clean --keep-days 30             # reap old chart HTML
+```
+
+### System observations (#144)
+
+The operating plane's notebook: runtime observers (the cycle runner, quality
+scans) and agent sessions record what they notice about the SYSTEM — power
+limitations, tuning opportunities, anomalies, hypotheses — the moment they
+notice it. The ledger holds observations, never actions: nothing acts on it
+automatically; adoption is always a human act.
+
+```bash
+gefion observe "h=20 buckets hover at the effective-N floor" \
+    --category tuning --evidence '{"refused": 8, "total": 10}' \
+    --suggested-action "consider longer holdout geometry"
+gefion observations list            # the open queue (also in db-health)
+gefion observations show --id 3
+gefion observations adopt --id 3 --reason "filed as issue #145"
+gefion observations reject --id 3 --reason "known, tracked elsewhere"
+
 
 ```
 - Dry-run reports feature-value counts per feature, hard-FK dependents with

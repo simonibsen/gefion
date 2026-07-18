@@ -228,6 +228,8 @@ SPA flag is caution, not demotion.
 
 If the arguments don't match a mode keyword, interpret the user's intent and route to the appropriate MCP tools. Common patterns:
 
+**Standing instruction (#144)**: while operating this system, when you notice something about how it could be improved — a power limitation, a tuning opportunity, an anomaly, a hypothesis worth testing later — record it AT THAT MOMENT via `observe` (category + evidence + suggested action). The ledger is advisory: never act on an observation yourself; a human adopts or rejects each one (`observations list|adopt|reject`). Session-level engineering thinking still goes to GitHub issues.
+
 | User says | Route to |
 |-----------|----------|
 | "update data" / "refresh prices" | `data_update` |

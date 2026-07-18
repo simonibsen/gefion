@@ -340,6 +340,31 @@ def _generate_market_body_template(principle_id: str) -> Optional[str]:
     return market_template_for(principle_id)
 
 
+def record_cycle_observation(conn, cycle_id: int,
+                             summary: Dict[str, Any]) -> None:
+    """Runtime observer (#144): a completed cycle with experiments but ZERO
+    FDR survivors is a geometry/power fact the system already computed —
+    record it in the observations ledger instead of throwing it away.
+    Observation only; nothing acts on it (adoption is a human act)."""
+    from gefion import observations
+
+    completed = summary.get("completed", 0)
+    survivors = summary.get("fdr_survivors", 0)
+    if completed <= 0 or survivors > 0:
+        return
+    observations.record(
+        conn, observer="cycle_runner", category="tuning",
+        observation=(
+            f"Cycle {cycle_id} completed {completed} experiment(s) with zero "
+            "FDR survivors — the current geometry (holdout span, horizon, "
+            "search space) may be power-limited rather than idea-limited."),
+        evidence={"cycle_id": cycle_id, "proposed": summary.get("proposed"),
+                  "completed": completed, "failed": summary.get("failed"),
+                  "fdr_survivors": survivors},
+        suggested_action=("review holdout geometry / search bounds before "
+                          "spending more cycles at this configuration"))
+
+
 class CycleRunner:
     """Orchestrates a full autonomous experiment cycle.
 
@@ -664,6 +689,14 @@ class CycleRunner:
                 "market_candidates": market_candidate_ids,
             }
             self._update_cycle_status(cycle_id, "completed", summary)
+
+            # Runtime observer (#144): zero-survivor geometry observation
+            try:
+                with self._get_conn() as conn:
+                    conn.autocommit = True
+                    record_cycle_observation(conn, cycle_id, summary)
+            except Exception as e:
+                logger.warning(f"Observation recording failed (non-fatal): {e}")
 
             return summary
 

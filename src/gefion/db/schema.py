@@ -291,6 +291,32 @@ def create_market_function_candidates_table(conn: Connection) -> None:
     conn.commit()
 
 
+def create_system_observations_table(conn: Connection) -> None:
+    """System-observations ledger (#144, owner-approved 2026-07-18).
+    Mirrors sql/schema.sql; idempotent — fixtures touching observations
+    call this. Observations, never actions: adoption is a human act."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_observations (
+                id BIGSERIAL PRIMARY KEY,
+                observer TEXT NOT NULL,
+                category TEXT NOT NULL CHECK (category IN ('improvement', 'anomaly', 'tuning', 'hypothesis')),
+                observation TEXT NOT NULL,
+                evidence JSONB,
+                suggested_action TEXT,
+                review_state TEXT NOT NULL DEFAULT 'open'
+                    CHECK (review_state IN ('open', 'acknowledged', 'adopted', 'rejected')),
+                reviewed_by TEXT,
+                reviewed_at TIMESTAMPTZ,
+                review_reason TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+    conn.commit()
+
+
 def create_feature_functions_table(conn: Connection) -> None:
     """Function registry for reusable feature functions."""
     with conn.cursor() as cur:

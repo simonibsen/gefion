@@ -63,6 +63,9 @@ DATA_TYPE_TABLES = {
                 "regime_candidates", "regime_trust_grades",
                 "discovery_diagnostics", "spa_reverdicts"],
     "quality": ["data_quality_findings"],
+    # Observations ledger (#144): machine-noticed items + review
+    # decisions — an audit trail that cannot be reproduced
+    "observations": ["system_observations"],
     "fundamentals": ["stocks_fundamentals", "quarterly_financials"],
     "macro": ["macro_series", "macro_series_values"],
     # Everything that cannot be re-fetched or recomputed — declarations,
@@ -76,12 +79,12 @@ DATA_TYPE_TABLES = {
         "regime_definitions", "regime_discovery_runs", "regime_candidates",
         "regime_trust_grades", "discovery_diagnostics", "spa_reverdicts",
         "data_quality_findings", "macro_series", "macro_series_values",
-        "market_function_candidates",
+        "market_function_candidates", "system_observations",
         "schema_migrations", "volatility_thresholds",
     ],
     "all": [
         "stocks", "stock_ohlcv", "computed_features", "feature_definitions", "feature_functions",
-        "market_function_candidates",
+        "market_function_candidates", "system_observations",
         "strategy_registry", "strategy_configs",
         "ml_datasets", "ml_runs", "ml_models",
         "predictions", "prediction_outcomes", "model_performance",

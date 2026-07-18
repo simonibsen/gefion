@@ -32,6 +32,7 @@ Also gather live system state:
 5. **Test suite** — run `OTEL_ENABLED=false .venv/bin/python -m pytest --tb=no -q` to get pass/fail/skip counts
 6. **Git status** — check branch, uncommitted changes, distance from main
 7. **System health** — use the `system_status` MCP tool (or `.venv/bin/gefion system-status --json`) to check infrastructure, data freshness, and missing features
+8. **Open observations (#144)** — check `gefion observations list` (or the db-health warning): what the machinery noticed about itself is FIRST-CLASS input to next-work suggestions. Surface open observations alongside GitHub issues when proposing priorities; when the owner decides on one, record the decision (`observations adopt --reason 'filed as #N'` / `reject --reason ...`).
 
 ---
 

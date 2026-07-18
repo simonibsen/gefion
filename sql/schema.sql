@@ -325,6 +325,24 @@ CREATE TABLE IF NOT EXISTS market_function_candidates (
     UNIQUE (name, version)
 );
 
+-- System-observations ledger (#144, owner-approved 2026-07-18).
+-- The operating plane's notebook: machine-noticed improvements/anomalies/
+-- tuning/hypotheses. Observations, never actions — adoption is a human act.
+CREATE TABLE IF NOT EXISTS system_observations (
+    id BIGSERIAL PRIMARY KEY,
+    observer TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('improvement', 'anomaly', 'tuning', 'hypothesis')),
+    observation TEXT NOT NULL,
+    evidence JSONB,
+    suggested_action TEXT,
+    review_state TEXT NOT NULL DEFAULT 'open'
+        CHECK (review_state IN ('open', 'acknowledged', 'adopted', 'rejected')),
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMPTZ,
+    review_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- =============================================================================
 -- STRATEGY MANAGEMENT
 -- =============================================================================

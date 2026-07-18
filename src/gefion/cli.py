@@ -4652,6 +4652,19 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                             "findings`")
                 except Exception:
                     health["data_quality"] = {"error": "unavailable"}
+
+                # System observations (#144): how many machine-noticed
+                # items await a human — the ledger is only useful if seen
+                try:
+                    from gefion.observations import open_count
+                    n_open = open_count(conn)
+                    health["open_observations"] = n_open
+                    if n_open:
+                        warnings.append(
+                            f"{n_open} open system observation(s) await "
+                            "review — see `gefion observations list`")
+                except Exception:
+                    health["open_observations"] = None
                 health["warnings"] = warnings
 
     except Exception as exc:
@@ -6446,6 +6459,162 @@ def feat_def_delete(
                 raise typer.Exit(1)
     out.success(f"definition {name!r} deleted ({deleted['values']} value(s))",
                 data={"deleted": deleted})
+
+
+@app.command("observe")
+def observe(
+    observation: str = typer.Argument(..., help="The observation itself"),
+    category: str = typer.Option(..., "--category",
+                                 help="improvement | anomaly | tuning | hypothesis"),
+    observer: str = typer.Option("claude_session", "--observer",
+                                 help="Who noticed (provenance)"),
+    suggested_action: Optional[str] = typer.Option(
+        None, "--suggested-action", help="What the observer would do"),
+    evidence: Optional[str] = typer.Option(
+        None, "--evidence", help="JSON evidence (p-values, counts, trace ids)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Record a system observation (#144) — the operating plane's notebook.
+    Observations, never actions: nothing acts on the ledger automatically;
+    adoption is a human act via `gefion observations adopt`."""
+    import json as _json
+
+    from gefion import observations
+    out = get_output(json_output)
+    if category not in observations.CATEGORIES:
+        out.error(f"category must be one of {observations.CATEGORIES}")
+        raise typer.Exit(1)
+    ev = None
+    if evidence:
+        try:
+            ev = _json.loads(evidence)
+        except ValueError as exc:
+            out.error(f"--evidence must be valid JSON: {exc}")
+            raise typer.Exit(1)
+    with create_span("cli.observe", category=category, observer=observer):
+        with _regime_conn(db_url) as conn:
+            oid = observations.record(conn, observer=observer,
+                                      category=category,
+                                      observation=observation,
+                                      evidence=ev,
+                                      suggested_action=suggested_action)
+    out.success(f"observation #{oid} recorded ({category})",
+                data={"observation_id": oid})
+
+
+observations_app = typer.Typer(help="System-observations ledger (#144): "
+                                    "review what the machinery noticed")
+app.add_typer(observations_app, name="observations", cls=SortedGroup)
+
+
+@observations_app.command("list")
+def observations_list(
+    state: str = typer.Option("open", "--state",
+                              help="open | acknowledged | adopted | rejected | all"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """The observation queue (default: open), newest first."""
+    from gefion import observations
+    out = get_output(json_output)
+    with create_span("cli.observations-list", state=state):
+        with _regime_conn(db_url) as conn:
+            rows = observations.list_observations(
+                conn, state=None if state == "all" else state)
+    if not out.json_mode:
+        for o in rows:
+            out.info(f"#{o['id']} [{o['category']}] {o['observer']} "
+                     f"({o['review_state']}): {o['observation'][:100]}")
+    out.success(f"{len(rows)} observation(s)",
+                data={"observations": [
+                    {**o, "created_at": str(o["created_at"]),
+                     "reviewed_at": str(o["reviewed_at"]) if o["reviewed_at"] else None}
+                    for o in rows]})
+
+
+@observations_app.command("show")
+def observations_show(
+    observation_id: int = typer.Option(..., "--id", help="Observation id"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """One observation in full: text, evidence, suggested action, review."""
+    from gefion import observations
+    out = get_output(json_output)
+    with create_span("cli.observations-show", observation_id=observation_id):
+        with _regime_conn(db_url) as conn:
+            o = observations.get(conn, observation_id)
+    if o is None:
+        out.error(f"no observation with id {observation_id}")
+        raise typer.Exit(1)
+    if not out.json_mode:
+        out.info(f"#{o['id']} [{o['category']}] by {o['observer']} "
+                 f"at {o['created_at']} — {o['review_state']}")
+        out.info(o["observation"])
+        if o.get("evidence"):
+            out.info(f"evidence: {o['evidence']}")
+        if o.get("suggested_action"):
+            out.info(f"suggested: {o['suggested_action']}")
+    out.success("observation", data={"observation": {
+        **o, "created_at": str(o["created_at"]),
+        "reviewed_at": str(o["reviewed_at"]) if o["reviewed_at"] else None}})
+
+
+def _observation_review(observation_id, state, reviewer, reason, db_url,
+                        json_output):
+    from gefion import observations
+    out = get_output(json_output)
+    with create_span(f"cli.observations-{state}",
+                     observation_id=observation_id):
+        with _regime_conn(db_url) as conn:
+            try:
+                observations.review(conn, observation_id, state,
+                                    reviewer=reviewer, reason=reason)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"observation #{observation_id}: {state}",
+                data={"observation_id": observation_id, "state": state})
+
+
+@observations_app.command("ack")
+def observations_ack(
+    observation_id: int = typer.Option(..., "--id", help="Observation id"),
+    reviewer: Optional[str] = typer.Option(None, "--reviewer"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Acknowledge (seen, not yet decided — intermediate state)."""
+    _observation_review(observation_id, "acknowledged", reviewer, None,
+                        db_url, json_output)
+
+
+@observations_app.command("adopt")
+def observations_adopt(
+    observation_id: int = typer.Option(..., "--id", help="Observation id"),
+    reviewer: Optional[str] = typer.Option(None, "--reviewer"),
+    reason: Optional[str] = typer.Option(None, "--reason",
+                                         help="e.g. 'filed as issue #N'"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Adopt (terminal): a human converted it into an issue/spec/change."""
+    _observation_review(observation_id, "adopted", reviewer, reason,
+                        db_url, json_output)
+
+
+@observations_app.command("reject")
+def observations_reject(
+    observation_id: int = typer.Option(..., "--id", help="Observation id"),
+    reason: str = typer.Option(..., "--reason", help="Required: why not"),
+    reviewer: Optional[str] = typer.Option(None, "--reviewer"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Reject (terminal, reason required, retained for audit)."""
+    _observation_review(observation_id, "rejected", reviewer, reason,
+                        db_url, json_output)
 
 
 @app.command("charts-clean")

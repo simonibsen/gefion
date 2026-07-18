@@ -135,3 +135,8 @@ The agent has access to 62 principles across 5 domains:
 - **microstructure**: Bid-ask spread, VPIN, fat tails, antifragility
 
 Use `gefion principles show <id>` to get full details on any principle.
+
+
+## Observations (#144, standing instruction)
+
+At cycle close, reflect briefly: did this run reveal anything about the SYSTEM (geometry power-limits, refusal patterns, tooling friction, a hypothesis worth a future hunt)? If yes, record it via `observe` (MCP) with category + evidence — at that moment, not later. Advisory only: never act on the ledger yourself; the human reviews via `gefion observations list`. (Zero-survivor cycles are auto-observed by the runner; your job is the observations only a reader of the full run would notice.)

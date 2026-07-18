@@ -2318,6 +2318,71 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="observe",
+            description=(
+                "Record a system observation in the ledger (#144). WHEN TO "
+                "USE: while OPERATING gefion (running hunts, cycles, health "
+                "checks, investigating anomalies), record anything you notice "
+                "about how the system could be improved — a power limitation, "
+                "a tuning opportunity, an anomaly, a hypothesis — at the "
+                "moment you notice it. Observations are advisory only: "
+                "nothing acts on them automatically; a human adopts or "
+                "rejects each one. During DEVELOPMENT work, file a GitHub "
+                "issue instead. Mutating (one ledger row)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "observation": {"type": "string", "description": "The observation"},
+                    "category": {"type": "string",
+                                 "description": "improvement | anomaly | tuning | hypothesis"},
+                    "observer": {"type": "string",
+                                 "description": "Provenance (default claude_session)"},
+                    "suggested_action": {"type": "string",
+                                         "description": "What the observer would do"},
+                    "evidence": {"type": "string",
+                                 "description": "JSON evidence (p-values, counts, trace ids)"},
+                },
+                "required": ["observation", "category"],
+            },
+        ),
+        Tool(
+            name="observations_list",
+            description=(
+                "The system-observations queue (default: open) — what the "
+                "machinery noticed and a human has not yet reviewed. "
+                "Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string",
+                              "description": "open (default) | acknowledged | adopted | rejected | all"},
+                },
+            },
+        ),
+        Tool(
+            name="observations_review",
+            description=(
+                "HUMAN-DIRECTED act: acknowledge, adopt, or reject an "
+                "observation (reject requires a reason; terminal states are "
+                "immutable). Only invoke at the user's explicit direction. "
+                "MUTATING."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "observation_id": {"type": "integer", "description": "Observation id"},
+                    "state": {"type": "string",
+                              "description": "acknowledged | adopted | rejected"},
+                    "reviewer": {"type": "string", "description": "Reviewer identity"},
+                    "reason": {"type": "string",
+                               "description": "Required for rejected; recommended for adopted"},
+                },
+                "required": ["observation_id", "state"],
+            },
+        ),
+        Tool(
             name="macro_candidate_list",
             description=(
                 "The generated market-function candidate queue (spec 014, "
@@ -2768,6 +2833,12 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_verdicts(arguments)
         elif name == "macro_derive":
             result = await _macro_derive(arguments)
+        elif name == "observe":
+            result = await _observe(arguments)
+        elif name == "observations_list":
+            result = await _observations_list(arguments)
+        elif name == "observations_review":
+            result = await _observations_review(arguments)
         elif name == "macro_candidate_list":
             result = await _macro_candidate_list(arguments)
         elif name == "macro_candidate_show":
@@ -5617,6 +5688,46 @@ async def _macro_derive(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--min-stocks", str(args["min_stocks"])])
         if args.get("full"):
             cmd.append("--full")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _observe(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Record a system observation (advisory ledger, #144)."""
+    async def _run():
+        cmd = ["observe", args["observation"], "--category", args["category"]]
+        if args.get("observer"):
+            cmd.extend(["--observer", args["observer"]])
+        if args.get("suggested_action"):
+            cmd.extend(["--suggested-action", args["suggested_action"]])
+        if args.get("evidence"):
+            cmd.extend(["--evidence", args["evidence"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _observations_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """The open-observations queue — read-only."""
+    async def _run():
+        cmd = ["observations", "list"]
+        if args.get("state"):
+            cmd.extend(["--state", args["state"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _observations_review(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Human-directed review of one observation."""
+    async def _run():
+        verb = {"acknowledged": "ack", "adopted": "adopt",
+                "rejected": "reject"}.get(args["state"])
+        if verb is None:
+            raise ValueError(f"unknown state {args['state']!r}")
+        cmd = ["observations", verb, "--id", str(args["observation_id"])]
+        if args.get("reviewer"):
+            cmd.extend(["--reviewer", args["reviewer"]])
+        if args.get("reason"):
+            cmd.extend(["--reason", args["reason"]])
         return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
