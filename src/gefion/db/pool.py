@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional
 from contextlib import contextmanager
 
+import atexit
 import os
 from psycopg_pool import ConnectionPool
 import psycopg
@@ -17,6 +18,7 @@ from gefion.observability import create_span, set_attributes
 
 
 _pool: Optional[ConnectionPool] = None
+_atexit_registered = False
 
 
 def init_pool(conninfo: str, min_size: int = 2, max_size: int = 10, timeout: float = 30.0, prepare_statements: bool = True) -> ConnectionPool:
@@ -34,9 +36,17 @@ def init_pool(conninfo: str, min_size: int = 2, max_size: int = 10, timeout: flo
     Returns:
         ConnectionPool instance
     """
-    global _pool
+    global _pool, _atexit_registered
     if _pool is not None:
         _pool.close()
+
+    # A pool left open at interpreter shutdown is torn down by
+    # ConnectionPool.__del__, which cannot join the pool's worker threads
+    # during finalization (PythonFinalizationError on Python 3.14) — close
+    # while threads are still joinable, whichever caller initialized us (#138)
+    if not _atexit_registered:
+        atexit.register(close_pool)
+        _atexit_registered = True
 
     # psycopg3 will automatically cache prepared statements when prepare=True is used in execute()
     # No explicit configuration needed - the prepare_statements flag is stored for reference by consumers

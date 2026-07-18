@@ -163,3 +163,40 @@ def test_pool_raises_without_init():
     with pytest.raises(RuntimeError, match="Connection pool not initialized"):
         with pool.get_connection() as conn:
             pass
+
+
+# --- pool must not survive to interpreter shutdown (issue #138) --------------------
+
+def test_init_pool_registers_atexit_close(monkeypatch):
+    """A pool left open at interpreter shutdown is torn down by
+    ConnectionPool.__del__, which on Python 3.14 raises
+    PythonFinalizationError (threads cannot be joined during finalization) —
+    the nightly data-update cron printed that traceback every run. init_pool
+    must register close_pool with atexit so the pool is closed while threads
+    are still joinable, no matter which caller initialized it."""
+    import atexit
+
+    captured = []
+    monkeypatch.setattr(atexit, "register", lambda fn, *a, **kw: captured.append(fn) or fn)
+    monkeypatch.setattr(pool, "_atexit_registered", False)
+
+    if os.getenv("ENABLE_DB_TESTS", "0") != "1":
+        pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")
+    try:
+        pool.init_pool(schema.test_db_url(), min_size=1, max_size=2)
+    except Exception as exc:
+        pytest.skip(f"DB not available: {exc}")
+    try:
+        assert pool.close_pool in captured
+        # re-init must not stack duplicate registrations
+        pool.init_pool(schema.test_db_url(), min_size=1, max_size=2)
+        assert captured.count(pool.close_pool) == 1
+    finally:
+        pool.close_pool()
+
+
+def test_close_pool_is_idempotent_for_atexit():
+    """atexit may fire after a caller already closed the pool — the second
+    close must be a no-op, not an error."""
+    pool.close_pool()
+    pool.close_pool()
