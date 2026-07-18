@@ -134,6 +134,25 @@ metrics:
     bounds: {min: -100000, max: 100000}
     why: EBITDA near zero explodes the ratio legitimately; loose envelope.
 
+  adjusted_close:
+    entity_table: stocks
+    table: stock_ohlcv
+    column: adjusted_close
+    series_range: {max_ratio: 1.0e6}
+    why: >
+      Serial reverse-splitters carry restated adjusted_close values spanning
+      magnitude cliffs — observed live 2026-07-16: ASTI 5.35e11, DCTH 5.07e11,
+      SMX 3.9e11, CETX 2.5e10, decaying to single digits today (issue #136).
+      These are internally consistent restatements (real provider semantics),
+      so conviction would be wrong; but a series whose positive values span
+      more than 6 orders of magnitude deserves a suspect finding consumers can
+      opt out of. Ratio, not an absolute bound, because the failure mode is
+      the cliff across ONE symbol's series: the largest legitimate dynamic
+      ranges (BRK.A ~2.5e3 appreciation; a 99.99% collapse ~1e4) sit orders
+      of magnitude under the ceiling. Scanned as a per-symbol SQL aggregate
+      by the weekly quality backfill — no write-path chokepoint, since the
+      property belongs to the whole series, not to any single row.
+
   vix:
     entity_table: macro_series
     table: macro_series_values

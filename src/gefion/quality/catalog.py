@@ -22,8 +22,9 @@ DEFAULT_CATALOG_PATH = (
 
 _DEFAULT_KEYS = {"tolerance_factor", "spike_factor", "robust_z_threshold"}
 _METRIC_KEYS = {"entity_table", "table", "column", "bounds", "derivation",
-                "series", "why"}
+                "series", "series_range", "why"}
 _BOUNDS_KEYS = {"min", "max"}
+_SERIES_RANGE_KEYS = {"max_ratio"}
 _DERIVATION_KEYS = {"expression", "inputs", "tolerance_factor"}
 _UNIVERSE_KEYS = {"test_tickers", "selectors"}
 
@@ -42,6 +43,9 @@ class Metric:
     bounds: Optional[Tuple[float, float]] = None
     derivation: Optional[Dict[str, Any]] = None
     series: Optional[str] = None
+    # max/min-positive dynamic-range ceiling over the whole per-entity series
+    # (issue #136); scanned as a SQL aggregate, suspect-only
+    series_range: Optional[float] = None
 
 
 @dataclass
@@ -79,6 +83,26 @@ def _parse_metric(name: str, raw: Dict[str, Any]) -> Metric:
             raise CatalogError(
                 f"metric {name!r} declares bounds without a 'why' — every "
                 "envelope must carry its definitional argument")
+    series_range = None
+    if "series_range" in raw:
+        sr = raw["series_range"]
+        if not isinstance(sr, dict):
+            raise CatalogError(f"metric {name!r}: series_range must be a mapping")
+        _require_keys(sr, _SERIES_RANGE_KEYS, f"metric {name!r} series_range")
+        try:
+            series_range = float(sr["max_ratio"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CatalogError(
+                f"metric {name!r}: series_range max_ratio must be numeric") from exc
+        if not raw.get("why"):
+            raise CatalogError(
+                f"metric {name!r} declares series_range without a 'why' — "
+                "every envelope must carry its definitional argument")
+        if bounds is not None:
+            raise CatalogError(
+                f"metric {name!r} declares both bounds and series_range — "
+                "series_range metrics scan SQL aggregates, never rows; "
+                "pick one detector per stanza")
     derivation = None
     if "derivation" in raw:
         d = raw["derivation"]
@@ -92,7 +116,8 @@ def _parse_metric(name: str, raw: Dict[str, Any]) -> Metric:
     return Metric(name=name, entity_table=raw["entity_table"],
                   table=raw["table"], column=raw["column"],
                   why=raw.get("why", ""), bounds=bounds,
-                  derivation=derivation, series=raw.get("series"))
+                  derivation=derivation, series=raw.get("series"),
+                  series_range=series_range)
 
 
 def load(path: Path) -> Catalog:

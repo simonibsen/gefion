@@ -132,3 +132,32 @@ def test_corroboration_tiers_can_never_convict():
     for r in (spike, outlier):
         assert r is not None
         assert r.verdict == "suspect"
+
+
+# --- series dynamic range (issue #136) — suspect only ------------------------------
+
+def test_series_range_flags_magnitude_cliff_as_suspect():
+    """ASTI observed live: restated adjusted_close 5.35e11 down to single
+    digits — internally consistent restatement, so suspect, never trash."""
+    r = rules.check_series_range(max_value=5.35e11, min_value=7.0,
+                                 max_ratio=1.0e6)
+    assert r is not None
+    assert r.verdict == "suspect"
+    assert r.rule == "series_dynamic_range"
+    assert r.observed == pytest.approx(5.35e11 / 7.0)
+    assert r.expected == 1.0e6
+    assert r.detail["max"] == 5.35e11 and r.detail["min"] == 7.0
+
+
+def test_series_range_tolerates_real_price_histories():
+    # BRK.A-class appreciation (~2.5e3) and a 99.99% collapse (~1e4) both pass
+    assert rules.check_series_range(700000.0, 275.0, 1.0e6) is None
+    assert rules.check_series_range(500.0, 0.05, 1.0e6) is None
+
+
+def test_series_range_abstains_without_positive_floor():
+    """No division by silence: a series whose smallest positive value is
+    missing or nonpositive yields no ratio and no verdict."""
+    assert rules.check_series_range(100.0, 0.0, 1.0e6) is None
+    assert rules.check_series_range(100.0, -5.0, 1.0e6) is None
+    assert rules.check_series_range(100.0, None, 1.0e6) is None
