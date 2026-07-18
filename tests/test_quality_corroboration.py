@@ -39,6 +39,8 @@ def conn():
         cur.execute("DELETE FROM macro_series WHERE name LIKE 'qcbtest%'")
         cur.execute("DELETE FROM stocks_fundamentals WHERE data_id IN "
                     "(SELECT id FROM stocks WHERE symbol LIKE 'QCB%')")
+        cur.execute("DELETE FROM stock_ohlcv WHERE data_id IN "
+                    "(SELECT id FROM stocks WHERE symbol LIKE 'QCB%')")
         cur.execute("DELETE FROM stocks WHERE symbol LIKE 'QCB%'")
 
     with c.cursor() as cur:
@@ -104,3 +106,90 @@ def test_macro_bounds_convict_through_identical_machinery(conn):
                                   metric="vix")
     assert rows and rows[0]["verdict"] == "trash"
     assert rows[0]["observed"] == -3.0
+
+
+# --- series dynamic range on adjusted_close (issue #136) ---------------------------
+
+def _insert_prices(cur, sid, rows):
+    for d, adj in rows:
+        cur.execute("INSERT INTO stock_ohlcv (data_id, date, close, "
+                    "adjusted_close) VALUES (%s, %s, %s, %s)",
+                    (sid, d, min(adj, 999999.0), adj))
+
+
+def test_backfill_series_range_flags_serial_reverse_splitter(conn):
+    """A restated magnitude cliff (5e11 -> single digits) earns exactly ONE
+    suspect finding for the whole series, dated at the max value — never a
+    per-row flood, never a conviction (the restatement is internally
+    consistent provider semantics, not trash)."""
+    from gefion.quality import backfill, findings
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO stocks (symbol, name) VALUES ('QCB3', 'X') "
+                    "RETURNING id")
+        sid = cur.fetchone()[0]
+        _insert_prices(cur, sid, ((date(2020, 1, 2), 5.35e11),
+                                  (date(2020, 1, 3), 2.1e8),
+                                  (date(2026, 1, 5), 7.0)))
+    summary = backfill.run(conn, entity_table="stocks", metric="adjusted_close")
+    rows = findings.list_findings(conn, entity_table="stocks", entity_id=sid,
+                                  metric="adjusted_close")
+    assert len(rows) == 1
+    assert rows[0]["rule"] == "series_dynamic_range"
+    assert rows[0]["verdict"] == "suspect"
+    assert rows[0]["date"] == date(2020, 1, 2)  # the most-restated point
+    assert summary["by_rule"].get("series_dynamic_range", 0) >= 1
+
+
+def test_backfill_series_range_passes_normal_history(conn):
+    from gefion.quality import backfill, findings
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO stocks (symbol, name) VALUES ('QCB4', 'X') "
+                    "RETURNING id")
+        sid = cur.fetchone()[0]
+        _insert_prices(cur, sid, ((date(2020, 1, 2), 400.0),
+                                  (date(2026, 1, 5), 2.0)))
+    backfill.run(conn, entity_table="stocks", metric="adjusted_close")
+    assert findings.list_findings(conn, entity_table="stocks",
+                                  entity_id=sid) == []
+
+
+def test_backfill_series_range_ignores_nonpositive_floor(conn):
+    """A stray zero must not fabricate an infinite ratio — the floor is the
+    smallest POSITIVE value."""
+    from gefion.quality import backfill, findings
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO stocks (symbol, name) VALUES ('QCB5', 'X') "
+                    "RETURNING id")
+        sid = cur.fetchone()[0]
+        _insert_prices(cur, sid, ((date(2020, 1, 2), 0.0),
+                                  (date(2020, 1, 3), 90.0),
+                                  (date(2026, 1, 5), 110.0)))
+    backfill.run(conn, entity_table="stocks", metric="adjusted_close")
+    assert findings.list_findings(conn, entity_table="stocks",
+                                  entity_id=sid) == []
+
+
+def test_backfill_series_range_reconciles_after_restatement_heals(conn):
+    """Issue-85 semantics extend to the new rule: when the provider re-restates
+    and the cliff no longer reproduces, the finding is superseded on the next
+    scan — resolved, never deleted."""
+    from gefion.quality import backfill, findings
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO stocks (symbol, name) VALUES ('QCB6', 'X') "
+                    "RETURNING id")
+        sid = cur.fetchone()[0]
+        _insert_prices(cur, sid, ((date(2020, 1, 2), 5.0e10),
+                                  (date(2026, 1, 5), 6.0)))
+    backfill.run(conn, entity_table="stocks", metric="adjusted_close")
+    assert findings.list_findings(conn, entity_table="stocks", entity_id=sid,
+                                  metric="adjusted_close")
+    with conn.cursor() as cur:
+        cur.execute("UPDATE stock_ohlcv SET adjusted_close = 12.0 "
+                    "WHERE data_id = %s AND date = %s", (sid, date(2020, 1, 2)))
+    backfill.run(conn, entity_table="stocks", metric="adjusted_close")
+    unresolved = findings.list_findings(conn, entity_table="stocks",
+                                        entity_id=sid, metric="adjusted_close")
+    assert unresolved == []  # list_findings defaults to unresolved only
+    kept = findings.list_findings(conn, entity_table="stocks", entity_id=sid,
+                                  metric="adjusted_close", include_resolved=True)
+    assert kept and kept[0]["resolved_at"] is not None  # superseded, not deleted

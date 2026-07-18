@@ -91,6 +91,26 @@ def check_temporal_spike(prev: Optional[float], value: float,
     )
 
 
+def check_series_range(max_value: Optional[float], min_value: Optional[float],
+                       max_ratio: float) -> Optional[RuleResult]:
+    """Series dynamic range (suspect only, issue #136): the max over the
+    smallest POSITIVE value of one entity's whole series. Serial reverse-split
+    restatements are internally consistent — a 5e11 'price' decaying to single
+    digits is real provider semantics, not trash — so outlierness corroborates,
+    it never convicts. Abstains without a positive floor: no ratio from
+    silence."""
+    if max_value is None or min_value is None or min_value <= 0 or max_value <= 0:
+        return None
+    ratio = max_value / min_value
+    if ratio <= max_ratio:
+        return None
+    return RuleResult(
+        rule="series_dynamic_range", verdict="suspect", observed=ratio,
+        expected=max_ratio,
+        detail={"max": max_value, "min": min_value, "max_ratio": max_ratio},
+    )
+
+
 def check_cross_sectional(value: float, universe: List[float],
                           threshold: float) -> Optional[RuleResult]:
     """Tier 4 (suspect only): robust z against the same-date universe —

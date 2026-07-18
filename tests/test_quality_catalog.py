@@ -173,3 +173,74 @@ def test_shipped_catalog_covers_initial_scope():
     assert all(m.why for m in cat.metrics.values())
     # the universe block is populated (T003)
     assert "ZVZZT" in cat.universe["test_tickers"]
+
+
+# --- series_range detector (issue #136) --------------------------------------------
+
+SERIES_RANGE = """
+    defaults:
+      tolerance_factor: 10
+      spike_factor: 100
+      robust_z_threshold: 10
+    metrics:
+      adjusted_close:
+        entity_table: stocks
+        table: stock_ohlcv
+        column: adjusted_close
+        series_range: {max_ratio: 1.0e6}
+        why: Serial reverse-split restatements span magnitude cliffs.
+    universe:
+      test_tickers: []
+      selectors: {}
+"""
+
+
+def test_series_range_parses(tmp_path):
+    cat = _load(tmp_path, SERIES_RANGE)
+    m = cat.metrics["adjusted_close"]
+    assert m.series_range == 1.0e6
+    assert m.bounds is None
+    assert m.table == "stock_ohlcv"
+
+
+def test_series_range_requires_why(tmp_path):
+    bad = SERIES_RANGE.replace(
+        "        why: Serial reverse-split restatements span magnitude cliffs.\n", "")
+    with pytest.raises(catalog.CatalogError) as exc:
+        _load(tmp_path, bad)
+    assert "why" in str(exc.value)
+
+
+def test_series_range_max_ratio_must_be_numeric(tmp_path):
+    with pytest.raises(catalog.CatalogError) as exc:
+        _load(tmp_path, SERIES_RANGE.replace("{max_ratio: 1.0e6}",
+                                             "{max_ratio: lots}"))
+    assert "adjusted_close" in str(exc.value)
+
+
+def test_series_range_refuses_unknown_keys(tmp_path):
+    with pytest.raises(catalog.CatalogError) as exc:
+        _load(tmp_path, SERIES_RANGE.replace("{max_ratio: 1.0e6}",
+                                             "{max_ratio: 1.0e6, surprise: 2}"))
+    assert "surprise" in str(exc.value)
+
+
+def test_series_range_and_bounds_are_mutually_exclusive(tmp_path):
+    """series_range metrics scan SQL aggregates, never rows — a bounds stanza
+    on the same metric would silently demand the per-row scan path."""
+    bad = SERIES_RANGE.replace(
+        "series_range: {max_ratio: 1.0e6}",
+        "series_range: {max_ratio: 1.0e6}\n        bounds: {min: 0, max: 100}")
+    with pytest.raises(catalog.CatalogError) as exc:
+        _load(tmp_path, bad)
+    assert "series_range" in str(exc.value) and "bounds" in str(exc.value)
+
+
+def test_shipped_catalog_covers_adjusted_close():
+    """Issue #136: the repo catalog watches adjusted_close dynamic range."""
+    cat = catalog.load_default()
+    m = cat.metrics["adjusted_close"]
+    assert m.entity_table == "stocks"
+    assert m.table == "stock_ohlcv" and m.column == "adjusted_close"
+    assert m.series_range == 1.0e6
+    assert m.why

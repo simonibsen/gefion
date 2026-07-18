@@ -63,7 +63,7 @@ def run(conn, entity_table: Optional[str] = None,
 # cross_field is write-path only (needs the provider payload) and must never
 # be resolved by a scan that didn't examine it.
 _BACKFILL_RULES = ("definitional_bound", "temporal_spike",
-                   "cross_sectional_outlier")
+                   "cross_sectional_outlier", "series_dynamic_range")
 
 
 def _reconcile(conn, selected, entries) -> int:
@@ -119,9 +119,45 @@ def _count_new(conn, entries) -> int:
 def _scan_metric(conn, cat, metric):
     """Scan every stored value of one metric; return (rows_examined, entries)."""
     entries: List[Dict[str, Any]] = []
+    if metric.series_range is not None:
+        return _scan_series_range(conn, metric, entries)
     if metric.entity_table == "macro_series":
         return _scan_macro(conn, cat, metric, entries)
     return _scan_stock(conn, cat, metric, entries)
+
+
+def _scan_series_range(conn, metric, entries):
+    """Series dynamic range (issue #136): ONE aggregate per entity, computed
+    SQL-side — the per-row scan path would drag the whole hypertable into
+    memory and mint a finding per date. One suspect finding per offending
+    entity, dated at its max value (the most-restated point)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL(
+                """SELECT data_id, MAX({col}),
+                          MIN({col}) FILTER (WHERE {col} > 0)
+                   FROM {tbl} WHERE {col} IS NOT NULL GROUP BY data_id"""
+            ).format(col=sql.Identifier(metric.column),
+                     tbl=sql.Identifier(metric.table)))
+        aggregates = cur.fetchall()
+    examined = len(aggregates)
+    for eid, max_v, min_pos in aggregates:
+        r = rules.check_series_range(
+            float(max_v) if max_v is not None else None,
+            float(min_pos) if min_pos is not None else None,
+            metric.series_range)
+        if r is None:
+            continue
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("SELECT date FROM {tbl} WHERE data_id = %s "
+                        "AND {col} = %s ORDER BY date LIMIT 1")
+                .format(tbl=sql.Identifier(metric.table),
+                        col=sql.Identifier(metric.column)),
+                (eid, max_v))
+            (max_date,) = cur.fetchone()
+        entries.append(_entry(metric.entity_table, eid, metric, max_date, r))
+    return examined, entries
 
 
 def _scan_stock(conn, cat, metric, entries):

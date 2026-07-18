@@ -386,6 +386,13 @@ out of research:
   definitionally impossible or self-contradictory values are convicted as
   trash. The rules live in a declarative catalog (`data-quality/catalog.yaml`),
   each bound carrying its definitional justification.
+- **Series-level detectors.** Some faults belong to a whole series, not one
+  row: serial reverse-splitters carry restated `adjusted_close` values
+  spanning magnitude cliffs (5e11 down to single digits — internally
+  consistent, so never convicted). A catalog `series_range` stanza flags any
+  symbol whose positive values span more than the configured ratio (1e6) with
+  ONE suspect finding per symbol, dated at the most-restated point; the weekly
+  `quality backfill` computes it as a SQL aggregate.
 - **Validation rides the write paths.** `fundamentals-update` and
   Derived series (`macro derive`): `macro_breadth_sma200` (% of the Stock
   universe above its own 200-day SMA — participation) and `macro_dispersion_20`
