@@ -175,6 +175,12 @@ def derive_series(conn, name: str, min_stocks: int = 100,
     from gefion.db.ingest import ensure_feature_definitions
 
     if name not in SEED_BODIES and _get_market_function(conn, name) is None:
+        # The gate (spec 014): an unpromoted candidate must refuse loudly,
+        # naming the review door — never a generic "unknown series"
+        from gefion.macro.candidates import gate_refusal
+        refusal = gate_refusal(conn, name)
+        if refusal:
+            raise MacroDeriveError(refusal)
         raise MacroDeriveError(
             f"unknown derived series {name!r} — available: "
             f"{sorted(SEED_BODIES)}")

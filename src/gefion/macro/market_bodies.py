@@ -147,3 +147,66 @@ SEED_BODIES = {
 ''',
     },
 }
+
+
+# --- generation templates for candidate market bodies (spec 014) -------------------
+#
+# Deterministic fallbacks for machine-proposed candidates: keyword-matched on
+# the principle id (mirrors the per-stock template path). These land in the
+# CANDIDATE ledger, never directly in feature_functions — a human owns the
+# gate. Contract: compute(rows) over one date's cross-section, float | None.
+
+MARKET_CANDIDATE_TEMPLATES = {
+    "advance_share": (
+        'def compute(rows):\n'
+        '    """% of stocks whose close is above their low of the day\n'
+        '    midpoint — a participation reading."""\n'
+        '    scored = [r for r in rows\n'
+        '              if r.get("high") is not None and r.get("low") is not None\n'
+        '              and r["high"] > r["low"]]\n'
+        '    if len(scored) < 30:\n'
+        '        return None\n'
+        '    up = sum(1 for r in scored\n'
+        '             if r["close"] > (r["high"] + r["low"]) / 2.0)\n'
+        '    return 100.0 * up / len(scored)\n'
+    ),
+    "volume_concentration": (
+        'def compute(rows):\n'
+        '    """Share of total volume carried by the top decile of stocks\n'
+        '    by volume — crowding/concentration reading."""\n'
+        '    vols = sorted((r["volume"] for r in rows\n'
+        '                   if r.get("volume")), reverse=True)\n'
+        '    if len(vols) < 50:\n'
+        '        return None\n'
+        '    top = vols[:max(1, len(vols) // 10)]\n'
+        '    total = float(sum(vols))\n'
+        '    return 100.0 * sum(top) / total if total > 0 else None\n'
+    ),
+    "range_dispersion": (
+        'def compute(rows):\n'
+        '    """Cross-sectional median of (high-low)/close — an intraday\n'
+        '    range dispersion reading."""\n'
+        '    spans = sorted((r["high"] - r["low"]) / r["close"] for r in rows\n'
+        '                   if r.get("high") is not None\n'
+        '                   and r.get("low") is not None and r["close"] > 0)\n'
+        '    if len(spans) < 30:\n'
+        '        return None\n'
+        '    mid = len(spans) // 2\n'
+        '    return (spans[mid] if len(spans) % 2\n'
+        '            else (spans[mid - 1] + spans[mid]) / 2.0)\n'
+    ),
+}
+
+
+def market_template_for(principle_id: str):
+    """Keyword-match a principle to a candidate market template, or None —
+    the honest no-match answer (no forced default: an unmatched principle
+    proposes nothing rather than something irrelevant)."""
+    pid = principle_id.lower()
+    if any(k in pid for k in ("breadth", "participation", "advance")):
+        return MARKET_CANDIDATE_TEMPLATES["advance_share"]
+    if any(k in pid for k in ("concentration", "crowding", "volume")):
+        return MARKET_CANDIDATE_TEMPLATES["volume_concentration"]
+    if any(k in pid for k in ("dispersion", "range", "volatility")):
+        return MARKET_CANDIDATE_TEMPLATES["range_dispersion"]
+    return None

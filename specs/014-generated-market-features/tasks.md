@@ -28,8 +28,8 @@ database can be initialized.
 **Purpose**: The store primitives US1 and US3 build on. (US2 does NOT depend
 on this phase — composites never touch the candidates table.)
 
-- [ ] T004 Write failing store tests (create with provenance; auto version-bump on same name — never overwrite; list by state; get; record_dry_run; review-state guardrails: no transitions out of rejected) in tests/test_market_candidates.py
-- [ ] T005 Implement candidate store (create/list/get/record_dry_run, observability spans with parent propagation) in src/gefion/macro/candidates.py
+- [X] T004 Write failing store tests (create with provenance; auto version-bump on same name — never overwrite; list by state; get; record_dry_run; review-state guardrails: no transitions out of rejected) in tests/test_market_candidates.py
+- [X] T005 Implement candidate store (create/list/get/record_dry_run, observability spans with parent propagation) in src/gefion/macro/candidates.py
 
 **Checkpoint**: store green — US1 can start; US2 can start any time after Phase 1
 
@@ -47,21 +47,21 @@ reject path retains audit.
 
 ### Tests for User Story 1 (write FIRST, verify RED)
 
-- [ ] T006 [P] [US1] Write failing dry-run tests (seeded synthetic cross-section is deterministic; ok result with sample values; sandbox violation and wrong-shape mark dry_run failed) in tests/test_market_candidate_dryrun.py
-- [ ] T007 [US1] Write failing gate tests (approve refuses on failed dry-run or non-pending state; approve atomically promotes — feature_functions row scope='market' active + paired feature_definitions, zero orphans, promoted_function_id recorded; reject requires reason, terminal, retained; pending/rejected candidates produce zero stored values through scheduled derive, explicit derive, and full recompute — SC-1401) in tests/test_market_candidates.py
-- [ ] T008 [P] [US1] Write failing generation tests (cycle runner market path writes ONLY candidates, never feature_functions; provenance recorded; template fallback when synthesis unavailable; honest no-candidate on total failure; cycle summary reports candidate id) in tests/test_cycle_runner_market_gen.py
-- [ ] T009 [P] [US1] Write failing CLI tests (macro candidate list|show|approve|reject, macro propose; refusal wording names the gate; --json on all) in tests/test_market_candidates_cli.py
+- [X] T006 [P] [US1] Write failing dry-run tests (seeded synthetic cross-section is deterministic; ok result with sample values; sandbox violation and wrong-shape mark dry_run failed) in tests/test_market_candidate_dryrun.py
+- [X] T007 [US1] Write failing gate tests (approve refuses on failed dry-run or non-pending state; approve atomically promotes — feature_functions row scope='market' active + paired feature_definitions, zero orphans, promoted_function_id recorded; reject requires reason, terminal, retained; pending/rejected candidates produce zero stored values through scheduled derive, explicit derive, and full recompute — SC-1401) in tests/test_market_candidates.py
+- [X] T008 [P] [US1] Write failing generation tests (cycle runner market path writes ONLY candidates, never feature_functions; provenance recorded; template fallback when synthesis unavailable; honest no-candidate on total failure; cycle summary reports candidate id) in tests/test_cycle_runner_market_gen.py
+- [X] T009 [P] [US1] Write failing CLI tests (macro candidate list|show|approve|reject, macro propose; refusal wording names the gate; --json on all) in tests/test_market_candidates_cli.py
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] Seeded synthetic cross-section generator + sandbox dry-run runner (stores dry_run JSONB) in src/gefion/macro/candidates.py
-- [ ] T011 [P] [US1] Market-scope generation templates (participation/concentration/breadth classes, market contract compute(rows)) in src/gefion/macro/market_bodies.py
-- [ ] T012 [US1] Cycle-runner market-scope generation path (Claude prompt variant stating the market contract + template fallback → candidate store; per-stock path untouched) in src/gefion/experiments/cycle_runner.py
-- [ ] T013 [US1] approve/reject/promote (atomic promotion via existing upsert_feature_function + definition pairing; approver/timestamp/reason recording) in src/gefion/macro/candidates.py
-- [ ] T014 [US1] CLI commands macro candidate list|show|approve|reject + macro propose (get_output presentation, --json) in src/gefion/cli.py
-- [ ] T015 [US1] MCP tools macro_candidate_list/show/approve/reject + macro_propose in mcp-server/server.py; parity assertions extended in tests/test_regime_interfaces.py (write assertions first, RED, then implement)
-- [ ] T016 [US1] UI candidates queue + read-only review packet in src/gefion/ui/views/ (expected-view test first in tests/test_ui_components.py, RED, then implement)
-- [ ] T017 [US1] Docs increment: docs/USER_GUIDE.md (commands + gate concept), docs/MCP_WORKFLOWS.md (review workflow), README.md command list
+- [X] T010 [US1] Seeded synthetic cross-section generator + sandbox dry-run runner (stores dry_run JSONB) in src/gefion/macro/candidates.py
+- [X] T011 [P] [US1] Market-scope generation templates (participation/concentration/breadth classes, market contract compute(rows)) in src/gefion/macro/market_bodies.py
+- [X] T012 [US1] Cycle-runner market-scope generation path (Claude prompt variant stating the market contract + template fallback → candidate store; per-stock path untouched) in src/gefion/experiments/cycle_runner.py
+- [X] T013 [US1] approve/reject/promote (atomic promotion via existing upsert_feature_function + definition pairing; approver/timestamp/reason recording) in src/gefion/macro/candidates.py
+- [X] T014 [US1] CLI commands macro candidate list|show|approve|reject + macro propose (get_output presentation, --json) in src/gefion/cli.py
+- [X] T015 [US1] MCP tools macro_candidate_list/show/approve/reject + macro_propose in mcp-server/server.py; parity assertions extended in tests/test_regime_interfaces.py (write assertions first, RED, then implement)
+- [X] T016 [US1] UI candidates queue + read-only review packet in src/gefion/ui/views/ (expected-view test first in tests/test_ui_components.py, RED, then implement)
+- [X] T017 [US1] Docs increment: docs/USER_GUIDE.md (commands + gate concept), docs/MCP_WORKFLOWS.md (review workflow), README.md command list
 
 **Checkpoint**: US1 shippable — the machine proposes, a human owns the gate
 

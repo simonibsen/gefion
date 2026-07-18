@@ -154,3 +154,96 @@ class TestCandidateStore:
                                               "seed": 42, "ran_at": "2026-07-18T00:00:00"})
         c = candidates.get_candidate(conn, cid)
         assert c["dry_run"]["ok"] is True and c["dry_run"]["seed"] == 42
+
+
+# --- T007: the gate — approve/reject/promote + SC-1401 -----------------------------
+
+class TestReviewGate:
+    def _pending(self, conn, name="mfc_test_gate", ok=True, **kw):
+        from gefion.macro import candidates
+        cid = candidates.create_candidate(
+            conn, name=name, kind="cross_section",
+            function_body="def compute(rows):\n    return float(len(rows))",
+            origin="template", principle_id="p-test", generator="test", **kw)
+        candidates.record_dry_run(conn, cid, {
+            "ok": ok, "sample": [], "error": None if ok else "sandbox refusal",
+            "seed": 42, "ran_at": "2026-07-18T00:00:00"})
+        return cid
+
+    def test_approve_refuses_failed_dry_run(self, conn):
+        from gefion.macro import candidates
+        cid = self._pending(conn, ok=False)
+        with pytest.raises(ValueError, match="dry-run"):
+            candidates.approve_candidate(conn, cid, approver="simon")
+        assert candidates.get_candidate(conn, cid)["review_state"] == "pending"
+
+    def test_approve_refuses_missing_dry_run(self, conn):
+        from gefion.macro import candidates
+        cid = candidates.create_candidate(
+            conn, name="mfc_test_nodry", kind="cross_section",
+            function_body="def compute(rows):\n    return 1.0", origin="template")
+        with pytest.raises(ValueError, match="dry-run"):
+            candidates.approve_candidate(conn, cid, approver="simon")
+
+    def test_approve_promotes_atomically(self, conn):
+        from gefion.macro import candidates
+        cid = self._pending(conn, name="mfc_test_promote")
+        fid = candidates.approve_candidate(conn, cid, approver="simon")
+        c = candidates.get_candidate(conn, cid)
+        assert c["review_state"] == "approved"
+        assert c["reviewed_by"] == "simon" and c["reviewed_at"] is not None
+        assert c["promoted_function_id"] == fid
+        with conn.cursor() as cur:
+            cur.execute("SELECT scope, status, enabled FROM feature_functions "
+                        "WHERE id = %s", (fid,))
+            scope, status, enabled = cur.fetchone()
+            assert (scope, status, enabled) == ("market", "active", True)
+            # zero orphans: the paired macro-home definition exists
+            cur.execute("SELECT entity_table, function_name FROM feature_definitions "
+                        "WHERE name = %s", ("macro_mfc_test_promote",))
+            row = cur.fetchone()
+            assert row == ("macro_series", "mfc_test_promote")
+
+    def test_approve_refuses_name_collision(self, conn):
+        from gefion.macro import candidates
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO feature_functions (name, version, status, enabled, "
+                "language, function_body, scope) VALUES "
+                "('mfc_test_taken', 'v1', 'active', TRUE, 'python', 'x', 'market')")
+        cid = self._pending(conn, name="mfc_test_taken")
+        with pytest.raises(ValueError, match="mfc_test_taken"):
+            candidates.approve_candidate(conn, cid, approver="simon")
+        assert candidates.get_candidate(conn, cid)["review_state"] == "pending"
+
+    def test_reject_requires_reason_and_is_terminal(self, conn):
+        from gefion.macro import candidates
+        cid = self._pending(conn, name="mfc_test_reject")
+        with pytest.raises(ValueError, match="reason"):
+            candidates.reject_candidate(conn, cid, approver="simon", reason="")
+        candidates.reject_candidate(conn, cid, approver="simon",
+                                    reason="duplicates breadth_sma200")
+        c = candidates.get_candidate(conn, cid)
+        assert c["review_state"] == "rejected"
+        assert c["review_reason"] == "duplicates breadth_sma200"
+        with pytest.raises(ValueError, match="pending"):
+            candidates.approve_candidate(conn, cid, approver="simon")
+        with pytest.raises(ValueError, match="pending"):
+            candidates.reject_candidate(conn, cid, approver="simon", reason="again")
+
+    def test_candidates_cannot_derive_sc1401(self, conn):
+        """SC-1401: pending AND rejected candidates yield zero stored values
+        through derive — incremental and full recompute both refuse, naming
+        the gate."""
+        from gefion.macro import candidates, derived
+        cid = self._pending(conn, name="mfc_test_locked")
+        for full in (False, True):
+            with pytest.raises(derived.MacroDeriveError, match="candidate"):
+                derived.derive_series(conn, "mfc_test_locked", full=full)
+        candidates.reject_candidate(conn, cid, approver="simon", reason="no")
+        with pytest.raises(derived.MacroDeriveError, match="candidate"):
+            derived.derive_series(conn, "mfc_test_locked")
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM feature_definitions "
+                        "WHERE name = 'macro_mfc_test_locked'")
+            assert cur.fetchone()[0] == 0

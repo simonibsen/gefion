@@ -1095,6 +1095,27 @@ The `regime_discover_*` tools mirror `gefion regime discover` (see
 - `macro_list` — the macro-series catalog with per-series value coverage
   (first/last date, row count) and materialization status (read-only).
 
+### Generated candidates — the owner gate (spec 014)
+
+The machine proposes market-level series; a human owns the gate. Candidates
+live in their own ledger and cannot execute until approved. The review
+workflow: `macro_candidate_list` (queue) → `macro_candidate_show` (packet:
+body, declared inputs, provenance, seeded sandbox dry-run) → decision.
+
+- `macro_propose` — generate a candidate market body from a principle
+  (`kind` cross_section | composite); queues for review, computes nothing.
+  Mutating (one candidate row).
+- `macro_candidate_list` — the candidate queue, default pending (read-only).
+- `macro_candidate_show` — the full review packet; optional
+  `rerun_dry_run` re-executes the seeded synthetic dry-run (never stored
+  data). Read-only.
+- `macro_candidate_approve` — **HUMAN-DIRECTED**: only at the user's
+  explicit request after they reviewed the packet; promotes into
+  `feature_functions` + paired macro-home definition; the nightly derive
+  adopts it automatically. Refuses failed/missing dry-runs. Mutating.
+- `macro_candidate_reject` — **HUMAN-DIRECTED**: terminal, reason required,
+  audit retained. Mutating.
+
 ## Data quality (spec 008)
 
 Provider-garbage detection: definitionally impossible or self-contradictory

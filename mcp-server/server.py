@@ -2237,6 +2237,102 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="macro_candidate_list",
+            description=(
+                "The generated market-function candidate queue (spec 014, "
+                "default: pending review). Candidates are machine-proposed "
+                "market-scope bodies waiting on the OWNER GATE — they cannot "
+                "execute until a human approves. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string",
+                              "description": "pending (default) | approved | rejected | all"},
+                },
+            },
+        ),
+        Tool(
+            name="macro_candidate_show",
+            description=(
+                "The review packet for one candidate: function body, declared "
+                "inputs, provenance (origin/principle/generator), and the "
+                "seeded sandbox dry-run result. Everything the approve/reject "
+                "decision needs, in one place. Read-only (optionally re-runs "
+                "the synthetic dry-run)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "candidate_id": {"type": "integer", "description": "Candidate id"},
+                    "rerun_dry_run": {"type": "boolean",
+                                      "description": "Re-execute the seeded dry-run"},
+                },
+                "required": ["candidate_id"],
+            },
+        ),
+        Tool(
+            name="macro_candidate_approve",
+            description=(
+                "HUMAN-DIRECTED act: approve a reviewed candidate — promotes "
+                "it into feature_functions (scope=market, active) with its "
+                "paired macro-home definition; the nightly derive adopts it "
+                "automatically. Refuses failed/missing dry-runs. Only invoke "
+                "when the human has reviewed the packet and asked for "
+                "approval — automation must never call this. MUTATING."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "candidate_id": {"type": "integer", "description": "Candidate id"},
+                    "approver": {"type": "string",
+                                 "description": "Reviewer identity to record"},
+                },
+                "required": ["candidate_id"],
+            },
+        ),
+        Tool(
+            name="macro_candidate_reject",
+            description=(
+                "HUMAN-DIRECTED act: reject a candidate with a required "
+                "reason. Terminal; the candidate and decision are retained "
+                "for audit (never erased). Only invoke at explicit human "
+                "direction. MUTATING."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "candidate_id": {"type": "integer", "description": "Candidate id"},
+                    "reason": {"type": "string",
+                               "description": "Required: why this candidate is refused"},
+                    "approver": {"type": "string",
+                                 "description": "Reviewer identity to record"},
+                },
+                "required": ["candidate_id", "reason"],
+            },
+        ),
+        Tool(
+            name="macro_propose",
+            description=(
+                "Explicitly generate a candidate market-scope function body "
+                "from a principle (spec 014). The candidate queues for human "
+                "review — generation NEVER shortens the gate. MUTATING "
+                "(writes a candidate row only; no feature values)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "principle": {"type": "string",
+                                  "description": "Principle id driving generation"},
+                    "design": {"type": "string",
+                               "description": "Free-text design context"},
+                    "kind": {"type": "string",
+                             "description": "cross_section (default) | composite"},
+                },
+                "required": ["principle"],
+            },
+        ),
+        Tool(
             name="macro_list",
             description=(
                 "List the macro-series catalog with value coverage (first/last "
@@ -2558,6 +2654,16 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _regime_discover_verdicts(arguments)
         elif name == "macro_derive":
             result = await _macro_derive(arguments)
+        elif name == "macro_candidate_list":
+            result = await _macro_candidate_list(arguments)
+        elif name == "macro_candidate_show":
+            result = await _macro_candidate_show(arguments)
+        elif name == "macro_candidate_approve":
+            result = await _macro_candidate_approve(arguments)
+        elif name == "macro_candidate_reject":
+            result = await _macro_candidate_reject(arguments)
+        elif name == "macro_propose":
+            result = await _macro_propose(arguments)
         elif name == "regime_delete":
             result = await _regime_delete(arguments)
         elif name == "regime_discover_delete":
@@ -5352,6 +5458,59 @@ async def _macro_derive(args: Dict[str, Any]) -> Dict[str, Any]:
             cmd.extend(["--min-stocks", str(args["min_stocks"])])
         if args.get("full"):
             cmd.append("--full")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_candidate_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Candidate queue (spec 014) — read-only."""
+    async def _run():
+        cmd = ["macro", "candidate", "list"]
+        if args.get("state"):
+            cmd.extend(["--state", args["state"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_candidate_show(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Review packet for one candidate — read-only (optional dry-run rerun)."""
+    async def _run():
+        cmd = ["macro", "candidate", "show", "--id", str(args["candidate_id"])]
+        if args.get("rerun_dry_run"):
+            cmd.append("--rerun-dry-run")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_candidate_approve(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Human-directed approval — promotes into the production roster."""
+    async def _run():
+        cmd = ["macro", "candidate", "approve", "--id", str(args["candidate_id"])]
+        if args.get("approver"):
+            cmd.extend(["--approver", args["approver"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_candidate_reject(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Human-directed terminal rejection (reason required, audit retained)."""
+    async def _run():
+        cmd = ["macro", "candidate", "reject", "--id", str(args["candidate_id"]),
+               "--reason", args["reason"]]
+        if args.get("approver"):
+            cmd.extend(["--approver", args["approver"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_propose(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Explicit candidate generation — queues for review, never executes."""
+    async def _run():
+        cmd = ["macro", "propose", "--principle", args["principle"]]
+        if args.get("design"):
+            cmd.extend(["--design", args["design"]])
+        if args.get("kind"):
+            cmd.extend(["--kind", args["kind"]])
         return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 

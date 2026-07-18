@@ -55,11 +55,22 @@ class TestUIStructure:
             "documentation.py",
             "settings.py",
             "regimes.py",
+            "candidates.py",
         ]
 
         assert views_dir.exists()
         for view in expected_views:
             assert (views_dir / view).exists(), f"View {view} not found"
+
+    def test_candidates_has_render_function(self, ui_dir):
+        """Candidates view (spec 014): pending queue + read-only review
+        packet; decisions stay deliberate CLI/MCP acts."""
+        content = (ui_dir / "views" / "candidates.py").read_text()
+        assert "def render_candidates(" in content
+        assert "review_state" in content       # the queue shows the gate state
+        assert "dry_run" in content            # the packet shows the dry-run
+        app_content = (ui_dir / "app.py").read_text()
+        assert "render_candidates" in app_content
 
     def test_regimes_has_render_function(self, ui_dir):
         """Regimes view should have a render_regimes function and register in app.py."""
