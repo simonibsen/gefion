@@ -210,3 +210,18 @@ def market_template_for(principle_id: str):
     if any(k in pid for k in ("dispersion", "range", "volatility")):
         return MARKET_CANDIDATE_TEMPLATES["range_dispersion"]
     return None
+
+
+def composite_template_for(principle_id: str, series: list) -> str:
+    """Deterministic composite candidate over the DECLARED series: an
+    equal-weight mean of the named inputs. Deliberately simple scaffolding —
+    the reviewer judges whether the combination deserves better, and the
+    Claude path writes richer bodies when available."""
+    keys = ", ".join(f"row[{s!r}]" for s in series)
+    return (
+        'def compute(row):\n'
+        f'    """Equal-weight composite over {", ".join(series)}\n'
+        f'    (generated from principle: {principle_id})."""\n'
+        f'    values = [{keys}]\n'
+        '    return sum(values) / len(values)\n'
+    )

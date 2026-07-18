@@ -668,20 +668,50 @@ class CycleRunner:
             return summary
 
     def propose_market_candidate(self, principle_id: str, design: str,
-                                 kind: str = "cross_section") -> Optional[int]:
+                                 kind: str = "cross_section",
+                                 series: Optional[List[str]] = None
+                                 ) -> Optional[int]:
         """Generate a MARKET-scope candidate body and queue it for review
         (spec 014). Writes ONLY to market_function_candidates — never to
         feature_functions; the gate is a human act and automation has no
-        path to it. Returns the candidate id, or None when no body could be
-        generated (honest: no empty candidates)."""
+        path to it. Composite kind requires declared input series, all of
+        which must already exist. Returns the candidate id, or None when
+        nothing could be generated (honest: no empty candidates)."""
         from gefion.macro import candidates as mcandidates
 
         with create_span("cycle_runner.propose_market_candidate",
                          principle=principle_id, kind=kind) as span:
+            inputs: Dict[str, Any] = {}
+            if kind == "composite":
+                if not series:
+                    logger.info(
+                        f"Composite generation for {principle_id} needs "
+                        "declared input series — proposing nothing")
+                    set_attributes(span, proposed=False)
+                    return None
+                with self._get_conn() as conn:
+                    conn.autocommit = True
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT name FROM macro_series "
+                                    "WHERE name = ANY(%s)", (list(series),))
+                        known = {r[0] for r in cur.fetchall()}
+                unknown = [s for s in series if s not in known]
+                if unknown:
+                    logger.info(
+                        f"Composite generation for {principle_id} declares "
+                        f"unknown series {unknown} — proposing nothing")
+                    set_attributes(span, proposed=False)
+                    return None
+                inputs = {"series": list(series)}
+
             body = _generate_market_body_claude(principle_id, design, kind=kind)
             origin = "claude" if body else "template"
             if body is None:
-                body = _generate_market_body_template(principle_id)
+                if kind == "composite":
+                    from gefion.macro.market_bodies import composite_template_for
+                    body = composite_template_for(principle_id, list(series))
+                else:
+                    body = _generate_market_body_template(principle_id)
             if body is None:
                 logger.info(
                     f"No market body generated for {principle_id} — "
@@ -694,12 +724,13 @@ class CycleRunner:
                 conn.autocommit = True
                 cid = mcandidates.create_candidate(
                     conn, name=name, kind=kind, function_body=body,
-                    origin=origin, inputs={},
+                    origin=origin, inputs=inputs,
                     description=(design or "")[:500] or None,
                     principle_id=principle_id, generator="cycle_runner")
                 mcandidates.record_dry_run(
                     conn, cid,
-                    mcandidates.dry_run_candidate(body, kind=kind, inputs={}))
+                    mcandidates.dry_run_candidate(body, kind=kind,
+                                                  inputs=inputs))
             set_attributes(span, proposed=True, candidate_id=cid)
             return cid
 

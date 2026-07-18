@@ -114,3 +114,51 @@ def test_market_templates_emit_market_contract():
     body = _generate_market_body_template("mcg-breadth-participation")
     assert body is not None
     assert "def compute(rows" in body
+
+
+# --- T026 (US3): composite-kind generation -----------------------------------------
+
+def _seed_macro_series(conn, names):
+    from gefion.macro import catalog
+    for n in names:
+        catalog.ensure_series(conn, name=n, provider="derived",
+                              kind="derived", cadence="daily")
+
+
+def test_composite_generation_declares_existing_series(conn, runner, monkeypatch):
+    from gefion.experiments import cycle_runner as cr
+    monkeypatch.setattr(cr, "_generate_market_body_claude", lambda *a, **k: None)
+    _seed_macro_series(conn, ["mcg_in_a", "mcg_in_b"])
+
+    cid = runner.propose_market_candidate(
+        "mcg-vol-breadth-interaction", "composite over the pair",
+        kind="composite", series=["mcg_in_a", "mcg_in_b"])
+
+    from gefion.macro import candidates
+    c = candidates.get_candidate(conn, cid)
+    assert c["kind"] == "composite"
+    assert c["inputs"] == {"series": ["mcg_in_a", "mcg_in_b"]}
+    assert "def compute(row" in c["function_body"]   # composite contract
+    assert c["dry_run"]["ok"] is True
+
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM macro_series WHERE name LIKE 'mcg_in_%'")
+
+
+def test_composite_generation_refuses_unknown_series(conn, runner, monkeypatch):
+    from gefion.experiments import cycle_runner as cr
+    monkeypatch.setattr(cr, "_generate_market_body_claude", lambda *a, **k: None)
+
+    cid = runner.propose_market_candidate(
+        "mcg-bad-composite", "x", kind="composite",
+        series=["mcg_no_such_series"])
+
+    assert cid is None   # honest refusal: only existing series may be declared
+
+
+def test_composite_generation_requires_series(conn, runner, monkeypatch):
+    from gefion.experiments import cycle_runner as cr
+    monkeypatch.setattr(cr, "_generate_market_body_claude", lambda *a, **k: None)
+
+    assert runner.propose_market_candidate(
+        "mcg-no-inputs", "x", kind="composite") is None

@@ -12781,6 +12781,9 @@ def macro_propose(
                                help="Free-text design context for generation"),
     kind: str = typer.Option("cross_section", "--kind",
                              help="cross_section | composite"),
+    series: Optional[str] = typer.Option(
+        None, "--series",
+        help="Composite kind: comma list of existing input macro series"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
 ) -> None:
@@ -12788,10 +12791,13 @@ def macro_propose(
     candidate queues for review — generation NEVER shortens the gate."""
     from gefion.experiments.cycle_runner import CycleRunner
     out = get_output(json_output)
+    series_list = ([x.strip() for x in series.split(",") if x.strip()]
+                   if series else None)
     with create_span("cli.macro-propose", principle=principle, kind=kind):
         url = _db_url(db_url)
         runner = CycleRunner(url)
-        cid = runner.propose_market_candidate(principle, design, kind=kind)
+        cid = runner.propose_market_candidate(principle, design, kind=kind,
+                                              series=series_list)
     if cid is None:
         out.error(f"no market body could be generated for {principle!r} — "
                   "nothing proposed (no empty candidates)")

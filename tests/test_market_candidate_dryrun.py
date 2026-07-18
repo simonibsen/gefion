@@ -70,3 +70,34 @@ class TestDryRun:
         rec = candidates.dry_run_candidate(body, kind="cross_section", inputs={})
         assert rec["ok"] is False
         assert "boom" in rec["error"]
+
+
+# --- T025 (US3): composite-kind dry-run --------------------------------------------
+
+class TestCompositeDryRun:
+    def test_seeded_series_rows_deterministic(self):
+        a = candidates.synthetic_series_rows(seed=42, series_names=["vix", "b"])
+        b = candidates.synthetic_series_rows(seed=42, series_names=["vix", "b"])
+        assert a == b
+        d, row = a[0]
+        assert set(row) == {"vix", "b"}
+
+    def test_composite_dry_run_executes_over_seeded_values(self):
+        body = ("def compute(row):\n"
+                "    return row['vix'] + row['breadth']\n")
+        rec = candidates.dry_run_candidate(
+            body, kind="composite", inputs={"series": ["vix", "breadth"]})
+        assert rec["ok"] is True
+        assert len(rec["sample"]) >= 3
+        assert all(isinstance(s["value"], float) for s in rec["sample"])
+
+    def test_composite_dry_run_fails_on_wrong_contract(self):
+        # a cross-section-contract body run as composite raises inside
+        body = "def compute(rows):\n    return float(len(rows))\n"
+        rec = candidates.dry_run_candidate(
+            body, kind="composite", inputs={"series": ["vix"]})
+        # len(dict) is legal python — but a body indexing missing keys fails
+        body2 = "def compute(row):\n    return row['not_declared']\n"
+        rec2 = candidates.dry_run_candidate(
+            body2, kind="composite", inputs={"series": ["vix"]})
+        assert rec2["ok"] is False

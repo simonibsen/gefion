@@ -422,6 +422,12 @@ gefion macro derive --series risk_state --full   # full history; nightly = incre
   disabled is a reported skip, never silent staleness.
 - Same sandbox and failure isolation as every market function: a failing
   body writes nothing.
+- **Generated composites** go through the gate like everything generated:
+  `gefion macro propose --principle vol-breadth-interaction --kind composite
+  --series vix,breadth_sma200` — the candidate declares only existing series
+  (unknown inputs refuse at generation), its dry-run executes over seeded
+  synthetic series values, and promotion re-validates inputs including cycle
+  refusal. Same queue, same human decision.
 - The `macro_<name>` feature declares `entity_table='macro_series'` and lands
   in `computed_features` — usable by discovery atoms, regime expressions
   (`regime interaction --by macro_vix`), and interaction tests with zero
