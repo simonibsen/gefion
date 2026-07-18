@@ -264,6 +264,82 @@ def _generate_function_body(principle_id: str, experiment_design: str) -> Option
     return _generate_function_body_template(principle_id)
 
 
+def _generate_market_body_claude(principle_id: str, experiment_design: str,
+                                 kind: str = "cross_section") -> Optional[str]:
+    """Use Claude Code (claude -p) to generate a MARKET-scope candidate body
+    (spec 014). Returns code defining the market contract, or None."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("claude"):
+        logger.debug("claude CLI not found, skipping market body generation")
+        return None
+
+    if kind == "composite":
+        contract = (
+            "- Define exactly: def compute(row):\n"
+            "- row is a dict of macro series values for ONE trading date, "
+            "e.g. {'vix': 18.2, 'breadth_sma200': 61.0}\n"
+            "- Return a float (the composite's value for that date) or None (gap)")
+    else:
+        contract = (
+            "- Define exactly: def compute(rows):\n"
+            "- rows is a list of dicts for ONE trading date's stock "
+            "cross-section; keys: symbol, close, high, low, volume, sector\n"
+            "- Return a float (the market-level value for that date) or None (gap)")
+
+    prompt = f"""Write a Python market-level feature function for a quantitative trading system.
+
+Principle: {principle_id}
+Description: {experiment_design}
+
+Requirements:
+{contract}
+- Use only: numpy, pandas, math, statistics (no file I/O, network, or system calls)
+- Return None rather than a made-up value when the input is too thin
+- Include a docstring explaining what the series measures
+
+Return ONLY the Python code, no markdown fences or explanations."""
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "text"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            logger.warning(f"claude -p failed for market body {principle_id}: "
+                           f"{result.stderr[:200]}")
+            return None
+        code = result.stdout.strip()
+        if code.startswith("```"):
+            lines = code.split("\n")
+            code = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        try:
+            compiled = compile(code, "<claude_market_generated>", "exec")
+            env: Dict[str, Any] = {}
+            exec(compiled, {"__builtins__": __builtins__}, env)
+            if callable(env.get("compute")):
+                return code
+            logger.warning(f"Claude market body for {principle_id} missing compute()")
+            return None
+        except SyntaxError as e:
+            logger.warning(f"Claude generated invalid market body for {principle_id}: {e}")
+            return None
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Market body generation timed out for {principle_id}")
+        return None
+    except Exception as e:
+        logger.warning(f"Market body generation failed for {principle_id}: {e}")
+        return None
+
+
+def _generate_market_body_template(principle_id: str) -> Optional[str]:
+    """Keyword-matched market candidate template, or None (honest no-match —
+    an unmatched principle proposes nothing rather than something irrelevant)."""
+    from gefion.macro.market_bodies import market_template_for
+    return market_template_for(principle_id)
+
+
 class CycleRunner:
     """Orchestrates a full autonomous experiment cycle.
 
@@ -389,7 +465,26 @@ class CycleRunner:
             # 3. Propose experiments (up to max)
             _emit("proposing", f"Proposing up to {min(len(ready), max_experiments)} experiments...")
             proposed_ids = []
+            market_candidate_ids = []
             for h in ready[:max_experiments]:
+                # Market-scope hypotheses become CANDIDATES behind the owner
+                # gate (spec 014) — never experiments, never auto-approved
+                if h.get("scope") == "market":
+                    cid = self.propose_market_candidate(
+                        h.get("principle_id", ""), h.get("description", ""),
+                        kind=h.get("kind", "cross_section"))
+                    if cid is not None:
+                        market_candidate_ids.append(cid)
+                        _emit("proposed",
+                              f"  Market candidate #{cid} queued for review "
+                              "(the gate: a human approves before it ever runs)",
+                              {"candidate_id": cid})
+                    else:
+                        _emit("proposed",
+                              f"  No market body could be generated for "
+                              f"{h.get('principle_id', '?')} — nothing proposed",
+                              {"candidate_id": None})
+                    continue
                 # Build search space: user bounds override defaults
                 exp_type = h["experiment_type"]
                 search_space = dict(DEFAULT_SEARCH_SPACES.get(exp_type, {}))
@@ -566,10 +661,78 @@ class CycleRunner:
                 "promoted": promoted_count,
                 "results": results,
                 "errors": [r.get("error") for r in failed if r.get("error")],
+                "market_candidates": market_candidate_ids,
             }
             self._update_cycle_status(cycle_id, "completed", summary)
 
             return summary
+
+    def propose_market_candidate(self, principle_id: str, design: str,
+                                 kind: str = "cross_section",
+                                 series: Optional[List[str]] = None
+                                 ) -> Optional[int]:
+        """Generate a MARKET-scope candidate body and queue it for review
+        (spec 014). Writes ONLY to market_function_candidates — never to
+        feature_functions; the gate is a human act and automation has no
+        path to it. Composite kind requires declared input series, all of
+        which must already exist. Returns the candidate id, or None when
+        nothing could be generated (honest: no empty candidates)."""
+        from gefion.macro import candidates as mcandidates
+
+        with create_span("cycle_runner.propose_market_candidate",
+                         principle=principle_id, kind=kind) as span:
+            inputs: Dict[str, Any] = {}
+            if kind == "composite":
+                if not series:
+                    logger.info(
+                        f"Composite generation for {principle_id} needs "
+                        "declared input series — proposing nothing")
+                    set_attributes(span, proposed=False)
+                    return None
+                with self._get_conn() as conn:
+                    conn.autocommit = True
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT name FROM macro_series "
+                                    "WHERE name = ANY(%s)", (list(series),))
+                        known = {r[0] for r in cur.fetchall()}
+                unknown = [s for s in series if s not in known]
+                if unknown:
+                    logger.info(
+                        f"Composite generation for {principle_id} declares "
+                        f"unknown series {unknown} — proposing nothing")
+                    set_attributes(span, proposed=False)
+                    return None
+                inputs = {"series": list(series)}
+
+            body = _generate_market_body_claude(principle_id, design, kind=kind)
+            origin = "claude" if body else "template"
+            if body is None:
+                if kind == "composite":
+                    from gefion.macro.market_bodies import composite_template_for
+                    body = composite_template_for(principle_id, list(series))
+                else:
+                    body = _generate_market_body_template(principle_id)
+            if body is None:
+                logger.info(
+                    f"No market body generated for {principle_id} — "
+                    "proposing nothing")
+                set_attributes(span, proposed=False)
+                return None
+
+            name = principle_id.replace("-", "_")[:40]
+            with self._get_conn() as conn:
+                conn.autocommit = True
+                cid = mcandidates.create_candidate(
+                    conn, name=name, kind=kind, function_body=body,
+                    origin=origin, inputs=inputs,
+                    description=(design or "")[:500] or None,
+                    principle_id=principle_id, generator="cycle_runner")
+                mcandidates.record_dry_run(
+                    conn, cid,
+                    mcandidates.dry_run_candidate(body, kind=kind,
+                                                  inputs=inputs))
+            set_attributes(span, proposed=True, candidate_id=cid)
+            return cid
 
     def _preflight_check(
         self,

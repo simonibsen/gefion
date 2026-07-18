@@ -48,6 +48,7 @@ PAGES = [
     ("Backtesting", ":material/history:"),
     ("Experiments", ":material/science:"),
     ("Regimes", ":material/insights:"),
+    ("Candidates", ":material/gavel:"),
     ("Charts", ":material/bar_chart:"),
     ("Documentation", ":material/menu_book:"),
     ("Settings", ":material/settings:"),
@@ -117,6 +118,9 @@ def main():
         elif current_page == "Regimes":
             from gefion.ui.views.regimes import render_regimes
             render_regimes()
+        elif current_page == "Candidates":
+            from gefion.ui.views.candidates import render_candidates
+            render_candidates()
         elif current_page == "Documentation":
             from gefion.ui.views.documentation import render_docs
             render_docs()

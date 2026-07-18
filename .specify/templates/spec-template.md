@@ -105,11 +105,11 @@
 <!--
   Does this feature introduce a repeatable workflow that would benefit from
   a Claude Code slash command?  If so, note the proposed skill below.
-  Skills live in `.claude/commands/` and MUST be prefixed with `g2-`.
-  See existing skills: /g2-services (infra), /g2-dev (dev loop).
+  Skills live in `.claude/commands/` and MUST be prefixed with `gefion-`.
+  See existing skills: /gefion-services (infra), /gefion-dev (dev loop).
 -->
 
-- **Proposed skill**: [e.g., `g2-deploy` — or "None needed"]
+- **Proposed skill**: [e.g., `gefion-deploy` — or "None needed"]
 - **Rationale**: [Why a skill would help, or why it's not needed]
 
 ## Success Criteria *(mandatory)*

@@ -16,6 +16,7 @@
   - [`feature_functions`](#feature-functions)
   - [`macro_series`](#macro-series)
   - [`macro_series_values`](#macro-series-values)
+  - [`market_function_candidates`](#market-function-candidates)
   - [`ml_datasets`](#ml-datasets)
   - [`ml_models`](#ml-models)
   - [`ml_runs`](#ml-runs)
@@ -286,6 +287,32 @@ Primary key: `date, series_id`
 | `open` | NUMERIC(14,6) | ✓ |  |  |
 | `high` | NUMERIC(14,6) | ✓ |  |  |
 | `low` | NUMERIC(14,6) | ✓ |  |  |
+
+### `market_function_candidates`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | BIGSERIAL |  |  |  |
+| `name` | TEXT |  |  |  |
+| `version` | INTEGER |  |  |  |
+| `kind` | TEXT |  |  |  |
+| `function_body` | TEXT |  |  |  |
+| `inputs` | JSONB |  |  |  |
+| `description` | TEXT | ✓ |  |  |
+| `origin` | TEXT |  |  |  |
+| `principle_id` | TEXT | ✓ |  |  |
+| `generator` | TEXT | ✓ |  |  |
+| `dry_run` | JSONB | ✓ |  |  |
+| `review_state` | TEXT |  |  |  |
+| `reviewed_by` | TEXT | ✓ |  |  |
+| `reviewed_at` | TIMESTAMPTZ | ✓ |  |  |
+| `review_reason` | TEXT | ✓ |  |  |
+| `promoted_function_id` | INTEGER | ✓ |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
 
 ### `ml_datasets`
 

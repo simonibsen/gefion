@@ -175,6 +175,12 @@ def derive_series(conn, name: str, min_stocks: int = 100,
     from gefion.db.ingest import ensure_feature_definitions
 
     if name not in SEED_BODIES and _get_market_function(conn, name) is None:
+        # The gate (spec 014): an unpromoted candidate must refuse loudly,
+        # naming the review door — never a generic "unknown series"
+        from gefion.macro.candidates import gate_refusal
+        refusal = gate_refusal(conn, name)
+        if refusal:
+            raise MacroDeriveError(refusal)
         raise MacroDeriveError(
             f"unknown derived series {name!r} — available: "
             f"{sorted(SEED_BODIES)}")
@@ -190,6 +196,16 @@ def derive_series(conn, name: str, min_stocks: int = 100,
         if not fn["enabled"]:
             set_attributes(span, skipped_disabled=True)
             return -1
+        composite_inputs = (fn.get("inputs") or {}).get("series") or []
+        if composite_inputs:
+            # A composite whose input PRODUCER is disabled must be a
+            # reported skip — silence never reads as health (spec 014)
+            from gefion.macro.composites import disabled_input_producers
+            disabled = disabled_input_producers(conn, composite_inputs)
+            if disabled:
+                set_attributes(span, skipped_disabled=True,
+                               disabled_inputs=",".join(disabled))
+                return -1
 
         series_id = catalog.ensure_series(
             conn, name=name, provider="derived", kind="derived",
@@ -217,9 +233,15 @@ def derive_series(conn, name: str, min_stocks: int = 100,
                             (feature_id, series_id))
                 start = cur.fetchone()[0]
 
-        from gefion.features.dispatcher import run_market_function
-        result = run_market_function(conn, fn, start=start,
-                                     min_stocks=min_stocks)
+        # Input shape is the executor discriminator (spec 014): declared
+        # series -> composite mode; otherwise the stock cross-section
+        if composite_inputs:
+            from gefion.features.dispatcher import run_composite_function
+            result = run_composite_function(conn, fn, start=start)
+        else:
+            from gefion.features.dispatcher import run_market_function
+            result = run_market_function(conn, fn, start=start,
+                                         min_stocks=min_stocks)
 
         written = 0
         if result["values"]:

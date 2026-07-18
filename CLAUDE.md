@@ -156,6 +156,7 @@ Before exiting plan mode, verify:
 - ONE new table — `spa_reverdicts` (append-only per-run results; (010-spa-reverdict)
 - ONE new column — `feature_functions.scope` ('stock'|'market', (011-market-dispatcher)
 - PostgreSQL + TimescaleDB — existing tables only (013-sector-signals)
+- Python 3.10+ (existing codebase) + psycopg (DB), existing `gefion.features.dispatcher` (014-generated-market-features)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)

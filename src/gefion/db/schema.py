@@ -240,6 +240,42 @@ def create_macro_series_tables(conn: Connection) -> None:
     conn.commit()
 
 
+def create_market_function_candidates_table(conn: Connection) -> None:
+    """Candidate ledger for generated market functions (spec 014,
+    owner-approved 2026-07-18). Mirrors sql/schema.sql; idempotent —
+    fixtures touching candidates call this (CI collection order can run
+    after a schema-reset test). Candidates live here, never in
+    feature_functions, so pending/rejected generated code has no execution
+    path by construction."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_function_candidates (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                kind TEXT NOT NULL CHECK (kind IN ('cross_section', 'composite')),
+                function_body TEXT NOT NULL,
+                inputs JSONB NOT NULL DEFAULT '{}'::jsonb,
+                description TEXT,
+                origin TEXT NOT NULL CHECK (origin IN ('claude', 'template', 'manual')),
+                principle_id TEXT,
+                generator TEXT,
+                dry_run JSONB,
+                review_state TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (review_state IN ('pending', 'approved', 'rejected')),
+                reviewed_by TEXT,
+                reviewed_at TIMESTAMPTZ,
+                review_reason TEXT,
+                promoted_function_id INTEGER,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (name, version)
+            );
+            """
+        )
+    conn.commit()
+
+
 def create_feature_functions_table(conn: Connection) -> None:
     """Function registry for reusable feature functions."""
     with conn.cursor() as cur:

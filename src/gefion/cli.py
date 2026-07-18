@@ -12544,6 +12544,9 @@ def macro_derive(
             # the DB is the source of truth, so seeded series (sector,
             # model, future) are covered without touching any cron line.
             names = explicit if explicit is not None else all_derived_series(conn)
+            # Composites derive AFTER their inputs (spec 014, topological)
+            from gefion.macro.composites import order_for_derive
+            names = order_for_derive(conn, names)
             for name in names:
                 try:
                     n = derive_series(conn, name, min_stocks=min_stocks,
@@ -12589,6 +12592,219 @@ def macro_list(
                     f"{s['values']} value(s) {s['first_date']}..{s['last_date']} "
                     f"{'(materialized)' if s['materialized'] else '(not materialized)'}")
         out.success(f"{len(series)} macro series", data={"series": series})
+
+
+# --- Generated market-function candidates: the owner gate (spec 014) ---------------
+
+candidate_app = typer.Typer(help="Generated market-function candidates: "
+                                 "the review gate (spec 014)")
+macro_app.add_typer(candidate_app, name="candidate", cls=SortedGroup)
+
+
+def _candidate_public(c: dict) -> dict:
+    out = dict(c)
+    for k in ("reviewed_at", "created_at"):
+        if out.get(k) is not None:
+            out[k] = str(out[k])
+    return out
+
+
+@candidate_app.command("list")
+def candidate_list(
+    state: str = typer.Option("pending", "--state",
+                              help="pending | approved | rejected | all"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """The candidate queue (default: pending review), newest first."""
+    from gefion.macro import candidates
+    out = get_output(json_output)
+    with create_span("cli.macro-candidate-list", state=state):
+        with _regime_conn(db_url) as conn:
+            rows = candidates.list_candidates(
+                conn, state=None if state == "all" else state)
+    if not out.json_mode:
+        for c in rows:
+            dry = c.get("dry_run") or {}
+            badge = "dry-run OK" if dry.get("ok") else "dry-run FAILED/missing"
+            out.info(f"#{c['id']} {c['name']} v{c['version']} [{c['kind']}] "
+                     f"{c['review_state']} — {c['origin']} from "
+                     f"{c.get('principle_id') or '?'} ({badge})")
+    out.success(f"{len(rows)} candidate(s)",
+                data={"candidates": [_candidate_public(c) for c in rows]})
+
+
+@candidate_app.command("show")
+def candidate_show(
+    candidate_id: int = typer.Option(..., "--id", help="Candidate id"),
+    rerun_dry_run: bool = typer.Option(
+        False, "--rerun-dry-run",
+        help="Re-execute the seeded sandbox dry-run and refresh its record"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """The review packet: body, declared inputs, provenance, dry-run —
+    everything the decision needs, in one place."""
+    from gefion.macro import candidates
+    out = get_output(json_output)
+    with create_span("cli.macro-candidate-show", candidate_id=candidate_id):
+        with _regime_conn(db_url) as conn:
+            c = candidates.get_candidate(conn, candidate_id)
+            if c is None:
+                out.error(f"no candidate with id {candidate_id}")
+                raise typer.Exit(1)
+            if rerun_dry_run:
+                candidates.record_dry_run(
+                    conn, candidate_id,
+                    candidates.dry_run_candidate(
+                        c["function_body"], kind=c["kind"], inputs=c["inputs"]))
+                c = candidates.get_candidate(conn, candidate_id)
+    if not out.json_mode:
+        out.info(f"#{c['id']} {c['name']} v{c['version']} [{c['kind']}] "
+                 f"{c['review_state']}")
+        out.info(f"origin: {c['origin']}  principle: {c.get('principle_id')}  "
+                 f"generator: {c.get('generator')}  created: {c['created_at']}")
+        if c.get("inputs"):
+            out.info(f"inputs: {c['inputs']}")
+        dry = c.get("dry_run") or {}
+        if dry:
+            status = "OK" if dry.get("ok") else f"FAILED — {dry.get('error')}"
+            out.info(f"dry-run (seed {dry.get('seed')}): {status}")
+            for s in (dry.get("sample") or [])[:5]:
+                out.info(f"  {s['date']}: {s['value']}")
+        else:
+            out.warning("no dry-run recorded — run --rerun-dry-run")
+        out.info("--- function body ---")
+        emit(c["function_body"])
+        out.info(f"decide: gefion macro candidate approve --id {c['id']}  |  "
+                 f"reject --id {c['id']} --reason '...'")
+    out.success("review packet", data={"candidate": _candidate_public(c)})
+
+
+@candidate_app.command("approve")
+def candidate_approve(
+    candidate_id: int = typer.Option(..., "--id", help="Candidate id"),
+    approver: Optional[str] = typer.Option(None, "--approver",
+                                           help="Recorded reviewer identity"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """HUMAN act: promote a reviewed candidate into the production roster.
+    The next scheduled derive picks it up — no configuration changes."""
+    from gefion.macro import candidates
+    out = get_output(json_output)
+    with create_span("cli.macro-candidate-approve", candidate_id=candidate_id):
+        with _regime_conn(db_url) as conn:
+            try:
+                fid = candidates.approve_candidate(conn, candidate_id,
+                                                   approver=approver)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"candidate #{candidate_id} approved and promoted "
+                f"(function id {fid}) — the nightly derive adopts it "
+                "automatically", data={"promoted_function_id": fid})
+
+
+@candidate_app.command("reject")
+def candidate_reject(
+    candidate_id: int = typer.Option(..., "--id", help="Candidate id"),
+    reason: str = typer.Option(..., "--reason",
+                               help="Required: why this candidate is refused"),
+    approver: Optional[str] = typer.Option(None, "--approver",
+                                           help="Recorded reviewer identity"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """HUMAN act: terminal rejection with a required reason. The candidate
+    and decision are retained for audit — never erased."""
+    from gefion.macro import candidates
+    out = get_output(json_output)
+    with create_span("cli.macro-candidate-reject", candidate_id=candidate_id):
+        with _regime_conn(db_url) as conn:
+            try:
+                candidates.reject_candidate(conn, candidate_id, reason=reason,
+                                            approver=approver)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"candidate #{candidate_id} rejected (retained for audit)",
+                data={"candidate_id": candidate_id, "reason": reason})
+
+
+@macro_app.command("register-composite")
+def macro_register_composite(
+    name: str = typer.Option(..., "--name", help="Composite series name"),
+    series: str = typer.Option(..., "--series",
+                               help="Comma list of input macro series names"),
+    body_file: Path = typer.Option(..., "--body-file",
+                                   help="Python file defining compute(row)"),
+    description: Optional[str] = typer.Option(None, "--description",
+                                              help="What the composite measures"),
+    allow_existing_series: bool = typer.Option(
+        False, "--allow-existing-series",
+        help="Deliberately become the producer of an existing series"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Register an OWNER-authored composite market function: per date it
+    receives its declared macro-series values and returns one value or a
+    gap. Unknown inputs and dependency cycles refuse at the door; derive
+    runs composites after their inputs. (Generated composites go through
+    `macro propose --kind composite` and the review gate instead.)"""
+    from gefion.macro.composites import register_composite
+    out = get_output(json_output)
+    if not body_file.exists():
+        out.error(f"body file not found: {body_file}")
+        raise typer.Exit(1)
+    inputs = [x.strip() for x in series.split(",") if x.strip()]
+    with create_span("cli.macro-register-composite", composite=name):
+        with _regime_conn(db_url) as conn:
+            try:
+                fid = register_composite(
+                    conn, name, inputs, body_file.read_text(),
+                    description=description,
+                    allow_existing_series=allow_existing_series)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"composite {name!r} registered (function id {fid}) — "
+                f"derive with `gefion macro derive --series {name} --full`",
+                data={"function_id": fid, "series": inputs})
+
+
+@macro_app.command("propose")
+def macro_propose(
+    principle: str = typer.Option(..., "--principle",
+                                  help="Principle id driving generation"),
+    design: str = typer.Option("", "--design",
+                               help="Free-text design context for generation"),
+    kind: str = typer.Option("cross_section", "--kind",
+                             help="cross_section | composite"),
+    series: Optional[str] = typer.Option(
+        None, "--series",
+        help="Composite kind: comma list of existing input macro series"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Explicitly generate a candidate market body from a principle. The
+    candidate queues for review — generation NEVER shortens the gate."""
+    from gefion.experiments.cycle_runner import CycleRunner
+    out = get_output(json_output)
+    series_list = ([x.strip() for x in series.split(",") if x.strip()]
+                   if series else None)
+    with create_span("cli.macro-propose", principle=principle, kind=kind):
+        url = _db_url(db_url)
+        runner = CycleRunner(url)
+        cid = runner.propose_market_candidate(principle, design, kind=kind,
+                                              series=series_list)
+    if cid is None:
+        out.error(f"no market body could be generated for {principle!r} — "
+                  "nothing proposed (no empty candidates)")
+        raise typer.Exit(1)
+    out.success(f"candidate #{cid} queued for review — "
+                f"`gefion macro candidate show --id {cid}`",
+                data={"candidate_id": cid})
 
 
 @quality_app.command("findings")

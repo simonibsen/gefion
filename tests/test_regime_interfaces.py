@@ -84,3 +84,31 @@ def test_operator_skill_mentions_regime_tools():
         "/gefion operator skill does not mention the regime tools — update its "
         "tool routing (Constitution III)"
     )
+
+
+# --- 014: candidate gate + composite parity (T015/T016/T023) -----------------------
+
+CANDIDATE_TOOLS = [
+    "macro_candidate_list", "macro_candidate_show",
+    "macro_candidate_approve", "macro_candidate_reject",
+    "macro_propose",
+    "macro_register_composite",
+]
+
+
+@pytest.mark.parametrize("tool", CANDIDATE_TOOLS)
+def test_candidate_mcp_surface_exists(tool):
+    server = (REPO / "mcp-server" / "server.py").read_text()
+    assert f'name="{tool}"' in server, f"MCP tool {tool} missing"
+    assert f'name == "{tool}"' in server, f"MCP dispatch missing for {tool}"
+
+
+def test_candidate_ui_surface_exists():
+    """The UI presents the pending queue + review packet (read-only —
+    decisions are deliberate CLI/MCP acts)."""
+    view = REPO / "src" / "gefion" / "ui" / "views" / "candidates.py"
+    assert view.exists()
+    content = view.read_text()
+    assert "def render_candidates(" in content
+    app_py = (REPO / "src" / "gefion" / "ui" / "app.py").read_text()
+    assert "render_candidates" in app_py

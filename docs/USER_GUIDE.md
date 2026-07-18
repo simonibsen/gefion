@@ -367,6 +367,67 @@ gefion macro derive --series all         # sector series compute like any derive
 # Catalog + coverage
 gefion macro list
 ```
+
+#### Generated market series — the owner gate (spec 014)
+
+The experiment system can propose NEW market-level series itself, but
+machine-generated code never computes a stored value until a human approves
+it. Candidates land in a waiting room (`market_function_candidates`), never
+in the executable roster, so the gate holds by construction — the machine
+proposes, a human owns the gate:
+
+```bash
+gefion macro propose --principle breadth-confirms-trend   # or a cycle does this
+gefion macro candidate list                               # the pending queue
+gefion macro candidate show --id 7                        # the review packet:
+                                                          # body + inputs + provenance
+                                                          # + seeded sandbox dry-run
+gefion macro candidate approve --id 7 --approver simon    # promote; nightly derive
+                                                          # adopts it automatically
+gefion macro candidate reject --id 7 --reason "duplicates breadth_sma200"
+```
+
+- The dry-run executes the body in the sandbox over deterministic seeded
+  SYNTHETIC data — never stored history (evaluation against real data IS
+  execution, which the gate forbids). A failed dry-run blocks approval.
+- Rejection is terminal and audited (reason required, record retained).
+- Regenerating from the same principle creates a new candidate version —
+  never a silent overwrite.
+- Pre-approval, every execution door refuses by name:
+  `'x' is a pending candidate — review with gefion macro candidate show`.
+
+#### Composite market series — macro-of-macro (spec 014)
+
+A composite is a market function whose inputs are **named macro series**
+instead of the stock cross-section: each date its `compute(row)` receives
+that date's stored values (e.g. `{"vix": 18.2, "breadth_sma200": 61.0}`)
+and returns one value or an honest gap. Owner-authored composites register
+directly (the gate is for *generated* code):
+
+```bash
+cat > risk_state.py <<'PY'
+def compute(row):
+    return row["vix"] / 20.0 - row["breadth_sma200"] / 100.0 + row["dispersion_20"]
+PY
+gefion macro register-composite --name risk_state \
+    --series vix,breadth_sma200,dispersion_20 --body-file risk_state.py
+gefion macro derive --series risk_state --full   # full history; nightly = incremental
+```
+
+- A date missing ANY declared input gets **no value** — gap, never imputed.
+- Unknown/empty inputs and dependency cycles (direct or transitive) refuse
+  at registration, naming the offender.
+- `macro derive` (all) runs composites **after** their inputs each night
+  (topological order); a composite whose input's producing function is
+  disabled is a reported skip, never silent staleness.
+- Same sandbox and failure isolation as every market function: a failing
+  body writes nothing.
+- **Generated composites** go through the gate like everything generated:
+  `gefion macro propose --principle vol-breadth-interaction --kind composite
+  --series vix,breadth_sma200` — the candidate declares only existing series
+  (unknown inputs refuse at generation), its dry-run executes over seeded
+  synthetic series values, and promotion re-validates inputs including cycle
+  refusal. Same queue, same human decision.
 - The `macro_<name>` feature declares `entity_table='macro_series'` and lands
   in `computed_features` — usable by discovery atoms, regime expressions
   (`regime interaction --by macro_vix`), and interaction tests with zero
