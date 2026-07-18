@@ -142,6 +142,12 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion feat-def-delete` | Delete a definition + its values (regime references refuse) |
 | `gefion feat-fx-delete` | Delete a function (refuses while definitions route to it) |
 | `gefion charts-clean` | Reap old chart HTML from the chart dir (dry-run default) |
+| `gefion observe` | Record a system observation (the operating plane's notebook) |
+| `gefion observations list` | Review what the machinery noticed (open queue) |
+| `gefion observations show` | One observation in full (evidence + suggested action) |
+| `gefion observations ack` | Mark an observation seen (intermediate) |
+| `gefion observations adopt` | Human act: convert an observation into real work |
+| `gefion observations reject` | Human act: reject with an audited reason |
 | `gefion data listing-meta` | Backfill stocks.exchange/asset_type from the listing |
 | `gefion macro ingest` | Ingest a macro series (VIX, CPI, …) + materialize its feature |
 | `gefion macro derive` | Compute derived market-shape series (breadth, dispersion) from the cross-section |

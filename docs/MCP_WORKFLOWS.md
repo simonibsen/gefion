@@ -1134,6 +1134,19 @@ touched by any of them.
   refuse; dataset provenance reported, never mutated.
 - `feature_function_delete` — refuses while any definition routes to it.
 
+### System observations (#144)
+
+The operating plane's notebook — observations, never actions.
+
+- `observe` — record a system observation while OPERATING gefion (power
+  limits, tuning opportunities, anomalies, hypotheses) at the moment of
+  noticing; advisory only. During development work, file a GitHub issue
+  instead. Mutating (one ledger row).
+- `observations_list` — the open queue (read-only); also surfaced as a
+  db-health warning line.
+- `observations_review` — **HUMAN-DIRECTED**: acknowledge/adopt/reject
+  (reject needs a reason; terminal states immutable). Mutating.
+
 ## Data quality (spec 008)
 
 Provider-garbage detection: definitionally impossible or self-contradictory

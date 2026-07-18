@@ -36,6 +36,7 @@
   - [`stocks_fundamentals`](#stocks-fundamentals)
   - [`strategy_configs`](#strategy-configs)
   - [`strategy_registry`](#strategy-registry)
+  - [`system_observations`](#system-observations)
   - [`volatility_thresholds`](#volatility-thresholds)
 - [Feeds graph](#feeds-graph-what-feeds-what)
 - [AlphaVantage endpoints → tables](#alphavantage-endpoints--tables)
@@ -689,6 +690,26 @@ Primary key: `id`
 | `tags` | TEXT[] | ✓ |  |  |
 | `enabled` | BOOLEAN | ✓ |  |  |
 | `created_at` | TIMESTAMPTZ | ✓ |  |  |
+
+### `system_observations`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | BIGSERIAL |  |  |  |
+| `observer` | TEXT |  |  |  |
+| `category` | TEXT |  |  |  |
+| `observation` | TEXT |  |  |  |
+| `evidence` | JSONB | ✓ |  |  |
+| `suggested_action` | TEXT | ✓ |  |  |
+| `review_state` | TEXT |  |  |  |
+| `reviewed_by` | TEXT | ✓ |  |  |
+| `reviewed_at` | TIMESTAMPTZ | ✓ |  |  |
+| `review_reason` | TEXT | ✓ |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
 
 ### `volatility_thresholds`
 
