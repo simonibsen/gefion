@@ -17,9 +17,9 @@ testable, shippable increment. DDL was owner-approved 2026-07-18.
 **Purpose**: The `market_function_candidates` table exists everywhere a
 database can be initialized.
 
-- [ ] T001 Write failing schema tests (table created by db-init; columns, CHECKs, UNIQUE(name,version)) in tests/test_market_candidates.py
-- [ ] T002 Add approved DDL to sql/schema.sql AND sql/migrations/20260718_000001_market_function_candidates.sql (two-file rule, exact DDL from data-model.md)
-- [ ] T003 Canonical creator for market_function_candidates in src/gefion/db/schema.py wired into db-init; T001 tests green
+- [X] T001 Write failing schema tests (table created by db-init; columns, CHECKs, UNIQUE(name,version)) in tests/test_market_candidates.py
+- [X] T002 Add approved DDL to sql/schema.sql AND sql/migrations/20260718_000001_market_function_candidates.sql (two-file rule, exact DDL from data-model.md)
+- [X] T003 Canonical creator for market_function_candidates in src/gefion/db/schema.py wired into db-init; T001 tests green
 
 ---
 
