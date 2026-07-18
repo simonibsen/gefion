@@ -1115,6 +1115,11 @@ body, declared inputs, provenance, seeded sandbox dry-run) → decision.
   adopts it automatically. Refuses failed/missing dry-runs. Mutating.
 - `macro_candidate_reject` — **HUMAN-DIRECTED**: terminal, reason required,
   audit retained. Mutating.
+- `macro_register_composite` — owner-authored composite market function
+  (macro-of-macro): declared inputs are named macro series; per date the
+  body receives their stored values and returns one value or a gap. Unknown
+  inputs and dependency cycles refuse at registration; derive runs
+  composites after their inputs. Mutating (registers the function).
 
 ## Data quality (spec 008)
 

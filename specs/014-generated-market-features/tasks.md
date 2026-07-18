@@ -79,16 +79,16 @@ involved.
 
 ### Tests for User Story 2 (write FIRST, verify RED)
 
-- [ ] T018 [US2] Write failing composite tests (executor: values computed from exactly that date's stored inputs; missing-input date = gap never imputed; NaN/None = gap; non-numeric = error; failing body writes nothing; disabled input series = reported skip; registration: unknown/disabled/empty series refuse naming the series; cycle refusal incl. transitive through composite-produced series; derive: incremental only-missing-dates, idempotent rerun, --full recompute; topological ordering after inputs) in tests/test_macro_composites.py
-- [ ] T019 [P] [US2] Write failing CLI test (macro register-composite validates and registers; refusals surface; --json) in tests/test_market_candidates_cli.py
+- [X] T018 [US2] Write failing composite tests (executor: values computed from exactly that date's stored inputs; missing-input date = gap never imputed; NaN/None = gap; non-numeric = error; failing body writes nothing; disabled input series = reported skip; registration: unknown/disabled/empty series refuse naming the series; cycle refusal incl. transitive through composite-produced series; derive: incremental only-missing-dates, idempotent rerun, --full recompute; topological ordering after inputs) in tests/test_macro_composites.py
+- [X] T019 [P] [US2] Write failing CLI test (macro register-composite validates and registers; refusals surface; --json) in tests/test_market_candidates_cli.py
 
 ### Implementation for User Story 2
 
-- [ ] T020 [US2] run_composite_function (per-date named-series rows, pivot query over macro_series_values, 011 value/gap/failure semantics, spans) in src/gefion/features/dispatcher.py
-- [ ] T021 [US2] Composite registration + input validation + DFS cycle refusal + topological order helper in src/gefion/macro/composites.py
-- [ ] T022 [US2] Derive orchestration: input-shape dispatch (series→composite executor) and composites-after-inputs ordering in src/gefion/macro/derived.py
-- [ ] T023 [US2] CLI macro register-composite in src/gefion/cli.py; MCP tool macro_register_composite in mcp-server/server.py (parity assertions first, RED)
-- [ ] T024 [US2] Docs increment: docs/USER_GUIDE.md composite section (contract, gap honesty, ordering), README.md
+- [X] T020 [US2] run_composite_function (per-date named-series rows, pivot query over macro_series_values, 011 value/gap/failure semantics, spans) in src/gefion/features/dispatcher.py
+- [X] T021 [US2] Composite registration + input validation + DFS cycle refusal + topological order helper in src/gefion/macro/composites.py
+- [X] T022 [US2] Derive orchestration: input-shape dispatch (series→composite executor) and composites-after-inputs ordering in src/gefion/macro/derived.py
+- [X] T023 [US2] CLI macro register-composite in src/gefion/cli.py; MCP tool macro_register_composite in mcp-server/server.py (parity assertions first, RED)
+- [X] T024 [US2] Docs increment: docs/USER_GUIDE.md composite section (contract, gap honesty, ordering), README.md
 
 **Checkpoint**: US1 and US2 independently shippable
 
