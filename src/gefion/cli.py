@@ -11035,6 +11035,50 @@ def experiment_probation_check(
                 console.print(f"  [dim]Skipped #{item['experiment_id']}: {item['reason']}[/dim]")
 
 
+@experiment_app.command("delete")
+def experiment_delete(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the delete (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete an experiment, its trials, and its OWNED experimental
+    features. Dry-run by default. Refuses (no --force): promoted
+    experiments and promoted features (production influence is an audit
+    fact), regime_discovery experiments (use `regime discover delete`),
+    and experiments with children (delete children first)."""
+    from gefion.experiments.deletion import (execute_experiment_delete,
+                                             plan_experiment_delete)
+    out = get_output(json_output)
+    with create_span("cli.experiment-delete", experiment_id=experiment_id,
+                     confirm=confirm):
+        with _regime_conn(db_url) as conn:
+            try:
+                plan = plan_experiment_delete(conn, experiment_id)
+                if not confirm:
+                    out.success("DRY-RUN (pass --confirm to execute)",
+                                data={"plan": plan})
+                    if not out.json_mode:
+                        e = plan["experiment"]
+                        out.info(f"#{e['id']} {e['name']} [{e['experiment_type']}] "
+                                 f"{'PROMOTED' if plan['promoted'] else e['status']}")
+                        out.info(f"would delete: {plan['trials']} trial(s), "
+                                 f"{len(plan['experimental_features'])} "
+                                 "experimental feature(s)")
+                        for msg, items in (("children block", plan["children"]),
+                                           ("promoted features refuse",
+                                            plan["promoted_features"])):
+                            if items:
+                                out.warning(f"{msg}: {items}")
+                    return
+                deleted = execute_experiment_delete(conn, experiment_id)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"experiment #{experiment_id} deleted", data={"deleted": deleted})
+
+
 @experiment_app.command("demote")
 def experiment_demote(
     experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID to demote"),

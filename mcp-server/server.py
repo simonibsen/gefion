@@ -1562,6 +1562,27 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="experiment_delete",
+            description=(
+                "Delete an experiment, its trials, and its OWNED experimental "
+                "features (#76 deletion door). Dry-run by default "
+                "(confirm=true executes). Refuses with deliberately NO force "
+                "flag: promoted experiments/features (production influence is "
+                "an audit fact), regime_discovery experiments (their own "
+                "guarded door), experiments with children. DESTRUCTIVE — only "
+                "at explicit user direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_id": {"type": "integer", "description": "Experiment ID"},
+                    "confirm": {"type": "boolean",
+                                "description": "Execute (default: dry-run report)"},
+                },
+                "required": ["experiment_id"],
+            },
+        ),
+        Tool(
             name="experiment_demote",
             description=(
                 "Manually demote a promoted experiment artifact. Reverses promotion: "
@@ -2633,6 +2654,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _experiment_cycle_list(arguments)
         elif name == "experiment_probation_check":
             result = await _experiment_probation_check(arguments)
+        elif name == "experiment_delete":
+            result = await _experiment_delete(arguments)
         elif name == "experiment_demote":
             result = await _experiment_demote(arguments)
         elif name == "docs_list":
@@ -5163,6 +5186,16 @@ async def _experiment_probation_check(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _check)
+
+
+async def _experiment_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Experiment deletion — dry-run default, refusals surface verbatim."""
+    async def _run():
+        cmd = ["experiment", "delete", "--id", str(args["experiment_id"])]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
 
 
 async def _experiment_demote(args: Dict[str, Any]) -> Dict[str, Any]:
