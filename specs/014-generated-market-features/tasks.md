@@ -104,14 +104,14 @@ semantics, approve, observe nightly computation.
 
 ### Tests for User Story 3 (write FIRST, verify RED)
 
-- [ ] T025 [P] [US3] Write failing composite-candidate tests (dry-run executes over seeded values for declared series; kind='composite' candidates declare only existing macro series — generation refuses otherwise; promotion runs composite input validation incl. cycle refusal) in tests/test_market_candidate_dryrun.py
-- [ ] T026 [P] [US3] Write failing generation tests (composite templates + Claude prompt variant for --kind composite; candidate lands pending with series inputs) in tests/test_cycle_runner_market_gen.py
+- [X] T025 [P] [US3] Write failing composite-candidate tests (dry-run executes over seeded values for declared series; kind='composite' candidates declare only existing macro series — generation refuses otherwise; promotion runs composite input validation incl. cycle refusal) in tests/test_market_candidate_dryrun.py
+- [X] T026 [P] [US3] Write failing generation tests (composite templates + Claude prompt variant for --kind composite; candidate lands pending with series inputs) in tests/test_cycle_runner_market_gen.py
 
 ### Implementation for User Story 3
 
-- [ ] T027 [US3] Composite dry-run input shape (seeded series values) + promotion-time composite validation hookup in src/gefion/macro/candidates.py
-- [ ] T028 [US3] Composite generation templates in src/gefion/macro/market_bodies.py + --kind composite through cycle runner and macro propose in src/gefion/experiments/cycle_runner.py and src/gefion/cli.py
-- [ ] T029 [US3] Docs increment: quickstart Story 3 flow reflected in docs/USER_GUIDE.md
+- [X] T027 [US3] Composite dry-run input shape (seeded series values) + promotion-time composite validation hookup in src/gefion/macro/candidates.py
+- [X] T028 [US3] Composite generation templates in src/gefion/macro/market_bodies.py + --kind composite through cycle runner and macro propose in src/gefion/experiments/cycle_runner.py and src/gefion/cli.py
+- [X] T029 [US3] Docs increment: quickstart Story 3 flow reflected in docs/USER_GUIDE.md
 
 **Checkpoint**: all three stories independently functional
 
