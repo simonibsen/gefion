@@ -297,6 +297,34 @@ CREATE INDEX IF NOT EXISTS data_quality_findings_metric_verdict_idx
 CREATE INDEX IF NOT EXISTS data_quality_findings_entity_idx
     ON data_quality_findings (entity_table, entity_id);
 
+-- Generated market-function candidates (spec 014, owner-approved 2026-07-18).
+-- The waiting room for machine-generated market-scope bodies: candidates
+-- live HERE, never in feature_functions, so pending/rejected generated code
+-- has no execution path by construction. Audit ledger semantics: rejection
+-- retains the row; no FK on promoted_function_id so the ledger survives
+-- function deletion (008 findings precedent).
+CREATE TABLE IF NOT EXISTS market_function_candidates (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    kind TEXT NOT NULL CHECK (kind IN ('cross_section', 'composite')),
+    function_body TEXT NOT NULL,
+    inputs JSONB NOT NULL DEFAULT '{}'::jsonb,
+    description TEXT,
+    origin TEXT NOT NULL CHECK (origin IN ('claude', 'template', 'manual')),
+    principle_id TEXT,
+    generator TEXT,
+    dry_run JSONB,
+    review_state TEXT NOT NULL DEFAULT 'pending'
+        CHECK (review_state IN ('pending', 'approved', 'rejected')),
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMPTZ,
+    review_reason TEXT,
+    promoted_function_id INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (name, version)
+);
+
 -- =============================================================================
 -- STRATEGY MANAGEMENT
 -- =============================================================================
