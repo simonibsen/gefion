@@ -12544,6 +12544,9 @@ def macro_derive(
             # the DB is the source of truth, so seeded series (sector,
             # model, future) are covered without touching any cron line.
             names = explicit if explicit is not None else all_derived_series(conn)
+            # Composites derive AFTER their inputs (spec 014, topological)
+            from gefion.macro.composites import order_for_derive
+            names = order_for_derive(conn, names)
             for name in names:
                 try:
                     n = derive_series(conn, name, min_stocks=min_stocks,
@@ -12727,6 +12730,47 @@ def candidate_reject(
                 raise typer.Exit(1)
     out.success(f"candidate #{candidate_id} rejected (retained for audit)",
                 data={"candidate_id": candidate_id, "reason": reason})
+
+
+@macro_app.command("register-composite")
+def macro_register_composite(
+    name: str = typer.Option(..., "--name", help="Composite series name"),
+    series: str = typer.Option(..., "--series",
+                               help="Comma list of input macro series names"),
+    body_file: Path = typer.Option(..., "--body-file",
+                                   help="Python file defining compute(row)"),
+    description: Optional[str] = typer.Option(None, "--description",
+                                              help="What the composite measures"),
+    allow_existing_series: bool = typer.Option(
+        False, "--allow-existing-series",
+        help="Deliberately become the producer of an existing series"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Register an OWNER-authored composite market function: per date it
+    receives its declared macro-series values and returns one value or a
+    gap. Unknown inputs and dependency cycles refuse at the door; derive
+    runs composites after their inputs. (Generated composites go through
+    `macro propose --kind composite` and the review gate instead.)"""
+    from gefion.macro.composites import register_composite
+    out = get_output(json_output)
+    if not body_file.exists():
+        out.error(f"body file not found: {body_file}")
+        raise typer.Exit(1)
+    inputs = [x.strip() for x in series.split(",") if x.strip()]
+    with create_span("cli.macro-register-composite", composite=name):
+        with _regime_conn(db_url) as conn:
+            try:
+                fid = register_composite(
+                    conn, name, inputs, body_file.read_text(),
+                    description=description,
+                    allow_existing_series=allow_existing_series)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"composite {name!r} registered (function id {fid}) — "
+                f"derive with `gefion macro derive --series {name} --full`",
+                data={"function_id": fid, "series": inputs})
 
 
 @macro_app.command("propose")

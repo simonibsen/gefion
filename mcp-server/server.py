@@ -2312,6 +2312,31 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="macro_register_composite",
+            description=(
+                "Register an OWNER-authored composite market function (spec "
+                "014): declared inputs are named macro series; per date the "
+                "body receives their stored values and returns one value or "
+                "a gap. Unknown inputs and dependency cycles refuse at "
+                "registration; the nightly derive runs composites after "
+                "their inputs. MUTATING (registers the function; values come "
+                "from macro_derive)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Composite series name"},
+                    "series": {"type": "string",
+                               "description": "Comma list of input macro series"},
+                    "body_file": {"type": "string",
+                                  "description": "Path to a Python file defining compute(row)"},
+                    "description": {"type": "string",
+                                    "description": "What the composite measures"},
+                },
+                "required": ["name", "series", "body_file"],
+            },
+        ),
+        Tool(
             name="macro_propose",
             description=(
                 "Explicitly generate a candidate market-scope function body "
@@ -2664,6 +2689,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _macro_candidate_reject(arguments)
         elif name == "macro_propose":
             result = await _macro_propose(arguments)
+        elif name == "macro_register_composite":
+            result = await _macro_register_composite(arguments)
         elif name == "regime_delete":
             result = await _regime_delete(arguments)
         elif name == "regime_discover_delete":
@@ -5499,6 +5526,17 @@ async def _macro_candidate_reject(args: Dict[str, Any]) -> Dict[str, Any]:
                "--reason", args["reason"]]
         if args.get("approver"):
             cmd.extend(["--approver", args["approver"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _macro_register_composite(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Owner-authored composite registration — refusals surface verbatim."""
+    async def _run():
+        cmd = ["macro", "register-composite", "--name", args["name"],
+               "--series", args["series"], "--body-file", args["body_file"]]
+        if args.get("description"):
+            cmd.extend(["--description", args["description"]])
         return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 

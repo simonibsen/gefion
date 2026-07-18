@@ -92,6 +92,7 @@ CANDIDATE_TOOLS = [
     "macro_candidate_list", "macro_candidate_show",
     "macro_candidate_approve", "macro_candidate_reject",
     "macro_propose",
+    "macro_register_composite",
 ]
 
 

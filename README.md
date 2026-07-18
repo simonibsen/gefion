@@ -146,6 +146,7 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion macro candidate show` | Review packet: body, inputs, provenance, sandbox dry-run |
 | `gefion macro candidate approve` | Human act: promote a reviewed candidate into the roster |
 | `gefion macro candidate reject` | Human act: terminal rejection with audited reason |
+| `gefion macro register-composite` | Owner-authored composite series over named macro series (macro-of-macro) |
 | `gefion quality findings` | List data-quality findings (provider-garbage detections) |
 | `gefion quality catalog` | Validation catalog: covered metrics + uncovered columns |
 | `gefion quality backfill` | Flag garbage in already-stored history (changes no values) |

@@ -1640,3 +1640,79 @@ def run_market_function(conn, fn_row: Dict[str, Any], start=None,
 
         set_attributes(span, values=len(values), gaps=gaps)
         return {"values": values, "gaps": gaps}
+
+
+def run_composite_function(conn, fn_row: Dict[str, Any],
+                           start=None) -> Dict[str, Any]:
+    """Execute one composite market function (spec 014): declared inputs are
+    NAMED MACRO SERIES ({"series": [...]}); per trading date the body's
+    compute(row) receives that date's stored values and returns float | None.
+
+    Same honesty rules as the cross-section mode (011): a date missing ANY
+    declared input is a gap that never reaches the body; None/NaN/inf are
+    gaps; raises and wrong-shaped returns are MarketFunctionError
+    (write-on-success stays the caller's contract). Causality is inherited
+    from the stored inputs — the body sees one date at a time.
+    """
+    import math
+
+    with create_span("features.dispatcher.composite_function",
+                     function=fn_row["name"]) as span:
+        env = None
+        try:
+            env = _exec_in_sandbox(fn_row["function_body"], None,
+                                   raise_errors=True)
+        except Exception as exc:
+            raise MarketFunctionError(
+                f"{fn_row['name']}: body failed to load: {exc}") from exc
+        compute = (env or {}).get("compute")
+        if not callable(compute):
+            raise MarketFunctionError(
+                f"{fn_row['name']}: body must define compute(row)")
+
+        series = ((fn_row.get("inputs") or {}).get("series")) or []
+        if not series:
+            raise MarketFunctionError(
+                f"{fn_row['name']}: composite declares no input series")
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT v.date, s.name, v.value
+                   FROM macro_series_values v
+                   JOIN macro_series s ON s.id = v.series_id
+                   WHERE s.name = ANY(%s)
+                     AND (%s::date IS NULL OR v.date > %s)
+                   ORDER BY v.date""",
+                (list(series), start, start))
+            rows = cur.fetchall()
+
+        by_date: Dict[Any, Dict[str, float]] = {}
+        for d, name, value in rows:
+            by_date.setdefault(d, {})[name] = float(value)
+
+        values, gaps = [], 0
+        for d in sorted(by_date):
+            row = by_date[d]
+            if len(row) < len(series):
+                gaps += 1          # missing input = gap, never imputed
+                continue
+            try:
+                result = compute(row)
+            except Exception as exc:
+                raise MarketFunctionError(
+                    f"{fn_row['name']}: compute raised on {d}: {exc}") from exc
+            if result is None:
+                gaps += 1
+                continue
+            if isinstance(result, bool) or not isinstance(result, (int, float)):
+                raise MarketFunctionError(
+                    f"{fn_row['name']}: compute returned "
+                    f"{type(result).__name__!r} on {d} — must be float or None")
+            result = float(result)
+            if not math.isfinite(result):
+                gaps += 1
+                continue
+            values.append((d, result))
+
+        set_attributes(span, values=len(values), gaps=gaps)
+        return {"values": values, "gaps": gaps}

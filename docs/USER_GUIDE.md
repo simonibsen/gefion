@@ -395,6 +395,33 @@ gefion macro candidate reject --id 7 --reason "duplicates breadth_sma200"
   never a silent overwrite.
 - Pre-approval, every execution door refuses by name:
   `'x' is a pending candidate — review with gefion macro candidate show`.
+
+#### Composite market series — macro-of-macro (spec 014)
+
+A composite is a market function whose inputs are **named macro series**
+instead of the stock cross-section: each date its `compute(row)` receives
+that date's stored values (e.g. `{"vix": 18.2, "breadth_sma200": 61.0}`)
+and returns one value or an honest gap. Owner-authored composites register
+directly (the gate is for *generated* code):
+
+```bash
+cat > risk_state.py <<'PY'
+def compute(row):
+    return row["vix"] / 20.0 - row["breadth_sma200"] / 100.0 + row["dispersion_20"]
+PY
+gefion macro register-composite --name risk_state \
+    --series vix,breadth_sma200,dispersion_20 --body-file risk_state.py
+gefion macro derive --series risk_state --full   # full history; nightly = incremental
+```
+
+- A date missing ANY declared input gets **no value** — gap, never imputed.
+- Unknown/empty inputs and dependency cycles (direct or transitive) refuse
+  at registration, naming the offender.
+- `macro derive` (all) runs composites **after** their inputs each night
+  (topological order); a composite whose input's producing function is
+  disabled is a reported skip, never silent staleness.
+- Same sandbox and failure isolation as every market function: a failing
+  body writes nothing.
 - The `macro_<name>` feature declares `entity_table='macro_series'` and lands
   in `computed_features` — usable by discovery atoms, regime expressions
   (`regime interaction --by macro_vix`), and interaction tests with zero
