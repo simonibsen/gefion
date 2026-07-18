@@ -207,6 +207,21 @@ def create_feature_definitions_table(conn: Connection) -> None:
             "ALTER TABLE feature_definitions "
             "ADD COLUMN IF NOT EXISTS entity_table TEXT NOT NULL DEFAULT 'stocks';"
         )
+        # Idempotent adds for the 004 experiment-provenance columns — the
+        # creator must mirror sql/schema.sql (a schema-reset test rebuilds
+        # from HERE, and a drifted creator broke later tests in suite order)
+        cur.execute(
+            "ALTER TABLE feature_definitions "
+            "ADD COLUMN IF NOT EXISTS is_experimental BOOLEAN DEFAULT FALSE;"
+        )
+        cur.execute(
+            "ALTER TABLE feature_definitions "
+            "ADD COLUMN IF NOT EXISTS source_experiment_id INTEGER;"
+        )
+        cur.execute(
+            "ALTER TABLE feature_definitions "
+            "ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMPTZ;"
+        )
     conn.commit()
 
 

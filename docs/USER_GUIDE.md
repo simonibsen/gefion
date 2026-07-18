@@ -506,6 +506,23 @@ gefion data entity-delete stocks OLDTICKER
 # Execute: delete feature values (per the registry), then the entity row
 gefion data entity-delete stocks OLDTICKER --confirm
 ```
+
+Every created artifact has a deletion door (#76 audit, all dry-run by
+default with `--confirm`, audit ledgers never touched):
+
+```bash
+gefion ml delete-model --name m --version v    # + predictions/outcomes/perf/
+                                               #   materialized signals; active
+                                               #   models need --force
+gefion experiment delete --id N                # + trials + experimental
+                                               #   features; PROMOTED refuses
+                                               #   always (no --force exists)
+gefion feat-def-delete NAME                    # values then definition;
+                                               #   regime references refuse
+gefion feat-fx-delete NAME                     # refuses while routed
+gefion charts-clean --keep-days 30             # reap old chart HTML
+
+```
 - Dry-run reports feature-value counts per feature, hard-FK dependents with
   their ON DELETE rules, and any blockers
 - Deletion refuses (with the list) if a RESTRICT/NO-ACTION dependent still

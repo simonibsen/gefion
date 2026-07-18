@@ -607,6 +607,29 @@ async def list_tools() -> List[Tool]:
         ),
 
         Tool(
+            name="ml_delete_model",
+            description=(
+                "Delete one ML model and its OWNED artifacts (predictions, "
+                "outcomes, performance rows, materialized signal features) in "
+                "dependency order (#76 deletion door). Dry-run by default "
+                "(confirm=true executes); an ACTIVE model refuses without "
+                "force=true. Training runs/datasets are never deleted. "
+                "DESTRUCTIVE — only at explicit user direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Model name"},
+                    "version": {"type": "string", "description": "Model version"},
+                    "confirm": {"type": "boolean",
+                                "description": "Execute (default: dry-run report)"},
+                    "force": {"type": "boolean",
+                              "description": "Delete even an active model"},
+                },
+                "required": ["name", "version"],
+            },
+        ),
+        Tool(
             name="ml_e2e_test",
             description=(
                 "Run end-to-end ML pipeline test. Tests the complete workflow: "
@@ -735,6 +758,43 @@ async def list_tools() -> List[Tool]:
                     "enabled": {"type": "boolean", "description": "true=enable, false=disable"},
                 },
                 "required": ["name", "enabled"],
+            },
+        ),
+        Tool(
+            name="feature_definition_delete",
+            description=(
+                "Delete a feature definition and its computed values (#76 "
+                "deletion door). Dry-run by default (confirm=true executes). "
+                "Refuses while a regime expression references the feature; "
+                "dataset provenance is reported, never mutated. DESTRUCTIVE "
+                "— only at explicit user direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Definition name"},
+                    "confirm": {"type": "boolean",
+                                "description": "Execute (default: dry-run report)"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="feature_function_delete",
+            description=(
+                "Delete a feature function (#76 deletion door). Dry-run by "
+                "default (confirm=true executes); refuses while any "
+                "definition routes to it. The candidate ledger survives "
+                "(audit). DESTRUCTIVE — only at explicit user direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Function name"},
+                    "confirm": {"type": "boolean",
+                                "description": "Execute (default: dry-run report)"},
+                },
+                "required": ["name"],
             },
         ),
         Tool(
@@ -1536,6 +1596,27 @@ async def list_tools() -> List[Tool]:
                     "min_samples": {"type": "integer", "description": "Realized outcomes required before demotion (default 30)"},
                 },
                 "required": [],
+            },
+        ),
+        Tool(
+            name="experiment_delete",
+            description=(
+                "Delete an experiment, its trials, and its OWNED experimental "
+                "features (#76 deletion door). Dry-run by default "
+                "(confirm=true executes). Refuses with deliberately NO force "
+                "flag: promoted experiments/features (production influence is "
+                "an audit fact), regime_discovery experiments (their own "
+                "guarded door), experiments with children. DESTRUCTIVE — only "
+                "at explicit user direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "experiment_id": {"type": "integer", "description": "Experiment ID"},
+                    "confirm": {"type": "boolean",
+                                "description": "Execute (default: dry-run report)"},
+                },
+                "required": ["experiment_id"],
             },
         ),
         Tool(
@@ -2516,6 +2597,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _ml_train_ensemble(arguments)
         elif name == "ml_predict_ensemble":
             result = await _ml_predict_ensemble(arguments)
+        elif name == "ml_delete_model":
+            result = await _ml_delete_model(arguments)
         elif name == "ml_e2e_test":
             result = await _ml_e2e_test(arguments)
         elif name == "query_predictions":
@@ -2530,6 +2613,10 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _feature_show(arguments)
         elif name == "feature_function_toggle":
             result = await _feature_function_toggle(arguments)
+        elif name == "feature_definition_delete":
+            result = await _feature_definition_delete(arguments)
+        elif name == "feature_function_delete":
+            result = await _feature_function_delete(arguments)
         elif name == "feature_definition_toggle":
             result = await _feature_definition_toggle(arguments)
         elif name == "feature_definitions_validate":
@@ -2608,6 +2695,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _experiment_cycle_list(arguments)
         elif name == "experiment_probation_check":
             result = await _experiment_probation_check(arguments)
+        elif name == "experiment_delete":
+            result = await _experiment_delete(arguments)
         elif name == "experiment_demote":
             result = await _experiment_demote(arguments)
         elif name == "docs_list":
@@ -3052,6 +3141,19 @@ async def _ml_predict_ensemble(args: Dict[str, Any]) -> Dict[str, Any]:
     return await executor.run(*cmd)
 
 
+async def _ml_delete_model(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Per-model artifact deletion — dry-run default, refusals surface."""
+    async def _run():
+        cmd = ["ml", "delete-model", "--name", args["name"],
+               "--version", args["version"]]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        if args.get("force"):
+            cmd.append("--force")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
 async def _ml_e2e_test(args: Dict[str, Any]) -> Dict[str, Any]:
     """Run end-to-end ML pipeline test."""
     exchange = args.get('exchange', 'NASDAQ')
@@ -3486,6 +3588,26 @@ async def _feature_function_toggle(args: Dict[str, Any]) -> Dict[str, Any]:
     async def _run():
         cmd = "feat-fx-enable" if args["enabled"] else "feat-fx-disable"
         return await GefionExecutor().run(cmd, args["name"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _feature_definition_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Definition deletion — dry-run default, refusals surface verbatim."""
+    async def _run():
+        cmd = ["feat-def-delete", args["name"]]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _feature_function_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Function deletion — dry-run default, refusals surface verbatim."""
+    async def _run():
+        cmd = ["feat-fx-delete", args["name"]]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        return await GefionExecutor().run(*cmd)
     return await _execute_with_health_check(['postgres'], _run)
 
 
@@ -5125,6 +5247,16 @@ async def _experiment_probation_check(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _check)
+
+
+async def _experiment_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Experiment deletion — dry-run default, refusals surface verbatim."""
+    async def _run():
+        cmd = ["experiment", "delete", "--id", str(args["experiment_id"])]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
 
 
 async def _experiment_demote(args: Dict[str, Any]) -> Dict[str, Any]:

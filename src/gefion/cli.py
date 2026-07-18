@@ -3969,6 +3969,46 @@ def ml_predict_ensemble(
         )
 
 
+@ml_app.command("delete-model")
+def ml_delete_model(
+    name: str = typer.Option(..., "--name", help="Model name"),
+    version: str = typer.Option(..., "--version", help="Model version"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the delete (default: dry-run)"),
+    force: bool = typer.Option(False, "--force",
+                               help="Delete even an ACTIVE (production) model"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete one model and its OWNED artifacts (predictions, outcomes,
+    performance, materialized signal features) in dependency order.
+    Dry-run by default: reports the full blast radius and changes nothing.
+    Training runs and datasets are reusable inputs — never deleted here."""
+    from gefion.ml.deletion import execute_model_delete, plan_model_delete
+    out = get_output(json_output)
+    with create_span("cli.ml-delete-model", model=f"{name}:{version}",
+                     confirm=confirm):
+        with _regime_conn(db_url) as conn:
+            try:
+                plan = plan_model_delete(conn, name, version)
+                if not confirm:
+                    out.success("DRY-RUN (pass --confirm to execute)",
+                                data={"plan": plan})
+                    if not out.json_mode:
+                        out.info(f"model {name}:{version} "
+                                 f"({'ACTIVE' if plan['active'] else 'inactive'})")
+                        out.info(f"would delete: {plan['predictions']} prediction(s), "
+                                 f"{plan['prediction_outcomes']} outcome(s), "
+                                 f"{plan['model_performance']} performance row(s), "
+                                 f"{len(plan['materialized_signals'])} signal feature(s)")
+                    return
+                deleted = execute_model_delete(conn, name, version, force=force)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"model {name}:{version} deleted", data={"deleted": deleted})
+
+
 @ml_app.command("e2e-test")
 def ml_e2e_test(
     exchange: str = typer.Option("NASDAQ", help="Exchange to test with"),
@@ -6365,6 +6405,119 @@ def feat_def_disable(
     """Deactivate a feature definition (feat-compute skips it)."""
     with create_span("cli.feat-def-disable", target=name):
         _toggle_row("feature_definitions", name, "active", False, db_url, json_output)
+
+
+@app.command("feat-def-delete")
+def feat_def_delete(
+    name: str = typer.Argument(..., help="Definition name"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the delete (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete a feature definition and its computed values (#76 door).
+    Dry-run by default. Refuses while a regime expression references the
+    feature (its labels would become unrecomputable); dataset provenance
+    is reported, never mutated. The routed function survives — it has its
+    own door (feat-fx-delete)."""
+    from gefion.features.deletion import (execute_definition_delete,
+                                          plan_definition_delete)
+    out = get_output(json_output)
+    with create_span("cli.feat-def-delete", target=name, confirm=confirm):
+        with _regime_conn(db_url) as conn:
+            try:
+                plan = plan_definition_delete(conn, name)
+                if not confirm:
+                    out.success("DRY-RUN (pass --confirm to execute)",
+                                data={"plan": plan})
+                    if not out.json_mode:
+                        out.info(f"would delete {plan['values']} value(s) + "
+                                 f"the definition {name!r}")
+                        if plan["regime_references"]:
+                            out.warning("regime references BLOCK: "
+                                        f"{plan['regime_references']}")
+                        if plan["dataset_references"]:
+                            out.info("dataset provenance (soft, untouched): "
+                                     f"{plan['dataset_references']}")
+                    return
+                deleted = execute_definition_delete(conn, name)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"definition {name!r} deleted ({deleted['values']} value(s))",
+                data={"deleted": deleted})
+
+
+@app.command("charts-clean")
+def charts_clean(
+    keep_days: int = typer.Option(30, "--keep-days",
+                                  help="Chart HTML older than this is reaped"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the reap (default: dry-run)"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Reap old chart HTML from the chart output dir (#76 disk story).
+    Dry-run by default: reports file count + bytes, deletes nothing.
+    Only *.html chart files are in scope — anything else is untouched."""
+    import time as _time
+
+    from gefion.charts.output import get_chart_output_dir
+    out = get_output(json_output)
+    with create_span("cli.charts-clean", keep_days=keep_days,
+                     confirm=confirm) as span:
+        chart_dir = get_chart_output_dir()
+        cutoff = _time.time() - keep_days * 86400
+        stale = [p for p in chart_dir.glob("*.html")
+                 if p.stat().st_mtime < cutoff]
+        total_bytes = sum(p.stat().st_size for p in stale)
+        if confirm:
+            for p in stale:
+                p.unlink()
+        set_attributes(span, files=len(stale), bytes=total_bytes,
+                       executed=confirm)
+    payload = {"dry_run": not confirm, "files": len(stale),
+               "bytes": total_bytes, "keep_days": keep_days,
+               "directory": str(chart_dir)}
+    if out.json_mode:
+        out.json(payload)
+    else:
+        verb = "reaped" if confirm else "would reap (pass --confirm)"
+        out.success(f"{verb}: {len(stale)} chart file(s), "
+                    f"{total_bytes / 1024:.0f} KiB older than {keep_days}d "
+                    f"in {chart_dir}")
+
+
+@app.command("feat-fx-delete")
+def feat_fx_delete(
+    name: str = typer.Argument(..., help="Function name"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the delete (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete a feature function (#76 door). Dry-run by default; refuses
+    while any definition routes to it (delete those first — dependency
+    order). The candidate ledger is never touched: the audit survives the
+    artifact."""
+    from gefion.features.deletion import (execute_function_delete,
+                                          plan_function_delete)
+    out = get_output(json_output)
+    with create_span("cli.feat-fx-delete", target=name, confirm=confirm):
+        with _regime_conn(db_url) as conn:
+            try:
+                plan = plan_function_delete(conn, name)
+                if not confirm:
+                    out.success("DRY-RUN (pass --confirm to execute)",
+                                data={"plan": plan})
+                    if not out.json_mode and plan["routed_definitions"]:
+                        out.warning("routed definitions BLOCK: "
+                                    f"{plan['routed_definitions']}")
+                    return
+                deleted = execute_function_delete(conn, name)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"function {name!r} deleted", data={"deleted": deleted})
 
 
 _ORPHAN_SQL = """
@@ -10993,6 +11146,50 @@ def experiment_probation_check(
                 console.print(f"  [yellow]Monitoring #{item['experiment_id']}[/yellow]")
             for item in summary["skipped"]:
                 console.print(f"  [dim]Skipped #{item['experiment_id']}: {item['reason']}[/dim]")
+
+
+@experiment_app.command("delete")
+def experiment_delete(
+    experiment_id: int = typer.Option(..., "--id", "-i", help="Experiment ID"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Execute the delete (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete an experiment, its trials, and its OWNED experimental
+    features. Dry-run by default. Refuses (no --force): promoted
+    experiments and promoted features (production influence is an audit
+    fact), regime_discovery experiments (use `regime discover delete`),
+    and experiments with children (delete children first)."""
+    from gefion.experiments.deletion import (execute_experiment_delete,
+                                             plan_experiment_delete)
+    out = get_output(json_output)
+    with create_span("cli.experiment-delete", experiment_id=experiment_id,
+                     confirm=confirm):
+        with _regime_conn(db_url) as conn:
+            try:
+                plan = plan_experiment_delete(conn, experiment_id)
+                if not confirm:
+                    out.success("DRY-RUN (pass --confirm to execute)",
+                                data={"plan": plan})
+                    if not out.json_mode:
+                        e = plan["experiment"]
+                        out.info(f"#{e['id']} {e['name']} [{e['experiment_type']}] "
+                                 f"{'PROMOTED' if plan['promoted'] else e['status']}")
+                        out.info(f"would delete: {plan['trials']} trial(s), "
+                                 f"{len(plan['experimental_features'])} "
+                                 "experimental feature(s)")
+                        for msg, items in (("children block", plan["children"]),
+                                           ("promoted features refuse",
+                                            plan["promoted_features"])):
+                            if items:
+                                out.warning(f"{msg}: {items}")
+                    return
+                deleted = execute_experiment_delete(conn, experiment_id)
+            except ValueError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    out.success(f"experiment #{experiment_id} deleted", data={"deleted": deleted})
 
 
 @experiment_app.command("demote")
