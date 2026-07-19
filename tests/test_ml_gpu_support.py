@@ -117,8 +117,10 @@ class TestXGBoostGPU:
 class TestLightGBMGPU:
     """Tests for LightGBM GPU configuration."""
 
-    def test_lightgbm_uses_gpu_when_device_cuda(self):
-        """LightGBM training uses GPU params when device=cuda."""
+    def test_lightgbm_cuda_request_downgrades_to_cpu(self):
+        """#146: the pip LightGBM wheel has no GPU support — passing
+        device='gpu' through would ERROR at fit. A cuda request must
+        downgrade to cpu (warned), and provenance records what ran."""
         import lightgbm as lgb
         from gefion.ml.models import train_quantile_model
 
@@ -143,7 +145,7 @@ class TestLightGBMGPU:
 
             if mock_lgb.called:
                 call_kwargs = mock_lgb.call_args[1]
-                assert call_kwargs.get("device") == "gpu"
+                assert call_kwargs.get("device") == "cpu"
 
     def test_lightgbm_uses_cpu_when_device_cpu(self):
         """LightGBM training uses CPU when device=cpu."""

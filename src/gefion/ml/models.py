@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -13,6 +13,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import QuantileRegressor
 from sklearn.pipeline import Pipeline
 
+from gefion.ml.device import detect_device
 from gefion.observability import create_span
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ def train_quantile_model(
     algorithm: str = "quantile_regression",
     hyperparams: Dict[str, Any] = None,
     quantiles: List[float] = None,
-    device: str = "cpu",
+    device: Optional[str] = None,
     base_model_path: Path = None,
 ) -> Dict[str, Any]:
     """
@@ -141,7 +142,11 @@ def train_quantile_model(
         algorithm: Algorithm choice ("quantile_regression", "xgboost", "lightgbm")
         hyperparams: Optional hyperparameter overrides
         quantiles: Quantiles to predict (default: [0.1, 0.5, 0.9])
-        device: Compute device ("cpu" or "cuda" for GPU training)
+        device: Compute device ("cpu" or "cuda"). None (default) =
+                auto-detect (#146) — so every caller, including the
+                experiment framework, inherits GPU support; a warm-start
+                base model's recorded device is pinned over auto-detect
+                (GPU/CPU training is not numerically identical).
         base_model_path: Optional path to base model for warm-start training.
                         Continues training from this model instead of starting fresh.
                         Only supported for xgboost and lightgbm.
@@ -165,7 +170,8 @@ def train_quantile_model(
         hyperparams = {}
 
     with create_span("ml.train", algorithm=algorithm, quantiles=str(quantiles),
-                      n_samples=X.shape[0], n_features=X.shape[1], device=device):
+                      n_samples=X.shape[0], n_features=X.shape[1],
+                      device=device or "auto"):
         return _train_quantile_model_impl(
             X, y, algorithm, hyperparams, quantiles, device, base_model_path
         )
@@ -177,12 +183,11 @@ def _train_quantile_model_impl(
     algorithm: str,
     hyperparams: Dict[str, Any],
     quantiles: List[float],
-    device: str,
+    device: Optional[str],
     base_model_path: Path,
 ) -> Dict[str, Any]:
     logger.info(f"Training {algorithm} model for quantiles {quantiles}")
     logger.info(f"Training data: {X.shape[0]} samples, {X.shape[1]} features")
-    logger.info(f"Training device: {device}")
 
     # Check for missing values
     missing_pct = X.isna().sum() / len(X) * 100
@@ -192,6 +197,7 @@ def _train_quantile_model_impl(
 
     # Load base model for warm-start if provided
     base_models = None
+    base_device = None
     warm_start_used = False
     if base_model_path is not None:
         base_model_path = Path(base_model_path)
@@ -217,11 +223,32 @@ def _train_quantile_model_impl(
                 else:
                     logger.info(f"Loaded base model from {base_model_path} for warm-start")
                     warm_start_used = True
+                    base_device = base_artifact.get("device")
             except Exception as e:
                 logger.warning(f"Failed to load base model: {e}. Training from scratch.")
                 base_models = None
         else:
             logger.warning(f"Base model path not found: {base_model_path}. Training from scratch.")
+
+    # Device resolution (#146): explicit wins; a warm-start base model's
+    # recorded device is pinned over auto-detect (GPU/CPU training is not
+    # numerically identical); otherwise auto-detect.
+    if device is None:
+        if warm_start_used and base_device:
+            device = base_device
+            logger.info(f"Training device: {device} (pinned from base model)")
+        else:
+            device = detect_device()
+            logger.info(f"Training device: {device} (auto-detected)")
+    else:
+        logger.info(f"Training device: {device}")
+    # LightGBM pip wheels have no GPU support and sklearn is CPU-only —
+    # downgrade with a warning, never error; provenance records what RAN.
+    if device == "cuda" and algorithm in ("lightgbm", "quantile_regression"):
+        logger.warning(
+            f"{algorithm} cannot train on cuda ({'pip wheel is CPU-only' if algorithm == 'lightgbm' else 'sklearn is CPU-only'}) "
+            "— training on cpu")
+        device = "cpu"
 
     # Train separate model for each quantile
     models = {}
@@ -271,6 +298,7 @@ def _train_quantile_model_impl(
         "quantiles": quantiles,
         "algorithm": algorithm,
         "warm_start": warm_start_used,
+        "device": device,
     }
 
     if warm_start_used and base_model_path is not None:
@@ -468,6 +496,7 @@ def save_model_artifact(
     full_metadata = {
         "feature_names": model_data["feature_names"],
         "quantiles": model_data["quantiles"],
+        "device": model_data.get("device"),
         "algorithm": model_data["algorithm"],
         "train_metrics": model_data["train_metrics"],
         **metadata
@@ -548,6 +577,7 @@ def load_model_artifact(artifact_path: Path) -> Dict[str, Any]:
         "feature_names": metadata["feature_names"],
         "quantiles": metadata["quantiles"],
         "algorithm": metadata["algorithm"],
+        "device": metadata.get("device"),
         "metadata": metadata,
         "calibration": calibration,
     }
