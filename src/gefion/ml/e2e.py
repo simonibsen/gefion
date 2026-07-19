@@ -316,17 +316,23 @@ def _run_data_update(exchange: str, limit: int, conn) -> List[str]:
     # Query which symbols now have the most recent data (these are the ones we updated)
     db_url = os.getenv("DATABASE_URL")
     with db_connection(db_url) as fresh_conn:
+        # Population routes through the modeling-universe gate (spec 015)
+        from gefion.universe import resolve_universe, universe_exclusion_clause
+        resolved = resolve_universe(fresh_conn, None)
+        uni_clause, uni_params = universe_exclusion_clause(
+            resolved.universe_id, "CURRENT_DATE", "s.id")
         with fresh_conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT s.symbol
                 FROM stocks s
                 JOIN stock_ohlcv o ON s.id = o.data_id
+                WHERE {uni_clause}
                 GROUP BY s.symbol
                 ORDER BY MAX(o.date) DESC
                 LIMIT %s;
                 """,
-                (limit,),
+                (*uni_params, limit),
             )
             symbols = [row[0] for row in cur.fetchall()]
     return symbols

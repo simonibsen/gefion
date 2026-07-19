@@ -63,6 +63,9 @@ def conn():
                 (sym,))
     yield c
     _cleanup(c)
+    # restore the canonical db-init state (seeded default) for later suites
+    from gefion.universe.definitions import seed_default_universe
+    seed_default_universe(c)
     c.close()
 
 
@@ -156,3 +159,87 @@ class TestMembersAndClause:
         from gefion.universe import universe_exclusion_clause
         clause, params = universe_exclusion_clause(None, "o.date", "o.data_id")
         assert clause.strip() == "TRUE" and params == []
+
+
+class TestConsumerRouting:
+    """US1: the modeling consumers draw their population from the gate."""
+
+    def test_dataset_symbols_respect_universe(self, conn):
+        from gefion.ml.dataset import resolve_universe_symbols
+        _seed_and_refresh_default(conn)
+        syms = resolve_universe_symbols(conn, {})          # default universe
+        assert "QUC_OK" in syms
+        assert "QUC_SPAC" not in syms and "QUC_ETF" not in syms
+        syms_all = resolve_universe_symbols(conn, {"universe": "all"})
+        assert {"QUC_OK", "QUC_SPAC", "QUC_ETF"} <= set(syms_all)
+        # explicit symbols still win verbatim (documented bypass)
+        explicit = resolve_universe_symbols(conn, {"symbols": ["QUC_SPAC"]})
+        assert explicit == ["QUC_SPAC"]
+
+    def test_market_function_cross_section_respects_universe(self, conn):
+        """The breadth/dispersion population (run_market_function) excludes
+        rule-excluded symbols under the default universe; 'all' reproduces
+        pre-015 behavior (asset_type='Stock', unfiltered by rules)."""
+        from gefion.features.dispatcher import run_market_function
+        _seed_and_refresh_default(conn)
+        fn_row = {
+            "id": 999999, "name": "quc_probe",
+            "function_body": ("def compute(rows):\n"
+                              "    return float(sum(1 for r in rows "
+                              "if r['symbol'].startswith('QUC_')))"),
+            "inputs": {},
+        }
+        by_date = dict(run_market_function(
+            conn, fn_row, min_stocks=1)["values"])
+        assert by_date[date(2024, 1, 2)] == 1.0     # QUC_OK only
+        by_date_all = dict(run_market_function(
+            conn, fn_row, min_stocks=1, universe="all")["values"])
+        assert by_date_all[date(2024, 1, 2)] == 2.0  # + QUC_SPAC (ETF: no bars in cross-section by asset_type)
+
+    def test_cross_sectional_population_respects_universe(self, conn):
+        from gefion.compute.cross_sectional import fetch_feature_with_sectors
+        from gefion.db import schema as dbschema
+        _seed_and_refresh_default(conn)
+        dbschema.create_feature_definitions_table(conn)
+        dbschema.create_computed_features_table(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO feature_definitions (name, function_name) "
+                "VALUES ('quc_feat', 'indicator') "
+                "ON CONFLICT (name) DO NOTHING")
+            cur.execute("SELECT id FROM feature_definitions WHERE name = 'quc_feat'")
+            fid = cur.fetchone()[0]
+            cur.execute("DELETE FROM computed_features WHERE feature_id = %s", (fid,))
+            cur.execute(
+                "INSERT INTO computed_features (data_id, feature_id, date, value) "
+                "SELECT id, %s, '2024-01-02', 1.5 FROM stocks "
+                "WHERE symbol LIKE 'QUC_%%'", (fid,))
+        try:
+            got = {r["symbol"] for r in
+                   fetch_feature_with_sectors(conn, "quc_feat",
+                                              target_date=date(2024, 1, 2))}
+            assert "QUC_OK" in got
+            assert "QUC_SPAC" not in got and "QUC_ETF" not in got
+            got_all = {r["symbol"] for r in
+                       fetch_feature_with_sectors(conn, "quc_feat",
+                                                  target_date=date(2024, 1, 2),
+                                                  universe="all")}
+            assert {"QUC_OK", "QUC_SPAC", "QUC_ETF"} <= got_all
+        finally:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM computed_features WHERE feature_id = %s",
+                            (fid,))
+                cur.execute("DELETE FROM feature_definitions WHERE name = 'quc_feat'")
+
+    def test_backtest_loader_respects_universe(self, conn):
+        from gefion.backtest.data_loader import load_price_data_for_backtest
+        from gefion.db import schema as dbschema
+        _seed_and_refresh_default(conn)
+        records = load_price_data_for_backtest(dbschema.test_db_url())
+        syms = {r["symbol"] for r in records if r["symbol"].startswith("QUC_")}
+        assert "QUC_OK" in syms and "QUC_SPAC" not in syms
+        records_all = load_price_data_for_backtest(dbschema.test_db_url(),
+                                                   universe="all")
+        syms_all = {r["symbol"] for r in records_all
+                    if r["symbol"].startswith("QUC_")}
+        assert {"QUC_OK", "QUC_SPAC", "QUC_ETF"} <= syms_all

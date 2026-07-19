@@ -1500,7 +1500,8 @@ class MarketFunctionError(RuntimeError):
 
 def run_market_function(conn, fn_row: Dict[str, Any], start=None,
                         min_stocks: int = 100,
-                        itersize: int = 50_000) -> Dict[str, Any]:
+                        itersize: int = 50_000,
+                        universe: Optional[str] = None) -> Dict[str, Any]:
     """Execute one scope='market' registry function over the stock
     cross-section, per date, in the standard sandbox (spec 011).
 
@@ -1510,11 +1511,19 @@ def run_market_function(conn, fn_row: Dict[str, Any], start=None,
     flight); dates thinner than `min_stocks` never reach the body (gap by
     policy). None/NaN/inf results are gaps; raises and wrong-shaped returns
     are MarketFunctionError (write-on-success is the caller's contract).
+
+    The cross-section population comes from the modeling universe (spec 015):
+    `universe` names one explicitly, None uses the default, 'all' reproduces
+    pre-015 behavior (asset_type='Stock' only, no rule filtering).
     """
     import math
 
+    from gefion.universe import resolve_universe, universe_exclusion_clause
+
     with create_span("features.dispatcher.market_function",
                      function=fn_row["name"], min_stocks=min_stocks) as span:
+        resolved = resolve_universe(conn, universe)
+        set_attributes(span, universe=resolved.name)
         env = None
         try:
             env = _exec_in_sandbox(fn_row["function_body"], None,
@@ -1563,6 +1572,13 @@ def run_market_function(conn, fn_row: Dict[str, Any], start=None,
         # path). Warm the window up with 60 calendar days (≥ ~40 trading
         # days ≥ the 20-row lag) before the cutoff; emit only dates after it.
         params["warmup"] = (start - timedelta(days=60)) if start else None
+        # Universe gate (spec 015): membership is date-aware, so the clause
+        # binds to each row's own date. 'all' composes to TRUE.
+        uni_clause, uni_params = universe_exclusion_clause(
+            resolved.universe_id, "o.date", "o.data_id")
+        uni_clause = uni_clause.replace("%s", "%(universe_id)s")
+        if uni_params:
+            params["universe_id"] = uni_params[0]
         sql = f"""
             SELECT * FROM (
                 SELECT o.date, s.symbol, o.close, o.high, o.low, o.volume,
@@ -1572,6 +1588,7 @@ def run_market_function(conn, fn_row: Dict[str, Any], start=None,
                 JOIN stocks s ON s.id = o.data_id AND s.asset_type = 'Stock'
                 {join_sql}
                 WHERE o.close > 0
+                  AND {uni_clause}
                   AND (%(warmup)s::date IS NULL OR o.date > %(warmup)s)
             ) w
             WHERE (%(start)s::date IS NULL OR w.date > %(start)s)

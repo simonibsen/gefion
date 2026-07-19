@@ -42,6 +42,10 @@ def conn():
     _cleanup(c)
     yield c
     _cleanup(c)
+    # leave the DB canonical for later suites: db-init guarantees a seeded
+    # default universe, so restore it after our delete-based cleanup
+    from gefion.universe.definitions import seed_default_universe
+    seed_default_universe(c)
     c.close()
 
 
@@ -209,6 +213,17 @@ class TestSeed:
         rules = {r["name"]: r for r in u["rules"]}
         assert rules["no-shell-companies"]["value"] == "SHELL COMPANIES"
         assert rules["no-etfs"]["value"] == "ETF"
+
+    def test_db_init_wires_seed_and_table_registry(self, conn):
+        """db-init must seed modeling_default (FR-011) and the shared
+        init_schema_tables helper must know the universe tables."""
+        import inspect
+
+        from gefion import cli
+        from gefion.cli_helpers import init_schema_tables
+        assert "seed_default_universe" in inspect.getsource(cli._db_init_impl)
+        init_schema_tables(conn, ["universe_definitions",
+                                  "universe_exclusions"])
 
     def test_seed_respects_existing_owner_edits(self, conn):
         """Re-seeding must never clobber an owner-edited default universe."""

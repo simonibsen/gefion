@@ -221,6 +221,15 @@ def run_discovery(conn, config: DiscoveryConfig, market: MarketData) -> Dict[str
                if config.signal_window else {}),
         }
 
+        # Universe provenance (spec 015): record which modeling universe the
+        # base population came from. Pre-015 databases (no default universe)
+        # simply omit the stamp — matching their unstamped population.
+        try:
+            from gefion.universe import resolve_universe
+            search_space["universe"] = resolve_universe(conn, None).provenance()
+        except Exception:
+            pass
+
         if gate is not None:
             search_space["gate"] = gate
         if config.freeform:

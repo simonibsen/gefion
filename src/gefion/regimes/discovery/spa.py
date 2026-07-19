@@ -256,11 +256,19 @@ def _rebuild_market(conn, run):
     signals_list = list(ss.get("signals", []))
     chain_spec = ",".join(ss.get("universe_filter", ["passthrough"]))
     chain = duniverse.parse_filter_chain(chain_spec)
+    # Runs stamped with a modeling universe (spec 015) rebuild from that
+    # universe's CURRENT membership; unstamped (pre-015) runs keep their
+    # legacy population so old re-verdicts reproduce.
+    uni_stamp = ss.get("universe")
     symbols = None
+    if uni_stamp:
+        from gefion.universe import universe_members
+        symbols = universe_members(conn, uni_stamp.get("universe_name"))
     if any(f.kind != "passthrough" for f in chain):
-        with conn.cursor() as cur:
-            cur.execute("SELECT symbol FROM stocks ORDER BY symbol")
-            symbols = [r[0] for r in cur.fetchall()]
+        if symbols is None:
+            with conn.cursor() as cur:
+                cur.execute("SELECT symbol FROM stocks ORDER BY symbol")
+                symbols = [r[0] for r in cur.fetchall()]
         symbols = duniverse.apply_chain(chain, symbols, conn=conn)
     max_date = ss.get("max_date")
     return load_market_data(

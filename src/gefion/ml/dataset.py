@@ -53,9 +53,11 @@ def resolve_universe_symbols(conn, universe: Dict[str, Any]) -> List[str]:
     """
     Resolve a manifest universe spec to a concrete symbol list.
 
-    Explicit universe['symbols'] wins. Otherwise symbols are selected from the
-    stocks table, filtered by universe['exchange'] (stocks.exchange) and capped
-    by universe['limit'] when provided.
+    Explicit universe['symbols'] wins verbatim (documented bypass). Otherwise
+    the base population is the modeling universe named by universe['universe']
+    (default: the default universe; 'all' = unfiltered — spec 015), filtered
+    by universe['exchange'] (stocks.exchange) and capped by universe['limit']
+    when provided.
     """
     explicit = universe.get("symbols") or []
     if explicit:
@@ -63,15 +65,21 @@ def resolve_universe_symbols(conn, universe: Dict[str, Any]) -> List[str]:
 
     exchange = universe.get("exchange")
     limit = universe.get("limit")
+    universe_name = universe.get("universe")
 
     with create_span("ml.dataset.resolve_universe_symbols",
-                     exchange=exchange or "", limit=limit or 0) as span:
-        query = "SELECT symbol FROM stocks"
-        params: List[Any] = []
+                     exchange=exchange or "", limit=limit or 0,
+                     universe=universe_name or "default") as span:
+        from gefion.universe import resolve_universe, universe_exclusion_clause
+        resolved = resolve_universe(conn, universe_name)
+        clause, uparams = universe_exclusion_clause(
+            resolved.universe_id, "CURRENT_DATE", "s.id")
+        query = f"SELECT s.symbol FROM stocks s WHERE {clause}"
+        params: List[Any] = list(uparams)
         if exchange:
-            query += " WHERE exchange = %s"
+            query += " AND s.exchange = %s"
             params.append(exchange)
-        query += " ORDER BY symbol"
+        query += " ORDER BY s.symbol"
         if limit:
             query += " LIMIT %s"
             params.append(limit)
@@ -155,8 +163,10 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
     feature_names = manifest.get("feature_names") or []
     exclude_features = manifest.get("exclude_features") or []
 
-    # Resolve exchange + limit to actual symbols if no explicit symbols provided
-    if not symbols and (universe.get("exchange") or universe.get("limit")):
+    # Resolve the population when no explicit symbols were provided. Always
+    # goes through the universe chokepoint (spec 015) — the old fallback
+    # exported EVERY stock in the database, bypassing any filtering.
+    if not symbols:
         symbols = resolve_universe_symbols(conn, universe)
 
     # Vintage bound (spec 012): a declared end_date is the TRAINING CUTOFF —

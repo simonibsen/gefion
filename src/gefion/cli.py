@@ -1752,15 +1752,23 @@ def ml_predict(
         # stocks.exchange is only populated by fundamentals-update, and most
         # rows are still NULL, so filtering would silently empty the universe.
         if exchange or (not sym_list and limit):
+            # Population routes through the modeling-universe gate (spec 015);
+            # explicit --symbols wins verbatim.
+            from gefion.universe import resolve_universe, universe_exclusion_clause
+            resolved_uni = resolve_universe(conn, None)
+            uni_clause, uni_params = universe_exclusion_clause(
+                resolved_uni.universe_id, "CURRENT_DATE", "s.id")
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
                 cur.execute(
                     f"""
                     SELECT DISTINCT s.id, s.symbol
                     FROM stocks s
+                    WHERE {uni_clause}
                     ORDER BY s.symbol
                     {limit_clause};
-                    """
+                    """,
+                    uni_params or None
                 )
                 universe = [(row[0], row[1]) for row in cur.fetchall()]
         else:
@@ -3753,15 +3761,23 @@ def ml_predict_ensemble(
         # stocks.exchange is only populated by fundamentals-update, and most
         # rows are still NULL, so filtering would silently empty the universe.
         if exchange or (not sym_list and limit):
+            # Population routes through the modeling-universe gate (spec 015);
+            # explicit --symbols wins verbatim.
+            from gefion.universe import resolve_universe, universe_exclusion_clause
+            resolved_uni = resolve_universe(conn, None)
+            uni_clause, uni_params = universe_exclusion_clause(
+                resolved_uni.universe_id, "CURRENT_DATE", "s.id")
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
                 cur.execute(
                     f"""
                     SELECT DISTINCT s.id, s.symbol
                     FROM stocks s
+                    WHERE {uni_clause}
                     ORDER BY s.symbol
                     {limit_clause};
-                    """
+                    """,
+                    uni_params or None
                 )
                 universe = [(row[0], row[1]) for row in cur.fetchall()]
         else:
@@ -4665,6 +4681,44 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                             "review — see `gefion observations list`")
                 except Exception:
                     health["open_observations"] = None
+
+                # Modeling universe (spec 015): headline counts + staleness.
+                # Every cross-section consumer draws from this — a missing
+                # default or stale refresh silently distorts everything.
+                try:
+                    from gefion.universe import resolve_universe
+                    from gefion.universe.membership import membership_summary
+                    resolved_uni = resolve_universe(conn, None)
+                    uni = membership_summary(conn, resolved_uni.name)
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT MAX(refreshed_at) FROM universe_exclusions "
+                            "WHERE universe_id = %s",
+                            (resolved_uni.universe_id,))
+                        last_refresh = cur.fetchone()[0]
+                    health["universe"] = {
+                        "name": uni["universe"],
+                        "members": uni["members"],
+                        "excluded": uni["currently_excluded"],
+                        "by_rule": uni["by_rule"],
+                        "last_refresh": (last_refresh.isoformat()
+                                         if last_refresh else None),
+                    }
+                    if last_refresh is None:
+                        warnings.append(
+                            f"universe '{uni['universe']}' has never been "
+                            "refreshed — run `gefion universe refresh`")
+                    elif (datetime.now(last_refresh.tzinfo)
+                          - last_refresh).days > 7:
+                        warnings.append(
+                            f"universe '{uni['universe']}' last refreshed "
+                            f"{last_refresh.date()} (>7 days) — run `gefion "
+                            "universe refresh`")
+                except Exception as exc:
+                    health["universe"] = None
+                    warnings.append(
+                        f"no default modeling universe resolvable ({exc}) — "
+                        "run `gefion db-init`")
                 health["warnings"] = warnings
 
     except Exception as exc:
@@ -5093,6 +5147,20 @@ def _db_init_impl(db_url, json_output):
                         f"Applied {result['applied']} migration(s)",
                         json_output=json_output
                     )
+
+        # Seed the default modeling universe (spec 015, FR-011) — idempotent,
+        # never clobbers owner edits. After migrations so the tables exist on
+        # databases upgrading from pre-015 schemas.
+        from gefion.universe.definitions import seed_default_universe
+        with db_connection(url) as conn:
+            init_schema_tables(conn, ["universe_definitions",
+                                      "universe_exclusions"])
+            seeded = seed_default_universe(conn)
+            emit(
+                f"Universe '{seeded['name']}' ready "
+                f"({len(seeded['rules'])} rule(s))",
+                json_output=json_output
+            )
 
     except Exception as exc:
         emit_error(f"Initialization failed: {exc}", json_output=json_output)
@@ -10098,18 +10166,24 @@ def volatility_compute(
             if symbols:
                 symbol_list = [s.strip().upper() for s in symbols.split(",")]
             else:
+                # Population routes through the modeling-universe gate (015)
+                from gefion.universe import resolve_universe, universe_exclusion_clause
+                resolved_uni = resolve_universe(conn, None)
+                uni_clause, uni_params = universe_exclusion_clause(
+                    resolved_uni.universe_id, "CURRENT_DATE", "s.id")
                 with conn.cursor() as cur:
                     # Query stocks with sufficient price history (at least 60 days)
-                    query = """
+                    query = f"""
                         SELECT s.symbol
                         FROM stocks s
                         JOIN stock_ohlcv o ON o.data_id = s.id
+                        WHERE {uni_clause}
                         GROUP BY s.symbol
                         HAVING COUNT(*) >= 60
                     """
                     if limit:
                         query += f" LIMIT {limit}"
-                    cur.execute(query)
+                    cur.execute(query, uni_params or None)
                     symbol_list = [row[0] for row in cur.fetchall()]
 
             if not symbol_list:
@@ -13799,11 +13873,11 @@ def regime_discover_start(
     try:
         with _regime_conn(db_url) as conn:
             chain = duniverse.parse_filter_chain(universe_filter)
-            symbols = None
+            # Base population routes through the modeling-universe gate
+            # (spec 015); the discovery filter chain then refines it.
+            from gefion.universe import universe_members
+            symbols = universe_members(conn)
             if any(f.kind != "passthrough" for f in chain):
-                with conn.cursor() as cur:
-                    cur.execute("SELECT symbol FROM stocks ORDER BY symbol")
-                    symbols = [r[0] for r in cur.fetchall()]
                 symbols = duniverse.apply_chain(chain, symbols, conn=conn)
             if signal_source not in ("features", "model_predictions"):
                 out.error(f"Unknown signal source {signal_source!r} — "

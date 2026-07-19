@@ -21,23 +21,33 @@ def load_price_data_for_backtest(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     limit: Optional[int] = None,
+    universe: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Load historical price data from database for backtesting.
 
     Args:
         db_url: Database connection URL
-        symbols: List of symbols to load (optional)
+        symbols: List of symbols to load (optional; wins verbatim)
         exchange: Exchange name to filter by (optional, alternative to symbols)
         start_date: Start date for price data (optional)
         end_date: End date for price data (optional)
         limit: Maximum number of symbols to load (optional, for testing)
+        universe: Modeling universe for the population (spec 015);
+            None = default universe, 'all' = unfiltered
 
     Returns:
         List of price records with symbol, date, close, open, high, low, volume
     """
+    from gefion.universe import resolve_universe, universe_exclusion_clause
+
     with create_span("backtest.data_loader.load_price_data_for_backtest", symbol_count=len(symbols) if symbols else 0) as span:
         with psycopg.connect(db_url) as conn:
+            resolved = resolve_universe(conn, universe)
+            # Membership is date-aware: bind the gate to each bar's own date
+            uni_clause, uni_params = universe_exclusion_clause(
+                resolved.universe_id, "o.date", "o.data_id")
+
             # Build query
             symbol_where_clauses = []  # For filtering stocks
             ohlcv_where_clauses = []   # For filtering price data
@@ -79,6 +89,12 @@ def load_price_data_for_backtest(
             if end_date:
                 ohlcv_where_clauses.append("o.date <= %s")
                 params.append(end_date)
+
+            # Universe gate (spec 015) — explicit symbols win verbatim
+            # (documented bypass, same as the dataset path)
+            if not symbols:
+                ohlcv_where_clauses.append(uni_clause)
+                params.extend(uni_params)
 
             # Combine all WHERE clauses
             all_where_clauses = symbol_where_clauses + ohlcv_where_clauses
@@ -141,8 +157,12 @@ def get_available_symbols(
         with psycopg.connect(db_url) as conn:
             # Note: exchange filtering not enforced yet (stocks.exchange is
             # sparsely populated). We just return active stocks with sufficient data
-            where_clause = "WHERE s.status = 'Active'"
-            params: List[Any] = []
+            from gefion.universe import resolve_universe, universe_exclusion_clause
+            resolved = resolve_universe(conn, None)
+            uni_clause, uni_params = universe_exclusion_clause(
+                resolved.universe_id, "CURRENT_DATE", "s.id")
+            where_clause = f"WHERE s.status = 'Active' AND {uni_clause}"
+            params: List[Any] = list(uni_params)
 
             limit_clause = f"LIMIT {limit}" if limit else ""
 

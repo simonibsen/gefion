@@ -415,6 +415,8 @@ def init_schema_tables(conn: psycopg.Connection, tables: List[str]) -> None:
             "stocks_fundamentals": schema.create_stocks_fundamentals_table,
             "strategy_registry": schema.create_strategy_registry_table,
             "strategy_configs": schema.create_strategy_configs_table,
+            "universe_definitions": schema.create_universe_definitions_table,
+            "universe_exclusions": schema.create_universe_exclusions_table,
         }
 
         for table in tables:
