@@ -157,6 +157,8 @@ Before exiting plan mode, verify:
 - ONE new column — `feature_functions.scope` ('stock'|'market', (011-market-dispatcher)
 - PostgreSQL + TimescaleDB — existing tables only (013-sector-signals)
 - Python 3.10+ (existing codebase) + psycopg (DB), existing `gefion.features.dispatcher` (014-generated-market-features)
+- Python 3.10+ (existing codebase) + psycopg (definitions/membership), existing `gefion.features.dispatcher`, `gefion.ml.dataset`, `gefion.regimes.discovery`, typer (CLI), PyYAML (export/import) (015-modeling-universe)
+- PostgreSQL + TimescaleDB. TWO new tables — `universe_definitions`, `universe_exclusions` (owner approval required; DDL in data-model.md). Provenance rides existing JSONB columns (`ml_datasets.universe`, `experiments.config`) and model artifact metadata — no result-table DDL. (015-modeling-universe)
 
 ## Recent Changes
 - 001-ui-reliability: Added Python 3.10+ + Streamlit (UI framework), subprocess (process execution)
