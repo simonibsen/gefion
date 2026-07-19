@@ -215,6 +215,57 @@ def set_enabled(conn, name: str, enabled: bool) -> None:
     conn.commit()
 
 
+def export_universes(conn) -> str:
+    """All definitions as YAML (git backup, same idiom as regime export)."""
+    import yaml
+    payload = [{
+        "name": u["name"],
+        "description": u["description"],
+        "is_default": u["is_default"],
+        "enabled": u["enabled"],
+        "rules": u["rules"],
+        "pins": u["pins"],
+    } for u in list_universes(conn)]
+    return yaml.safe_dump({"universes": payload}, sort_keys=False)
+
+
+def import_universes(conn, text: str, dry_run: bool = False) -> Dict[str, Any]:
+    """Import definitions from YAML; validates everything BEFORE writing.
+
+    Returns a diff report {created, updated, unchanged}; dry_run reports
+    without writing.
+    """
+    import yaml
+    doc = yaml.safe_load(text) or {}
+    entries = doc.get("universes") or []
+    if not isinstance(entries, list):
+        raise UniverseValidationError("expected a top-level 'universes' list")
+    for e in entries:
+        validate_definition(e.get("name", ""), e.get("rules") or [],
+                            e.get("pins") or [])
+    created, updated, unchanged = [], [], []
+    for e in entries:
+        existing = get_universe(conn, e["name"])
+        fingerprint = compute_fingerprint(e.get("rules") or [],
+                                          e.get("pins") or [])
+        if existing is None:
+            created.append(e["name"])
+        elif existing["fingerprint"] != fingerprint:
+            updated.append(e["name"])
+        else:
+            unchanged.append(e["name"])
+        if not dry_run:
+            define_universe(conn, e["name"],
+                            description=e.get("description"),
+                            rules=e.get("rules") or [],
+                            pins=e.get("pins") or [],
+                            is_default=bool(e.get("is_default")))
+            if "enabled" in e and not e["is_default"]:
+                set_enabled(conn, e["name"], bool(e["enabled"]))
+    return {"created": created, "updated": updated, "unchanged": unchanged,
+            "dry_run": dry_run}
+
+
 def seed_default_universe(conn) -> Dict[str, Any]:
     """Idempotent db-init seed of the default modeling universe (FR-011).
 

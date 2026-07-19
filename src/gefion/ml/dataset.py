@@ -61,6 +61,10 @@ def resolve_universe_symbols(conn, universe: Dict[str, Any]) -> List[str]:
     """
     explicit = universe.get("symbols") or []
     if explicit:
+        # Provenance stamp (spec 015): explicit lists are their own universe
+        universe["universe_name"] = "explicit"
+        universe["universe_fingerprint"] = None
+        universe["resolved_count"] = len(explicit)
         return list(explicit)
 
     exchange = universe.get("exchange")
@@ -96,6 +100,11 @@ def resolve_universe_symbols(conn, universe: Dict[str, Any]) -> List[str]:
             symbols = exclude_test_tickers(symbols)
         except Exception:  # pragma: no cover - defensive
             pass
+
+        # Provenance stamp (spec 015): rides ml_datasets.universe JSONB —
+        # results record exactly which population they were measured on
+        universe.update(resolved.provenance())
+        universe["resolved_count"] = len(symbols)
 
         set_attributes(span, symbol_count=len(symbols))
         return symbols
