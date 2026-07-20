@@ -4717,6 +4717,8 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                 # Every cross-section consumer draws from this — a missing
                 # default or stale refresh silently distorts everything.
                 try:
+                    from datetime import datetime as _dt_now
+
                     from gefion.universe import resolve_universe
                     from gefion.universe.membership import membership_summary
                     resolved_uni = resolve_universe(conn, None)
@@ -4739,7 +4741,7 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                         warnings.append(
                             f"universe '{uni['universe']}' has never been "
                             "refreshed — run `gefion universe refresh`")
-                    elif (datetime.now(last_refresh.tzinfo)
+                    elif (_dt_now.now(last_refresh.tzinfo)
                           - last_refresh).days > 7:
                         warnings.append(
                             f"universe '{uni['universe']}' last refreshed "
