@@ -6,6 +6,17 @@ import pytest
 from gefion.db import schema
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_after_module():
+    """This module DROPS every table (destructive by design). Per the house
+    rule in conftest.restore_test_db's docstring, destroyers MUST restore the
+    canonical db-init state on the way out — later modules (and the next
+    session's db-init) must never see a gutted database."""
+    yield
+    from conftest import restore_test_db
+    restore_test_db()
+
+
 def create_connection():
     if os.getenv("ENABLE_DB_TESTS", "0") != "1":
         pytest.skip("DB tests disabled (set ENABLE_DB_TESTS=1 to enable)")

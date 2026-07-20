@@ -48,6 +48,15 @@ def test_ml_dataset_build_writes_manifest_and_upserts_db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(store, "upsert_ml_dataset", fake_upsert_ml_dataset)
 
+    # The dummy conn can't answer universe queries (spec 015) — stub the
+    # resolution the provenance stamp performs
+    import gefion.universe as guniverse
+
+    monkeypatch.setattr(
+        guniverse, "resolve_universe",
+        lambda conn, name=None: guniverse.ResolvedUniverse(
+            "modeling_default", 1, "sha256:test"))
+
     out_dir = tmp_path / "datasets"
     runner = CliRunner()
     res = runner.invoke(

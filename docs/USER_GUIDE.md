@@ -551,6 +551,70 @@ gefion observations reject --id 3 --reason "known, tracked elsewhere"
 - `gefion db-health` includes an entity-integrity orphan scan (feature
   values whose `data_id` has no home in their declared entity table)
 
+### Modeling universe (spec 015)
+
+Which stocks count. A **universe** is a named, rule-defined subset of the
+stock population — the entity-space sibling of a regime definition. Every
+modeling cross-section (dataset builds, breadth/dispersion series, rankings,
+backtests, experiment populations, discovery base lists) draws from one
+universe through a single gate; data ingestion and quality scanning are
+deliberately never filtered (observe everything, model a subset).
+
+`gefion db-init` seeds the default universe `modeling_default`, which
+excludes shell companies (SPACs — cash boxes, not businesses) and ETFs
+(funds — they double-count constituents in breadth). Rules are generic
+attribute/operator/value predicates: matching an exclude rule excludes, any
+match excludes, per-symbol pins beat rules, and a NULL attribute never
+matches (absence of data is not evidence of exclusion).
+
+```bash
+gefion universe list                       # all universes + excluded counts
+gefion universe show modeling_default      # rules with reasons, flap counts
+gefion universe refresh                    # re-evaluate rules → intervals
+gefion universe members --limit 20         # members (add --as-of for history)
+gefion universe explain AACT               # names the rule that excluded it
+```
+
+Add a rule without touching code — edit a YAML rules file and re-define:
+
+```yaml
+# rules.yaml
+- name: no-penny-stocks
+  attribute: close          # time-varying: membership becomes date-aware
+  op: lt                    # ops: eq ne in lt lte gt gte between is_missing
+  value: 1.00
+  reason: "Sub-dollar prices distort return statistics"
+```
+
+```bash
+gefion universe define modeling_default --rules-file rules.yaml
+gefion universe refresh        # prints the delta; refuses outsized shrinks
+```
+
+- Membership is stored as date **intervals** (complement form: exclusions),
+  so `--as-of 2015-06-30` answers with 2015 membership — threshold rules
+  never apply today's snapshot to history
+- A refresh that would empty the universe refuses always; one that shrinks
+  membership by more than 25 percentage points refuses unless `--force`
+- `gefion universe enable NAME` / `gefion universe disable NAME` toggle
+  resolution (the default universe cannot be disabled); unknown or disabled
+  universes REFUSE loudly — there is no silent fallback to "everything"
+- `gefion universe export -o universes/universes.yaml` /
+  `gefion universe import FILE [--dry-run]` round-trip definitions as YAML
+  (git backup; the database is the source of truth)
+- `gefion universe delete NAME [--confirm]` is a standard deletion door:
+  dry-run by default, refuses while result provenance references the
+  universe or while it is the default
+- Consumers accept `--universe NAME` (`ml dataset-build`, `backtest run`);
+  omitted = the default universe, `all` = the unfiltered population for
+  control runs
+- Provenance: datasets, experiments, and model artifacts record the
+  universe name + definition fingerprint they were built under; results
+  from different universes are visibly different results
+- `gefion db-health` reports the universe headline (members, excluded, by
+  rule) and warns when the refresh is stale (>7 days) — the nightly chain
+  refreshes automatically
+
 ### Cross-sectional features (market-relative rankings)
 Cross-sectional features compare stocks to their peers at the same point in time, as opposed to time-series features which compare a stock to its own history.
 

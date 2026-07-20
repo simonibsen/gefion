@@ -51,6 +51,23 @@ feature_definition.params → passed to function
 ### Core Tables
 
 ```sql
+-- Modeling universe (spec 015): named, rule-defined subsets of the stock
+-- population; every modeling cross-section resolves through ONE gate
+-- (gefion/universe/). Membership is stored in COMPLEMENT form — a symbol
+-- is a member as-of D iff no exclusion interval covers it.
+universe_definitions (
+    name,                    -- unique; 'modeling_default' seeded by db-init
+    rules, pins,             -- JSONB generic predicates + per-symbol overrides
+    fingerprint,             -- sha256 of canonical rules+pins (provenance)
+    is_default, enabled
+)
+universe_exclusions (
+    universe_id → universe_definitions.id,
+    data_id → stocks.id,
+    rule_name,               -- which rule/pin caused this interval
+    excluded_from, excluded_to  -- NULL to = open-ended
+)
+
 -- Time-series price data (TimescaleDB hypertable)
 stock_ohlcv (
     data_id → stocks.id,

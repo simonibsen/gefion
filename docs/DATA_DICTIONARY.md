@@ -37,6 +37,8 @@
   - [`strategy_configs`](#strategy-configs)
   - [`strategy_registry`](#strategy-registry)
   - [`system_observations`](#system-observations)
+  - [`universe_definitions`](#universe-definitions)
+  - [`universe_exclusions`](#universe-exclusions)
   - [`volatility_thresholds`](#volatility-thresholds)
 - [Feeds graph](#feeds-graph-what-feeds-what)
 - [AlphaVantage endpoints → tables](#alphavantage-endpoints--tables)
@@ -710,6 +712,41 @@ Primary key: `id`
 | `reviewed_at` | TIMESTAMPTZ | ✓ |  |  |
 | `review_reason` | TEXT | ✓ |  |  |
 | `created_at` | TIMESTAMPTZ |  |  |  |
+
+### `universe_definitions`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `name` | TEXT |  |  |  |
+| `description` | TEXT | ✓ |  |  |
+| `rules` | JSONB |  |  |  |
+| `pins` | JSONB |  |  |  |
+| `fingerprint` | TEXT |  |  |  |
+| `is_default` | BOOLEAN |  |  |  |
+| `enabled` | BOOLEAN |  |  |  |
+| `created_at` | TIMESTAMPTZ |  |  |  |
+| `updated_at` | TIMESTAMPTZ |  |  |  |
+
+### `universe_exclusions`
+
+*(no description yet)*
+
+Primary key: `id`
+
+| Column | Type | Null | Source | Notes |
+|---|---|---|---|---|
+| **`id`** 🔑 | SERIAL |  |  |  |
+| `universe_id` | INTEGER |  |  |  |
+| `data_id` | INTEGER |  |  |  |
+| `rule_name` | TEXT |  |  |  |
+| `excluded_from` | DATE |  |  |  |
+| `excluded_to` | DATE | ✓ |  |  |
+| `refreshed_at` | TIMESTAMPTZ |  |  |  |
 
 ### `volatility_thresholds`
 

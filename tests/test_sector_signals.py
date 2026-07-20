@@ -66,6 +66,12 @@ def world():
     schema.create_computed_features_table(c)
     schema.create_feature_functions_table(c)
     schema.create_macro_series_tables(c)
+    # derive resolves the modeling universe (spec 015) — fixtures create
+    # every table the code under test touches (house rule)
+    schema.create_universe_definitions_table(c)
+    schema.create_universe_exclusions_table(c)
+    from gefion.universe.definitions import seed_default_universe
+    seed_default_universe(c)
     with c.cursor() as cur:
         _cleanup(cur)
         ids = {}

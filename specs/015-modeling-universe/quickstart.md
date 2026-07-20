@@ -22,10 +22,11 @@ gefion universe members modeling_default --limit 5
 ## Add a rule without code (SC-002)
 
 ```yaml
-# rules.yaml — add to existing rules
+# rules.yaml — add to existing rules (rules are EXCLUSION predicates:
+# matching excludes)
 - name: no-penny-stocks
   attribute: close
-  op: gte          # members must satisfy; below floor ⇒ excluded
+  op: lt
   value: 1.00
   reason: "Sub-dollar prices distort return statistics"
 ```

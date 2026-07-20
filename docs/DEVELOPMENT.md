@@ -161,6 +161,26 @@ active models are a --force gate. Disk: chart HTML reaps via `charts-clean`;
 exports are git-tracked backups by design (no reaper); dataset artifacts
 belong to their `ml_datasets` rows.
 
+## Modeling-universe chokepoint (spec 015 — convention)
+
+Any code that selects a POPULATION OF STOCK SYMBOLS for modeling or
+statistics MUST route through `gefion.universe` — never inline
+`SELECT symbol FROM stocks` with ad-hoc filters. Two forms:
+
+- symbol-list consumers: `universe_members(conn, name, as_of=...)` /
+  `universe_member_ids(...)`
+- streaming-SQL consumers (per-date aggregation):
+  `universe_exclusion_clause(universe_id, date_expr, data_id_expr)` composed
+  into the query's WHERE (membership is date-aware — bind to the row's date)
+
+Rules of the road: explicit user-provided symbol lists win verbatim
+(documented bypass); `None` resolves the default universe, `'all'` is the
+unfiltered control population; unknown/disabled universes REFUSE — never
+silently fall back to everything. Ingestion, quality scanning, raw price
+storage, and the feat-compute sweep are deliberately NOT filtered (observe
+everything, model a subset). Anything producing stored results should stamp
+`resolved.provenance()` (name + fingerprint) into its result payload.
+
 ## Patterns & Gotchas (living reference)
 
 - **DB-is-source-of-truth functions (spec 011)**: market-level function
