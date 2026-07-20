@@ -5,9 +5,11 @@ A market-scope `function_body` MUST define:
 ```python
 def compute(rows):
     """rows: list[dict] for ONE trading date.
-    Keys: symbol, close, high, low, volume, plus every feature named in
-    the registry row's inputs.features (missing per-stock values -> key
-    absent from that stock's dict).
+    Keys: symbol, close, high, low, volume, sector (013), industry (016),
+    plus every feature named in the registry row's inputs.features
+    (missing per-stock values -> key absent from that stock's dict).
+    The cross-section is universe-gated (spec 015): rows contain only
+    modeling-universe members as of that date.
     Return: float (the day's series value) or None (no value for this day).
     NaN/inf are treated as None. Anything else is a failure."""
 ```

@@ -71,6 +71,62 @@ def sector_signal_bodies(sector: str, min_members: int = 30) -> dict:
     }
 
 
+def industry_signal_bodies(industry: str, min_members: int = 30) -> dict:
+    """Generated market bodies for ONE industry (016 — the 013 sector
+    pattern one level finer): relative strength (median member ret_20 minus
+    median all-rows ret_20) and internal breadth (% of members above their
+    own 200-day SMA). MIN_MEMBERS is written into the body — the declared,
+    operator-editable floor; a thinner (industry, date) returns None (gap,
+    never a value). The cross-section is already universe-gated (spec 015),
+    so members are investable operating businesses by construction."""
+    slug = sector_slug(industry)
+    rs_body = (
+        'def compute(rows):\n'
+        f'    """Median member ret_20 minus median ALL-rows ret_20 ({industry})."""\n'
+        f'    MIN_MEMBERS = {min_members}\n'
+        '    def median(xs):\n'
+        '        xs = sorted(xs)\n'
+        '        n = len(xs)\n'
+        '        mid = n // 2\n'
+        '        return xs[mid] if n % 2 else (xs[mid - 1] + xs[mid]) / 2.0\n'
+        '    market = [r["ret_20"] for r in rows if r.get("ret_20") is not None]\n'
+        '    members = [r["ret_20"] for r in rows\n'
+        f'               if r.get("industry") == {industry!r}\n'
+        '               and r.get("ret_20") is not None]\n'
+        '    if len(members) < MIN_MEMBERS or not market:\n'
+        '        return None\n'
+        '    return median(members) - median(market)\n'
+    )
+    breadth_body = (
+        'def compute(rows):\n'
+        f'    """% of {industry} members above their own 200-day SMA."""\n'
+        f'    MIN_MEMBERS = {min_members}\n'
+        '    members = [r for r in rows\n'
+        f'               if r.get("industry") == {industry!r}\n'
+        '               and r.get("indicator_sma_200") is not None\n'
+        '               and r["indicator_sma_200"] > 0]\n'
+        '    if len(members) < MIN_MEMBERS:\n'
+        '        return None\n'
+        '    hits = sum(1 for r in members if r["close"] > r["indicator_sma_200"])\n'
+        '    return 100.0 * hits / len(members)\n'
+    )
+    return {
+        f"industry_rs_{slug}": {
+            "description": (f"Industry relative strength: median 20-day "
+                            f"return of {industry} members minus market "
+                            f"median"),
+            "inputs": {"features": ["ret_20"]},
+            "body": rs_body,
+        },
+        f"industry_breadth_{slug}": {
+            "description": (f"Industry breadth: % of {industry} members "
+                            f"closing above their own 200-day SMA"),
+            "inputs": {"features": ["indicator_sma_200"]},
+            "body": breadth_body,
+        },
+    }
+
+
 def model_signal_bodies(model_name: str, model_version: str,
                         horizon: int, cutoff: str) -> dict:
     """Generated market bodies for one vintage model's prediction signals

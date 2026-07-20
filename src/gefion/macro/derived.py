@@ -150,6 +150,78 @@ def seed_sector_functions(conn, sectors: Optional[list] = None,
                 "census": census}
 
 
+def seed_industry_functions(conn, industries: Optional[list] = None,
+                            min_members: int = 100,
+                            body_floor: int = 30) -> Dict[str, Any]:
+    """Seed generated industry bodies create-if-absent (016 — the 013
+    sector door one level finer).
+
+    The census counts CURRENT MODELING-UNIVERSE MEMBERS (spec 015), not raw
+    stocks: 'SHELL COMPANIES' is itself an industry and must never earn a
+    series, and universe-excluded members (penny date-ranges) must not pad
+    a thin industry over the floor. Otherwise identical semantics to
+    seed_sector_functions: under-floor industries are skipped-and-reported,
+    unknown names refuse listing the census, slug collisions refuse, and
+    the DB body wins on re-run.
+    """
+    from gefion.universe import resolve_universe, universe_exclusion_clause
+
+    from .market_bodies import industry_signal_bodies, sector_slug
+
+    with create_span("macro.derived.seed_industries",
+                     min_members=min_members) as span:
+        resolved = resolve_universe(conn, None)
+        uni_clause, uni_params = universe_exclusion_clause(
+            resolved.universe_id, "CURRENT_DATE", "s.id")
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT s.industry, count(*) FROM stocks s "
+                f"WHERE s.asset_type = 'Stock' AND s.industry IS NOT NULL "
+                f"AND {uni_clause} "
+                f"GROUP BY s.industry ORDER BY s.industry", uni_params)
+            census = {r[0]: r[1] for r in cur.fetchall()}
+        if industries is not None:
+            unknown = [x for x in industries if x not in census]
+            if unknown:
+                raise MacroDeriveError(
+                    f"unknown industry(ies) {unknown} under universe "
+                    f"'{resolved.name}' — gated census: {sorted(census)}")
+            census = {k: v for k, v in census.items() if k in industries}
+        slugs: Dict[str, str] = {}
+        for industry in census:
+            slug = sector_slug(industry)
+            if slug in slugs:
+                raise MacroDeriveError(
+                    f"industries {slugs[slug]!r} and {industry!r} both slug "
+                    f"to {slug!r} — refusing to merge distinct industries")
+            slugs[slug] = industry
+        seeded, existing, skipped_thin = [], [], {}
+        with conn.cursor() as cur:
+            for industry, members in sorted(census.items()):
+                if members < min_members:
+                    skipped_thin[industry] = members
+                    continue
+                for name, spec in industry_signal_bodies(
+                        industry, min_members=body_floor).items():
+                    cur.execute(
+                        """INSERT INTO feature_functions
+                               (name, version, status, enabled, description,
+                                language, function_body, inputs, scope)
+                           VALUES (%s, 'v1', 'active', TRUE, %s, 'python',
+                                   %s, %s, 'market')
+                           ON CONFLICT DO NOTHING""",
+                        (name, spec["description"], spec["body"],
+                         json.dumps(spec["inputs"])))
+                    (seeded if cur.rowcount else existing).append(name)
+        conn.commit()
+        set_attributes(span, seeded=len(seeded), existing=len(existing),
+                       skipped=len(skipped_thin), universe=resolved.name)
+        return {"seeded": seeded, "existing": existing,
+                "skipped_thin": skipped_thin,
+                "census": census,
+                "universe": resolved.name}
+
+
 def _get_market_function(conn, name: str) -> Optional[Dict[str, Any]]:
     with conn.cursor() as cur:
         cur.execute(
