@@ -262,3 +262,20 @@ class TestDbHealthHeadline:
         assert "universe" in payload
         assert payload["universe"]["name"] == "modeling_default"
         assert "members" in payload["universe"]
+
+    def test_db_health_after_refresh_reports_timestamp(self, conn):
+        """The staleness branch only executes once a refresh has happened —
+        prod hit a NameError here that the unrefreshed test never reached.
+        Must report last_refresh, not fall back to the missing-universe
+        warning."""
+        from gefion.universe.definitions import seed_default_universe
+        from gefion.universe.membership import refresh_universe
+        seed_default_universe(conn)
+        refresh_universe(conn, "modeling_default")
+        r = _invoke("db-health", "--json")
+        assert r.exit_code == 0, r.output
+        payload = json.loads(r.output)
+        assert payload["universe"] is not None, payload.get("warnings")
+        assert payload["universe"]["last_refresh"] is not None
+        assert not any("no default modeling universe" in w
+                       for w in payload.get("warnings", []))
