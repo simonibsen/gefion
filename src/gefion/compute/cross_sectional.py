@@ -297,7 +297,8 @@ def compute_all_rankings(
 def fetch_feature_with_sectors(
     conn: psycopg.Connection,
     feature_name: str,
-    target_date: Optional[date] = None
+    target_date: Optional[date] = None,
+    universe: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Fetch feature values joined with stock sector/industry data.
@@ -306,6 +307,8 @@ def fetch_feature_with_sectors(
         conn: Database connection
         feature_name: Name of the feature to fetch (e.g., 'indicator_rsi_14')
         target_date: Date to fetch data for (defaults to latest available)
+        universe: Modeling universe for the ranking population (spec 015);
+            None = default universe, 'all' = unfiltered
 
     Returns:
         List of dicts with symbol, data_id, value, sector, industry
@@ -342,9 +345,16 @@ def fetch_feature_with_sectors(
                     return []
                 target_date = row[0]
 
-            # Fetch feature values with stock sector/industry
+            # Fetch feature values with stock sector/industry. The ranking
+            # population routes through the universe gate (spec 015); the
+            # legacy Inactive-status exclusion stays as belt-and-braces.
+            from gefion.universe import (resolve_universe,
+                                         universe_exclusion_clause)
+            resolved = resolve_universe(conn, universe)
+            uni_clause, uni_params = universe_exclusion_clause(
+                resolved.universe_id, "cf.date", "cf.data_id")
             cur.execute(
-                """
+                f"""
                 SELECT
                     s.symbol,
                     s.id as data_id,
@@ -357,9 +367,10 @@ def fetch_feature_with_sectors(
                 WHERE cf.feature_id = %s
                   AND cf.date = %s
                   AND s.status IS DISTINCT FROM 'Inactive'
+                  AND {uni_clause}
                 ORDER BY s.symbol
                 """,
-                (feature_id, target_date)
+                (feature_id, target_date, *uni_params)
             )
 
             results = []

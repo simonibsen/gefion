@@ -2383,6 +2383,163 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="universe_list",
+            description=(
+                "All modeling-universe definitions (spec 015) with rule "
+                "counts and current exclusion counts. The universe decides "
+                "which stocks every cross-section consumer (datasets, "
+                "breadth series, rankings, backtests, experiments) sees. "
+                "Read-only."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="universe_show",
+            description=(
+                "One universe in full: rules with reasons, pins, membership "
+                "summary, flap counts for time-varying rules. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Universe name"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="universe_members",
+            description=(
+                "Member symbols of a universe as of a date (membership is "
+                "date-aware — intervals, not snapshots). Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string",
+                             "description": "Universe name (omit = default; "
+                                            "'all' = unfiltered)"},
+                    "as_of": {"type": "string",
+                              "description": "YYYY-MM-DD (default today)"},
+                    "limit": {"type": "integer",
+                              "description": "Cap the listing"},
+                },
+            },
+        ),
+        Tool(
+            name="universe_explain",
+            description=(
+                "Why is/isn't a symbol in the universe (as of a date)? "
+                "Names the exact rule or pin and its reason. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Stock symbol"},
+                    "universe": {"type": "string",
+                                 "description": "Universe name (omit = default)"},
+                    "as_of": {"type": "string",
+                              "description": "YYYY-MM-DD (default today)"},
+                },
+                "required": ["symbol"],
+            },
+        ),
+        Tool(
+            name="universe_refresh",
+            description=(
+                "Re-evaluate universe rules and reconcile membership "
+                "intervals; prints the delta. MUTATING and consequential: "
+                "changes the population every modeling consumer sees. "
+                "Refuses empty or outsized-shrink results (guard); only "
+                "force past the guard at the user's explicit direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string",
+                             "description": "Universe name (omit = default)"},
+                    "force": {"type": "boolean",
+                              "description": "Override the shrink guard "
+                                             "(HUMAN-DIRECTED only)"},
+                },
+            },
+        ),
+        Tool(
+            name="universe_define",
+            description=(
+                "OWNER-GATED act: create or update a universe definition "
+                "from YAML rules. Universe definitions are owner-controlled "
+                "objects (like feature/regime definitions) — only invoke at "
+                "the user's explicit direction, and run universe_refresh "
+                "afterwards to apply. MUTATING."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Universe name"},
+                    "rules_yaml": {"type": "string",
+                                   "description": "YAML list of rules "
+                                                  "({name, attribute, op, "
+                                                  "value, reason}), or a "
+                                                  "mapping with rules + pins"},
+                    "description": {"type": "string",
+                                    "description": "Human description"},
+                    "default": {"type": "boolean",
+                                "description": "Make this the default "
+                                               "universe"},
+                },
+                "required": ["name", "rules_yaml"],
+            },
+        ),
+        Tool(
+            name="universe_delete",
+            description=(
+                "DESTRUCTIVE, HUMAN-DIRECTED: delete a universe definition "
+                "and its membership intervals. Dry-run by default (full "
+                "blast radius, changes nothing); refuses while referenced "
+                "by result provenance or while default. Only pass "
+                "confirm=true at the user's explicit direction."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Universe name"},
+                    "confirm": {"type": "boolean",
+                                "description": "Actually delete (default "
+                                               "false = dry-run)"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="universe_export",
+            description=(
+                "Export all universe definitions as YAML (git backup — the "
+                "database is the source of truth). Read-only."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="universe_import",
+            description=(
+                "OWNER-GATED act: import universe definitions from YAML "
+                "(validates everything before writing; dry_run reports the "
+                "diff). Only invoke at the user's explicit direction. "
+                "MUTATING unless dry_run."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "yaml_text": {"type": "string",
+                                  "description": "YAML from universe_export"},
+                    "dry_run": {"type": "boolean",
+                                "description": "Report the diff without "
+                                               "writing"},
+                },
+                "required": ["yaml_text"],
+            },
+        ),
+        Tool(
             name="macro_candidate_list",
             description=(
                 "The generated market-function candidate queue (spec 014, "
@@ -2839,6 +2996,24 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _observations_list(arguments)
         elif name == "observations_review":
             result = await _observations_review(arguments)
+        elif name == "universe_list":
+            result = await _universe_list(arguments)
+        elif name == "universe_show":
+            result = await _universe_show(arguments)
+        elif name == "universe_members":
+            result = await _universe_members(arguments)
+        elif name == "universe_explain":
+            result = await _universe_explain(arguments)
+        elif name == "universe_refresh":
+            result = await _universe_refresh(arguments)
+        elif name == "universe_define":
+            result = await _universe_define(arguments)
+        elif name == "universe_delete":
+            result = await _universe_delete(arguments)
+        elif name == "universe_export":
+            result = await _universe_export(arguments)
+        elif name == "universe_import":
+            result = await _universe_import(arguments)
         elif name == "macro_candidate_list":
             result = await _macro_candidate_list(arguments)
         elif name == "macro_candidate_show":
@@ -5729,6 +5904,116 @@ async def _observations_review(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get("reason"):
             cmd.extend(["--reason", args["reason"]])
         return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _universe_list(args: Dict[str, Any]) -> Dict[str, Any]:
+    """All universe definitions — read-only."""
+    async def _run():
+        return await GefionExecutor().run("universe", "list")
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _universe_show(args: Dict[str, Any]) -> Dict[str, Any]:
+    """One universe in full — read-only."""
+    async def _run():
+        return await GefionExecutor().run("universe", "show", args["name"])
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _universe_members(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Member symbols as of a date — read-only."""
+    async def _run():
+        cmd = ["universe", "members"]
+        if args.get("name"):
+            cmd.append(args["name"])
+        if args.get("as_of"):
+            cmd.extend(["--as-of", args["as_of"]])
+        if args.get("limit"):
+            cmd.extend(["--limit", str(args["limit"])])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _universe_explain(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Why is/isn't a symbol in the universe — read-only."""
+    async def _run():
+        cmd = ["universe", "explain", args["symbol"]]
+        if args.get("universe"):
+            cmd.extend(["--universe", args["universe"]])
+        if args.get("as_of"):
+            cmd.extend(["--as-of", args["as_of"]])
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _universe_refresh(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Reconcile membership intervals — mutating, guarded."""
+    async def _run():
+        cmd = ["universe", "refresh"]
+        if args.get("name"):
+            cmd.append(args["name"])
+        if args.get("force"):
+            cmd.append("--force")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _universe_define(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Owner-gated definition create/update — mutating."""
+    import tempfile
+
+    async def _run():
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml",
+                                         delete=False) as f:
+            f.write(args["rules_yaml"])
+            rules_path = f.name
+        try:
+            cmd = ["universe", "define", args["name"],
+                   "--rules-file", rules_path]
+            if args.get("description"):
+                cmd.extend(["--description", args["description"]])
+            if args.get("default"):
+                cmd.append("--default")
+            return await GefionExecutor().run(*cmd)
+        finally:
+            os.unlink(rules_path)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _universe_delete(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Deletion door — dry-run unless confirm."""
+    async def _run():
+        cmd = ["universe", "delete", args["name"]]
+        if args.get("confirm"):
+            cmd.append("--confirm")
+        return await GefionExecutor().run(*cmd)
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _universe_export(args: Dict[str, Any]) -> Dict[str, Any]:
+    """YAML export — read-only."""
+    async def _run():
+        return await GefionExecutor().run("universe", "export")
+    return await _execute_with_health_check(['postgres'], _run)
+
+
+async def _universe_import(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Owner-gated YAML import — validates before writing."""
+    import tempfile
+
+    async def _run():
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml",
+                                         delete=False) as f:
+            f.write(args["yaml_text"])
+            yaml_path = f.name
+        try:
+            cmd = ["universe", "import", yaml_path]
+            if args.get("dry_run"):
+                cmd.append("--dry-run")
+            return await GefionExecutor().run(*cmd)
+        finally:
+            os.unlink(yaml_path)
     return await _execute_with_health_check(['postgres'], _run)
 
 

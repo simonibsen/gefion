@@ -1075,8 +1075,16 @@ class CycleRunner:
                         (feature_name,),
                     )
 
-                    # Get stock IDs to compute for
-                    cur.execute("SELECT id FROM stocks WHERE status = 'Active' LIMIT 100")
+                    # Get stock IDs to compute for — routed through the
+                    # modeling-universe gate (spec 015)
+                    from gefion.universe import (resolve_universe,
+                                                 universe_exclusion_clause)
+                    resolved_uni = resolve_universe(conn, None)
+                    uni_clause, uni_params = universe_exclusion_clause(
+                        resolved_uni.universe_id, "CURRENT_DATE", "s.id")
+                    cur.execute(
+                        f"SELECT s.id FROM stocks s WHERE s.status = 'Active' "
+                        f"AND {uni_clause} LIMIT 100", uni_params or None)
                     stock_ids = [r[0] for r in cur.fetchall()]
 
                 # Compute using the dispatcher

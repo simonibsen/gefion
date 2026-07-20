@@ -9,6 +9,21 @@ from gefion.observability import create_span, set_attributes
 
 
 @st.cache_data(ttl=300)
+def _load_universe_summary():
+    """Modeling-universe headline (spec 015) — read-only card data."""
+    try:
+        from gefion.ui.components.database import get_connection
+        from gefion.universe import resolve_universe
+        from gefion.universe.membership import membership_summary
+        with create_span("ui.dashboard._load_universe_summary"):
+            with get_connection() as conn:
+                resolved = resolve_universe(conn, None)
+                return membership_summary(conn, resolved.name)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=300)
 def _get_dashboard_context_data():
     """Cached dashboard context data — avoids repeated slow queries."""
     data = {}
@@ -345,6 +360,28 @@ def render_dashboard():
                 st.caption("Run Data Management → Update")
 
         st.caption("_Data cached for 60 seconds_")
+
+    # Modeling universe (spec 015) — read-only card; definition changes are
+    # owner-gated and stay on the CLI/MCP surface
+    universe_summary = _load_universe_summary()
+    if universe_summary:
+        st.markdown("---")
+        st.subheader("Modeling Universe")
+        ucol1, ucol2, ucol3 = st.columns(3)
+        with ucol1:
+            st.metric("Universe", universe_summary["universe"])
+        with ucol2:
+            st.metric("Members", f"{universe_summary['members']:,}")
+        with ucol3:
+            st.metric("Excluded", f"{universe_summary['currently_excluded']:,}")
+        by_rule = universe_summary.get("by_rule") or {}
+        if by_rule:
+            st.caption("Excluded by rule: " + ", ".join(
+                f"{rule} ({count:,})" for rule, count in
+                sorted(by_rule.items())))
+        else:
+            st.caption("No exclusions materialized yet — run "
+                       "`gefion universe refresh`")
 
     st.markdown("---")
 

@@ -66,6 +66,10 @@ DATA_TYPE_TABLES = {
     # Observations ledger (#144): machine-noticed items + review
     # decisions — an audit trail that cannot be reproduced
     "observations": ["system_observations"],
+    # Universe declarations (spec 015): rules/pins/fingerprints are owner
+    # decisions that cannot be reproduced; exclusion intervals are derived
+    # (recompute via `universe refresh`) but tiny, so they ride along
+    "universes": ["universe_definitions", "universe_exclusions"],
     "fundamentals": ["stocks_fundamentals", "quarterly_financials"],
     "macro": ["macro_series", "macro_series_values"],
     # Everything that cannot be re-fetched or recomputed — declarations,
@@ -80,6 +84,7 @@ DATA_TYPE_TABLES = {
         "regime_trust_grades", "discovery_diagnostics", "spa_reverdicts",
         "data_quality_findings", "macro_series", "macro_series_values",
         "market_function_candidates", "system_observations",
+        "universe_definitions",
         "schema_migrations", "volatility_thresholds",
     ],
     "all": [
@@ -94,6 +99,7 @@ DATA_TYPE_TABLES = {
         "regime_candidates", "regime_trust_grades", "discovery_diagnostics",
         "spa_reverdicts", "data_quality_findings",
         "macro_series", "macro_series_values",
+        "universe_definitions", "universe_exclusions",
         "schema_migrations",
     ],
 }
@@ -929,8 +935,11 @@ def apply_retention(
 # The coverage drift test fails if a real table is in neither this set nor
 # DATA_TYPE_TABLES["all"] — hand lists are not allowed to rot silently.
 BACKUP_EXEMPT_TABLES = {
-    # (populated as exemptions are consciously decided; empty = everything
-    # real must be in the "all" list)
+    # (populated as exemptions are consciously decided)
+    # Derived market-relative rankings, created on demand by
+    # `cross-sectional compute` and fully recomputable from computed_features
+    # + stocks; whole-DB dumps still capture it by construction.
+    "cross_sectional_features",
 }
 
 

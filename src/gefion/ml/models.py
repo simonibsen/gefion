@@ -132,6 +132,7 @@ def train_quantile_model(
     quantiles: List[float] = None,
     device: Optional[str] = None,
     base_model_path: Path = None,
+    universe: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Train quantile regression models for multiple quantiles.
@@ -150,6 +151,9 @@ def train_quantile_model(
         base_model_path: Optional path to base model for warm-start training.
                         Continues training from this model instead of starting fresh.
                         Only supported for xgboost and lightgbm.
+        universe: Optional universe provenance stamp (spec 015) —
+                 {"universe_name", "universe_fingerprint", ...} — recorded in
+                 the result and artifact metadata. Absent = pre-015 result.
 
     Returns:
         Dict containing:
@@ -172,9 +176,12 @@ def train_quantile_model(
     with create_span("ml.train", algorithm=algorithm, quantiles=str(quantiles),
                       n_samples=X.shape[0], n_features=X.shape[1],
                       device=device or "auto"):
-        return _train_quantile_model_impl(
+        result = _train_quantile_model_impl(
             X, y, algorithm, hyperparams, quantiles, device, base_model_path
         )
+        if universe is not None:
+            result["universe"] = dict(universe)
+        return result
 
 
 def _train_quantile_model_impl(
@@ -497,6 +504,7 @@ def save_model_artifact(
         "feature_names": model_data["feature_names"],
         "quantiles": model_data["quantiles"],
         "device": model_data.get("device"),
+        "universe": model_data.get("universe"),
         "algorithm": model_data["algorithm"],
         "train_metrics": model_data["train_metrics"],
         **metadata
@@ -578,6 +586,7 @@ def load_model_artifact(artifact_path: Path) -> Dict[str, Any]:
         "quantiles": metadata["quantiles"],
         "algorithm": metadata["algorithm"],
         "device": metadata.get("device"),
+        "universe": metadata.get("universe"),
         "metadata": metadata,
         "calibration": calibration,
     }

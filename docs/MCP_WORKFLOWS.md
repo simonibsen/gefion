@@ -1147,6 +1147,33 @@ The operating plane's notebook — observations, never actions.
 - `observations_review` — **HUMAN-DIRECTED**: acknowledge/adopt/reject
   (reject needs a reason; terminal states immutable). Mutating.
 
+### Modeling universe (spec 015)
+
+Which stocks count: every modeling cross-section (datasets, breadth series,
+rankings, backtests, experiments, discovery) draws its population from a
+named, rule-defined universe through one gate. The default
+(`modeling_default`, seeded by db-init) excludes shell companies and ETFs.
+Ingestion and quality scanning are never filtered.
+
+- `universe_list` — all definitions + current exclusion counts (read-only).
+- `universe_show` — rules with reasons, pins, membership summary, flap
+  counts (read-only).
+- `universe_members` — member symbols as of a date; membership is
+  date-aware intervals, so historical as-of queries are honest (read-only).
+- `universe_explain` — why is/isn't a symbol in — names the exact rule/pin
+  and reason (read-only). USE THIS first when a symbol is unexpectedly
+  missing from a dataset or ranking.
+- `universe_refresh` — re-evaluate rules → reconcile intervals; prints the
+  delta. MUTATING and consequential (changes every consumer's population);
+  refuses empty/outsized-shrink results — only force at the user's
+  explicit direction.
+- `universe_define` — **OWNER-GATED**: create/update a definition from
+  YAML rules; run `universe_refresh` afterwards. Mutating.
+- `universe_export` / `universe_import` — YAML round-trip (import
+  validates everything before writing; `dry_run` reports the diff).
+- `universe_delete` — **DESTRUCTIVE, HUMAN-DIRECTED**: dry-run by default;
+  refuses while referenced by result provenance or while default.
+
 ## Data quality (spec 008)
 
 Provider-garbage detection: definitionally impossible or self-contradictory

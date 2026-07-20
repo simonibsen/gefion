@@ -317,6 +317,65 @@ def create_system_observations_table(conn: Connection) -> None:
     conn.commit()
 
 
+def create_universe_definitions_table(conn: Connection) -> None:
+    """Universe definitions (spec 015, owner-approved 2026-07-19). Named,
+    rule-defined subsets of the stock population — the entity-space sibling
+    of regime_definitions. Mirrors sql/schema.sql; idempotent — fixtures
+    touching universes call this."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS universe_definitions (
+                id          SERIAL PRIMARY KEY,
+                name        TEXT UNIQUE NOT NULL,
+                description TEXT,
+                rules       JSONB NOT NULL,
+                pins        JSONB NOT NULL DEFAULT '[]'::jsonb,
+                fingerprint TEXT NOT NULL,
+                is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+                enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS universe_definitions_default_idx
+                ON universe_definitions(is_default) WHERE is_default;
+            """
+        )
+    conn.commit()
+
+
+def create_universe_exclusions_table(conn: Connection) -> None:
+    """Universe membership in complement form (spec 015, owner-approved
+    2026-07-19): a symbol is a member as-of D iff no row covers it. Mirrors
+    sql/schema.sql; idempotent. Requires stocks + universe_definitions."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS universe_exclusions (
+                id            SERIAL PRIMARY KEY,
+                universe_id   INTEGER NOT NULL REFERENCES universe_definitions(id) ON DELETE CASCADE,
+                data_id       INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
+                rule_name     TEXT NOT NULL,
+                excluded_from DATE NOT NULL,
+                excluded_to   DATE,
+                refreshed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (universe_id, data_id, rule_name, excluded_from)
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS universe_exclusions_lookup_idx
+                ON universe_exclusions(universe_id, data_id);
+            """
+        )
+    conn.commit()
+
+
 def create_feature_functions_table(conn: Connection) -> None:
     """Function registry for reusable feature functions."""
     with conn.cursor() as cur:

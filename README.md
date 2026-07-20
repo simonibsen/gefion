@@ -148,6 +148,17 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 | `gefion observations ack` | Mark an observation seen (intermediate) |
 | `gefion observations adopt` | Human act: convert an observation into real work |
 | `gefion observations reject` | Human act: reject with an audited reason |
+| `gefion universe list` | Modeling universes (spec 015) + excluded counts |
+| `gefion universe show` | One universe: rules with reasons, membership, flap counts |
+| `gefion universe define` | Create/update a universe from a YAML rules file (owner-gated) |
+| `gefion universe refresh` | Re-evaluate rules → membership intervals (guarded delta) |
+| `gefion universe members` | Member symbols as of a date (`--as-of` for history) |
+| `gefion universe explain` | Why is/isn't a symbol in the universe — names the rule |
+| `gefion universe enable` | Enable a universe for resolution |
+| `gefion universe disable` | Disable a universe (consumers naming it refuse) |
+| `gefion universe export` | All definitions as YAML (git backup) |
+| `gefion universe import` | Import definitions from YAML (validates first, `--dry-run`) |
+| `gefion universe delete` | Deletion door: dry-run default; provenance references refuse |
 | `gefion data listing-meta` | Backfill stocks.exchange/asset_type from the listing |
 | `gefion macro ingest` | Ingest a macro series (VIX, CPI, …) + materialize its feature |
 | `gefion macro derive` | Compute derived market-shape series (breadth, dispersion) from the cross-section |

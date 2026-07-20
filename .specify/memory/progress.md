@@ -1,10 +1,28 @@
 # Gefion Project Status
 
-**Last Updated**: 2026-07-10
+**Last Updated**: 2026-07-19
 
 ## Current Capabilities
 
-### SPA Re-Verdict (spec 010 — new)
+### Modeling Universe (spec 015 — new)
+- First-class universe objects: named, rule-defined subsets of the stock
+  population (`universe_definitions` + `universe_exclusions` in complement
+  form — exclusion intervals; member = no covering interval)
+- Default `modeling_default` (seeded by db-init) excludes shell companies
+  (~458 SPACs) and ETFs (~1,268) from every modeling cross-section
+- One chokepoint (`gefion.universe`): datasets, market functions
+  (breadth/dispersion), rankings, backtests, ml-predict, experiment
+  populations, and discovery base lists all resolve through it; ingestion
+  and quality scanning deliberately unfiltered
+- Rules are generic attribute/op/value predicates (data, not code);
+  membership is date-aware (as-of queries); refresh is guarded (empty
+  refuses always, >25pp shrink refuses without --force)
+- Provenance: universe name + fingerprint stamped into dataset manifests,
+  ml_datasets.universe, model artifacts, experiments.config, and discovery
+  search_space
+- Full CLI group + 9 MCP tools + read-only UI card + deletion door
+
+### SPA Re-Verdict (spec 010)
 - Selection-aware check over a discovery run's counted family: `gefion regime
   discover spa <run>` answers "could the best candidate be the best of many
   lucky draws?" — Hansen SPA (consistent p is the verdict; lower/upper as

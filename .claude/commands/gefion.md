@@ -262,6 +262,12 @@ If the arguments don't match a mode keyword, interpret the user's intent and rou
 | "is this data trustworthy" / "any bad data" | `quality_findings` (show the verdict tier — suspect ≠ trash) |
 | "flag garbage in stored data" | confirm, then `quality_backfill` → `quality_findings` |
 | "what data quality rules exist" | `quality_catalog` |
+| "which stocks count" / "what's in the modeling universe" | `universe_list` → `universe_show` (rules with reasons) |
+| "why isn't SYMBOL in my dataset/ranking" | `universe_explain` FIRST — it names the excluding rule before you debug anything else |
+| "exclude penny stocks" / "add a universe rule" | `universe_define` (OWNER-GATED — only at explicit direction) → `universe_refresh` → show the delta |
+| "refresh the universe" | `universe_refresh` — surface the delta; if the guard refuses, show the refusal and STOP (forcing is the user's call) |
+| "compare against the unfiltered market" | consumer tools with `universe='all'` (control population) |
+| "delete a universe" (explicit) | `universe_delete` dry-run → blast radius → `confirm=true` only on second explicit confirmation |
 
 ---
 

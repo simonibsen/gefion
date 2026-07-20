@@ -541,9 +541,13 @@ def ml_device(
 def ml_dataset_build(
     name: str = typer.Option(..., help="Dataset name (logical identifier)"),
     version: str = typer.Option(..., help="Dataset version (e.g., date tag)"),
-    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional; wins verbatim)"),
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
+    universe_name: Optional[str] = typer.Option(
+        None, "--universe",
+        help="Modeling universe for the population (spec 015): a universe "
+             "name, 'all' for unfiltered; default = the default universe"),
     lookback_days: int = typer.Option(200, help="Rolling window lookback days"),
     start_date: Optional[str] = typer.Option(
         None, "--start-date",
@@ -582,9 +586,8 @@ def ml_dataset_build(
             --horizons 7,14,30 --weak-thresholds 0.02,0.03,0.05 --strong-thresholds 0.05,0.08,0.12
     """
     sym_list = parse_comma_separated(symbols) or []
-    if not sym_list and not exchange:
-        emit_error("Universe required: provide --symbols or --exchange", json_output=json_output)
-        return
+    # No explicit symbols/exchange = the named (or default) modeling universe
+    # population (spec 015); the old hard requirement predates universes.
 
     # Feature selection validation
     feature_list = parse_comma_separated(features) or []
@@ -640,6 +643,8 @@ def ml_dataset_build(
         universe["exchange"] = exchange
     if limit is not None:
         universe["limit"] = int(limit)
+    if universe_name:
+        universe["universe"] = universe_name
 
     label_spec = {"type": "forward_return_5class", "thresholds": thresholds_by_horizon}
     split_spec = {"type": "walk_forward", "note": "TBD", "horizons_days": horizon_vals,
@@ -665,16 +670,26 @@ def ml_dataset_build(
         "split_spec": split_spec,
         "artifact_uri": str(manifest_path),
     }
-    manifest_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
-    manifest_path.write_text(manifest_text)
-
     from gefion.ml.store import sha256_text, upsert_ml_dataset
 
-    payload = dict(manifest)
-    payload["checksum"] = sha256_text(manifest_text)
+    payload = dict(manifest)   # shallow: shares the universe dict by design
 
     with db_connection(db_url) as conn:
         init_schema_tables(conn, ["ml_datasets"])
+
+        # Universe provenance stamp (spec 015): recorded in the manifest file
+        # and the ml_datasets.universe JSONB before anything persists
+        if not sym_list:
+            from gefion.universe import resolve_universe
+            universe.update(
+                resolve_universe(conn, universe_name).provenance())
+        else:
+            universe["universe_name"] = "explicit"
+            universe["universe_fingerprint"] = None
+            universe["resolved_count"] = len(sym_list)
+        manifest_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        manifest_path.write_text(manifest_text)
+        payload["checksum"] = sha256_text(manifest_text)
 
         # Check if dataset already exists
         if not force:
@@ -732,6 +747,12 @@ def ml_dataset_build(
                 out_dir=dataset_dir,
                 on_progress=lambda msg: emit(msg, json_output=json_output),
             )
+            # Export resolution added resolved_count to the shared universe
+            # dict — persist the completed stamp (manifest file + DB row)
+            manifest_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+            manifest_path.write_text(manifest_text)
+            payload["checksum"] = sha256_text(manifest_text)
+            dataset_id = upsert_ml_dataset(conn, payload)
 
     emit(
         f"Dataset registered: {name} {version}",
@@ -1402,13 +1423,23 @@ def ml_train(
                 else:
                     emit(f"  Warning: Base model not found at {base_model}, training from scratch", json_output=json_output)
 
-            # Train quantile models (q10, q50, q90)
+            # Train quantile models (q10, q50, q90). The universe stamp
+            # (spec 015) flows from the dataset the model trains on.
+            dataset_universe = dataset.get("universe") or {}
+            universe_stamp = None
+            if dataset_universe.get("universe_name"):
+                universe_stamp = {
+                    "universe_name": dataset_universe["universe_name"],
+                    "universe_fingerprint":
+                        dataset_universe.get("universe_fingerprint"),
+                }
             model_data = train_quantile_model(
                 X, y,
                 algorithm=algorithm,
                 hyperparams=hyperparams if hyperparams else None,
                 device=resolved_device,
-                base_model_path=base_model_path
+                base_model_path=base_model_path,
+                universe=universe_stamp
             )
             if model_data.get("warm_start"):
                 emit(f"  Warm-started {len(model_data['models'])} quantile models", json_output=json_output)
@@ -1752,15 +1783,23 @@ def ml_predict(
         # stocks.exchange is only populated by fundamentals-update, and most
         # rows are still NULL, so filtering would silently empty the universe.
         if exchange or (not sym_list and limit):
+            # Population routes through the modeling-universe gate (spec 015);
+            # explicit --symbols wins verbatim.
+            from gefion.universe import resolve_universe, universe_exclusion_clause
+            resolved_uni = resolve_universe(conn, None)
+            uni_clause, uni_params = universe_exclusion_clause(
+                resolved_uni.universe_id, "CURRENT_DATE", "s.id")
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
                 cur.execute(
                     f"""
                     SELECT DISTINCT s.id, s.symbol
                     FROM stocks s
+                    WHERE {uni_clause}
                     ORDER BY s.symbol
                     {limit_clause};
-                    """
+                    """,
+                    uni_params or None
                 )
                 universe = [(row[0], row[1]) for row in cur.fetchall()]
         else:
@@ -3753,15 +3792,23 @@ def ml_predict_ensemble(
         # stocks.exchange is only populated by fundamentals-update, and most
         # rows are still NULL, so filtering would silently empty the universe.
         if exchange or (not sym_list and limit):
+            # Population routes through the modeling-universe gate (spec 015);
+            # explicit --symbols wins verbatim.
+            from gefion.universe import resolve_universe, universe_exclusion_clause
+            resolved_uni = resolve_universe(conn, None)
+            uni_clause, uni_params = universe_exclusion_clause(
+                resolved_uni.universe_id, "CURRENT_DATE", "s.id")
             with conn.cursor() as cur:
                 limit_clause = f"LIMIT {limit}" if limit else ""
                 cur.execute(
                     f"""
                     SELECT DISTINCT s.id, s.symbol
                     FROM stocks s
+                    WHERE {uni_clause}
                     ORDER BY s.symbol
                     {limit_clause};
-                    """
+                    """,
+                    uni_params or None
                 )
                 universe = [(row[0], row[1]) for row in cur.fetchall()]
         else:
@@ -4665,6 +4712,44 @@ def _db_health_impl(db_url, migrations_dir, json_output):
                             "review — see `gefion observations list`")
                 except Exception:
                     health["open_observations"] = None
+
+                # Modeling universe (spec 015): headline counts + staleness.
+                # Every cross-section consumer draws from this — a missing
+                # default or stale refresh silently distorts everything.
+                try:
+                    from gefion.universe import resolve_universe
+                    from gefion.universe.membership import membership_summary
+                    resolved_uni = resolve_universe(conn, None)
+                    uni = membership_summary(conn, resolved_uni.name)
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT MAX(refreshed_at) FROM universe_exclusions "
+                            "WHERE universe_id = %s",
+                            (resolved_uni.universe_id,))
+                        last_refresh = cur.fetchone()[0]
+                    health["universe"] = {
+                        "name": uni["universe"],
+                        "members": uni["members"],
+                        "excluded": uni["currently_excluded"],
+                        "by_rule": uni["by_rule"],
+                        "last_refresh": (last_refresh.isoformat()
+                                         if last_refresh else None),
+                    }
+                    if last_refresh is None:
+                        warnings.append(
+                            f"universe '{uni['universe']}' has never been "
+                            "refreshed — run `gefion universe refresh`")
+                    elif (datetime.now(last_refresh.tzinfo)
+                          - last_refresh).days > 7:
+                        warnings.append(
+                            f"universe '{uni['universe']}' last refreshed "
+                            f"{last_refresh.date()} (>7 days) — run `gefion "
+                            "universe refresh`")
+                except Exception as exc:
+                    health["universe"] = None
+                    warnings.append(
+                        f"no default modeling universe resolvable ({exc}) — "
+                        "run `gefion db-init`")
                 health["warnings"] = warnings
 
     except Exception as exc:
@@ -5093,6 +5178,20 @@ def _db_init_impl(db_url, json_output):
                         f"Applied {result['applied']} migration(s)",
                         json_output=json_output
                     )
+
+        # Seed the default modeling universe (spec 015, FR-011) — idempotent,
+        # never clobbers owner edits. After migrations so the tables exist on
+        # databases upgrading from pre-015 schemas.
+        from gefion.universe.definitions import seed_default_universe
+        with db_connection(url) as conn:
+            init_schema_tables(conn, ["universe_definitions",
+                                      "universe_exclusions"])
+            seeded = seed_default_universe(conn)
+            emit(
+                f"Universe '{seeded['name']}' ready "
+                f"({len(seeded['rules'])} rule(s))",
+                json_output=json_output
+            )
 
     except Exception as exc:
         emit_error(f"Initialization failed: {exc}", json_output=json_output)
@@ -6501,6 +6600,371 @@ def observe(
                                       suggested_action=suggested_action)
     out.success(f"observation #{oid} recorded ({category})",
                 data={"observation_id": oid})
+
+
+universe_app = typer.Typer(help="Modeling universe (spec 015): named, "
+                                "rule-defined subsets of the stock population "
+                                "that every cross-section consumer draws from")
+app.add_typer(universe_app, name="universe", cls=SortedGroup)
+
+
+def _load_rules_file(path: Path) -> tuple:
+    """A rules file is either a YAML list (rules only) or a mapping with
+    'rules' and optional 'pins'."""
+    import yaml
+    doc = yaml.safe_load(path.read_text())
+    if isinstance(doc, list):
+        return doc, []
+    if isinstance(doc, dict):
+        return doc.get("rules") or [], doc.get("pins") or []
+    raise ValueError("rules file must be a YAML list of rules or a mapping "
+                     "with 'rules' (and optional 'pins')")
+
+
+@universe_app.command("define")
+def universe_define(
+    name: str = typer.Argument(..., help="Universe name (create or update)"),
+    description: Optional[str] = typer.Option(None, "--description",
+                                              help="Human description"),
+    rules_file: Path = typer.Option(..., "--rules-file",
+                                    help="YAML rules (list, or mapping with "
+                                         "rules + pins)"),
+    default: bool = typer.Option(False, "--default",
+                                 help="Make this the default universe"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Create or update a universe definition from a YAML rules file.
+
+    Rules are generic attribute/op/value predicates; matching an exclude
+    rule excludes. Run `gefion universe refresh` afterwards to apply."""
+    from gefion.universe.definitions import (UniverseValidationError,
+                                             define_universe)
+    out = get_output(json_output)
+    with create_span("cli.universe-define", universe=name):
+        try:
+            rules, pins = _load_rules_file(rules_file)
+            with _regime_conn(db_url) as conn:
+                row = define_universe(conn, name, description=description,
+                                      rules=rules, pins=pins,
+                                      is_default=default)
+        except (OSError, ValueError, UniverseValidationError) as exc:
+            out.error(f"universe define refused: {exc}")
+            raise typer.Exit(1)
+    out.success(
+        f"universe '{name}' defined ({len(row['rules'])} rule(s), "
+        f"{len(row['pins'])} pin(s)) — run `gefion universe refresh "
+        f"{name}` to apply",
+        data={"name": row["name"], "fingerprint": row["fingerprint"],
+              "rules": row["rules"], "pins": row["pins"],
+              "is_default": row["is_default"]})
+
+
+@universe_app.command("list")
+def universe_list(
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """All universe definitions with headline membership counts."""
+    from gefion.universe.definitions import list_universes
+    out = get_output(json_output)
+    with create_span("cli.universe-list"):
+        with _regime_conn(db_url) as conn:
+            rows = list_universes(conn)
+            with conn.cursor() as cur:
+                counts = {}
+                cur.execute(
+                    "SELECT universe_id, COUNT(DISTINCT data_id) "
+                    "FROM universe_exclusions "
+                    "WHERE excluded_from <= CURRENT_DATE "
+                    "AND (excluded_to IS NULL OR CURRENT_DATE <= excluded_to) "
+                    "GROUP BY universe_id")
+                for uid, n in cur.fetchall():
+                    counts[uid] = n
+    payload = [{
+        "name": u["name"], "description": u["description"],
+        "enabled": u["enabled"], "is_default": u["is_default"],
+        "rules": len(u["rules"]), "pins": len(u["pins"]),
+        "fingerprint": u["fingerprint"],
+        "currently_excluded": counts.get(u["id"], 0),
+    } for u in rows]
+    if not out.json_mode:
+        for u in payload:
+            flags = ("default " if u["is_default"] else "") + \
+                    ("" if u["enabled"] else "DISABLED ")
+            out.info(f"{u['name']} {flags}— {u['rules']} rule(s), "
+                     f"{u['currently_excluded']} excluded")
+    out.success(f"{len(payload)} universe(s)", data={"universes": payload})
+
+
+@universe_app.command("show")
+def universe_show(
+    name: str = typer.Argument(..., help="Universe name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """One universe in full: rules with reasons, pins, membership summary,
+    flap counts for time-varying rules."""
+    from gefion.universe.definitions import get_universe
+    from gefion.universe.membership import membership_summary
+    out = get_output(json_output)
+    with create_span("cli.universe-show", universe=name):
+        with _regime_conn(db_url) as conn:
+            u = get_universe(conn, name)
+            if u is None:
+                out.error(f"no universe named '{name}'")
+                raise typer.Exit(1)
+            try:
+                summary = membership_summary(conn, name)
+            except ValueError:
+                summary = None
+    if not out.json_mode:
+        out.info(f"{u['name']} — {u['description'] or ''}")
+        for r in u["rules"]:
+            out.info(f"  rule {r['name']}: {r['attribute']} {r['op']} "
+                     f"{r.get('value', '')} — {r['reason']}")
+        for p in u["pins"]:
+            out.info(f"  pin {p['symbol']} ({p['action']}): {p['reason']}")
+        if summary:
+            out.info(f"  members {summary['members']} / excluded "
+                     f"{summary['currently_excluded']} "
+                     f"(by rule: {summary['by_rule']})")
+            if summary["flaps"]:
+                out.info(f"  flap counts: {summary['flaps']}")
+    out.success(
+        f"universe '{name}'",
+        data={"name": u["name"], "description": u["description"],
+              "enabled": u["enabled"], "is_default": u["is_default"],
+              "fingerprint": u["fingerprint"], "rules": u["rules"],
+              "pins": u["pins"], "summary": summary})
+
+
+@universe_app.command("members")
+def universe_members_cmd(
+    name: Optional[str] = typer.Argument(None,
+                                         help="Universe name (default: the "
+                                              "default universe; 'all' = "
+                                              "unfiltered)"),
+    as_of: Optional[str] = typer.Option(None, "--as-of",
+                                        help="Membership as of date "
+                                             "(YYYY-MM-DD, default today)"),
+    limit: Optional[int] = typer.Option(None, "--limit",
+                                        help="Cap the listing"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Member symbols of a universe as of a date (US3: date-aware)."""
+    from datetime import date as _date
+
+    from gefion.universe import UniverseResolutionError, universe_members
+    out = get_output(json_output)
+    as_of_date = _date.fromisoformat(as_of) if as_of else None
+    with create_span("cli.universe-members", universe=name or "default"):
+        try:
+            with _regime_conn(db_url) as conn:
+                members = universe_members(conn, name, as_of=as_of_date)
+        except UniverseResolutionError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+    shown = members[:limit] if limit else members
+    if not out.json_mode:
+        for s in shown[:50]:
+            out.info(s)
+        if len(shown) > 50:
+            out.info(f"... and {len(shown) - 50} more")
+    out.success(f"{len(members)} member(s)",
+                data={"members": shown, "total": len(members),
+                      "as_of": (as_of_date or _date.today()).isoformat()})
+
+
+@universe_app.command("explain")
+def universe_explain(
+    symbol: str = typer.Argument(..., help="Stock symbol"),
+    name: Optional[str] = typer.Option(None, "--universe",
+                                       help="Universe name (default: the "
+                                            "default universe)"),
+    as_of: Optional[str] = typer.Option(None, "--as-of",
+                                        help="As-of date (YYYY-MM-DD)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Why is/isn't SYMBOL in the universe? Names the rule/pin and reason
+    (SC-003 — one command)."""
+    from datetime import date as _date
+
+    from gefion.universe.membership import explain_symbol
+    out = get_output(json_output)
+    as_of_date = _date.fromisoformat(as_of) if as_of else None
+    with create_span("cli.universe-explain", symbol=symbol):
+        try:
+            with _regime_conn(db_url) as conn:
+                result = explain_symbol(conn, symbol.upper(), name=name,
+                                        as_of=as_of_date)
+        except ValueError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+    if result["member"]:
+        out.success(f"{symbol} IS a member of '{result['universe']}' "
+                    f"as of {result['as_of']}", data=result)
+    else:
+        why = "; ".join(f"{e['rule']}: {e['reason']}"
+                        for e in result["excluded_by"])
+        out.success(f"{symbol} is NOT in '{result['universe']}' "
+                    f"as of {result['as_of']} — {why}", data=result)
+
+
+@universe_app.command("refresh")
+def universe_refresh(
+    name: Optional[str] = typer.Argument(None,
+                                         help="Universe name (default: the "
+                                              "default universe)"),
+    force: bool = typer.Option(False, "--force",
+                               help="Override the shrink guard (never the "
+                                    "empty-universe refusal)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Re-evaluate rules and reconcile membership intervals. Prints the
+    delta; refuses empty or outsized-shrink results (FR-010)."""
+    from gefion.universe.membership import (UniverseGuardError,
+                                            refresh_universe)
+    out = get_output(json_output)
+    with create_span("cli.universe-refresh", universe=name or "default"):
+        try:
+            with _regime_conn(db_url) as conn:
+                delta = refresh_universe(conn, name, force=force)
+        except UniverseGuardError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+        except ValueError as exc:
+            out.error(f"universe refresh refused: {exc}")
+            raise typer.Exit(1)
+    out.success(
+        f"universe '{delta['universe']}' refreshed: +{delta['added']} "
+        f"-{delta['removed']} interval(s); {delta['currently_excluded']} of "
+        f"{delta['total_symbols']} symbols excluded",
+        data=delta)
+
+
+@universe_app.command("enable")
+def universe_enable(
+    name: str = typer.Argument(..., help="Universe name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Enable a universe for resolution."""
+    _universe_toggle(name, True, db_url, json_output)
+
+
+@universe_app.command("disable")
+def universe_disable(
+    name: str = typer.Argument(..., help="Universe name"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Disable a universe (consumers naming it will refuse). The default
+    universe cannot be disabled."""
+    _universe_toggle(name, False, db_url, json_output)
+
+
+def _universe_toggle(name: str, enabled: bool, db_url, json_output) -> None:
+    from gefion.universe.definitions import (UniverseValidationError,
+                                             set_enabled)
+    out = get_output(json_output)
+    with create_span("cli.universe-toggle", universe=name, enabled=enabled):
+        try:
+            with _regime_conn(db_url) as conn:
+                set_enabled(conn, name, enabled)
+        except UniverseValidationError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+    out.success(f"universe '{name}' {'enabled' if enabled else 'disabled'}",
+                data={"name": name, "enabled": enabled})
+
+
+@universe_app.command("export")
+def universe_export(
+    output: Optional[Path] = typer.Option(None, "-o", "--output",
+                                          help="Write YAML here (default: "
+                                               "stdout / universes/)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Export all universe definitions as YAML (git backup — the database
+    is the source of truth)."""
+    from gefion.universe.definitions import export_universes
+    out = get_output(json_output)
+    with create_span("cli.universe-export"):
+        with _regime_conn(db_url) as conn:
+            text = export_universes(conn)
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text)
+        out.success(f"exported to {output}", data={"path": str(output)})
+    elif out.json_mode:
+        out.success("exported", data={"yaml": text})
+    else:
+        print(text)
+
+
+@universe_app.command("import")
+def universe_import(
+    file: Path = typer.Argument(..., help="YAML file (from universe export)"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Report the diff without writing"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Import universe definitions from YAML (validates everything before
+    writing). Run `gefion universe refresh` afterwards to apply."""
+    from gefion.universe.definitions import (UniverseValidationError,
+                                             import_universes)
+    out = get_output(json_output)
+    with create_span("cli.universe-import", dry_run=dry_run):
+        try:
+            with _regime_conn(db_url) as conn:
+                report = import_universes(conn, file.read_text(),
+                                          dry_run=dry_run)
+        except (OSError, ValueError, UniverseValidationError) as exc:
+            out.error(f"universe import refused: {exc}")
+            raise typer.Exit(1)
+    out.success(
+        f"{'dry-run: ' if dry_run else ''}created {len(report['created'])}, "
+        f"updated {len(report['updated'])}, unchanged "
+        f"{len(report['unchanged'])}", data=report)
+
+
+@universe_app.command("delete")
+def universe_delete(
+    name: str = typer.Argument(..., help="Universe name"),
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Actually delete (default: dry-run)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Delete a universe (deletion door: dry-run by default; refuses while
+    referenced by result provenance or while default)."""
+    from gefion.universe.deletion import (execute_universe_delete,
+                                          plan_universe_delete)
+    out = get_output(json_output)
+    with create_span("cli.universe-delete", universe=name, confirm=confirm):
+        try:
+            with _regime_conn(db_url) as conn:
+                if not confirm:
+                    plan = plan_universe_delete(conn, name)
+                    msg = (f"DRY-RUN: would delete universe '{name}' "
+                           f"({plan['exclusion_intervals']} interval(s))")
+                    if plan["blockers"]:
+                        msg += " — BLOCKED: " + "; ".join(plan["blockers"])
+                    else:
+                        msg += " — re-run with --confirm to delete"
+                    out.success(msg, data=plan)
+                    return
+                result = execute_universe_delete(conn, name)
+        except ValueError as exc:
+            out.error(str(exc))
+            raise typer.Exit(1)
+    out.success(f"universe '{name}' deleted", data=result)
 
 
 observations_app = typer.Typer(help="System-observations ledger (#144): "
@@ -8631,6 +9095,12 @@ def backtest_run(
         "--limit",
         help="Limit number of symbols from exchange (for testing)"
     ),
+    universe_name: Optional[str] = typer.Option(
+        None,
+        "--universe",
+        help="Modeling universe for the population (spec 015): a universe "
+             "name, 'all' for unfiltered; default = the default universe"
+    ),
     strategy: str = typer.Option(
         "momentum",
         "--strategy",
@@ -8967,6 +9437,7 @@ def backtest_run(
             start_date=start,
             end_date=end,
             limit=limit,
+            universe=universe_name,
         )
 
         if not price_data:
@@ -10098,18 +10569,24 @@ def volatility_compute(
             if symbols:
                 symbol_list = [s.strip().upper() for s in symbols.split(",")]
             else:
+                # Population routes through the modeling-universe gate (015)
+                from gefion.universe import resolve_universe, universe_exclusion_clause
+                resolved_uni = resolve_universe(conn, None)
+                uni_clause, uni_params = universe_exclusion_clause(
+                    resolved_uni.universe_id, "CURRENT_DATE", "s.id")
                 with conn.cursor() as cur:
                     # Query stocks with sufficient price history (at least 60 days)
-                    query = """
+                    query = f"""
                         SELECT s.symbol
                         FROM stocks s
                         JOIN stock_ohlcv o ON o.data_id = s.id
+                        WHERE {uni_clause}
                         GROUP BY s.symbol
                         HAVING COUNT(*) >= 60
                     """
                     if limit:
                         query += f" LIMIT {limit}"
-                    cur.execute(query)
+                    cur.execute(query, uni_params or None)
                     symbol_list = [row[0] for row in cur.fetchall()]
 
             if not symbol_list:
@@ -13799,11 +14276,11 @@ def regime_discover_start(
     try:
         with _regime_conn(db_url) as conn:
             chain = duniverse.parse_filter_chain(universe_filter)
-            symbols = None
+            # Base population routes through the modeling-universe gate
+            # (spec 015); the discovery filter chain then refines it.
+            from gefion.universe import universe_members
+            symbols = universe_members(conn)
             if any(f.kind != "passthrough" for f in chain):
-                with conn.cursor() as cur:
-                    cur.execute("SELECT symbol FROM stocks ORDER BY symbol")
-                    symbols = [r[0] for r in cur.fetchall()]
                 symbols = duniverse.apply_chain(chain, symbols, conn=conn)
             if signal_source not in ("features", "model_predictions"):
                 out.error(f"Unknown signal source {signal_source!r} — "
