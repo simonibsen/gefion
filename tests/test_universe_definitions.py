@@ -213,6 +213,10 @@ class TestSeed:
         rules = {r["name"]: r for r in u["rules"]}
         assert rules["no-shell-companies"]["value"] == "SHELL COMPANIES"
         assert rules["no-etfs"]["value"] == "ETF"
+        # owner-approved 2026-07-19: sub-dollar prices distort return stats
+        assert rules["no-penny-stocks"]["attribute"] == "close"
+        assert rules["no-penny-stocks"]["op"] == "lt"
+        assert rules["no-penny-stocks"]["value"] == 1.00
 
     def test_db_init_wires_seed_and_table_registry(self, conn):
         """db-init must seed modeling_default (FR-011) and the shared

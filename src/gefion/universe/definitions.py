@@ -32,6 +32,11 @@ SEED_RULES = [
     {"name": "no-etfs", "attribute": "asset_type", "op": "eq", "value": "ETF",
      "reason": "Funds, not companies; double-counts constituents in "
                "cross-sections"},
+    # owner-approved 2026-07-19 (with the first two): time-varying — a
+    # symbol is excluded only for the date ranges it traded sub-dollar
+    {"name": "no-penny-stocks", "attribute": "close", "op": "lt",
+     "value": 1.00,
+     "reason": "Sub-dollar prices distort return statistics"},
 ]
 
 _PIN_ACTIONS = {"include", "exclude"}

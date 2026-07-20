@@ -561,8 +561,10 @@ universe through a single gate; data ingestion and quality scanning are
 deliberately never filtered (observe everything, model a subset).
 
 `gefion db-init` seeds the default universe `modeling_default`, which
-excludes shell companies (SPACs — cash boxes, not businesses) and ETFs
-(funds — they double-count constituents in breadth). Rules are generic
+excludes shell companies (SPACs — cash boxes, not businesses), ETFs
+(funds — they double-count constituents in breadth), and penny stocks
+(sub-dollar closes, excluded only for the date ranges they traded below
+$1 — the rule is time-varying). Rules are generic
 attribute/operator/value predicates: matching an exclude rule excludes, any
 match excludes, per-symbol pins beat rules, and a NULL attribute never
 matches (absence of data is not evidence of exclusion).

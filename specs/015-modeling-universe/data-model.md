@@ -96,3 +96,4 @@ universe_definitions 1 ──< universe_exclusions >── 1 stocks
 `modeling_default` (is_default=true) with rules:
 1. `no-shell-companies`: industry eq "SHELL COMPANIES" — "Blank-check entities; cash boxes, not operating businesses"
 2. `no-etfs`: asset_type eq "ETF" — "Funds, not companies; double-counts constituents in cross-sections"
+3. `no-penny-stocks`: close lt 1.00 — "Sub-dollar prices distort return statistics" (time-varying; owner-approved 2026-07-19)
