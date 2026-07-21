@@ -13345,6 +13345,50 @@ def macro_seed_sectors(
         data=result)
 
 
+@macro_app.command("seed-industries")
+def macro_seed_industries(
+    industries: Optional[str] = typer.Option(
+        None, "--industries", help="Comma list of industry names (default: "
+                                   "every industry meeting --min-members)"),
+    min_members: int = typer.Option(
+        100, "--min-members",
+        help="Census floor: industries with fewer CURRENT modeling-universe "
+             "members get NO bodies"),
+    body_floor: int = typer.Option(
+        30, "--body-floor",
+        help="Per-date MIN_MEMBERS written into each generated body "
+             "(thinner days are gaps)"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Seed generated industry-signal bodies (016): relative strength and
+    breadth per industry, discovered from stocks.industry — census counts
+    MODELING-UNIVERSE members only (spec 015), so 'SHELL COMPANIES' never
+    earns a series. Create-if-absent (an edited DB body is never
+    overwritten). Compute afterwards with `gefion macro derive`."""
+    from gefion.macro.derived import MacroDeriveError, seed_industry_functions
+    from gefion.output import get_output
+    out = get_output(json_output)
+    with create_span("cli.macro-seed-industries"):
+        with _regime_conn(db_url) as conn:
+            try:
+                result = seed_industry_functions(
+                    conn,
+                    industries=[x.strip() for x in industries.split(",")]
+                    if industries else None,
+                    min_members=min_members, body_floor=body_floor)
+            except MacroDeriveError as exc:
+                out.error(str(exc))
+                raise typer.Exit(1)
+    thin = result["skipped_thin"]
+    out.success(
+        f"Seeded {len(result['seeded'])} industry function(s), "
+        f"{len(result['existing'])} already present (DB wins), "
+        f"{len(thin)} industry(ies) skipped under the {min_members}-member "
+        f"floor (universe: {result['universe']})",
+        data=result)
+
+
 @macro_app.command("derive")
 def macro_derive(
     series: str = typer.Option(

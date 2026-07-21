@@ -2318,6 +2318,34 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="macro_seed_industries",
+            description=(
+                "Seed generated industry-signal bodies (016): relative "
+                "strength and breadth per industry, discovered from "
+                "stocks.industry — census counts MODELING-UNIVERSE members "
+                "only (spec 015), so shell companies never earn a series. "
+                "Create-if-absent; an edited DB body is never overwritten. "
+                "Compute afterwards with macro_derive. MUTATING."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "industries": {"type": "string",
+                                   "description": "Comma list of industry "
+                                                  "names (default: every "
+                                                  "industry meeting "
+                                                  "min_members)"},
+                    "min_members": {"type": "integer",
+                                    "description": "Census floor over gated "
+                                                   "members (default 100)"},
+                    "body_floor": {"type": "integer",
+                                   "description": "Per-date MIN_MEMBERS "
+                                                  "written into each body "
+                                                  "(default 30)"},
+                },
+            },
+        ),
+        Tool(
             name="observe",
             description=(
                 "Record a system observation in the ledger (#144). WHEN TO "
@@ -3046,6 +3074,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _macro_ingest(arguments)
         elif name == "macro_seed_sectors":
             result = await _macro_seed_sectors(arguments)
+        elif name == "macro_seed_industries":
+            result = await _macro_seed_industries(arguments)
         elif name == "macro_list":
             result = await _macro_list(arguments)
         elif name == "quality_findings":
@@ -6189,6 +6219,18 @@ async def _macro_seed_sectors(args: Dict[str, Any]) -> Dict[str, Any]:
     cmd = ["macro", "seed-sectors"]
     if args.get("sectors"):
         cmd.extend(["--sectors", str(args["sectors"])])
+    if args.get("min_members") is not None:
+        cmd.extend(["--min-members", str(args["min_members"])])
+    if args.get("body_floor") is not None:
+        cmd.extend(["--body-floor", str(args["body_floor"])])
+    return await executor.run(*cmd)
+
+
+async def _macro_seed_industries(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Seed industry-signal market bodies (016, universe-gated census)."""
+    cmd = ["macro", "seed-industries"]
+    if args.get("industries"):
+        cmd.extend(["--industries", str(args["industries"])])
     if args.get("min_members") is not None:
         cmd.extend(["--min-members", str(args["min_members"])])
     if args.get("body_floor") is not None:

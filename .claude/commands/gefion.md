@@ -259,6 +259,7 @@ If the arguments don't match a mode keyword, interpret the user's intent and rou
 | "delete this model/experiment/feature" (explicit) | the #76 doors: `ml_delete_model` / `experiment_delete` / `feature_definition_delete` / `feature_function_delete` — ALWAYS dry-run first, show the blast radius, execute only on a second explicit confirmation; promoted artifacts refuse by design, do not route around refusals |
 | "combine VIX and breadth into one indicator" / macro-of-macro | `macro_register_composite` (owner-authored) → `macro_derive` — inputs must exist; cycles refuse |
 | "sector rotation" / "which sectors lead" / "hunt on sector states" | `macro seed-sectors` → `macro derive --series all` → `regime discover start` with `macro_sector_rs_*`/`macro_sector_breadth_*` tercile atoms (CLI) |
+| "which industries lead" / "biotech breadth" / "hunt on industry states" | `macro_seed_industries` (universe-gated census) → `macro_derive` → hunts pre-register `macro_industry_rs_*`/`macro_industry_breadth_*` atoms like any feature |
 | "is this data trustworthy" / "any bad data" | `quality_findings` (show the verdict tier — suspect ≠ trash) |
 | "flag garbage in stored data" | confirm, then `quality_backfill` → `quality_findings` |
 | "what data quality rules exist" | `quality_catalog` |

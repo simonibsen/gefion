@@ -364,6 +364,14 @@ gefion macro derive --series dispersion_20 --min-stocks 100
 gefion macro seed-sectors                # census-driven; sectors under --min-members (100) skipped
 gefion macro derive --series all         # sector series compute like any derived series
 
+# Industry-state series (016): the same pattern one level finer (151
+# industries vs 11 sectors — biotech, regional banks, software, ...).
+# The census counts MODELING-UNIVERSE members only (spec 015): "SHELL
+# COMPANIES" is itself an industry and never earns a series, and penny
+# members never pad a thin industry over the floor.
+gefion macro seed-industries             # gated census; industries under --min-members (100) skipped
+gefion macro derive --series all         # industry series compute like any derived series
+
 # Catalog + coverage
 gefion macro list
 ```
