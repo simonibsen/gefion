@@ -58,6 +58,17 @@ def conn():
 
 # --- parsers (pure, no DB) ------------------------------------------------------
 
+def test_fred_url_pins_full_history_start():
+    """FRED's graph-CSV endpoint applies a per-series DEFAULT WINDOW when no
+    start date is given — hy_oas came back with 3 years instead of its
+    1996-onward history while t10y2y returned everything (017). Pinning
+    cosd= forces full history for every series."""
+    from gefion.macro.ingest import FRED_CSV_URL
+    url = FRED_CSV_URL.format(series="BAMLH0A0HYM2")
+    assert "cosd=1900-01-01" in url
+    assert "id=BAMLH0A0HYM2" in url
+
+
 def test_parse_fred_csv_value_only_skips_missing():
     from gefion.macro import ingest
     text = ("observation_date,VIXCLS\n"
