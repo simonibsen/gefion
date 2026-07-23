@@ -194,6 +194,38 @@ def ingest_series(conn, name: str, provider: str, kind: str, cadence: str,
                 **summary}
 
 
+def refresh_all_series(conn,
+                       fetch: Optional[Callable[[str, bool], List[Dict[str, Any]]]] = None,
+                       ) -> Dict[str, Any]:
+    """Incrementally refresh EVERY registered external macro series (017).
+
+    The nightly-chain form of ingest: enumerates catalog rows whose provider
+    is external (fred:/alphavantage: — derived and materialized series have
+    their own pipelines and are never touched) and re-ingests each with its
+    stored provider/kind/cadence. One failing provider is reported in
+    `failed`, never raised — a dead provider must not stop the others.
+    """
+    with create_span("macro.ingest.refresh_all") as span:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT name, provider, kind, cadence, description "
+                "FROM macro_series "
+                "WHERE provider LIKE 'fred:%' OR provider LIKE 'alphavantage:%' "
+                "ORDER BY name")
+            rows = cur.fetchall()
+        refreshed, failed = [], {}
+        for name, provider, kind, cadence, description in rows:
+            try:
+                refreshed.append(ingest_series(
+                    conn, name, provider=provider, kind=kind,
+                    cadence=cadence, description=description, full=False,
+                    fetch=fetch))
+            except Exception as exc:
+                failed[name] = str(exc)
+        set_attributes(span, refreshed=len(refreshed), failed=len(failed))
+        return {"refreshed": refreshed, "failed": failed}
+
+
 def _validate_macro(conn, name: str, series_id: int,
                     rows: List[Dict[str, Any]], quality_catalog: Any) -> int:
     """Validate ingested macro values against the data-quality catalog and

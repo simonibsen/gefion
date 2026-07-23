@@ -2287,11 +2287,14 @@ async def list_tools() -> List[Tool]:
                     "kind": {"type": "string", "description": "index | rate | breadth"},
                     "cadence": {"type": "string", "description": "daily | weekly | monthly"},
                     "full": {"type": "boolean", "description": "Decades backfill"},
+                    "refresh_all": {"type": "boolean",
+                                    "description": "Refresh EVERY registered "
+                                    "external series incrementally (017 — "
+                                    "the nightly-chain form; omit name)"},
                     "include_flagged": {"type": "boolean",
                                         "description": "Carry quality-convicted "
                                         "values into the feature (default: excluded)"},
                 },
-                "required": ["name"],
             },
         ),
         Tool(
@@ -6202,6 +6205,8 @@ async def _entity_delete(args: Dict[str, Any]) -> Dict[str, Any]:
 async def _macro_ingest(args: Dict[str, Any]) -> Dict[str, Any]:
     """Ingest a macro series + materialize its feature (mutating)."""
     async def _run():
+        if args.get("refresh_all"):
+            return await GefionExecutor().run("macro", "ingest", "--all")
         cmd = ["macro", "ingest", "--name", args["name"]]
         for opt in ("provider", "kind", "cadence"):
             if args.get(opt):

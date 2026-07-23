@@ -355,6 +355,17 @@ into the stocks table. Adding one is configuration, not schema:
 ```bash
 # Ingest VIX from FRED (keyless, back to 1990) and materialize macro_vix
 gefion macro ingest --name vix --provider fred:VIXCLS --full
+
+# The standing macro vocabulary (all FRED, keyless, decades of history):
+gefion macro ingest --name t10y2y --provider fred:T10Y2Y --kind rate --full        # 10y-2y term spread
+gefion macro ingest --name hy_oas --provider fred:BAMLH0A0HYM2 --kind rate --full  # high-yield credit spread
+gefion macro ingest --name dollar_index --provider fred:DTWEXBGS --kind index --full
+gefion macro ingest --name fed_funds --provider fred:DFF --kind rate --full
+
+# Refresh EVERY registered external series incrementally (the nightly-chain
+# form — 017; derived series have their own pipeline and are untouched):
+gefion macro ingest --all
+
 # derived market-shape series (no provider — computed from our own cross-section):
 gefion macro derive                      # ALL derived series (repo seeds + every DB market function), incremental
 gefion macro derive --series dispersion_20 --min-stocks 100
