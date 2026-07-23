@@ -24,7 +24,11 @@ from typing import Any, Callable, Dict, List, Optional
 from gefion.macro import catalog
 from gefion.observability import create_span, set_attributes
 
-FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}"
+# cosd pins the observation start: without it FRED applies a per-series
+# DEFAULT WINDOW (hy_oas returned 3 years while t10y2y returned everything
+# — 017). 1900 predates every FRED series; the endpoint clamps to actual.
+FRED_CSV_URL = ("https://fred.stlouisfed.org/graph/fredgraph.csv"
+                "?id={series}&cosd=1900-01-01")
 
 
 class MacroIngestError(ValueError):
