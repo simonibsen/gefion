@@ -8116,6 +8116,39 @@ def _parse_overview_fundamentals(overview: dict) -> dict:
     return result
 
 
+def _stale_fundamentals_stocks(conn, max_age_days: int, force: bool,
+                               limit: Optional[int]) -> list:
+    """Stocks whose FUNDAMENTALS are stale or absent (017).
+
+    Freshness keys off stocks_fundamentals' own MAX(date) per stock — never
+    stocks.updated_at, which is a shared column bumped by listing-meta and
+    other jobs (that coupling froze the weekly refresh: one listing-meta run
+    made every stock look fresh for --max-age days). ETFs are excluded
+    entirely: OVERVIEW has no fundamentals for funds. Never-fetched stocks
+    order first.
+    """
+    query = """
+        SELECT s.id, s.symbol
+        FROM stocks s
+        LEFT JOIN (SELECT data_id, MAX(date) AS last_fetch
+                   FROM stocks_fundamentals GROUP BY data_id) f
+          ON f.data_id = s.id
+        WHERE s.asset_type IS DISTINCT FROM 'ETF'
+    """
+    params: list = []
+    if not force:
+        query += (" AND (f.last_fetch IS NULL "
+                  "OR f.last_fetch < CURRENT_DATE - %s::int)")
+        params.append(max_age_days)
+    query += " ORDER BY f.last_fetch ASC NULLS FIRST, s.symbol"
+    if limit:
+        query += " LIMIT %s"
+        params.append(limit)
+    with conn.cursor() as cur:
+        cur.execute(query, params)
+        return cur.fetchall()
+
+
 def _fundamentals_update_impl(
     exchange: Optional[str],
     limit: Optional[int],
@@ -8128,7 +8161,6 @@ def _fundamentals_update_impl(
 ) -> None:
     """Implementation of fundamentals-update."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from datetime import datetime, timedelta
     from gefion.alphavantage.client import AlphaVantageClient
 
     url = _db_url(db_url)
@@ -8139,31 +8171,14 @@ def _fundamentals_update_impl(
         emit_error(str(e), json_output=json_output)
         return
 
-    # Get stocks to update
+    # Get stocks whose fundamentals are stale/absent (017: freshness from
+    # the fundamentals data itself, never the shared stocks.updated_at).
+    # Note: exchange is not enforced as a filter — this command is what
+    # populates stocks.exchange, so filtering by it would skip rows that
+    # still need their first update.
     with db_connection(url) as conn:
-        with conn.cursor() as cur:
-            query = "SELECT id, symbol, updated_at FROM stocks WHERE 1=1"
-            params: list = []
-
-            if exchange:
-                # Note: exchange is not enforced as a filter yet — this command
-                # is what populates stocks.exchange, so filtering by it here
-                # would skip the rows that still need their first update.
-                pass
-
-            if not force:
-                # Skip recently updated stocks
-                cutoff = datetime.now() - timedelta(days=max_age_days)
-                query += " AND (updated_at IS NULL OR updated_at < %s)"
-                params.append(cutoff)
-
-            query += " ORDER BY updated_at ASC NULLS FIRST"
-
-            if limit:
-                query += f" LIMIT {limit}"
-
-            cur.execute(query, params)
-            stocks = cur.fetchall()
+        stocks = _stale_fundamentals_stocks(conn, max_age_days=max_age_days,
+                                            force=force, limit=limit)
 
     if not stocks:
         if json_output:
@@ -8204,7 +8219,7 @@ def _fundamentals_update_impl(
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {
             pool.submit(_fetch_one, stock_id, symbol): symbol
-            for stock_id, symbol, _ in stocks
+            for stock_id, symbol in stocks
         }
         for future in as_completed(futures):
             stock_id, symbol, overview, err, was_skipped = future.result()
@@ -13264,7 +13279,8 @@ def data_entity_delete(
 
 @macro_app.command("ingest")
 def macro_ingest(
-    name: str = typer.Option(..., "--name", help="Series name (e.g. vix)"),
+    name: Optional[str] = typer.Option(None, "--name",
+                                       help="Series name (e.g. vix)"),
     provider: str = typer.Option(
         "fred:VIXCLS", "--provider",
         help="Provider key: fred:<SERIES> (keyless, default) or "
@@ -13272,6 +13288,10 @@ def macro_ingest(
     kind: str = typer.Option("index", "--kind", help="index | rate | breadth | …"),
     cadence: str = typer.Option("daily", "--cadence", help="daily | weekly | monthly"),
     full: bool = typer.Option(False, "--full", help="Decades backfill vs incremental"),
+    refresh_all: bool = typer.Option(
+        False, "--all",
+        help="Incrementally refresh EVERY registered external series "
+             "(the nightly-chain form; derived series untouched)"),
     include_flagged: bool = typer.Option(
         False, "--include-flagged",
         help="Carry data-quality-convicted values into the feature anyway "
@@ -13286,10 +13306,31 @@ def macro_ingest(
     (entity_table='macro_series') landing in computed_features. Values
     convicted as provider trash (e.g. a VIX <= 0) are excluded from the
     feature by default; the raw value stays verbatim in macro_series_values.
+
+    `--all` refreshes every registered external series incrementally (017)
+    — one failing provider is reported, never stops the others.
     """
-    from gefion.macro.ingest import MacroIngestError, ingest_series
+    from gefion.macro.ingest import (MacroIngestError, ingest_series,
+                                     refresh_all_series)
     out = get_output(json_output)
+    if refresh_all and name:
+        out.error("--all and --name are mutually exclusive")
+        raise typer.Exit(1)
+    if not refresh_all and not name:
+        out.error("provide --name SERIES, or --all to refresh everything")
+        raise typer.Exit(1)
     with _regime_conn(db_url) as conn:
+        if refresh_all:
+            result = refresh_all_series(conn)
+            msg = (f"Refreshed {len(result['refreshed'])} external series, "
+                   f"{len(result['failed'])} failed")
+            if result["failed"]:
+                msg += " (" + "; ".join(
+                    f"{k}: {v}" for k, v in result["failed"].items()) + ")"
+            out.success(msg, data={
+                "refreshed": [r["series"] for r in result["refreshed"]],
+                "failed": result["failed"]})
+            return
         try:
             summary = ingest_series(conn, name, provider=provider, kind=kind,
                                     cadence=cadence, full=full,

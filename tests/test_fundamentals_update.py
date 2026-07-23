@@ -137,7 +137,7 @@ def test_fundamentals_update_uses_single_db_connection():
         "SYM3": {"Name": "Sym Three", "Sector": "Energy", "Industry": "Oil"},
     }
 
-    stocks = [(1, "SYM1", None), (2, "SYM2", None), (3, "SYM3", None)]
+    stocks = [(1, "SYM1"), (2, "SYM2"), (3, "SYM3")]
 
     connection_count = {"opens": 0}
     original_db_connection = None
@@ -197,7 +197,7 @@ def test_fundamentals_update_emits_progress():
     from gefion.alphavantage.client import AlphaVantageClient
     import io
 
-    stocks = [(i, f"SYM{i}", None) for i in range(5)]
+    stocks = [(i, f"SYM{i}") for i in range(5)]
 
     mock_conn = Mock()
     mock_conn.transaction = lambda: __import__('contextlib').nullcontext()
@@ -251,7 +251,7 @@ def test_fundamentals_update_rich_progress():
     from gefion.cli import _fundamentals_update_impl
     from gefion.alphavantage.client import AlphaVantageClient
 
-    stocks = [(1, "AAPL", None), (2, "MSFT", None)]
+    stocks = [(1, "AAPL"), (2, "MSFT")]
 
     mock_conn = Mock()
     mock_conn.transaction = lambda: __import__('contextlib').nullcontext()
@@ -322,7 +322,7 @@ def test_fundamentals_update_inserts_into_stocks_fundamentals():
         "SharesOutstanding": "15500000000",
     }
 
-    stocks = [(1, "AAPL", None)]
+    stocks = [(1, "AAPL")]
     executed_sqls = []
 
     mock_conn = Mock()
@@ -358,7 +358,8 @@ def test_fundamentals_update_inserts_into_stocks_fundamentals():
     # Should have an INSERT into stocks_fundamentals
     fundamentals_inserts = [
         (sql, params) for sql, params in executed_sqls
-        if "stocks_fundamentals" in sql
+        if sql.lstrip().upper().startswith("INSERT")
+        and "stocks_fundamentals" in sql
     ]
     assert len(fundamentals_inserts) == 1, (
         f"Expected 1 INSERT into stocks_fundamentals, got {len(fundamentals_inserts)}. "
@@ -388,7 +389,7 @@ def test_fundamentals_update_writes_exchange():
         "Exchange": "NASDAQ",
     }
 
-    stocks = [(1, "AAPL", None)]
+    stocks = [(1, "AAPL")]
     executed_sqls = []
 
     mock_conn = Mock()
@@ -519,7 +520,7 @@ def test_fundamentals_update_parallel_execution():
         call_spans.append((started, time.monotonic()))
         return {"Name": f"{symbol} Inc", "Sector": "Tech", "Industry": "Software"}
 
-    stocks = [(i, f"SYM{i}", None) for i in range(6)]
+    stocks = [(i, f"SYM{i}") for i in range(6)]
 
     mock_conn = Mock()
     mock_conn.transaction = lambda: __import__('contextlib').nullcontext()

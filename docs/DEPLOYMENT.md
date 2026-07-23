@@ -132,11 +132,16 @@ universe filters and sector-scoped work. Two guards now exist:
    # data-update runs --skip-features (#120 item 1a): its local-mode feature
    # phase duplicated the chained dispatcher-mode feat-compute at ~3.5x the
    # cost — ONE feature pass, on the fast path.
-   30 2 * * *  data-update --timeframe auto --skip-features --json && feat-compute --all-features --incremental --json && universe refresh --json && { ml predict-backfill --model-name prod_model --model-version v2022 --json || true; } && macro derive --json
+   30 2 * * *  data-update --timeframe auto --skip-features --json && feat-compute --all-features --incremental --json && universe refresh --json && { ml predict-backfill --model-name prod_model --model-version v2022 --json || true; } && { macro ingest --all --json || true; } && macro derive --json
    # universe refresh (spec 015) runs AFTER feat-compute (fresh attributes)
    # and BEFORE macro derive (derived series must see fresh membership); it
    # is blocking by design — a guard refusal should stop the derive rather
    # than silently compute series over a gutted population.
+   # macro ingest --all (017) refreshes every EXTERNAL series (VIX, spreads,
+   # dollar, rates) before derive so composites read today's values; it is
+   # non-blocking (|| true) — a dead provider must never stop the derive.
+   # History: VIX went stale for two weeks (2026-07) because refresh was
+   # per-series and in no cron at all.
    # predict-backfill resumes from the last stored prediction (a no-op
    # costs seconds), re-materializes the pred_* feature rows (the signal
    # surface derive reads), and runs BEFORE derive so the model series pick
