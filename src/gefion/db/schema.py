@@ -911,6 +911,8 @@ def create_stocks_fundamentals_table(conn: Connection) -> None:
                 beta NUMERIC(14,6),
                 ev_to_ebitda NUMERIC(14,6),
                 shares_outstanding BIGINT,
+                sector TEXT,
+                industry TEXT,
                 created_at TIMESTAMP DEFAULT NOW(),
                 PRIMARY KEY (data_id, date)
             );
@@ -925,6 +927,11 @@ def create_stocks_fundamentals_table(conn: Connection) -> None:
             cur.execute(
                 sql.SQL("ALTER TABLE stocks_fundamentals ALTER COLUMN {} "
                         "TYPE NUMERIC(14,6)").format(sql.Identifier(col)))
+        # Classification history (018): sector/industry AS OF the fetch date
+        cur.execute("ALTER TABLE stocks_fundamentals "
+                    "ADD COLUMN IF NOT EXISTS sector TEXT;")
+        cur.execute("ALTER TABLE stocks_fundamentals "
+                    "ADD COLUMN IF NOT EXISTS industry TEXT;")
         cur.execute("SELECT create_hypertable('stocks_fundamentals', 'date', if_not_exists => TRUE);")
         try:
             cur.execute("SELECT set_chunk_time_interval('stocks_fundamentals', INTERVAL '90 days');")
