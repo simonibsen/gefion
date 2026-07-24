@@ -8305,8 +8305,15 @@ def _write_fundamentals_results(conn, results) -> Dict[str, int]:
                     """, (name or None, sector or None, industry or None,
                           stock_exchange or None, stock_id))
 
-                    # Insert time-series fundamentals data
+                    # Insert time-series fundamentals data. Classification
+                    # history (018): sector/industry ride the vintage row —
+                    # stocks.sector/industry are current-state only, these
+                    # rows are where taxonomy history lives. A
+                    # classification-only OVERVIEW (shells: no ratios) still
+                    # writes a vintage.
                     fundamentals = _parse_overview_fundamentals(overview)
+                    fundamentals["sector"] = sector or None
+                    fundamentals["industry"] = industry or None
                     if any(v is not None for v in fundamentals.values()):
                         cols = list(fundamentals.keys())
                         placeholders = ", ".join(["%s"] * (2 + len(cols)))

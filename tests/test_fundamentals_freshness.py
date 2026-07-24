@@ -95,6 +95,75 @@ class TestStalePopulation:
         assert rows[0] == "QFU_NEVER"   # NULLS FIRST: oldest need first
 
 
+class TestClassificationHistory:
+    """018: sector/industry accrue WITH the vintage rows. The stocks columns
+    are current-state only (overwritten on reclassification) — every sector
+    series, industry census, and shell exclusion was applying today's
+    taxonomy to 26 years of history. Vintage rows now carry the
+    classification as of their fetch date."""
+
+    def test_vintage_rows_carry_classification(self, conn):
+        c, ids = conn
+        with c.cursor() as cur:
+            cur.execute(
+                "INSERT INTO stocks_fundamentals (data_id, date, pe_ratio, "
+                "sector, industry) VALUES (%s, %s, 9.9, 'TECHNOLOGY', "
+                "'SOFTWARE - APPLICATION')",
+                (ids["QFU_NEVER"], date.today() - timedelta(days=1)))
+            cur.execute(
+                "SELECT sector, industry FROM stocks_fundamentals "
+                "WHERE data_id = %s AND date = %s",
+                (ids["QFU_NEVER"], date.today() - timedelta(days=1)))
+            assert cur.fetchone() == ("TECHNOLOGY", "SOFTWARE - APPLICATION")
+
+    def test_update_impl_writes_classification_into_vintage(self):
+        """The weekly refresh must write sector/industry into the vintage
+        row — and a classification-only OVERVIEW (no ratios: shells) must
+        still produce a vintage row."""
+        import os as _os
+        from unittest.mock import Mock, patch
+
+        from gefion.cli import _fundamentals_update_impl
+        from contextlib import contextmanager, nullcontext
+
+        overview = {"Symbol": "SHEL", "Name": "Shell Co",
+                    "Sector": "FINANCIAL SERVICES",
+                    "Industry": "SHELL COMPANIES"}   # no ratio fields at all
+        executed = []
+
+        @contextmanager
+        def fake_conn_ctx(url):
+            conn = Mock()
+            conn.transaction = lambda: nullcontext()
+            conn.autocommit = True
+            cur = Mock()
+            cur.fetchall.return_value = [(1, "SHEL")]
+            cur.execute.side_effect = lambda sql, params=None: executed.append(
+                (str(sql), params))
+            conn.cursor.return_value.__enter__ = Mock(return_value=cur)
+            conn.cursor.return_value.__exit__ = Mock(return_value=False)
+            yield conn
+
+        with patch.dict(_os.environ, {"ALPHAVANTAGE_API_KEY": "k",
+                                      "OTEL_ENABLED": "false"}):
+            with patch("gefion.cli.db_connection", side_effect=fake_conn_ctx):
+                # the impl does a LOCAL import — patch the source module
+                with patch("gefion.alphavantage.client.AlphaVantageClient") as MockClient:
+                    MockClient.return_value.fetch_overview.return_value = overview
+                    _fundamentals_update_impl(
+                        exchange=None, limit=None, max_age_days=30,
+                        force=True, calls_per_minute=75,
+                        db_url="postgresql://test", json_output=True,
+                        workers=1)
+        inserts = [(s, p) for s, p in executed
+                   if s.lstrip().upper().startswith("INSERT")
+                   and "stocks_fundamentals" in s]
+        assert inserts, "classification-only overview must still write a vintage"
+        sql, params = inserts[0]
+        assert "sector" in sql and "industry" in sql
+        assert "SHELL COMPANIES" in params
+
+
 class TestProviderExtremesStore:
     def test_issue_79_garbage_extremes_store_verbatim(self, conn):
         """Beta -503341.44 and DividendYield 1000000.0 (real provider

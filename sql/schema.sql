@@ -147,9 +147,17 @@ CREATE TABLE IF NOT EXISTS stocks_fundamentals (
     beta NUMERIC(14,6),
     ev_to_ebitda NUMERIC(14,6),
     shares_outstanding BIGINT,
+    -- Classification history (018): sector/industry AS OF the fetch date.
+    -- stocks.sector/industry are current-state only (overwritten on
+    -- reclassification); the vintage rows are where taxonomy history lives.
+    sector TEXT,
+    industry TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (data_id, date)
 );
+-- Idempotent add for databases created before 018
+ALTER TABLE stocks_fundamentals ADD COLUMN IF NOT EXISTS sector TEXT;
+ALTER TABLE stocks_fundamentals ADD COLUMN IF NOT EXISTS industry TEXT;
 SELECT create_hypertable('stocks_fundamentals', 'date', if_not_exists => TRUE);
 SELECT set_chunk_time_interval('stocks_fundamentals', INTERVAL '90 days');
 CREATE INDEX IF NOT EXISTS stocks_fundamentals_data_date_idx

@@ -655,6 +655,8 @@ Point-in-time company fundamentals (no history — overwritten on update).
 | `beta` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`Beta` | Beta vs market |
 | `ev_to_ebitda` | NUMERIC(14,6) | ✓ | `OVERVIEW`.<br>`EVToEBITDA` | Enterprise value / EBITDA |
 | `shares_outstanding` | BIGINT | ✓ | `OVERVIEW`.<br>`SharesOutstanding` | Shares outstanding |
+| `sector` | TEXT | ✓ | `OVERVIEW`.<br>`Sector` | GICS sector |
+| `industry` | TEXT | ✓ | `OVERVIEW`.<br>`Industry` | GICS industry |
 | `created_at` | TIMESTAMP | ✓ |  |  |
 
 ### `strategy_configs`
