@@ -4016,14 +4016,21 @@ async def _cross_sectional_compute(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _query_database(args: Dict[str, Any]) -> Dict[str, Any]:
     """Execute read-only SQL query for data exploration."""
+    import re
+
     sql = args['sql'].strip()
 
     # Safety checks - only allow SELECT queries
     sql_upper = sql.upper()
     dangerous_keywords = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE', 'TRUNCATE', 'GRANT', 'REVOKE']
 
+    # Match keywords as whole SQL words on a comment-stripped copy, so
+    # column names like created_at / updated_at don't false-positive (#161).
+    sql_checked = re.sub(r'--[^\n]*', ' ', sql_upper)
+    sql_checked = re.sub(r'/\*.*?\*/', ' ', sql_checked, flags=re.DOTALL)
+
     for keyword in dangerous_keywords:
-        if keyword in sql_upper:
+        if re.search(rf'\b{keyword}\b', sql_checked):
             return {
                 'success': False,
                 'error': f'Dangerous SQL keyword detected: {keyword}. Only SELECT queries allowed.',
