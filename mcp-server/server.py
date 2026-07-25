@@ -4715,7 +4715,10 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
             steps.append("1. Fix infrastructure: Start required services")
 
         if any(t in ["no_data", "no_prices", "stale_data"] for t in issue_types):
-            steps.append(f"{len(steps)+1}. Update price data: gefion data-update")
+            steps.append(
+                f"{len(steps)+1}. Update price data: "
+                "gefion data-update --exchange NASDAQ --limit 10"
+            )
 
         if "no_features" in issue_types:
             steps.append(f"{len(steps)+1}. Compute features: gefion feat-compute")

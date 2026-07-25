@@ -255,3 +255,86 @@ class TestFundamentalsStalenessDetection:
         # Expected: If all stocks updated within 30 days
         # No stale_fundamentals issue
         pass
+
+
+class TestNextStepsBoundedDataUpdate:
+    """next_steps must never recommend unbounded 'gefion data-update' (issue #158).
+
+    The structured issues/suggestions are deliberately bounded
+    (--exchange NASDAQ --limit 10); next_steps must be consistent.
+    """
+
+    @staticmethod
+    def _import_server():
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent))
+        import server
+        return server
+
+    @staticmethod
+    def _run_async(coro):
+        """Run a coroutine without tearing down the current event loop.
+
+        asyncio.run() closes the loop and unsets the current one, which
+        breaks tests (test_rbac.py) that rely on asyncio.get_event_loop().
+        """
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("loop closed")
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+
+    def test_next_steps_data_update_is_bounded(self, monkeypatch):
+        """Generated next_steps for stale data must include --limit."""
+        server = self._import_server()
+
+        class FakeHealthCache:
+            def get_or_check(self, service, check_fn):
+                return {"running": True}
+
+        async def fake_query_database(args):
+            sql = args.get("sql", "")
+            if "total_stocks" in sql and "ohlcv_rows" in sql:
+                # 100 stocks, 50000 rows, very stale latest date -> stale_data
+                return {
+                    "success": True,
+                    "rows": [["100", "50000", "2020-01-02", "1000", "10"]],
+                }
+            return {"success": False}
+
+        monkeypatch.setattr(server, "health_cache", FakeHealthCache())
+        monkeypatch.setattr(server, "_query_database", fake_query_database)
+
+        result = self._run_async(server._system_status({}))
+
+        # Sanity: the scenario actually produced a stale-data issue and a
+        # data-update next step (otherwise this test asserts nothing).
+        assert any(i["type"] == "stale_data" for i in result["issues"])
+        assert any("data-update" in step for step in result["next_steps"])
+
+        for step in result["next_steps"]:
+            if "data-update" in step:
+                assert "--limit" in step, (
+                    f"next_steps recommends unbounded data-update: {step!r} — "
+                    "must be bounded like the structured suggestions (issue #158)"
+                )
+
+    def test_system_status_source_has_no_unbounded_data_update(self):
+        """No literal in _system_status may emit 'gefion data-update' without --limit."""
+        from pathlib import Path
+        src = Path("mcp-server/server.py").read_text()
+
+        start = src.index("async def _system_status(")
+        next_fn = src.index("\nasync def ", start + 1)
+        fn_body = src[start:next_fn]
+
+        for line in fn_body.splitlines():
+            if "gefion data-update" in line:
+                assert "--limit" in line, (
+                    f"unbounded data-update in _system_status: {line.strip()!r}"
+                )
