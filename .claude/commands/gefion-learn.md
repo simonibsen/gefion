@@ -35,13 +35,14 @@ Read it at start; update it whenever a checkpoint passes. If it doesn't exist, t
 - Prefer `--json` + explanation when the learner should read output; prefer the UI when the lesson is visual (charts, lifecycle badges).
 - **Thread the three surfaces throughout.** Whenever a module runs a CLI command, name its MCP-tool equivalent (and UI page where one exists) so the learner sees CLI / MCP / UI as three doors to one operation — don't save MCP for the end. Where it's low-friction, actually *demonstrate* the MCP tool (the tutor has them available, e.g. `query_database`, `system_status`, `experiment_results`) rather than only mentioning it. Module 9 then consolidates MCP rather than introducing it cold.
 - The UI runs at http://localhost:8501 (`gefion ui --no-browser` if down). All CLI examples use `.venv/bin/python -m gefion.cli …` (alias: `gefion …` if installed).
-- If a command errors, teach the debugging path (error message → `docs/TROUBLESHOOTING.md` → `gefion health`), don't just fix it silently.
+- If a command errors, teach the debugging path (error message → `docs/TROUBLESHOOTING.md` → `gefion health`), don't just fix it silently. The same applies to MCP tool errors: most MCP tools shell out to the CLI through one executor in `mcp-server/server.py`, so an MCP failure is itself a lesson in how the surfaces are wired (issue #157 is the canonical example — read the returned `command` field first).
 
 ### Curriculum
 
 **Module 0 — Orientation & services**
 Concepts: what gefion is (ML stock-prediction research system), the service stack (PostgreSQL+TimescaleDB, Tempo, Grafana), where things live (`src/gefion`, `datasets/`, `~/.gefion`), and the **three surfaces** every operation is reachable through — CLI, MCP server (~70 tools mirroring the CLI), and the Streamlit UI (FR-042). Introduce MCP here as a first-class surface, not an afterthought: the tutor itself drives many exercises through MCP tools (e.g. `query_database`), so the learner should recognize it from module 0.
-Do: `/gefion-services start` equivalent (`docker ps` to inspect), `gefion health`, open the UI Dashboard. Point out that the same health check exists as CLI (`gefion health`), MCP (`health_check`), and a UI page — one concept, three doors.
+Do: `/gefion-services start` equivalent (`docker ps` to inspect), `gefion health`, open the UI Dashboard. Point out that the same health check exists as CLI (`gefion health`), MCP (`health_check`), and a UI page — one concept, three doors. Define the "doors" metaphor explicitly the first time you use it (a door = one of the three surfaces into the same operation); learners reasonably ask "what do you mean, door?".
+Expect `system_status`/`health` to *suggest* `gefion data-update` when local data is stale (see #158). Do NOT follow it — instead teach it as the first instance of a theme that recurs through Module 10: **tools suggest, operators decide**. Gefion is full of machinery that proposes (experiment cycles, generated features, discovered regimes); at every level a human owns the gate, starting here with a disk-constrained dev box and a well-meaning status tool.
 Checkpoint: learner explains what each running container does, and names the three surfaces (CLI / MCP / UI).
 
 **Module 1 — Data layer**
