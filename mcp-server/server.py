@@ -58,8 +58,14 @@ class GefionExecutor:
             self.env['ALPHAVANTAGE_API_KEY'] = api_key
 
     async def run(self, *args: str) -> Dict[str, Any]:
-        """Run gefion command with --json flag and return parsed output."""
-        cmd = ['gefion'] + list(args) + ['--json']
+        """Run gefion command with --json flag and return parsed output.
+
+        Invokes the CLI via the interpreter running this server
+        (sys.executable -m gefion.cli) rather than a bare 'gefion'
+        executable, which is not on PATH when the server is launched
+        with the venv python from outside an activated venv (#157).
+        """
+        cmd = [sys.executable, '-m', 'gefion.cli'] + list(args) + ['--json']
 
         try:
             result = subprocess.run(
@@ -5324,7 +5330,7 @@ async def _experiment_chain(args: Dict[str, Any]) -> Dict[str, Any]:
     """Create a child experiment chained to a parent."""
     async def _chain():
         cmd = [
-            "gefion", "experiment", "chain",
+            "experiment", "chain",
             "--parent-id", str(args["parent_id"]),
             "--name", args["name"],
             "--search-space", args["search_space"],
