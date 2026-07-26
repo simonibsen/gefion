@@ -134,6 +134,54 @@ quarterly_financials (
 - `macro_series` / `macro_series_values`: catalog + raw values for market-level series (VIX, CPI, rates) — the first non-stock entity home
 - `market_function_candidates`: the waiting room for machine-generated market-scope bodies (spec 014) — candidates live here, never in `feature_functions`, until a human approves; pending/rejected generated code has no execution path by construction. Audit-ledger semantics: rejection retains the row; no FK on `promoted_function_id` so the ledger survives function deletion
 
+### Soft edges and their compensations (issue #155)
+
+The code-as-data design uses deliberate non-foreign-key (non-FK) edges —
+by-name references, expression-embedded names, JavaScript Object Notation
+Binary (JSONB) provenance stamps, and the registry-routed
+`computed_features.data_id`. Each one is compensated by a validator, a
+deletion-door scan, or a refusal-while-referenced guarantee:
+
+- `feature_definitions.function_name → feature_functions.name` — validated
+  by `gefion feat-def-validate` (fix: `feat-def-fix`); functions refuse
+  deletion while routed
+- regime expressions embedding `feature_definitions.name` — features refuse
+  deletion while referenced; a missing feature fails loudly at compute time
+- `computed_features.data_id → (feature_definitions.entity_table).id` — the
+  retired hard FK (spec 007); db-health's `entity_integrity` orphan scan
+- JSONB provenance stamps (`ml_datasets.universe`, `experiments.config`,
+  `regime_discovery_runs.search_space` naming a universe;
+  `ml_datasets.feature_names`; `experiments.results->by_regime`) — deletion
+  doors refuse or report across them; provenance is never mutated
+
+Every such edge is DECLARED in `gefion.db.schema.SOFT_EDGES` (a module-level
+registry) and enforced by `tests/test_soft_edge_registry.py`: each entry's
+validator/deletion-door dotted paths must import to callables, and every
+`plan_*` deletion door in the codebase must be claimed by an entry. A new
+soft edge without a registered compensation is red CI — the same enforcement
+philosophy as the docs and data-dictionary drift checks.
+
+### Column archaeology (documented state, 2026-07)
+
+- **`stocks.exchange`** — sparsely populated since inception and never
+  enforced as a filter: `--exchange` on `ml dataset-build` / `ml predict` /
+  backtests selects the whole-stocks universe with a note, because filtering
+  on a mostly-NULL column would silently shrink the universe
+  (`gefion.backtest.data_loader`, `cli.py`). The populate path exists —
+  `gefion data listing-meta` backfills `exchange`/`asset_type` from the
+  AlphaVantage listing, and `fundamentals-update` writes it per stock — but
+  enforcement stays off until coverage is real (the old #29/#30 follow-up).
+  Modeling populations should route through universes (spec 015), which is
+  the supported filter chokepoint.
+- **`stocks.updated_at`** — vestigial for fundamentals freshness: since 017,
+  staleness keys off `stocks_fundamentals`' own `MAX(date)` per stock, never
+  this shared column (one listing-meta run once made every stock look fresh
+  and froze the weekly refresh). It is still written by `fundamentals-update`
+  and the `data update` auto-populate step, and still READ in exactly one
+  place: `data update`'s fundamentals check uses it (with `sector IS NULL`)
+  as a 30-day re-check gate for stock *metadata*. Retiring it means moving
+  that gate; until then it is metadata-recency only — never data freshness.
+
 ### Generated market functions and composites (spec 014)
 
 Two flows sit on top of the market dispatcher (spec 011):
@@ -534,6 +582,31 @@ experiment_trials (
     duration_seconds
 )
 ```
+
+### Run ledgers: ml_runs vs experiments
+
+Two run ledgers from different eras coexist deliberately — they answer
+different questions:
+
+- **`ml_runs`** records **mechanical train/predict/eval executions**: one
+  row per `gefion ml train` / `ml predict` / `ml eval` (and their
+  classifier/ensemble variants), with `run_type` ('train', 'predict',
+  'eval', 'train_classifier', 'train_ensemble', 'predict_ensemble'),
+  status, timing, `dataset_id`, and the exact `run_config`.
+  `ml_models.train_run_id` points here for artifact lineage. It answers
+  "what ran, on which dataset, with which config, and did it finish?"
+- **`experiments`** records **hypothesis verdicts**: one row per proposed
+  hypothesis (written by `gefion.experiments.core`), carrying the
+  search space, trials, holdout p-value, and the False Discovery Rate
+  (FDR) gate outcome (`fdr_survived`, `promoted_at`, probation/demotion).
+  It answers "was this idea supported, and did it earn production?"
+
+An experiment's trials may *cause* many `ml_runs` rows (hyperparameter
+trials train models), but there is no FK between the ledgers: `ml_runs`
+is execution accounting, `experiments` is scientific accounting. Neither
+replaces the other, and deletion doors treat them differently — runs and
+datasets are reusable inputs (never deleted with a model), while promoted
+experiments refuse deletion always.
 
 ### Experiment Chaining
 

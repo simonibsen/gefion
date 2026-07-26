@@ -161,6 +161,20 @@ active models are a --force gate. Disk: chart HTML reaps via `charts-clean`;
 exports are git-tracked backups by design (no reaper); dataset artifacts
 belong to their `ml_datasets` rows.
 
+## Soft edges must be registered (issue #155 — convention)
+
+A "soft edge" is any deliberate non-FK reference: a by-name column
+(`feature_definitions.function_name`), a name embedded in an expression or
+naming scheme, or a JSONB provenance stamp. Every soft edge needs a
+registered compensation — declare it in `gefion.db.schema.SOFT_EDGES`
+(edge, validator, deletion door, or a documented `no_validator_reason`).
+`tests/test_soft_edge_registry.py` enforces the registry: dotted paths
+must import to callables, and every `plan_*` function in a
+`gefion/*/deletion.py` module must be claimed by an entry — so shipping a
+new deletion door (which every new soft edge gets, per the deletion
+policy above) without registering its edge is red CI. When you add a soft
+edge: add the `SoftEdge` entry in the same increment as the door.
+
 ## Modeling-universe chokepoint (spec 015 — convention)
 
 Any code that selects a POPULATION OF STOCK SYMBOLS for modeling or
