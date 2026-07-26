@@ -153,3 +153,17 @@ class TestLearningPathCoversFeatureAreas:
             f"CLI groups absent from .claude/commands/gefion-learn.md: "
             f"{missing} — extend the curriculum (or mention where they fit)"
         )
+
+
+class TestStandingMacroVocabularyDocumented:
+    """The USER_GUIDE's standing FRED vocabulary must carry every series the
+    system expects operators to register — a series admitted by owner
+    decision (#160: oil, dollar) is not done until the guide shows its
+    ingest line."""
+
+    def test_oil_and_dollar_series_documented(self):
+        guide = (REPO / "docs" / "USER_GUIDE.md").read_text()
+        for name, fred_id in (("oil_wti", "fred:DCOILWTICO"),
+                              ("dollar_index", "fred:DTWEXBGS")):
+            assert name in guide, f"{name} missing from docs/USER_GUIDE.md"
+            assert fred_id in guide, f"{fred_id} missing from docs/USER_GUIDE.md"
