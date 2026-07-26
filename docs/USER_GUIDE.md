@@ -359,8 +359,9 @@ gefion macro ingest --name vix --provider fred:VIXCLS --full
 # The standing macro vocabulary (all FRED, keyless, decades of history):
 gefion macro ingest --name t10y2y --provider fred:T10Y2Y --kind rate --full        # 10y-2y term spread
 gefion macro ingest --name hy_oas --provider fred:BAMLH0A0HYM2 --kind rate --full  # high-yield credit spread
-gefion macro ingest --name dollar_index --provider fred:DTWEXBGS --kind index --full
+gefion macro ingest --name dollar_index --provider fred:DTWEXBGS --kind index --full    # trade-weighted broad dollar (017; envelope #160)
 gefion macro ingest --name fed_funds --provider fred:DFF --kind rate --full
+gefion macro ingest --name oil_wti --provider fred:DCOILWTICO --kind price --full  # WTI crude, 1986- (#160; the 2020-04-20 -36.98 print is real)
 
 # Refresh EVERY registered external series incrementally (the nightly-chain
 # form — 017; derived series have their own pipeline and are untouched):

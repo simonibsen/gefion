@@ -163,6 +163,31 @@ metrics:
       A volatility index is strictly positive; the all-time intraday extreme
       is ~90 (2008). 200 leaves headroom for regime breaks; <= 0 is trash.
 
+  oil_wti:
+    entity_table: macro_series
+    table: macro_series_values
+    column: value
+    series: oil_wti
+    bounds: {min: -150, max: 500}
+    why: >
+      WTI spot in USD/barrel. NEGATIVE OIL IS REAL: DCOILWTICO printed
+      -36.98 on 2020-04-20 (storage-crisis settlement), so a naive
+      positive-only bound would convict history. -150 leaves headroom under
+      the observed low; the all-time high is ~147 (2008-07), so 500 catches
+      cents-scaled or 1e2/1e3-scaled nonsense while admitting regime breaks.
+
+  dollar_index:
+    entity_table: macro_series
+    table: macro_series_values
+    column: value
+    series: dollar_index
+    bounds: {min: 1, max: 1000}
+    why: >
+      Trade-weighted broad dollar index, base 100 = Jan 2006; observed range
+      ~85-130 since inception. An index level is strictly positive, and a
+      value beyond 1000 has no definitional reading — it is a scale slip or
+      a sign flip, not a dollar regime.
+
 universe:
   # NASDAQ's published test-symbol family — configuration, not code.
   test_tickers: [ZVZZT, ZWZZT, ZXZZT, ZJZZT, ZBZX, ZTEST, ZAZZT, ZBZZT, ZCZZT]

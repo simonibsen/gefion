@@ -175,6 +175,30 @@ def test_shipped_catalog_covers_initial_scope():
     assert "ZVZZT" in cat.universe["test_tickers"]
 
 
+def test_shipped_catalog_covers_oil_and_dollar():
+    """#160: oil_wti and dollar_index join the standing macro vocabulary with
+    documented envelopes. Oil's bound must ADMIT the real 2020-04-20 print
+    (WTI settled at -36.98 — negative oil is history, not provider trash)
+    while convicting scaled or sign-flipped nonsense; a trade-weighted
+    dollar index is strictly positive."""
+    from gefion.quality.rules import check_bounds
+    cat = catalog.load_default()
+    for name in ("oil_wti", "dollar_index"):
+        assert name in cat.metrics
+        assert cat.metrics[name].entity_table == "macro_series"
+        assert cat.metrics[name].series == name
+        assert cat.metrics[name].why
+    # negative oil is real (2020-04-20: -36.98) — must NOT convict
+    assert check_bounds(cat.metrics["oil_wti"], -36.98) is None
+    assert check_bounds(cat.metrics["oil_wti"], 147.27) is None  # 2008 record
+    assert check_bounds(cat.metrics["oil_wti"], -500.0) is not None
+    assert check_bounds(cat.metrics["oil_wti"], 25560.0) is not None  # cents-scaled
+    # broad dollar index (base 100 = Jan 2006; observed ~85-130)
+    assert check_bounds(cat.metrics["dollar_index"], 120.53) is None
+    assert check_bounds(cat.metrics["dollar_index"], 0.0) is not None  # zero/sign garbage
+    assert check_bounds(cat.metrics["dollar_index"], 101415.5) is not None  # 1e3-scaled
+
+
 # --- series_range detector (issue #136) --------------------------------------------
 
 SERIES_RANGE = """
