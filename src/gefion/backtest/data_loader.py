@@ -14,6 +14,26 @@ from psycopg import sql
 from gefion.observability import create_span, set_attributes
 
 
+def resolve_backtest_universe(
+    db_url: str,
+    symbols: Optional[List[str]],
+    universe: Optional[str],
+) -> Dict[str, Any]:
+    """Provenance stamp for a backtest's population (spec 015, issue #153).
+
+    Explicit symbol lists bypass the universe gate (documented bypass, same
+    as the dataset path) — they are their own universe, stamped "explicit".
+    Otherwise the stamp names the resolved universe and its fingerprint,
+    exactly the ``ml_datasets.universe`` pattern.
+    """
+    from gefion.universe import resolve_universe
+
+    if symbols:
+        return {"universe_name": "explicit", "universe_fingerprint": None}
+    with psycopg.connect(db_url) as conn:
+        return resolve_universe(conn, universe).provenance()
+
+
 def load_price_data_for_backtest(
     db_url: str,
     symbols: Optional[List[str]] = None,

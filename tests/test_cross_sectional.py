@@ -37,22 +37,9 @@ def db_conn():
 def setup_db(db_conn):
     """Set up test database schema and cross_sectional_features table."""
     schema.create_stocks_table(db_conn)
-
-    # Create cross_sectional_features table with comparison_group
-    with db_conn.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS cross_sectional_features (
-                data_id INTEGER NOT NULL,
-                date DATE NOT NULL,
-                feature_name TEXT NOT NULL,
-                comparison_group TEXT NOT NULL DEFAULT 'market',
-                value DOUBLE PRECISION,
-                rank INTEGER,
-                percentile DOUBLE PRECISION,
-                created_at TIMESTAMP DEFAULT NOW(),
-                PRIMARY KEY (data_id, date, feature_name, comparison_group)
-            );
-        """)
+    # Canonical creator (issue #153): fixtures build the table the way
+    # db-init does, so schema drift shows up here first.
+    schema.create_cross_sectional_features_table(db_conn)
 
     yield
 

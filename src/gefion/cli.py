@@ -8370,6 +8370,13 @@ def cross_sectional_compute(
     include_market: bool = typer.Option(True, "--market/--no-market", help="Include market-wide rankings"),
     include_sectors: bool = typer.Option(True, "--sectors/--no-sectors", help="Include sector-relative rankings"),
     include_industries: bool = typer.Option(False, "--industries", help="Include industry-relative rankings"),
+    universe_name: Optional[str] = typer.Option(
+        None,
+        "--universe",
+        help="Modeling universe for the ranking population (spec 015): a "
+             "universe name, 'all' for unfiltered; default = the default "
+             "universe. Stamped on every stored row (issue #153)."
+    ),
     db_url: Optional[str] = typer.Option(None, help="Database URL"),
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
 ) -> None:
@@ -8401,9 +8408,11 @@ def cross_sectional_compute(
         include_market=include_market,
         include_sectors=include_sectors,
         include_industries=include_industries,
+        universe=universe_name or "default",
     ):
         _cross_sectional_compute_impl(
-            feature, date, include_market, include_sectors, include_industries, db_url, json_output
+            feature, date, include_market, include_sectors, include_industries,
+            universe_name, db_url, json_output
         )
 
 
@@ -8413,6 +8422,7 @@ def _cross_sectional_compute_impl(
     include_market: bool,
     include_sectors: bool,
     include_industries: bool,
+    universe_name: Optional[str],
     db_url: Optional[str],
     json_output: bool,
 ) -> None:
@@ -8440,6 +8450,7 @@ def _cross_sectional_compute_impl(
                 include_market=include_market,
                 include_sectors=include_sectors,
                 include_industries=include_industries,
+                universe=universe_name,
             )
 
             if json_output:
@@ -8448,6 +8459,7 @@ def _cross_sectional_compute_impl(
                 emit(f"[bold green]Cross-sectional rankings computed[/bold green]")
                 emit(f"  Feature: {result['feature_name']}")
                 emit(f"  Date: {result['date']}")
+                emit(f"  Universe: {result['universe_name']}")
                 emit(f"  Stocks: {result['stocks_count']}")
                 emit(f"  Rankings: {result['total_rankings']}")
                 emit(f"  Groups: {', '.join(result['groups'])}")
@@ -9454,6 +9466,13 @@ def backtest_run(
     emit("Loading price data from database...", json_output=json_output)
 
     try:
+        # Population provenance (spec 015, issue #153): record which
+        # universe the strategy's cross-section actually was —
+        # explicit symbol lists are their own universe ("explicit")
+        from gefion.backtest.data_loader import resolve_backtest_universe
+        universe_stamp = resolve_backtest_universe(
+            url, symbol_list, universe_name)
+
         price_data = load_price_data_for_backtest(
             db_url=url,
             symbols=symbol_list,
@@ -9812,6 +9831,7 @@ def backtest_run(
                     "start": start_date,
                     "end": end_date,
                 },
+                "universe": universe_stamp,
                 "symbols_tested": len(symbols_found),
                 "performance": {
                     "initial_value": initial_cash,
@@ -9866,6 +9886,7 @@ def backtest_run(
             console = Console()
             console.print("\n[bold green]Backtest Results[/bold green]")
             console.print(f"Strategy: {strategy}")
+            console.print(f"Universe: {universe_stamp['universe_name']}")
             console.print(f"Period: {start_date} to {end_date}")
             console.print(f"Symbols: {len(symbols_found)}")
             console.print(f"\n[bold]Performance:[/bold]")

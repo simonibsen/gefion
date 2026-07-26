@@ -83,6 +83,11 @@ def insert_cross_sectional_features(
                         f.get("value"),
                         f.get("rank"),
                         f.get("percentile"),
+                        # Universe provenance (issue #153): callers that know
+                        # their population stamp it; absent keys write NULL —
+                        # the "population unknown" legacy posture
+                        f.get("universe_name"),
+                        f.get("universe_fingerprint"),
                     )
                 )
 
@@ -94,13 +99,17 @@ def insert_cross_sectional_features(
             cur.executemany(
                 """
                 INSERT INTO cross_sectional_features
-                    (data_id, date, feature_name, comparison_group, value, rank, percentile)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (data_id, date, feature_name, comparison_group,
+                     value, rank, percentile,
+                     universe_name, universe_fingerprint)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (data_id, date, feature_name, comparison_group)
                 DO UPDATE SET
                     value = EXCLUDED.value,
                     rank = EXCLUDED.rank,
                     percentile = EXCLUDED.percentile,
+                    universe_name = EXCLUDED.universe_name,
+                    universe_fingerprint = EXCLUDED.universe_fingerprint,
                     created_at = NOW()
                 """,
                 insert_data,

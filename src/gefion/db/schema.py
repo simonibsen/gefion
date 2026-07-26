@@ -716,6 +716,76 @@ def create_computed_features_table(conn: Connection) -> None:
     conn.commit()
 
 
+def create_cross_sectional_features_table(conn: Connection) -> None:
+    """Market-relative rankings (rank/percentile) per comparison group.
+
+    Universe provenance (issue #153): every ranking row records the
+    population it was ranked within — universe_name + universe_fingerprint,
+    the spec-015 ``ml_datasets.universe`` pattern. NULL in these columns
+    means pre-provenance legacy: the population is unknown (pre-015
+    unfiltered market or post-015 default universe — not distinguishable
+    after the fact). Readers must never treat NULL as modeling_default;
+    absence of data is not evidence.
+    """
+    _ensure_timescaledb(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cross_sectional_features (
+                data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
+                date DATE NOT NULL,
+                feature_name TEXT NOT NULL,
+                comparison_group TEXT NOT NULL DEFAULT 'market',
+                value DOUBLE PRECISION,
+                rank INTEGER,
+                percentile DOUBLE PRECISION,
+                universe_name TEXT,
+                universe_fingerprint TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (data_id, date, feature_name, comparison_group)
+            );
+            """
+        )
+        # Idempotent for pre-provenance tables (created before issue #153)
+        cur.execute(
+            """
+            ALTER TABLE cross_sectional_features
+                ADD COLUMN IF NOT EXISTS universe_name TEXT,
+                ADD COLUMN IF NOT EXISTS universe_fingerprint TEXT;
+            """
+        )
+        cur.execute(
+            "SELECT create_hypertable('cross_sectional_features', 'date', "
+            "if_not_exists => TRUE);"
+        )
+        try:
+            cur.execute(
+                "SELECT set_chunk_time_interval('cross_sectional_features', "
+                "INTERVAL '30 days');")
+        except Exception:
+            pass
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS cross_sectional_features_brin "
+            "ON cross_sectional_features USING BRIN(date);")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS "
+            "cross_sectional_features_data_id_date_idx "
+            "ON cross_sectional_features(data_id, date DESC);")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS cross_sectional_features_date_idx "
+            "ON cross_sectional_features(date DESC);")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS "
+            "cross_sectional_features_comparison_group_idx "
+            "ON cross_sectional_features(comparison_group, date);")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS "
+            "cross_sectional_features_feature_date_group_rank_idx "
+            "ON cross_sectional_features(feature_name, date, "
+            "comparison_group, rank);")
+    conn.commit()
+
+
 def create_ml_datasets_table(conn: Connection) -> None:
     """Dataset manifests for ML training/inference runs."""
     with conn.cursor() as cur:

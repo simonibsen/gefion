@@ -616,6 +616,7 @@ Compute cross-sectional rankings for a feature across comparison groups.
 - `include_market`: Include market-wide rankings (default: true)
 - `include_sectors`: Include sector-relative rankings (default: true)
 - `include_industries`: Include industry-relative rankings (default: false)
+- `universe`: Modeling universe for the ranking population (spec 015): a universe name, `all` for unfiltered; default = the default universe. Stamped on every stored row (`universe_name` + `universe_fingerprint`)
 
 **What it does:**
 1. Fetches latest feature values for all stocks
@@ -640,7 +641,9 @@ Compute cross-sectional rankings for a feature across comparison groups.
   "date": "2025-12-24",
   "stocks_count": 100,
   "total_rankings": 156,
-  "groups": ["market", "sector:TECHNOLOGY", "sector:HEALTHCARE", "sector:FINANCE"]
+  "groups": ["market", "sector:TECHNOLOGY", "sector:HEALTHCARE", "sector:FINANCE"],
+  "universe_name": "modeling_default",
+  "universe_fingerprint": "sha256:…"
 }
 ```
 

@@ -404,6 +404,8 @@ def init_schema_tables(conn: psycopg.Connection, tables: List[str]) -> None:
             "feature_functions": schema.create_feature_functions_table,
             "feature_definitions": schema.create_feature_definitions_table,
             "computed_features": schema.create_computed_features_table,
+            "cross_sectional_features":
+                schema.create_cross_sectional_features_table,
             "ml_datasets": schema.create_ml_datasets_table,
             "ml_runs": schema.create_ml_runs_table,
             "ml_models": schema.create_ml_models_table,

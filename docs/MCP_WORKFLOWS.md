@@ -419,9 +419,15 @@ Include both market and sector rankings.
   "date": "2025-12-24",
   "stocks_count": 100,
   "total_rankings": 156,
-  "groups": ["market", "sector:TECHNOLOGY", "sector:HEALTHCARE", "sector:FINANCE"]
+  "groups": ["market", "sector:TECHNOLOGY", "sector:HEALTHCARE", "sector:FINANCE"],
+  "universe_name": "modeling_default",
+  "universe_fingerprint": "sha256:…"
 }
 ```
+
+Rankings are computed within a modeling universe (optional `universe`
+parameter; default = the default universe, `all` = unfiltered) and every
+stored row is stamped with that universe's name and fingerprint.
 
 **Step 3: Query ranking results**
 

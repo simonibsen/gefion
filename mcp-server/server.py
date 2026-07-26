@@ -957,6 +957,7 @@ async def list_tools() -> List[Tool]:
                     "include_market": {"type": "boolean", "description": "Include market-wide rankings", "default": True},
                     "include_sectors": {"type": "boolean", "description": "Include sector-relative rankings", "default": True},
                     "include_industries": {"type": "boolean", "description": "Include industry-relative rankings", "default": False},
+                    "universe": {"type": "string", "description": "Modeling universe for the ranking population (spec 015): a universe name, 'all' for unfiltered; default = the default universe. Stamped on every stored row."},
                 },
                 "required": ["feature_name"],
             },
@@ -4010,6 +4011,8 @@ async def _cross_sectional_compute(args: Dict[str, Any]) -> Dict[str, Any]:
         cmd.append('--no-sectors')
     if args.get('include_industries') is True:
         cmd.append('--industries')
+    if args.get('universe'):
+        cmd.extend(['--universe', args['universe']])
 
     return await executor.run(*cmd)
 
