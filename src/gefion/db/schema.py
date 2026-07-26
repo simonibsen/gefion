@@ -7,7 +7,9 @@ assumes TimescaleDB is installed/enabled (see docker-compose).
 
 from __future__ import annotations
 
+import dataclasses
 import os
+from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
@@ -17,6 +19,155 @@ from psycopg import sql
 from gefion.observability import create_span, set_attributes
 
 _DEFAULT_TEST_URL = "postgresql://gefion:gefionpass@localhost:6432/gefion_test"
+
+
+# --- Soft-edge registry (issue #155) --------------------------------------
+#
+# Gefion's code-as-data design uses deliberate non-FK edges: by-name
+# references, expression-embedded names, JSONB provenance stamps, and the
+# registry-routed computed_features.data_id. Every such edge MUST be
+# declared here with its compensation — a validator (detection callable)
+# and/or the deletion door that scans or refuses across it.
+#
+# tests/test_soft_edge_registry.py enforces this registry: every entry's
+# dotted paths must import to callables, and every `plan_*` function in a
+# `gefion/*/deletion.py` module must be claimed by an entry. Adding a new
+# soft edge (which gets a deletion door per the #76 house pattern) without
+# registering it here is red CI.
+#
+# `validator=None` is a DECLARED gap: `no_validator_reason` must explain
+# why the deletion door alone is sufficient (e.g. refusal-while-referenced
+# makes dangling references unreachable through supported paths).
+
+@dataclasses.dataclass(frozen=True)
+class SoftEdge:
+    """One deliberate non-FK reference and its registered compensation."""
+
+    name: str            # unique short identifier
+    from_ref: str        # referencing side: table.column / expression / JSONB path
+    to_ref: str          # referenced side: table.column (or naming scheme)
+    kind: str            # "column" | "expression" | "jsonb" | "naming"
+    deletion_door: str   # dotted path to the plan_* door that scans/refuses it
+    validator: Optional[str] = None  # dotted path to a detection callable
+    no_validator_reason: str = ""    # required (non-empty) when validator is None
+    notes: str = ""
+
+
+SOFT_EDGES: tuple = (
+    SoftEdge(
+        name="definition_function",
+        from_ref="feature_definitions.function_name",
+        to_ref="feature_functions.name",
+        kind="column",
+        deletion_door="gefion.features.deletion.plan_function_delete",
+        validator="gefion.cli._find_orphans",
+        notes="Surfaced by `gefion feat-def-validate`; `feat-def-fix` "
+              "deactivates orphaned definitions. The door refuses to delete "
+              "a function while any definition routes to it.",
+    ),
+    SoftEdge(
+        name="regime_expression_feature",
+        from_ref="regime_definitions.expression (comparison leaf 'feature')",
+        to_ref="feature_definitions.name",
+        kind="expression",
+        deletion_door="gefion.features.deletion.plan_definition_delete",
+        validator=None,
+        no_validator_reason=(
+            "Define-time validation (validate_expression) is structural "
+            "only; existence surfaces at compute time as a loud LookupError "
+            "(regimes.labels), and the door REFUSES deleting a referenced "
+            "feature (feat-def-fix deactivates, never deletes). No static "
+            "dangling-reference scan exists — #155 finding: a YAML regime "
+            "import can name a feature that does not exist and only fail "
+            "at compute time."),
+    ),
+    SoftEdge(
+        name="computed_features_entity",
+        from_ref="computed_features.data_id",
+        to_ref="(feature_definitions.entity_table).id",
+        kind="column",
+        deletion_door="gefion.entities.deletion.plan_delete",
+        validator="gefion.entities.orphans.scan",
+        notes="The retired hard FK (spec 007). The orphan scan feeds "
+              "db-health's entity_integrity section.",
+    ),
+    SoftEdge(
+        name="universe_provenance",
+        from_ref="ml_datasets.universe / experiments.config / "
+                 "regime_discovery_runs.search_space ->> 'universe_name'",
+        to_ref="universe_definitions.name",
+        kind="jsonb",
+        deletion_door="gefion.universe.deletion.plan_universe_delete",
+        validator=None,
+        no_validator_reason=(
+            "Refusal-while-referenced: the door refuses deletion while any "
+            "provenance stamp names the universe, so stamps always resolve "
+            "through supported paths — a validator would have nothing to "
+            "find."),
+    ),
+    SoftEdge(
+        name="dataset_feature_names",
+        from_ref="ml_datasets.feature_names[]",
+        to_ref="feature_definitions.name",
+        kind="jsonb",
+        deletion_door="gefion.features.deletion.plan_definition_delete",
+        validator=None,
+        no_validator_reason=(
+            "Provenance is reported, never mutated (#76): a deleted feature "
+            "leaves the dataset row as a historical record by design — "
+            "dangling names here are accepted accounting, not corruption."),
+    ),
+    SoftEdge(
+        name="experiment_regime_results",
+        from_ref="experiments.results -> 'by_regime' ->> 'regime'",
+        to_ref="regime_definitions.name",
+        kind="jsonb",
+        deletion_door="gefion.regimes.deletion.plan_regime_delete",
+        validator=None,
+        no_validator_reason=(
+            "Reported, never mutated; `regime archive` is the recommended "
+            "lifecycle exit so results stay resolvable by name. A forced "
+            "hard delete may leave name-keyed results dangling by design."),
+    ),
+    SoftEdge(
+        name="model_signal_features",
+        from_ref="feature_definitions.name LIKE 'pred_%__<model>_<version>'",
+        to_ref="ml_models(name, version)",
+        kind="naming",
+        deletion_door="gefion.ml.deletion.plan_model_delete",
+        validator=None,
+        no_validator_reason=(
+            "Naming-convention edge (spec 012): the model door enumerates "
+            "and deletes the whole materialized-signal family with the "
+            "model, so the convention is exercised on every delete."),
+    ),
+    SoftEdge(
+        name="feature_source_experiment",
+        from_ref="feature_definitions.source_experiment_id",
+        to_ref="experiments.id",
+        kind="column",
+        deletion_door="gefion.experiments.deletion.plan_experiment_delete",
+        validator=None,
+        no_validator_reason=(
+            "Soft integer reference (no FK): the experiment door enumerates "
+            "owned features (experimental vs promoted) in its blast radius; "
+            "a dangling id after experiment deletion marks a feature as "
+            "orphaned provenance, which the door surfaces before delete."),
+    ),
+    SoftEdge(
+        name="discovery_admission_provenance",
+        from_ref="regime_definitions.descriptive_metadata (machine origin)",
+        to_ref="regime_discovery_runs / regime_candidates ledger",
+        kind="jsonb",
+        deletion_door="gefion.regimes.deletion.plan_run_delete",
+        validator=None,
+        no_validator_reason=(
+            "The run door refuses deletion ALWAYS while admissions exist "
+            "(the ledger is the multiple-testing audit trail behind a live "
+            "artifact); the candidate ledger deliberately has no FK to the "
+            "artifact so accounting survives artifact deletion."),
+    ),
+)
 
 
 def _append_test_suffix(url: str) -> str:
