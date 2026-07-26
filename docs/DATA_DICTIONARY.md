@@ -71,11 +71,13 @@ Market-relative feature rankings (percentile, z-score) computed across the unive
 | **`data_id`** 🔑 | INTEGER |  |  |  |
 | **`date`** 🔑 | DATE |  |  |  |
 | **`feature_name`** 🔑 | TEXT |  |  |  |
+| **`comparison_group`** 🔑 | TEXT |  |  |  |
 | `value` | DOUBLE PRECISION | ✓ |  |  |
 | `rank` | INTEGER | ✓ |  |  |
 | `percentile` | DOUBLE PRECISION | ✓ |  |  |
+| `universe_name` | TEXT | ✓ |  |  |
+| `universe_fingerprint` | TEXT | ✓ |  |  |
 | `created_at` | TIMESTAMP | ✓ |  |  |
-| **`comparison_group`** 🔑 | TEXT |  |  |  |
 
 ### `data_quality_findings`
 

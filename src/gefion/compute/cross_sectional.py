@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 import psycopg
 
 from gefion.observability import create_span, set_attributes
+from gefion.universe import ResolvedUniverse
 
 
 def compute_return_vs_market(price_data: List[Dict[str, Any]], date: str) -> List[Dict[str, Any]]:
@@ -393,6 +394,7 @@ def store_cross_sectional_rankings(
     rankings: List[Dict[str, Any]],
     feature_name: str,
     target_date: date,
+    universe: Optional[ResolvedUniverse] = None,
 ) -> int:
     """
     Store cross-sectional rankings to the database.
@@ -402,14 +404,23 @@ def store_cross_sectional_rankings(
         rankings: List of ranking results from compute_rankings_by_group
         feature_name: Name of the feature being ranked
         target_date: Date of the rankings
+        universe: The resolved population the rankings were computed over
+            (issue #153). Stamped as universe_name + universe_fingerprint on
+            every row. None writes NULLs — the "population unknown" legacy
+            posture, only appropriate for callers that genuinely cannot say.
 
     Returns:
         Number of rows inserted
     """
-    with create_span("compute.cross_sectional.store_cross_sectional_rankings", feature_name=feature_name, target_date=str(target_date)) as span:
+    with create_span("compute.cross_sectional.store_cross_sectional_rankings",
+                     feature_name=feature_name, target_date=str(target_date),
+                     universe=universe.name if universe else "unstamped") as span:
         if not rankings:
             set_attributes(span, row_count=0)
             return 0
+
+        universe_name = universe.name if universe else None
+        universe_fingerprint = universe.fingerprint if universe else None
 
         with conn.cursor() as cur:
             # Batch insert
@@ -423,17 +434,25 @@ def store_cross_sectional_rankings(
                     r["value"],
                     r["rank"],
                     r["percentile"],
+                    universe_name,
+                    universe_fingerprint,
                 ))
 
-            # Use ON CONFLICT to handle updates
-            from psycopg import sql
+            # Use ON CONFLICT to handle updates; the universe stamp must
+            # follow the recompute — a stale stamp is worse than none
             cur.executemany(
                 """
                 INSERT INTO cross_sectional_features
-                    (data_id, date, feature_name, comparison_group, value, rank, percentile)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (data_id, date, feature_name, comparison_group,
+                     value, rank, percentile,
+                     universe_name, universe_fingerprint)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (data_id, date, feature_name, comparison_group)
-                DO UPDATE SET value = EXCLUDED.value, rank = EXCLUDED.rank, percentile = EXCLUDED.percentile
+                DO UPDATE SET value = EXCLUDED.value,
+                              rank = EXCLUDED.rank,
+                              percentile = EXCLUDED.percentile,
+                              universe_name = EXCLUDED.universe_name,
+                              universe_fingerprint = EXCLUDED.universe_fingerprint
                 """,
                 values
             )
@@ -450,11 +469,14 @@ def compute_and_store_rankings(
     include_market: bool = True,
     include_sectors: bool = True,
     include_industries: bool = False,
+    universe: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Compute cross-sectional rankings and store to database.
 
     This is the main entry point for computing sector/market rankings.
+    The ranking population routes through the universe chokepoint (spec
+    015) and its identity is stamped on every stored row (issue #153).
 
     Args:
         conn: Database connection
@@ -463,17 +485,28 @@ def compute_and_store_rankings(
         include_market: Include market-wide rankings
         include_sectors: Include per-sector rankings
         include_industries: Include per-industry rankings
+        universe: Modeling universe for the ranking population (spec 015);
+            None = default universe, 'all' = unfiltered
 
     Returns:
-        Dict with status, counts, and any errors
+        Dict with status, counts, universe provenance, and any errors
 
     Example:
         result = compute_and_store_rankings(conn, "indicator_rsi_14")
-        # {"success": True, "total_rankings": 15, "groups": ["market", "sector:TECHNOLOGY", ...]}
+        # {"success": True, "total_rankings": 15, "groups": ["market", ...],
+        #  "universe_name": "modeling_default", "universe_fingerprint": "sha256:..."}
     """
-    with create_span("compute.cross_sectional.compute_and_store_rankings", feature_name=feature_name) as span:
+    with create_span("compute.cross_sectional.compute_and_store_rankings",
+                     feature_name=feature_name,
+                     universe=universe or "default") as span:
+        # Resolve the population ONCE — the same identity gates the fetch
+        # and is stamped on the stored rows (unknown universes REFUSE here)
+        from gefion.universe import resolve_universe
+        resolved = resolve_universe(conn, universe)
+
         # Fetch feature data with sectors
-        data = fetch_feature_with_sectors(conn, feature_name, target_date)
+        data = fetch_feature_with_sectors(
+            conn, feature_name, target_date, universe=resolved.name)
 
         if not data:
             set_attributes(span, success=False, total_rankings=0)
@@ -495,13 +528,15 @@ def compute_and_store_rankings(
             include_industries=include_industries,
         )
 
-        # Store to database
-        stored = store_cross_sectional_rankings(conn, rankings, feature_name, actual_date)
+        # Store to database with the population's identity
+        stored = store_cross_sectional_rankings(
+            conn, rankings, feature_name, actual_date, universe=resolved)
 
         # Get unique comparison groups
         groups = list({r["comparison_group"] for r in rankings})
 
-        set_attributes(span, success=True, total_rankings=stored, stocks_count=len(data))
+        set_attributes(span, success=True, total_rankings=stored,
+                       stocks_count=len(data), universe=resolved.name)
         return {
             "success": True,
             "feature_name": feature_name,
@@ -509,6 +544,7 @@ def compute_and_store_rankings(
             "total_rankings": stored,
             "groups": sorted(groups),
             "stocks_count": len(data),
+            **resolved.provenance(),
         }
 
 

@@ -242,6 +242,42 @@ END $$;
 SELECT create_hypertable('computed_features', 'date', if_not_exists => TRUE);
 SELECT set_chunk_time_interval('computed_features', INTERVAL '30 days');
 
+-- Cross-sectional features hypertable
+-- Market-relative rankings (rank/percentile) per comparison group
+-- (market, sector:X, industry:X). A stored rank is only meaningful relative
+-- to the population it was ranked within: universe_name/universe_fingerprint
+-- record that population (spec 015 provenance pattern, issue #153).
+-- NULL universe columns = pre-provenance legacy rows (population unknown);
+-- readers must never treat NULL as modeling_default.
+CREATE TABLE IF NOT EXISTS cross_sectional_features (
+    data_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    feature_name TEXT NOT NULL,
+    comparison_group TEXT NOT NULL DEFAULT 'market',
+    value DOUBLE PRECISION,
+    rank INTEGER,
+    percentile DOUBLE PRECISION,
+    universe_name TEXT,
+    universe_fingerprint TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (data_id, date, feature_name, comparison_group)
+);
+
+-- Convert to hypertable (30-day chunks)
+SELECT create_hypertable('cross_sectional_features', 'date', if_not_exists => TRUE);
+SELECT set_chunk_time_interval('cross_sectional_features', INTERVAL '30 days');
+
+CREATE INDEX IF NOT EXISTS cross_sectional_features_brin
+    ON cross_sectional_features USING BRIN(date);
+CREATE INDEX IF NOT EXISTS cross_sectional_features_data_id_date_idx
+    ON cross_sectional_features(data_id, date DESC);
+CREATE INDEX IF NOT EXISTS cross_sectional_features_date_idx
+    ON cross_sectional_features(date DESC);
+CREATE INDEX IF NOT EXISTS cross_sectional_features_comparison_group_idx
+    ON cross_sectional_features(comparison_group, date);
+CREATE INDEX IF NOT EXISTS cross_sectional_features_feature_date_group_rank_idx
+    ON cross_sectional_features(feature_name, date, comparison_group, rank);
+
 -- =============================================================================
 -- MACRO SERIES (L1) — first non-stock entity table (spec 007)
 -- =============================================================================

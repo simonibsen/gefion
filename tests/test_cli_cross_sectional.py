@@ -50,6 +50,13 @@ class TestCrossSectionalComputeCommand:
         result = runner.invoke(app, ["cross-sectional-compute", "--help"])
         assert "--json" in result.output
 
+    def test_help_shows_universe_option(self):
+        """Rankings declare their population (spec 015 / issue #153)."""
+        from gefion.cli import app
+
+        result = runner.invoke(app, ["cross-sectional-compute", "--help"])
+        assert "--universe" in result.output
+
 
 @pytest.mark.skipif(
     not pytest.importorskip("psycopg"),

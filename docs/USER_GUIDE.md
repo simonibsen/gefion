@@ -650,6 +650,9 @@ gefion cross-sectional-compute --feature indicator_rsi_14 --industries
 # Market-only rankings (no sector/industry)
 gefion cross-sectional-compute --feature indicator_rsi_14 --no-sectors
 
+# Rank within an explicit modeling universe ('all' = unfiltered)
+gefion cross-sectional-compute --feature indicator_rsi_14 --universe all
+
 # JSON output
 gefion cross-sectional-compute --feature indicator_rsi_14 --json
 ```
@@ -658,6 +661,13 @@ gefion cross-sectional-compute --feature indicator_rsi_14 --json
 - `market` - Rank vs all stocks in the universe
 - `sector:X` - Rank vs stocks in the same sector (e.g., `sector:TECHNOLOGY`)
 - `industry:X` - Rank vs stocks in the same industry
+
+**Universe provenance:** the ranking population routes through the modeling
+universe gate (`--universe`; default = the default universe). Each stored
+row records which universe it was ranked within (`universe_name` +
+`universe_fingerprint`) — a rank is only meaningful relative to its
+population. Rows computed before this change carry NULL there: population
+unknown, never to be read as `modeling_default`.
 
 **Output stored in `cross_sectional_features` table:**
 | Column | Description |
@@ -669,6 +679,8 @@ gefion cross-sectional-compute --feature indicator_rsi_14 --json
 | `value` | Original feature value |
 | `rank` | Position among peers (1 = highest) |
 | `percentile` | Position as 0-1 (1.0 = top, 0.0 = bottom) |
+| `universe_name` | Universe the population was drawn from (NULL = legacy, unknown) |
+| `universe_fingerprint` | Universe definition fingerprint at compute time |
 
 **Example interpretation:**
 - AAPL with RSI 72, rank 3, percentile 0.85 in `sector:TECHNOLOGY`
