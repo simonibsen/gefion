@@ -58,8 +58,14 @@ class GefionExecutor:
             self.env['ALPHAVANTAGE_API_KEY'] = api_key
 
     async def run(self, *args: str) -> Dict[str, Any]:
-        """Run gefion command with --json flag and return parsed output."""
-        cmd = ['gefion'] + list(args) + ['--json']
+        """Run gefion command with --json flag and return parsed output.
+
+        Invokes the CLI via the interpreter running this server
+        (sys.executable -m gefion.cli) rather than a bare 'gefion'
+        executable, which is not on PATH when the server is launched
+        with the venv python from outside an activated venv (#157).
+        """
+        cmd = [sys.executable, '-m', 'gefion.cli'] + list(args) + ['--json']
 
         try:
             result = subprocess.run(
@@ -4010,14 +4016,21 @@ async def _cross_sectional_compute(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _query_database(args: Dict[str, Any]) -> Dict[str, Any]:
     """Execute read-only SQL query for data exploration."""
+    import re
+
     sql = args['sql'].strip()
 
     # Safety checks - only allow SELECT queries
     sql_upper = sql.upper()
     dangerous_keywords = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE', 'TRUNCATE', 'GRANT', 'REVOKE']
 
+    # Match keywords as whole SQL words on a comment-stripped copy, so
+    # column names like created_at / updated_at don't false-positive (#161).
+    sql_checked = re.sub(r'--[^\n]*', ' ', sql_upper)
+    sql_checked = re.sub(r'/\*.*?\*/', ' ', sql_checked, flags=re.DOTALL)
+
     for keyword in dangerous_keywords:
-        if keyword in sql_upper:
+        if re.search(rf'\b{keyword}\b', sql_checked):
             return {
                 'success': False,
                 'error': f'Dangerous SQL keyword detected: {keyword}. Only SELECT queries allowed.',
@@ -4709,7 +4722,10 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
             steps.append("1. Fix infrastructure: Start required services")
 
         if any(t in ["no_data", "no_prices", "stale_data"] for t in issue_types):
-            steps.append(f"{len(steps)+1}. Update price data: gefion data-update")
+            steps.append(
+                f"{len(steps)+1}. Update price data: "
+                "gefion data-update --exchange NASDAQ --limit 10"
+            )
 
         if "no_features" in issue_types:
             steps.append(f"{len(steps)+1}. Compute features: gefion feat-compute")
@@ -5324,7 +5340,7 @@ async def _experiment_chain(args: Dict[str, Any]) -> Dict[str, Any]:
     """Create a child experiment chained to a parent."""
     async def _chain():
         cmd = [
-            "gefion", "experiment", "chain",
+            "experiment", "chain",
             "--parent-id", str(args["parent_id"]),
             "--name", args["name"],
             "--search-space", args["search_space"],
