@@ -30,6 +30,17 @@ class TestTestDbUrl:
         url = schema.test_db_url()
         assert url == "postgresql://custom:pass@remote:5432/my_test_db"
 
+    def test_refuses_non_test_database(self, monkeypatch):
+        """#167: a TEST_DATABASE_URL naming a non-test DB must raise, not be
+        honored verbatim — this is how qcl_* fixtures reached the dev `gefion`
+        DB. `my_test_db` (see above) stays valid; a bare `gefion` does not."""
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setenv(
+            "TEST_DATABASE_URL", "postgresql://gefion:gefionpass@localhost:6432/gefion"
+        )
+        with pytest.raises(ValueError):
+            schema.test_db_url()
+
     def test_test_db_url_derives_from_DATABASE_URL(self, monkeypatch):
         """Appends _test to DB name from DATABASE_URL when TEST_DATABASE_URL not set."""
         monkeypatch.delenv("TEST_DATABASE_URL", raising=False)
