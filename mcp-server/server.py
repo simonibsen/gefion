@@ -5142,7 +5142,7 @@ async def _backtest_run(args: Dict[str, Any]) -> Dict[str, Any]:
         if args.get('model_version'):
             cmd.extend(['--model-version', args['model_version']])
         if args.get('horizon'):
-            cmd.extend(['--horizon', str(args['horizon'])])
+            cmd.extend(['--horizon-days', str(args['horizon'])])
 
         # Advanced features (CLI flags to be added when CLI is updated)
         # For now, we note the requested features in the output
