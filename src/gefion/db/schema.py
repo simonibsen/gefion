@@ -183,6 +183,29 @@ def _append_test_suffix(url: str) -> str:
     return urlunparse(parsed._replace(path=new_path))
 
 
+def _assert_test_db(url: str) -> str:
+    """Refuse any URL whose database name does not look like a test DB (#167).
+
+    The tests write and DELETE freely, so a misconfigured ``TEST_DATABASE_URL``
+    pointing at a real database is a data-loss footgun — this is how the qcl_*
+    universe fixtures once leaked into the dev ``gefion`` DB. Failing closed here
+    protects every DB-backed test at a single chokepoint.
+
+    The bar is "the database name contains ``test``" (case-insensitive), not a
+    strict ``_test`` suffix: the explicit ``TEST_DATABASE_URL`` override is
+    documented to accept operator-chosen names like ``my_test_db``. That still
+    refuses the real footgun — a plain ``gefion`` has no ``test`` in it.
+    """
+    db_name = urlparse(url).path.lstrip("/")
+    if "test" not in db_name.lower():
+        raise ValueError(
+            f"test_db_url() resolved to non-test database {db_name!r}; the tests "
+            "database name must contain 'test' (see #167). Refusing to hand the "
+            "suite a URL that could clobber real data."
+        )
+    return url
+
+
 def test_db_url() -> str:
     """Return the database URL for tests.
 
@@ -190,16 +213,19 @@ def test_db_url() -> str:
     1. ``TEST_DATABASE_URL`` env var (explicit override)
     2. ``DATABASE_URL`` env var with ``_test`` appended to the DB name
     3. Default: ``postgresql://gefion:gefionpass@localhost:6432/gefion_test``
+
+    Every resolved URL is guarded by :func:`_assert_test_db` — the result is
+    guaranteed to target a ``_test`` database or raise (#167).
     """
     explicit = os.environ.get("TEST_DATABASE_URL")
     if explicit:
-        return explicit
+        return _assert_test_db(explicit)
 
     base = os.environ.get("DATABASE_URL")
     if base:
-        return _append_test_suffix(base)
+        return _assert_test_db(_append_test_suffix(base))
 
-    return _DEFAULT_TEST_URL
+    return _assert_test_db(_DEFAULT_TEST_URL)
 
 
 def _ensure_timescaledb(conn: Connection) -> None:
