@@ -31,12 +31,33 @@ def _parse_env_file(path: Path) -> Dict[str, str]:
     return env
 
 
+_VALID_ENVS = ("dev", "production")
+DEFAULT_MIN_FREE_DISK_GB = 20.0
+DEFAULT_MIN_FREE_MEM_GB = 2.0
+
+
+def _normalize_env(value: Optional[str]) -> str:
+    """Host identity; unknown/invalid fails conservative to 'dev' (#158)."""
+    candidate = (value or "").strip().lower()
+    return candidate if candidate in _VALID_ENVS else "dev"
+
+
+def _float_or(value: Optional[str], default: float) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class Settings:
     """Core runtime settings."""
 
     alphavantage_api_key: Optional[str]
     database_url: Optional[str]
+    gefion_env: str = "dev"
+    min_free_disk_gb: float = DEFAULT_MIN_FREE_DISK_GB
+    min_free_mem_gb: float = DEFAULT_MIN_FREE_MEM_GB
     env_file: Optional[Path] = None
 
     def __repr__(self) -> str:  # pragma: no cover - simple masking logic
@@ -45,6 +66,7 @@ class Settings:
             "Settings("
             f"alphavantage_api_key={masked}, "
             f"database_url={self.database_url!r}, "
+            f"gefion_env={self.gefion_env!r}, "
             f"env_file={str(self.env_file) if self.env_file else None}"
             ")"
         )
@@ -57,6 +79,9 @@ class Settings:
         return {
             "ALPHAVANTAGE_API_KEY": api_key,
             "DATABASE_URL": self.database_url,
+            "GEFION_ENV": self.gefion_env,
+            "GEFION_MIN_FREE_DISK_GB": str(self.min_free_disk_gb),
+            "GEFION_MIN_FREE_MEM_GB": str(self.min_free_mem_gb),
         }
 
 
@@ -94,5 +119,35 @@ def load_settings(
     return Settings(
         alphavantage_api_key=env_map.get("ALPHAVANTAGE_API_KEY"),
         database_url=env_map.get("DATABASE_URL"),
+        gefion_env=_normalize_env(env_map.get("GEFION_ENV")),
+        min_free_disk_gb=_float_or(
+            env_map.get("GEFION_MIN_FREE_DISK_GB"), DEFAULT_MIN_FREE_DISK_GB
+        ),
+        min_free_mem_gb=_float_or(
+            env_map.get("GEFION_MIN_FREE_MEM_GB"), DEFAULT_MIN_FREE_MEM_GB
+        ),
         env_file=file_path,
     )
+
+
+def apply_dotenv(
+    env_file: Optional[Path | str] = None,
+    environ: Optional[MutableMapping[str, str]] = None,
+    override: bool = False,
+) -> Dict[str, str]:
+    """Load a .env file into ``environ`` (``os.environ`` by default).
+
+    Makes ``.env`` the single config source of truth for a process that reads
+    ``os.environ`` directly (e.g. the MCP server, which resolves DATABASE_URL,
+    GEFION_ENV, thresholds from the environment). Existing keys are preserved
+    unless ``override`` — so an explicitly-set variable (e.g. the MCP client's
+    ``env`` block) still wins over the file. Returns the keys actually applied.
+    """
+    target: MutableMapping[str, str] = os.environ if environ is None else environ
+    path = Path(env_file) if env_file is not None else Path(".env")
+    applied: Dict[str, str] = {}
+    for key, value in _parse_env_file(path).items():
+        if override or key not in target:
+            target[key] = value
+            applied[key] = value
+    return applied

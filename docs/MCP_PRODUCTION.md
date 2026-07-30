@@ -23,6 +23,37 @@ G2_MCP_ROLE=operator
 G2_MCP_ROLE=developer
 ```
 
+## Host capability posture (`system_status`)
+
+The MCP server reads its configuration from `.env` (single source of truth); a
+variable already set in the environment — e.g. the Claude Desktop `env` block —
+still wins over the file. `system_status` then measures what the host can
+afford and returns a `host` block, so an agent works *within* the machine's
+affordances (use `--limit`, bound concurrency) rather than reaching past them.
+It only advises — it never acts.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GEFION_ENV` | `dev` | Host identity: `dev` \| `production`. Unknown/invalid → `dev` (fail-conservative). A `dev` host bounds data operations regardless of measured headroom. |
+| `GEFION_MIN_FREE_DISK_GB` | `20` | Below this free disk, `disk.tight` is set and data ops are bounded. |
+| `GEFION_MIN_FREE_MEM_GB` | `2` | Below this available memory, `memory.tight` is set (bound concurrency). |
+
+Capability is **measured** (disk / memory / cpu), not hand-declared; `GEFION_ENV`
+only biases policy — so every host is assessed by *which* resource is tight, not
+a single blanket "constrained" label. Example `host` block:
+
+```json
+"host": {
+  "env": "dev",
+  "disk":   {"free_gb": 122.6, "tight": false},
+  "memory": {"available_gb": 3.1, "tight": true},
+  "cpu":    {"count": 8},
+  "bounded_data_ops": true,
+  "notes": ["Refresh price data with --limit against existing symbols ...",
+            "Low available memory (3.1 GB) — bound concurrency ..."]
+}
+```
+
 ## Tool Access by Role
 
 ### Available to Both Roles

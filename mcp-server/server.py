@@ -46,6 +46,21 @@ except ImportError:
     # Fallback if gefion module not in path
     health = None
 
+# #158: make .env the single config source of truth for this process. The
+# server reads os.environ directly (DATABASE_URL, GEFION_ENV, capability
+# thresholds); apply_dotenv() layers .env in without overriding vars already
+# set (e.g. the MCP client's env block still wins).
+try:
+    from gefion.config import apply_dotenv, load_settings
+    from gefion.host import assess, inventory
+
+    apply_dotenv()
+except ImportError:
+    apply_dotenv = None
+    load_settings = None
+    assess = None
+    inventory = None
+
 
 class GefionExecutor:
     """Execute gefion CLI commands and return JSON results."""
@@ -4741,6 +4756,29 @@ async def _system_status(args: Dict[str, Any]) -> Dict[str, Any]:
         status_result["status"] = "needs_attention"
 
     status_result["summary"] = f"{len(sorted_issues)} issue(s) found" if sorted_issues else "All systems operational"
+
+    # #158: host-capability posture — measured (disk/memory/cpu), biased by the
+    # declared GEFION_ENV. Tailors advice to what THIS host can afford so the
+    # agent works within the system's affordances (use --limit, bound
+    # concurrency) rather than reaching past them. Suggestions only — never acts.
+    if inventory is not None and load_settings is not None:
+        try:
+            _settings = load_settings()
+            _posture = assess(
+                _settings.gefion_env,
+                inventory("."),
+                min_free_disk_gb=_settings.min_free_disk_gb,
+                min_free_mem_gb=_settings.min_free_mem_gb,
+            )
+            status_result["host"] = _posture
+            if _posture.get("notes"):
+                next_steps = status_result.setdefault("next_steps", [])
+                for _note in _posture["notes"]:
+                    if _note not in next_steps:
+                        next_steps.append(_note)
+        except Exception:
+            # Posture is advisory; never fail system_status over it.
+            pass
 
     return status_result
 
