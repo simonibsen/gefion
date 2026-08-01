@@ -230,6 +230,19 @@ def run_probation_checks(db_url: Optional[str] = None,
                 else:
                     summary["monitoring"].append(entry)
 
+            # Runtime observer (#162): a proven machine feature function that
+            # survived probation but is not captured in version control is a
+            # durability gap the system can already see. Record it (never act;
+            # a human runs feat-fx-export and commits). Non-fatal to probation.
+            try:
+                from gefion.features.export_observer import (
+                    record_unexported_function_observations)
+                oids = record_unexported_function_observations(conn)
+                if oids:
+                    summary["export_observations"] = oids
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(f"Export observer failed (non-fatal): {exc}")
+
         set_attributes(span, checked=summary["checked"],
                        demoted=len(summary["demoted"]),
                        passed=len(summary["passed"]))
