@@ -297,11 +297,27 @@ def approve_candidate(conn, candidate_id: int,
 #
 # Revocation is a single env switch with no schema change: unset
 # GEFION_TEMPLATE_AUTO_APPROVE (fail-closed default OFF) and every candidate is
-# gated again. Higher rungs (per-generator earned autonomy, full autonomy) stay
-# unbuilt — this is rung 1 only.
+# gated again. Rungs 2 (per-generator earned autonomy) and 3 (full autonomy)
+# layer on below, each behind its own fail-closed default-OFF switch, all
+# enforcing at this SAME door with the SAME refusal invariant.
+#
+# Switch precedence at the door: earned (rung 2) ⊃ template-auto (rung 1) ⊃
+# everything-gated. All OFF by default; a single unset of any switch reverts
+# that rung with no schema change.
 
 TEMPLATE_AUTO_APPROVER = "policy:template-auto"
 _TEMPLATE_AUTO_FLAG = "GEFION_TEMPLATE_AUTO_APPROVE"
+
+# Rung 2 (#142): earned per-generator autonomy.
+EARNED_AUTO_APPROVER_PREFIX = "policy:earned:"
+_EARNED_AUTO_FLAG = "GEFION_EARNED_AUTONOMY"
+_EARNED_AUTO_N_FLAG = "GEFION_EARNED_AUTONOMY_N"
+DEFAULT_EARNED_AUTONOMY_N = 3
+
+
+def _flag_on(name: str) -> bool:
+    """A fail-closed env switch: default OFF, truthy only for 1/true/yes."""
+    return os.getenv(name, "false").lower() in ("true", "1", "yes")
 
 
 def template_auto_approval_enabled() -> bool:
@@ -311,30 +327,112 @@ def template_auto_approval_enabled() -> bool:
     not open the gate; the owner turns it on by setting
     ``GEFION_TEMPLATE_AUTO_APPROVE`` to a truthy value (``1``/``true``/``yes``),
     and unsetting it returns to everything-gated with no schema change."""
-    return os.getenv(_TEMPLATE_AUTO_FLAG, "false").lower() in ("true", "1", "yes")
+    return _flag_on(_TEMPLATE_AUTO_FLAG)
+
+
+def earned_autonomy_enabled() -> bool:
+    """Whether rung 2 (#142) is on: a generator that has earned trust gets its
+    dry-run-passing candidates auto-promoted. Fail-closed default OFF via
+    ``GEFION_EARNED_AUTONOMY``."""
+    return _flag_on(_EARNED_AUTO_FLAG)
+
+
+def earned_autonomy_threshold() -> int:
+    """N human approvals a generator needs to earn autonomy. Configurable via
+    ``GEFION_EARNED_AUTONOMY_N`` (positive int); default
+    ``DEFAULT_EARNED_AUTONOMY_N``. A malformed or non-positive value falls back
+    to the default rather than opening the gate wider than intended."""
+    raw = os.getenv(_EARNED_AUTO_N_FLAG)
+    if raw is None:
+        return DEFAULT_EARNED_AUTONOMY_N
+    try:
+        val = int(raw)
+    except ValueError:
+        return DEFAULT_EARNED_AUTONOMY_N
+    return val if val > 0 else DEFAULT_EARNED_AUTONOMY_N
+
+
+def generator_autonomy_earned(conn, generator: Optional[str],
+                              threshold: Optional[int] = None) -> bool:
+    """Rung-2 trust, derived purely from audit history — no new state.
+
+    A generator has earned autonomy iff it has accrued at least ``threshold``
+    (default: :func:`earned_autonomy_threshold`) HUMAN approvals AND none of
+    its promoted series is currently demoted or disabled. Because trust is a
+    pure function of the ledger, revocation is automatic: the moment one of the
+    generator's promoted ``feature_functions`` rows goes ``status='demoted'``
+    or ``enabled=FALSE`` (a demotion in the history — including via the
+    experiments auto-demotion machinery), this flips back to ``False`` and the
+    generator is gated again.
+
+    Human approvals are those NOT attributed to a policy (``reviewed_by`` is a
+    human name or NULL; every policy approval is a ``policy:*`` string), so a
+    generator can never bootstrap its own trust from prior auto-approvals."""
+    if not generator:
+        return False
+    n = threshold if threshold is not None else earned_autonomy_threshold()
+    with create_span("macro.candidates.generator_autonomy_earned",
+                     generator=generator, threshold=n) as span:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  COUNT(*) FILTER (
+                    WHERE c.review_state = 'approved'
+                      AND (c.reviewed_by IS NULL
+                           OR c.reviewed_by NOT LIKE 'policy:%%')
+                  ) AS human_approvals,
+                  COUNT(*) FILTER (
+                    WHERE c.promoted_function_id IS NOT NULL
+                      AND EXISTS (
+                        SELECT 1 FROM feature_functions ff
+                        WHERE ff.id = c.promoted_function_id
+                          AND (ff.status = 'demoted' OR ff.enabled = FALSE)
+                      )
+                  ) AS demotions
+                FROM market_function_candidates c
+                WHERE c.generator = %s
+                """,
+                (generator,))
+            human_approvals, demotions = cur.fetchone()
+        earned = human_approvals >= n and demotions == 0
+        set_attributes(span, human_approvals=human_approvals,
+                       demotions=demotions, earned=earned)
+        return earned
+
+
+def _select_auto_policy(conn, c: Dict[str, Any]) -> Optional[str]:
+    """The one place precedence lives: earned ⊃ template-auto ⊃ gated. Returns
+    the ``reviewed_by`` string of the highest ON policy that admits candidate
+    ``c``, or None when it stays gated for a human. Callers have already
+    confirmed ``c`` is pending with a passing dry-run — this only decides which
+    door (never bypasses the refusal invariant)."""
+    if earned_autonomy_enabled():
+        generator = c.get("generator")
+        if generator and generator_autonomy_earned(conn, generator):
+            return EARNED_AUTO_APPROVER_PREFIX + generator
+    if template_auto_approval_enabled() and c["origin"] == "template":
+        return TEMPLATE_AUTO_APPROVER
+    return None
 
 
 def maybe_auto_approve(conn, candidate_id: int) -> Optional[int]:
-    """Rung-1 policy at the sole door (#142). Promote a candidate iff the
-    template-auto policy is ON and it is a pending, template-origin candidate
-    with a passing dry-run — via ``approve_candidate`` (no second door),
-    attributed to ``reviewed_by='policy:template-auto'``. Returns the promoted
-    feature_functions id, or None when the candidate stays gated for human
-    review (policy off, claude-origin, non-pending, or no passing dry-run).
+    """Graduated-autonomy policy at the sole door (#142). Promote a candidate
+    through ``approve_candidate`` (no second door) iff it is pending, has a
+    passing dry-run, AND the highest ON policy admits it — attributing the
+    promotion to that policy's ``reviewed_by`` string (never NULL, never a
+    human). Returns the promoted feature_functions id, or None when the
+    candidate stays gated for human review.
 
-    The refusal invariant lives in ``approve_candidate`` and is re-checked here
-    only to decide whether to knock on the door — this path never bypasses it."""
+    Precedence: earned (rung 2) ⊃ template-auto (rung 1) ⊃ everything-gated. The
+    refusal invariant is enforced HERE (pending + passing dry-run) before any
+    policy is consulted, and again inside ``approve_candidate`` — a
+    failed/missing dry-run can never promote under any rung."""
     with create_span("macro.candidates.maybe_auto_approve",
                      candidate_id=candidate_id) as span:
-        if not template_auto_approval_enabled():
-            set_attributes(span, auto_approved=False, gate_reason="policy-off")
-            return None
         c = get_candidate(conn, candidate_id)
         if c is None:
             set_attributes(span, auto_approved=False, gate_reason="missing")
-            return None
-        if c["origin"] != "template":
-            set_attributes(span, auto_approved=False, gate_reason="origin-gated")
             return None
         if c["review_state"] != "pending":
             set_attributes(span, auto_approved=False, gate_reason="not-pending")
@@ -344,9 +442,13 @@ def maybe_auto_approve(conn, candidate_id: int) -> Optional[int]:
             set_attributes(span, auto_approved=False,
                            gate_reason="dry-run-refused")
             return None
-        fid = approve_candidate(conn, candidate_id,
-                                approver=TEMPLATE_AUTO_APPROVER)
-        set_attributes(span, auto_approved=True, promoted_function_id=fid)
+        approver = _select_auto_policy(conn, c)
+        if approver is None:
+            set_attributes(span, auto_approved=False, gate_reason="gated")
+            return None
+        fid = approve_candidate(conn, candidate_id, approver=approver)
+        set_attributes(span, auto_approved=True, policy=approver,
+                       promoted_function_id=fid)
         return fid
 
 

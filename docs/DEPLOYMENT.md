@@ -35,11 +35,20 @@ ALPHAVANTAGE_API_KEY=<key>
 EOF
 chmod 600 .env
 
-# Optional autonomy (#142, rung 1): auto-approve template-origin generated
-# market candidates that pass their dry-run. Fail-closed default OFF — add
-# this line to opt in; remove it to revert to everything-gated (no schema
-# change). Claude-origin bodies and failed/missing dry-runs always stay gated.
+# Optional autonomy (#142): relax the generated-market-candidate gate one
+# graduated rung at a time. Each switch is fail-closed default OFF — add a line
+# to opt in; remove it to revert THAT rung (no schema change). The refusal
+# invariant holds under every rung: a failed/missing dry-run never promotes.
+# Precedence: earned ⊃ template-auto ⊃ everything-gated.
+#   # Rung 1 — auto-approve repo-reviewed template-origin candidates.
+#   #          Claude-origin bodies stay gated. reviewed_by='policy:template-auto'
 #   GEFION_TEMPLATE_AUTO_APPROVE=1
+#   # Rung 2 — earned per-generator autonomy: a generator auto-approves after
+#   #          N human approvals with zero demotions of its promoted series
+#   #          (trust derived from history; a demotion revokes it automatically).
+#   #          reviewed_by='policy:earned:<generator>'. N defaults to 3.
+#   GEFION_EARNED_AUTONOMY=1
+#   GEFION_EARNED_AUTONOMY_N=3
 
 # 3. Services (images are version-pinned in the compose files — keep it that way)
 docker compose up -d postgres

@@ -439,8 +439,34 @@ gated and always wait for a human.
   dry-run can never promote, under any policy. Rung 1 rides the existing door,
   which enforces the dry-run gate — the flag only decides whether template
   candidates *knock*.
-- **Higher rungs are not built:** per-generator earned autonomy (rung 2) and
-  full review-after-the-fact autonomy (rung 3) remain open in #142.
+
+##### Rung 2: earned per-generator autonomy (#142)
+
+Rung 2 lets trust accrue to the specific **generator** that produced a
+candidate (the `generator` column on the ledger, e.g. `cycle_runner`). A
+generator earns autonomy once it has accumulated **N human approvals** with
+**zero demotions or disables** of any series it has already had promoted. Once
+earned, that generator's dry-run-passing candidates auto-promote — regardless of
+origin — recorded as `reviewed_by='policy:earned:<generator>'`.
+
+- **Trust is derived, not stored.** The condition is a pure function of the
+  audit history: human approvals are counted from the candidate ledger, and a
+  demotion is any of the generator's promoted `feature_functions` rows going
+  `status='demoted'` or `enabled=FALSE`. There is no new state and no schema
+  change.
+- **Revocation is automatic.** Auto-approved series ride the existing
+  experiments auto-demotion machinery as their probation window: the moment one
+  of a generator's series degrades and is disabled, the derived condition flips
+  and that generator is gated again on the next run. Only human approvals count
+  toward earning, so a generator can never bootstrap its own trust from prior
+  policy approvals.
+- **The switches:** `GEFION_EARNED_AUTONOMY` (fail-closed **default OFF**) turns
+  the rung on; `GEFION_EARNED_AUTONOMY_N` sets the threshold N (positive
+  integer, **default 3**; a malformed or non-positive value falls back to the
+  default rather than widening the gate).
+- **Precedence:** earned (rung 2) ⊃ template-auto (rung 1) ⊃ everything-gated.
+  The switches are independent and OFF by default; unsetting either reverts
+  that rung with no schema change. The refusal invariant still holds under both.
 
 #### Composite market series — macro-of-macro (spec 014)
 
