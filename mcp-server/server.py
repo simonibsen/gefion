@@ -237,50 +237,27 @@ def format_service_error(service: str, health_status: Dict[str, Any]) -> str:
     return message
 
 
+# ============================================================================
+# Always-on behavioral guidance
+# ============================================================================
+# Folded in from the removed developer/operator role mechanism (issue #172).
+# The role toggle guarded nothing dangerous, but this tools-first guidance is
+# genuinely valuable — so it is now unconditional, surfaced to every calling
+# agent via the MCP server instructions rather than an optional tool.
+SERVER_INSTRUCTIONS = (
+    "Gefion drives an ML research and trading-signal pipeline through these MCP "
+    "tools. Prefer the system's tools for every operation — data updates, ML "
+    "training, backtests, queries, and monitoring all have dedicated tools. Do "
+    "not reflexively write or run ad-hoc code to do work a tool already does. "
+    "SQL via query_database is read-only (SELECT/WITH only). When you hit a "
+    "genuine limit that no tool covers, say so explicitly and note that it would "
+    "need code — don't paper over the gap."
+)
+
 # Initialize server and health cache
-app = Server("gefion-mcp-server")
+app = Server("gefion-mcp-server", instructions=SERVER_INSTRUCTIONS)
 executor = GefionExecutor()
 health_cache = HealthCheckCache(ttl_seconds=60)
-
-
-# ============================================================================
-# Role-Based Access Control (RBAC)
-# ============================================================================
-
-# Role configuration from environment (default: operator for safety)
-MCP_ROLE = os.environ.get('GEFION_MCP_ROLE', 'operator').lower()
-if MCP_ROLE not in ('developer', 'operator'):
-    MCP_ROLE = 'operator'  # Default to operator for invalid values
-
-# Tools blocked for operator role
-OPERATOR_BLOCKED_TOOLS = {'dev_status'}
-
-# Role descriptions and guidelines
-ROLE_INFO = {
-    'developer': {
-        'description': 'Full access for development and operations',
-        'guidelines': [
-            'Full access to all tools including dev_status',
-            'Can read and modify source code',
-            'Can run arbitrary SQL queries',
-            'Intended for local development environment',
-        ]
-    },
-    'operator': {
-        'description': 'Data operations and monitoring only',
-        'guidelines': [
-            'Focus on data operations, ML training, and monitoring',
-            'Do not suggest code changes or modifications',
-            'Do not attempt to read or modify source files',
-            'Use MCP tools for all operations',
-            'SQL queries are read-only (SELECT only)',
-        ]
-    }
-}
-
-# Log role at startup
-import sys
-print(f"[gefion-mcp-server] Starting with role: {MCP_ROLE}", file=sys.stderr)
 
 
 # ============================================================================
@@ -1342,20 +1319,6 @@ async def list_tools() -> List[Tool]:
                     "model_version": {"type": "string", "description": "Model version (required when comparing ml_signal or ml_filter strategies)"},
                 },
                 "required": ["start_date", "end_date"],
-            },
-        ),
-
-        # RBAC: Role info tool (available to all roles)
-        Tool(
-            name="get_role_info",
-            description=(
-                "Get current MCP server role and behavioral guidelines. "
-                "Returns role (developer/operator), description, and guidelines for LLM behavior. "
-                "Use this to understand access permissions and expected behavior."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
             },
         ),
 
@@ -2802,28 +2765,12 @@ async def list_tools() -> List[Tool]:
         ),
     ]
 
-    # RBAC: Filter tools based on role
-    if MCP_ROLE == 'operator':
-        tools = [t for t in tools if t.name not in OPERATOR_BLOCKED_TOOLS]
-
     return tools
 
 
 @app.call_tool()
 async def call_tool(name: str, arguments: Any) -> List[TextContent]:
     """Handle tool invocations."""
-
-    # RBAC: Check if tool is blocked for current role
-    if MCP_ROLE == 'operator' and name in OPERATOR_BLOCKED_TOOLS:
-        return [TextContent(
-            type="text",
-            text=json.dumps({
-                "success": False,
-                "error": f"Access denied: '{name}' is not available in operator role",
-                "role": MCP_ROLE,
-                "tool": name
-            }, indent=2)
-        )]
 
     try:
         import time as _time
@@ -2841,10 +2788,7 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
         except Exception:
             pass
 
-        # RBAC: Handle get_role_info tool
-        if name == "get_role_info":
-            result = await _get_role_info(arguments)
-        elif name == "ml_dataset_build":
+        if name == "ml_dataset_build":
             result = await _ml_dataset_build(arguments)
         elif name == "ml_dataset_inspect":
             result = await _ml_dataset_inspect(arguments)
@@ -5758,22 +5702,6 @@ async def _chart_pred_vs_actual(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _generate)
-
-
-# ============================================================================
-# RBAC Tools
-# ============================================================================
-
-async def _get_role_info(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Return current role and behavioral guidelines."""
-    role_info = ROLE_INFO.get(MCP_ROLE, ROLE_INFO['operator'])
-    return {
-        "success": True,
-        "role": MCP_ROLE,
-        "description": role_info['description'],
-        "guidelines": role_info['guidelines'],
-        "blocked_tools": list(OPERATOR_BLOCKED_TOOLS) if MCP_ROLE == 'operator' else [],
-    }
 
 
 # ============================================================================
