@@ -32,10 +32,47 @@ def _conn():
         pytest.skip(f"DB not available: {exc}")
 
 
+# Columns the promote path (approve_candidate) writes into feature_definitions.
+# test_query_caching / test_composite_indexes drop feature_definitions CASCADE
+# and recreate a stripped-down local schema (id, name, function_name only),
+# never restoring it — so a promote running afterward on the shared test DB hits
+# a non-canonical table. We restore the columns NON-destructively (ADD COLUMN IF
+# NOT EXISTS) rather than dropping: feature_definitions is the parent of the
+# computed_features hypertable's FK, so a CASCADE drop would contaminate later
+# tests in suite order.
+_PROMOTE_COLUMNS = (
+    ("params", "JSONB"),
+    ("source_table", "TEXT"),
+    ("source_column", "TEXT"),
+    ("store_table", "TEXT"),
+    ("store_column", "TEXT"),
+    ("store_type", "TEXT"),
+    ("active", "BOOLEAN DEFAULT TRUE"),
+    ("entity_table", "TEXT NOT NULL DEFAULT 'stocks'"),
+)
+
+
 @pytest.fixture
 def conn():
     c = _conn()
+    # Heal every table the auto-approve promote touches. The canonical creators
+    # are idempotent; feature_definitions may exist in a stripped-down form left
+    # by an earlier test, so top up the columns the promote needs (non-destructive
+    # — see _PROMOTE_COLUMNS). Then close the process-global pool so CycleRunner
+    # opens FRESH connections: CI's failure was a pooled connection carrying a
+    # prepared-statement plan pinned to a since-recreated relation's OID
+    # ("could not open relation with OID …"); fresh connections re-plan cleanly.
+    from gefion.db import pool as db_pool
+    schema.create_feature_definitions_table(c)
+    schema.create_feature_functions_table(c)
+    schema.create_macro_series_tables(c)
     schema.create_market_function_candidates_table(c)
+    with c.cursor() as cur:
+        for col, coltype in _PROMOTE_COLUMNS:
+            cur.execute(
+                f"ALTER TABLE feature_definitions "
+                f"ADD COLUMN IF NOT EXISTS {col} {coltype}")
+    db_pool.close_pool()
 
     def _cleanup(cur):
         cur.execute("DELETE FROM feature_definitions WHERE name LIKE 'macro_mfc_auto_%'")
@@ -49,6 +86,7 @@ def conn():
     with c.cursor() as cur:
         _cleanup(cur)
     c.close()
+    db_pool.close_pool()
 
 
 def _pending(conn, name, origin="template", ok=True):
