@@ -7,6 +7,7 @@ rejection retains the row (audit: supersede/hide, never erase).
 """
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 from psycopg.types.json import Json
@@ -282,6 +283,70 @@ def approve_candidate(conn, candidate_id: int,
                     (approver, fid, candidate_id))
         set_attributes(span, promoted_function_id=fid,
                        series_id=series_id)
+        return fid
+
+
+# --- rung 1 (#142): auto-approve template-origin candidates ------------------------
+#
+# Graduated autonomy, lowest-risk class only. A deterministic, repo-reviewed
+# template body (origin='template') that passes its dry-run is auto-promoted
+# through the SOLE door (approve_candidate), attributed to the policy — never
+# impersonating a human. LLM-generated bodies (origin='claude') stay gated.
+# The refusal invariant is untouched: approve_candidate still enforces the
+# dry-run gate, so a failed/missing dry-run can never promote under any policy.
+#
+# Revocation is a single env switch with no schema change: unset
+# GEFION_TEMPLATE_AUTO_APPROVE (fail-closed default OFF) and every candidate is
+# gated again. Higher rungs (per-generator earned autonomy, full autonomy) stay
+# unbuilt — this is rung 1 only.
+
+TEMPLATE_AUTO_APPROVER = "policy:template-auto"
+_TEMPLATE_AUTO_FLAG = "GEFION_TEMPLATE_AUTO_APPROVE"
+
+
+def template_auto_approval_enabled() -> bool:
+    """Whether rung 1 (#142) is on: template-origin candidates auto-promote.
+
+    Single revocation switch. Fail-closed default OFF — merging this code does
+    not open the gate; the owner turns it on by setting
+    ``GEFION_TEMPLATE_AUTO_APPROVE`` to a truthy value (``1``/``true``/``yes``),
+    and unsetting it returns to everything-gated with no schema change."""
+    return os.getenv(_TEMPLATE_AUTO_FLAG, "false").lower() in ("true", "1", "yes")
+
+
+def maybe_auto_approve(conn, candidate_id: int) -> Optional[int]:
+    """Rung-1 policy at the sole door (#142). Promote a candidate iff the
+    template-auto policy is ON and it is a pending, template-origin candidate
+    with a passing dry-run — via ``approve_candidate`` (no second door),
+    attributed to ``reviewed_by='policy:template-auto'``. Returns the promoted
+    feature_functions id, or None when the candidate stays gated for human
+    review (policy off, claude-origin, non-pending, or no passing dry-run).
+
+    The refusal invariant lives in ``approve_candidate`` and is re-checked here
+    only to decide whether to knock on the door — this path never bypasses it."""
+    with create_span("macro.candidates.maybe_auto_approve",
+                     candidate_id=candidate_id) as span:
+        if not template_auto_approval_enabled():
+            set_attributes(span, auto_approved=False, gate_reason="policy-off")
+            return None
+        c = get_candidate(conn, candidate_id)
+        if c is None:
+            set_attributes(span, auto_approved=False, gate_reason="missing")
+            return None
+        if c["origin"] != "template":
+            set_attributes(span, auto_approved=False, gate_reason="origin-gated")
+            return None
+        if c["review_state"] != "pending":
+            set_attributes(span, auto_approved=False, gate_reason="not-pending")
+            return None
+        dry = c.get("dry_run")
+        if not dry or not dry.get("ok"):
+            set_attributes(span, auto_approved=False,
+                           gate_reason="dry-run-refused")
+            return None
+        fid = approve_candidate(conn, candidate_id,
+                                approver=TEMPLATE_AUTO_APPROVER)
+        set_attributes(span, auto_approved=True, promoted_function_id=fid)
         return fid
 
 

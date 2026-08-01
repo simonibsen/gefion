@@ -764,7 +764,13 @@ class CycleRunner:
                     conn, cid,
                     mcandidates.dry_run_candidate(body, kind=kind,
                                                   inputs=inputs))
-            set_attributes(span, proposed=True, candidate_id=cid)
+                # Rung 1 (#142): a template-origin candidate with a passing
+                # dry-run auto-promotes through the sole door when the policy
+                # is on; otherwise it stays queued for human review. Claude
+                # bodies and failed dry-runs never take this path.
+                promoted = mcandidates.maybe_auto_approve(conn, cid)
+            set_attributes(span, proposed=True, candidate_id=cid,
+                           auto_approved=bool(promoted))
             return cid
 
     def _preflight_check(

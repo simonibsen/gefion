@@ -35,6 +35,12 @@ ALPHAVANTAGE_API_KEY=<key>
 EOF
 chmod 600 .env
 
+# Optional autonomy (#142, rung 1): auto-approve template-origin generated
+# market candidates that pass their dry-run. Fail-closed default OFF — add
+# this line to opt in; remove it to revert to everything-gated (no schema
+# change). Claude-origin bodies and failed/missing dry-runs always stay gated.
+#   GEFION_TEMPLATE_AUTO_APPROVE=1
+
 # 3. Services (images are version-pinned in the compose files — keep it that way)
 docker compose up -d postgres
 docker compose -f docker/tempo/docker-compose.tempo.yml up -d
