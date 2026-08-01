@@ -14298,11 +14298,12 @@ def regime_discover_start(
                                    help="Tier(s) enabled: interaction|grammar|expressive"),
     signal_source: str = typer.Option("features", "--signal-source",
                                       help="Declared signal universe: "
-                                           "features | model_predictions"),
+                                           "features | model_predictions | "
+                                           "strategy_backtests"),
     coverage_floor: float = typer.Option(
         0.95, "--coverage-floor",
-        help="model_predictions rung: minimum fraction of post-cutoff "
-             "trading days each signal must cover"),
+        help="model_predictions/strategy_backtests rungs: minimum fraction of "
+             "evaluable trading days each signal must cover"),
     grading_scheme: str = typer.Option("walk_forward", "--grading-scheme",
                                        help="Declared trust-grading scheme"),
     universe_filter: Optional[str] = typer.Option(
@@ -14348,9 +14349,12 @@ def regime_discover_start(
     from gefion.regimes.discovery.runner import DiscoveryConfig, DiscoveryError, run_discovery
     from gefion.regimes.discovery.segregation import SegregationError
     from gefion.regimes.discovery.signals import (ModelSignalError,
+                                                  StrategySignalError,
                                                   check_model_signal_window,
+                                                  check_strategy_signal_window,
                                                   load_market_data,
-                                                  resolve_model_signal_provenance)
+                                                  resolve_model_signal_provenance,
+                                                  resolve_strategy_signal_provenance)
 
     out = get_output(json_output)
     try:
@@ -14397,9 +14401,10 @@ def regime_discover_start(
             symbols = universe_members(conn)
             if any(f.kind != "passthrough" for f in chain):
                 symbols = duniverse.apply_chain(chain, symbols, conn=conn)
-            if signal_source not in ("features", "model_predictions"):
-                out.error(f"Unknown signal source {signal_source!r} — "
-                          f"available: features, model_predictions")
+            if signal_source not in ("features", "model_predictions",
+                                     "strategy_backtests"):
+                out.error(f"Unknown signal source {signal_source!r} — available: "
+                          f"features, model_predictions, strategy_backtests")
                 raise typer.Exit(1)
             if signal:
                 signals_list = list(signal)
@@ -14409,14 +14414,24 @@ def regime_discover_start(
                           "macro_model_outlook_q50) — defaulting to all "
                           "active features would silently change the rung")
                 raise typer.Exit(1)
+            elif signal_source == "strategy_backtests":
+                out.error("signal_source=strategy_backtests requires explicit "
+                          "--signal names (the strategy-derived series, e.g. "
+                          "macro_strategy_<config>_equity) — defaulting to all "
+                          "active features would silently change the rung")
+                raise typer.Exit(1)
             else:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT name FROM feature_definitions WHERE active = true ORDER BY name")
                     signals_list = [r[0] for r in cur.fetchall()]
             provenance = None
+            strategy_provenance = None
             if signal_source == "model_predictions":
                 provenance = resolve_model_signal_provenance(conn, signals_list)
+            elif signal_source == "strategy_backtests":
+                strategy_provenance = resolve_strategy_signal_provenance(
+                    conn, signals_list)
             detector_list = []
             if principles:
                 from gefion.experiments.principles import load_principles
@@ -14443,6 +14458,13 @@ def regime_discover_start(
                 window_record = check_model_signal_window(
                     conn, market, signals_list, provenance,
                     coverage_floor=coverage_floor)
+            elif strategy_provenance is not None:
+                window_record = check_strategy_signal_window(
+                    conn, market, signals_list, strategy_provenance,
+                    coverage_floor=coverage_floor)
+            # The strategy rung records its identity under a "strategy" key; the
+            # conservative entanglement rule reuses input_features either way.
+            entanglement_prov = provenance or strategy_provenance
             config = DiscoveryConfig(
                 name=name, seed=seed, atoms=atom_list, signals=signals_list,
                 depth=depth, budget=budget, tiers=tuple(tier),
@@ -14453,10 +14475,13 @@ def regime_discover_start(
                 freeform=freeform_list, detectors=detector_list,
                 reserve_justification=reserve_justification,
                 dataset_version=dataset,
-                signal_provenance=provenance, signal_window=window_record)
+                signal_provenance=entanglement_prov,
+                strategy_provenance=strategy_provenance,
+                signal_window=window_record)
             summary = run_discovery(conn, config, market)
     except (GrammarError, DiscoveryError, duniverse.UniverseError,
-            SegregationError, LookupError, ModelSignalError) as exc:
+            SegregationError, LookupError, ModelSignalError,
+            StrategySignalError) as exc:
         out.error(f"Discovery refused: {exc}")
         raise typer.Exit(1)
 
