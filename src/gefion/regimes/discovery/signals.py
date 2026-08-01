@@ -23,6 +23,11 @@ class ModelSignalError(ValueError):
     materialization, vintage mixing, lookahead, or thin coverage."""
 
 
+class StrategySignalError(ValueError):
+    """The strategy_backtests rung refuses: wrong namespace, missing
+    materialization, mixed fit vintages, lookahead, or thin coverage."""
+
+
 def resolve_model_signal_provenance(conn, signals: List[str]) -> Dict[str, Any]:
     """Resolve declared model-prediction signals to ONE model identity.
 
@@ -141,6 +146,179 @@ def check_model_signal_window(conn, market: MarketData, signals: List[str],
     return record
 
 
+def materialize_strategy_equity(conn, config_name: str, strategy_name: str,
+                                equity_curve: List[tuple],
+                                fit_cutoff: Optional[datetime.date] = None,
+                                input_features: Optional[List[str]] = None) -> str:
+    """Store a strategy backtest's equity curve as a market-level series (the
+    strategy_backtests rung's input, issue #105).
+
+    Reuses the existing macro/computed-features molds (zero DDL): the equity
+    LEVEL series lands under a `macro_series` entity as feature
+    `macro_strategy_<config>_equity`; the strategy identity + fit cutoff +
+    traded-feature list ride the market `feature_functions` row's `inputs`
+    (the rung's provenance chain). The equity->per-observation-return mapping
+    is applied later, at discovery time, by StrategyBacktestSignalSource — so
+    the stored series is a plain point-in-time level, never a peeked return.
+    Returns the market feature name.
+    """
+    from psycopg.types.json import Json
+
+    from gefion.db.ingest import ensure_feature_definitions
+    from gefion.macro import catalog
+
+    series_name = f"strategy_{config_name}_equity"
+    feature_name = f"macro_{series_name}"
+    prov = {"config": config_name, "strategy_name": strategy_name,
+            "fit_cutoff": fit_cutoff.isoformat() if fit_cutoff else None,
+            "input_features": sorted(input_features or [])}
+    with create_span("discovery.signals.materialize_strategy_equity",
+                     config=config_name, n_points=len(equity_curve)) as span:
+        series_id = catalog.ensure_series(
+            conn, name=series_name, provider="strategy", kind="backtest",
+            cadence="daily",
+            description=f"equity curve of strategy config {config_name!r}")
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO feature_functions
+                       (name, version, status, language, function_body,
+                        description, inputs, scope, created_by)
+                   VALUES (%s, 'v1', 'active', 'python', %s, %s, %s, 'market',
+                           'strategy-backtests-rung')
+                   ON CONFLICT (name, version) DO UPDATE
+                       SET inputs = EXCLUDED.inputs,
+                           function_body = EXCLUDED.function_body""",
+                (series_name,
+                 "# strategy equity curve (materialized, not computed here)\n",
+                 f"equity curve of strategy config {config_name!r}",
+                 Json({"strategy": prov})))
+        ids = ensure_feature_definitions(conn, [{
+            "name": feature_name, "function_name": series_name,
+            "params": None, "source_table": "stock_ohlcv",
+            "source_column": "close", "store_table": "computed_features",
+            "store_column": "value", "store_type": "double precision",
+            "active": True, "entity_table": "macro_series",
+        }])
+        feature_id = ids[feature_name]
+        with conn.cursor() as cur:
+            cur.executemany(
+                """INSERT INTO computed_features (data_id, date, feature_id, value)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (feature_id, data_id, date)
+                   DO UPDATE SET value = EXCLUDED.value""",
+                [(series_id, d, feature_id, float(v)) for d, v in equity_curve])
+        conn.commit()
+        set_attributes(span, series_id=series_id, feature_id=feature_id)
+        return feature_name
+
+
+def resolve_strategy_signal_provenance(conn, signals: List[str]) -> Dict[str, Any]:
+    """Resolve declared strategy-equity signals to their strategy identities.
+
+    Every signal must be a strategy-derived market series
+    (`macro_strategy_<config>_equity`) backed by a market feature_function
+    carrying strategy provenance (see materialize_strategy_equity). One hunt,
+    one fit vintage: distinct non-null fit cutoffs across the declared signals
+    refuse (mixed in-sample windows are how lookahead hides). Returns
+    {strategies, fit_cutoff, input_features} — the last feeds the conservative
+    entanglement rule (an atom the strategy trades on conditions it on itself).
+    """
+    import json as _json
+
+    with create_span("discovery.signals.resolve_strategy_provenance",
+                     n_signals=len(signals)) as span:
+        fix = ("materialize a strategy's equity curve as a market series with "
+               "gefion.regimes.discovery.signals.materialize_strategy_equity "
+               "(name macro_strategy_<config>_equity)")
+        strategies: List[Dict[str, Any]] = []
+        cutoffs: set = set()
+        inputs: set = set()
+        seen: set = set()
+        with conn.cursor() as cur:
+            for sig in signals:
+                fn_name = sig[len("macro_"):] if sig.startswith("macro_") else None
+                row = None
+                if fn_name:
+                    cur.execute("SELECT inputs FROM feature_functions "
+                                "WHERE name = %s AND scope = 'market'", (fn_name,))
+                    row = cur.fetchone()
+                strat = None
+                if row is not None:
+                    payload = row[0]
+                    if isinstance(payload, str):
+                        payload = _json.loads(payload)
+                    strat = (payload or {}).get("strategy")
+                if not strat or not strat.get("config"):
+                    raise StrategySignalError(
+                        f"signal {sig!r} is not a strategy-derived series — the "
+                        f"strategy_backtests rung consumes an equity-curve series "
+                        f"only; {fix}")
+                key = strat["config"]
+                if key not in seen:
+                    seen.add(key)
+                    strategies.append({"config": strat["config"],
+                                       "strategy_name": strat.get("strategy_name")})
+                if strat.get("fit_cutoff"):
+                    cutoffs.add(strat["fit_cutoff"])
+                inputs.update(strat.get("input_features") or [])
+        if len(cutoffs) > 1:
+            raise StrategySignalError(
+                f"declared strategy signals carry {len(cutoffs)} different fit "
+                f"cutoffs ({sorted(cutoffs)}) — one hunt, one fit vintage "
+                f"(mixed in-sample windows are how lookahead hides)")
+        prov = {"strategies": strategies,
+                "fit_cutoff": next(iter(cutoffs)) if cutoffs else None,
+                "input_features": sorted(inputs)}
+        set_attributes(span, n_strategies=len(strategies),
+                       fit_cutoff=prov["fit_cutoff"] or "none")
+        return prov
+
+
+def check_strategy_signal_window(conn, market: MarketData, signals: List[str],
+                                 provenance: Dict[str, Any],
+                                 coverage_floor: float = 0.95) -> Dict[str, Any]:
+    """The strategy rung's causality + coverage gate, at pre-registration.
+
+    In-sample lookahead: if the strategy declares a fit cutoff, any equity
+    value at or before it is in-sample by construction — refuse. Coverage:
+    each signal must cover at least `coverage_floor` of the evaluable trading
+    calendar (post-cutoff when a fit cutoff exists, else the full grid); a thin
+    series refuses. Returns the auditable window record for pre-registration.
+    """
+    cutoff = (datetime.date.fromisoformat(provenance["fit_cutoff"])
+              if provenance.get("fit_cutoff") else None)
+    end = max(market.dates())
+    with conn.cursor() as cur:
+        if cutoff is not None:
+            cur.execute("SELECT count(DISTINCT date) FROM stock_ohlcv "
+                        "WHERE date > %s AND date <= %s", (cutoff, end))
+        else:
+            cur.execute("SELECT count(DISTINCT date) FROM stock_ohlcv "
+                        "WHERE date <= %s", (end,))
+        expected = cur.fetchone()[0]
+    record = {"fit_cutoff": provenance.get("fit_cutoff"), "window_end": str(end),
+              "expected_days": expected, "coverage_floor": coverage_floor,
+              "coverage": {}}
+    for sig in signals:
+        series = market.features[sig]
+        first = series[0][0]
+        if cutoff is not None and first <= cutoff:
+            raise StrategySignalError(
+                f"signal {sig!r} has an equity value at or before the fit cutoff "
+                f"{cutoff} (first: {first}) — in-sample lookahead by construction; "
+                f"materialize the equity curve from the post-cutoff span only")
+        have = sum(1 for d, _ in series
+                   if (cutoff is None or d > cutoff) and d <= end)
+        coverage = have / expected if expected else 0.0
+        record["coverage"][sig] = round(coverage, 4)
+        if coverage < coverage_floor:
+            raise StrategySignalError(
+                f"signal {sig!r} covers {coverage:.1%} of the {expected} "
+                f"evaluable trading days (floor {coverage_floor:.0%}) — "
+                f"re-materialize the strategy equity curve over the full span")
+    return record
+
+
 class FeatureSignalSource:
     """Per-observation edge records from market-level feature signals."""
 
@@ -190,6 +368,87 @@ class FeatureSignalSource:
                 })
             set_attributes(span, n_records=len(out))
             return out
+
+
+class StrategyBacktestSignalSource:
+    """Per-observation edge records from a strategy's equity curve (#105).
+
+    The signal is a strategy's equity LEVEL series (materialized market-side);
+    `records()` maps it to per-observation strategy RETURNS aligned to the
+    discovery observation grid and uses each return directly as the
+    experimental_score — "does following this strategy earn here?", the honest
+    question to ask of a strategy per regime. The mapping is causal by
+    construction: r_t = equity_t / equity_{t-1} - 1 uses only equity at or
+    before t, so no future point can enter an earlier return (no lookahead).
+    Conditioning features are read raw from market data, exactly like the
+    feature rung, so tier-1/tier-2 tests plug into the same downstream.
+    """
+
+    def __init__(self, market: MarketData, signals: List[str], align_window: int = 60):
+        missing = [s for s in signals if s not in market.features]
+        if missing:
+            raise LookupError(f"strategy signal(s) not in market data: {missing}")
+        self.market = market
+        self.signals = list(signals)
+        self.align_window = align_window  # unused (no trailing median); parity
+        self._returns: Dict[str, Series] = {
+            s: self._to_returns(market.features[s]) for s in signals}
+
+    @staticmethod
+    def _to_returns(levels: Series) -> Series:
+        """Equity levels -> per-observation returns, causal (only past+present)."""
+        out: Series = []
+        prev: Optional[tuple] = None
+        for d, lvl in sorted(levels):
+            if prev is not None and prev[1] != 0:
+                out.append((d, float(lvl) / float(prev[1]) - 1.0))
+            prev = (d, lvl)
+        return out
+
+    def series(self, name: str) -> Series:
+        """Return series for a strategy signal; raw market series otherwise."""
+        if name in self._returns:
+            return self._returns[name]
+        if name not in self.market.features:
+            raise LookupError(f"feature {name!r} not in market data")
+        return self.market.features[name]
+
+    def records(self, signal: str,
+                start: Optional[datetime.date] = None,
+                end: Optional[datetime.date] = None) -> List[Dict[str, Any]]:
+        """Per-observation records: {date, baseline_score, experimental_score}.
+
+        experimental_score at t = the strategy's return over (t-1, t]; baseline
+        is the do-nothing arm (0.0). No future equity enters r_t, so the paired
+        conditional test asks "does the strategy earn in this regime?" without
+        peeking past the observation date.
+        """
+        with create_span("discovery.signals.strategy_records", signal=signal) as span:
+            if signal not in self._returns:
+                self._returns[signal] = self._to_returns(self.series(signal))
+            out: List[Dict[str, Any]] = []
+            for d, r in self._returns[signal]:
+                if start is not None and d < start:
+                    continue
+                if end is not None and d > end:
+                    continue
+                out.append({"date": d, "baseline_score": 0.0,
+                            "experimental_score": float(r)})
+            set_attributes(span, n_records=len(out))
+            return out
+
+
+def make_signal_source(signal_source: str, market: MarketData,
+                       signals: List[str], align_window: int = 60):
+    """Dispatch to the signal source for a declared rung (the pluggable seam).
+
+    `features` and `model_predictions` share FeatureSignalSource (model signals
+    are ordinary market series under guard); `strategy_backtests` uses the
+    equity-curve source. Unknown sources are rejected upstream at the CLI.
+    """
+    if signal_source == "strategy_backtests":
+        return StrategyBacktestSignalSource(market, signals, align_window=align_window)
+    return FeatureSignalSource(market, signals, align_window=align_window)
 
 
 def _feature_series(cur, name: str, symbols: Optional[List[str]],

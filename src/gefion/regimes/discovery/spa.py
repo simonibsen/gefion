@@ -382,7 +382,7 @@ def reconstruct_family(conn, run, market=None) -> Dict[str, Any]:
     DB rebuild; verification against the just-stored tests then proves
     same-world by construction rather than by luck."""
     from gefion.regimes.discovery import ledger
-    from gefion.regimes.discovery.signals import FeatureSignalSource
+    from gefion.regimes.discovery.signals import make_signal_source
 
     run_row = _get_run(conn, run)
     with create_span("discovery.spa.reconstruct", run_id=run_row["id"]) as span:
@@ -394,8 +394,9 @@ def reconstruct_family(conn, run, market=None) -> Dict[str, Any]:
         ss = run_row["search_space"]
         if market is None:
             market = _rebuild_market(conn, run_row)
-        src = FeatureSignalSource(market, ss["signals"],
-                                  align_window=int(ss.get("align_window", 60)))
+        src = make_signal_source(ss.get("signal_source", "features"), market,
+                                 ss["signals"],
+                                 align_window=int(ss.get("align_window", 60)))
         start, end = _outer_window(run_row)
 
         units, divergent = [], []

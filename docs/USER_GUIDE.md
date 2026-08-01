@@ -901,7 +901,7 @@ segregation (discovery never sees the outer holdout), a pre-registered bounded s
 space, one flat FDR family that counts every test including the losers, and auditable
 ledgers. See [REGIMES.md](REGIMES.md) § Agentic discovery for the threat model.
 
-- `gefion regime discover start --name <slug> --atoms <atoms.json> [--depth K] [--budget N] [--tier interaction|grammar|expressive]... [--signal-source features|model_predictions] [--coverage-floor 0.95] [--grading-scheme walk_forward] [--universe-filter <chain>|passthrough] [--fresh-holdout START:END] [--freeform <asts.json>] [--principles <id,id>] [--reserve-justification TEXT] [--signal <feat>]... [--horizon-days N] [--holdout-weeks N] [--min-effective-n N] [--max-date YYYY-MM-DD] [--seed N] [--dataset V]` — pre-register and run a bounded discovery. Expect mostly rejections; that is correct behavior. The expressive tier (free-form ASTs via `--freeform`, principle-seeded detectors via `--principles`) requires a declared single-use `--fresh-holdout` reserve; re-declaring a consumed reserve requires `--reserve-justification`.
+- `gefion regime discover start --name <slug> --atoms <atoms.json> [--depth K] [--budget N] [--tier interaction|grammar|expressive]... [--signal-source features|model_predictions|strategy_backtests] [--coverage-floor 0.95] [--grading-scheme walk_forward] [--universe-filter <chain>|passthrough] [--fresh-holdout START:END] [--freeform <asts.json>] [--principles <id,id>] [--reserve-justification TEXT] [--signal <feat>]... [--horizon-days N] [--holdout-weeks N] [--min-effective-n N] [--max-date YYYY-MM-DD] [--seed N] [--dataset V]` — pre-register and run a bounded discovery. Expect mostly rejections; that is correct behavior. The expressive tier (free-form ASTs via `--freeform`, principle-seeded detectors via `--principles`) requires a declared single-use `--fresh-holdout` reserve; re-declaring a consumed reserve requires `--reserve-justification`.
 - `gefion regime discover list [--status S]` — list runs (status, family size, dataset).
 - `gefion regime discover show <run>` — pre-registration, segregation boundaries, family size, status.
 - `gefion regime discover ledger <run> [--verdict V]` — the candidate ledger: every candidate evaluated, losers included (they are the FDR denominator).
@@ -954,3 +954,40 @@ The rung's own refusals, all at pre-registration:
 - **Conservative entanglement** — a model signal derives from ALL the
   model's declared input features, so an atom conditioning on any of them
   is refused as self-conditioning.
+
+#### The strategy_backtests rung (issue #105 — interrogating a strategy)
+
+`--signal-source strategy_backtests` points the same machinery at a trading
+strategy: "in which market states does this strategy actually earn?" The
+signal is a strategy's **equity curve**, materialized market-side as
+`macro_strategy_<config>_equity`. At discovery time the equity curve is
+mapped to per-observation strategy returns (`r_t = equity_t / equity_{t-1} −
+1`) and each return is used directly as the per-observation score — bucketed
+by candidate regime, the conditional test asks whether the strategy earns in
+that regime. The mapping is causal by construction: `r_t` uses only equity at
+or before `t`, so no future point can enter an earlier return.
+
+```bash
+gefion regime discover start --name strat-meta-hunt --atoms atoms.json   --signal-source strategy_backtests   --signal macro_strategy_myconfig_equity   --tier grammar --horizon-days 5 --holdout-weeks 8
+```
+
+The rung's own refusals, all at pre-registration:
+
+- **Explicit signals only** — defaulting to all active features would
+  silently change the rung; indicator signals under this rung refuse.
+- **One fit vintage per hunt** — declared signals carrying different fit
+  cutoffs refuse (mixed in-sample windows are how lookahead hides); the run
+  row records each strategy's identity (config + implementation) and cutoff.
+- **In-sample lookahead** — if a strategy declares a fit cutoff, any equity
+  value at or before it refuses (it is in-sample by construction).
+- **Coverage floor** (`--coverage-floor`, default 95%) — each equity series
+  must cover that fraction of the evaluable trading days, else the run
+  refuses.
+- **Conservative entanglement** — a feature the strategy trades on is refused
+  as a conditioning atom (conditioning the strategy on its own input).
+
+The equity curve is materialized with
+`gefion.regimes.discovery.signals.materialize_strategy_equity` (a strategy's
+backtest `equity_curve` payload → a market series, zero DDL). Until the
+meta-hunt admits something, a strategy's returns are signals under test —
+nothing may treat them as a validated edge.

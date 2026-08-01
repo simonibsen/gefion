@@ -37,7 +37,7 @@ from gefion.regimes.discovery.segregation import (
     MarketData,
     SegregationError,
 )
-from gefion.regimes.discovery.signals import FeatureSignalSource
+from gefion.regimes.discovery.signals import FeatureSignalSource, make_signal_source
 
 # Discovery admits at a stricter rate than standard experiments (0.10): a
 # discovered regime is a *claim mill* — its search volume is the risk — so the
@@ -101,6 +101,10 @@ class DiscoveryConfig:
     # entanglement rule (an atom on ANY model input conditions it on itself).
     signal_provenance: Optional[Dict[str, Any]] = None
     signal_window: Optional[Dict[str, Any]] = None
+    # strategy_backtests rung (issue #105): resolved strategy identity + fit
+    # cutoff, recorded under the "strategy" search-space key. input_features
+    # (features the strategy trades on) reuse the same entanglement rule.
+    strategy_provenance: Optional[Dict[str, Any]] = None
 
     def validate(self) -> None:
         if not self.name or not self.signals:
@@ -216,7 +220,10 @@ def run_discovery(conn, config: DiscoveryConfig, market: MarketData) -> Dict[str
             "label_window": config.label_window,
             "align_window": config.align_window,
             **({"model": config.signal_provenance}
-               if config.signal_provenance else {}),
+               if config.signal_provenance
+               and config.signal_source == "model_predictions" else {}),
+            **({"strategy": config.strategy_provenance}
+               if config.strategy_provenance else {}),
             **({"signal_window": config.signal_window}
                if config.signal_window else {}),
         }
@@ -358,8 +365,8 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
     # the judge, so it costs the outer test nothing; the conjunction is what
     # makes zero-survivors-in-noise structural.
     inner_market = ctx.inner_market()
-    inner_src = FeatureSignalSource(inner_market, config.signals,
-                                    align_window=config.align_window)
+    inner_src = make_signal_source(config.signal_source, inner_market,
+                                   config.signals, align_window=config.align_window)
     inner_results: List[List[Dict[str, Any]]] = []
     selected: List[bool] = []
     detector_state: Dict[int, Dict[str, Any]] = {}  # index -> fit result / refusal
@@ -393,8 +400,8 @@ def _enumerate_and_evaluate(conn, run_id, config, atoms, market, ctx, holdout):
     # -- Stage B: CONFIRMATION — selected candidates only. Interaction/grammar
     # confirm on the outer holdout; expressive candidates confirm on the
     # declared, single-use fresh-holdout reserve (FR-118a).
-    src = FeatureSignalSource(market, config.signals,
-                              align_window=config.align_window)
+    src = make_signal_source(config.signal_source, market, config.signals,
+                             align_window=config.align_window)
     all_tests: List[Dict[str, Any]] = []      # flat family, in deterministic order
     per_candidate: List[List[Dict[str, Any]]] = []
     reserve_spent = False
