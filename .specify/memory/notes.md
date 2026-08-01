@@ -21,9 +21,10 @@ Three g2-prefixed skills:
 - `/g2-dev` — Developer/PM assistant (status, next work, safe dev loop). Uses git, tests, spec-kit.
 - `/g2-services` — Start/stop infrastructure (PostgreSQL, Tempo, Grafana).
 
-The `/g2` operator skill and MCP RBAC (operator/developer roles) are complementary:
-- MCP RBAC controls tool access for external MCP clients (Claude Desktop, production)
-- Skills control behavior for Claude Code CLI sessions
+The MCP server ships always-on tools-first behavioral guidance in its server
+instructions for every calling agent (Claude Desktop, production); skills shape
+behavior for Claude Code CLI sessions. (The old developer/operator MCP RBAC was
+vestigial and was removed in issue #172.)
 
 ## Spec-Kit Setup
 

@@ -1219,7 +1219,6 @@ documented here or in a section above.
 - `system_status` — comprehensive status with intelligent suggestions: infrastructure health, data freshness, missing features.
 - `health_check` — quick infrastructure health check (PostgreSQL, Tempo, Docker); use `system_status` for the full picture.
 - `docker_status` — docker compose services status (quick docker-specific check).
-- `get_role_info` — current MCP server role (developer/operator) and behavioral guidelines.
 - `dev_status` — parse DEVELOPMENT/NEXT_STEPS/PROGRESS docs for roadmap position and next steps.
 
 ### Data & features

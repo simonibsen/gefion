@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 """
-Tests for MCP Role-Based Access Control (RBAC).
+Tests for MCP server after role mechanism removal (issue #172).
 
-TDD tests - written before implementation.
+The developer/operator role gate (``GEFION_MCP_ROLE``) was vestigial: the
+toggle was never switched and it guarded nothing dangerous (every
+destructive tool stayed available to ``operator``; the only blocked tool
+was ``dev_status``). It has been removed. The one valuable piece — the
+tools-first behavioral guidance — is now always-on in the MCP server
+instructions.
+
+These tests assert the *absence* of the role concept and the *presence*
+of the always-on guidance.
 """
 
 import asyncio
+import importlib
 import json
 import os
+
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 def run_async(coro):
@@ -17,193 +27,78 @@ def run_async(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
-class TestRoleConfiguration:
-    """Test role detection from environment variable."""
+@pytest.fixture
+def server_module():
+    """Freshly-reloaded server module."""
+    import server
+    importlib.reload(server)
+    return server
 
-    def test_default_role_is_operator(self):
-        """When GEFION_MCP_ROLE is not set, default to operator (safer default)."""
-        with patch.dict(os.environ, {}, clear=True):
-            # Remove GEFION_MCP_ROLE if present
-            os.environ.pop('GEFION_MCP_ROLE', None)
 
-            # Import after env is set
-            import importlib
+class TestNoRoleConcept:
+    """The role mechanism is gone: no env read, no module-level state."""
+
+    def test_no_mcp_role_attribute(self, server_module):
+        assert not hasattr(server_module, "MCP_ROLE")
+
+    def test_no_operator_blocked_tools(self, server_module):
+        assert not hasattr(server_module, "OPERATOR_BLOCKED_TOOLS")
+
+    def test_no_role_info(self, server_module):
+        assert not hasattr(server_module, "ROLE_INFO")
+
+    def test_role_env_var_ignored(self):
+        """Setting GEFION_MCP_ROLE has no effect; the concept is gone."""
+        with patch.dict(os.environ, {"GEFION_MCP_ROLE": "developer"}):
             import server
             importlib.reload(server)
-
-            assert server.MCP_ROLE == "operator"
-
-    def test_operator_role_from_env(self):
-        """When GEFION_MCP_ROLE=operator, role should be operator."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
-            import importlib
-            import server
-            importlib.reload(server)
-
-            assert server.MCP_ROLE == "operator"
-
-    def test_developer_role_from_env(self):
-        """When GEFION_MCP_ROLE=developer, role should be developer."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'developer'}):
-            import importlib
-            import server
-            importlib.reload(server)
-
-            assert server.MCP_ROLE == "developer"
+            assert not hasattr(server, "MCP_ROLE")
 
 
-class TestToolFiltering:
-    """Test tool filtering based on role."""
+class TestGetRoleInfoRemoved:
+    """The get_role_info tool (schema + handler + dispatch) is gone."""
 
-    def test_dev_status_available_for_developer(self):
-        """Developer role should see dev_status tool."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'developer'}):
-            import importlib
-            import server
-            importlib.reload(server)
+    def test_get_role_info_not_in_tool_list(self, server_module):
+        tools = run_async(server_module.list_tools())
+        assert "get_role_info" not in [t.name for t in tools]
 
-            tools = run_async(server.list_tools())
-            tool_names = [t.name for t in tools]
+    def test_get_role_info_handler_removed(self, server_module):
+        assert not hasattr(server_module, "_get_role_info")
 
-            assert "dev_status" in tool_names
-
-    def test_dev_status_blocked_for_operator(self):
-        """Operator role should NOT see dev_status tool."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
-            import importlib
-            import server
-            importlib.reload(server)
-
-            tools = run_async(server.list_tools())
-            tool_names = [t.name for t in tools]
-
-            assert "dev_status" not in tool_names
-
-    def test_query_database_available_for_operator(self):
-        """Operator role should see query_database tool."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
-            import importlib
-            import server
-            importlib.reload(server)
-
-            tools = run_async(server.list_tools())
-            tool_names = [t.name for t in tools]
-
-            assert "query_database" in tool_names
-
-    def test_all_operational_tools_available_for_operator(self):
-        """Operator role should see all operational tools."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
-            import importlib
-            import server
-            importlib.reload(server)
-
-            tools = run_async(server.list_tools())
-            tool_names = [t.name for t in tools]
-
-            # All these should be available to operator
-            expected_tools = [
-                "ml_dataset_build", "ml_train", "ml_predict", "ml_eval",
-                "ml_train_classifier", "ml_predict_classifier",
-                "query_predictions", "query_model_performance",
-                "data_update", "features_list", "cross_sectional_compute",
-                "query_database",
-                "span_check", "trace_search", "trace_detail", "trace_compare",
-                "system_status", "health_check", "docker_status",
-                "strategy_list", "strategy_configs", "strategy_create_config",
-                "get_role_info",  # New tool
-            ]
-
-            for tool in expected_tools:
-                assert tool in tool_names, f"Expected {tool} to be available for operator"
+    def test_calling_get_role_info_is_unknown(self, server_module):
+        result = run_async(server_module.call_tool("get_role_info", {}))
+        assert len(result) == 1
+        response = json.loads(result[0].text)
+        assert response["success"] is False
 
 
-class TestAccessDenied:
-    """Test access denied for blocked tools (defense in depth)."""
+class TestDevStatusAlwaysAvailable:
+    """dev_status was the only role-gated tool; it is now always available."""
 
-    def test_dev_status_call_denied_for_operator(self):
-        """Calling dev_status as operator should return access denied."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
-            import importlib
-            import server
-            importlib.reload(server)
+    def test_dev_status_in_tool_list(self, server_module):
+        tools = run_async(server_module.list_tools())
+        assert "dev_status" in [t.name for t in tools]
 
-            result = run_async(server.call_tool("dev_status", {}))
-
-            # Should return TextContent with error
-            assert len(result) == 1
+    def test_dev_status_not_access_denied(self, server_module):
+        with patch.object(
+            server_module,
+            "_dev_status",
+            return_value={"success": True},
+        ):
+            result = run_async(server_module.call_tool("dev_status", {}))
             response = json.loads(result[0].text)
-
-            assert response["success"] is False
-            assert "access denied" in response["error"].lower() or "not available" in response["error"].lower()
-
-    def test_dev_status_call_allowed_for_developer(self):
-        """Calling dev_status as developer should work."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'developer'}):
-            import importlib
-            import server
-            importlib.reload(server)
-
-            # Mock the _dev_status function to avoid file system dependencies
-            with patch.object(server, '_dev_status', return_value={"success": True, "role": "developer"}):
-                result = run_async(server.call_tool("dev_status", {}))
-
-                assert len(result) == 1
-                response = json.loads(result[0].text)
-
-                # Should not be access denied
-                if "error" in response:
-                    assert "access denied" not in response["error"].lower()
+            if "error" in response:
+                assert "access denied" not in response["error"].lower()
 
 
-class TestGetRoleInfo:
-    """Test get_role_info tool."""
+class TestToolsFirstGuidanceAlwaysOn:
+    """The behavioral guidance is unconditional in the server instructions."""
 
-    def test_get_role_info_returns_operator(self):
-        """get_role_info should return operator role and guidelines."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'operator'}):
-            import importlib
-            import server
-            importlib.reload(server)
+    def test_server_has_instructions(self, server_module):
+        assert server_module.app.instructions
 
-            result = run_async(server.call_tool("get_role_info", {}))
-
-            assert len(result) == 1
-            response = json.loads(result[0].text)
-
-            assert response["success"] is True
-            assert response["role"] == "operator"
-            assert "description" in response
-            assert "guidelines" in response
-            assert isinstance(response["guidelines"], list)
-            # Should include guidance about not modifying code
-            guidelines_text = " ".join(response["guidelines"]).lower()
-            assert "code" in guidelines_text or "source" in guidelines_text
-
-    def test_get_role_info_returns_developer(self):
-        """get_role_info should return developer role."""
-        with patch.dict(os.environ, {'GEFION_MCP_ROLE': 'developer'}):
-            import importlib
-            import server
-            importlib.reload(server)
-
-            result = run_async(server.call_tool("get_role_info", {}))
-
-            assert len(result) == 1
-            response = json.loads(result[0].text)
-
-            assert response["success"] is True
-            assert response["role"] == "developer"
-
-    def test_get_role_info_available_in_tool_list(self):
-        """get_role_info should appear in tool list for both roles."""
-        for role in ["developer", "operator"]:
-            with patch.dict(os.environ, {'GEFION_MCP_ROLE': role}):
-                import importlib
-                import server
-                importlib.reload(server)
-
-                tools = run_async(server.list_tools())
-                tool_names = [t.name for t in tools]
-
-                assert "get_role_info" in tool_names, f"get_role_info should be in tool list for {role}"
+    def test_instructions_are_tools_first(self, server_module):
+        text = server_module.app.instructions.lower()
+        # Use the system's tools; don't reflexively write code.
+        assert "tool" in text
+        assert "code" in text
