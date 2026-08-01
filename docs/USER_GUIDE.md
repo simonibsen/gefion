@@ -464,9 +464,24 @@ origin — recorded as `reviewed_by='policy:earned:<generator>'`.
   the rung on; `GEFION_EARNED_AUTONOMY_N` sets the threshold N (positive
   integer, **default 3**; a malformed or non-positive value falls back to the
   default rather than widening the gate).
-- **Precedence:** earned (rung 2) ⊃ template-auto (rung 1) ⊃ everything-gated.
-  The switches are independent and OFF by default; unsetting either reverts
-  that rung with no schema change. The refusal invariant still holds under both.
+
+##### Rung 3: full autonomy with review-after (#142)
+
+Rung 3 is the top of the ladder: **every** dry-run-passing candidate
+auto-promotes regardless of origin or generator, recorded as
+`reviewed_by='policy:full-auto'`. The candidate ledger becomes a *retrospective*
+control — review-after rather than review-before — so each full-auto promotion
+also emits one **system observation** (`gefion observations list`, observer
+`full_auto_gate`) as a standing digest of what the open gate admitted. The
+digest is idempotent (one observation per candidate) and, like all observations
+(#144), never acts — it is a heads-up for a human to review.
+
+- **The switch:** `GEFION_FULL_AUTONOMY` (fail-closed **default OFF**).
+- **Precedence:** full-auto (rung 3) ⊃ earned (rung 2) ⊃ template-auto (rung 1)
+  ⊃ everything-gated. All three switches are independent and OFF by default;
+  unsetting any one reverts that rung with no schema change.
+- **The refusal invariant still holds:** a failed or missing dry-run can never
+  promote under *any* rung — the same one door enforces it.
 
 #### Composite market series — macro-of-macro (spec 014)
 

@@ -195,17 +195,20 @@ Two flows sit on top of the market dispatcher (spec 011):
    all` adopts it with zero configuration. Every derive door refuses
    unpromoted candidates by name. `approve_candidate` is the SOLE door
    from candidate to `feature_functions`; graduated autonomy (#142) is a
-   policy at that one chokepoint, not a second door. Rungs layer there,
-   each behind its own fail-closed default-OFF switch, precedence
-   earned ⊃ template-auto ⊃ gated: **rung 1**
+   policy at that one chokepoint, not a second door. Three rungs layer
+   there, each behind its own fail-closed default-OFF switch, precedence
+   full-auto ⊃ earned ⊃ template-auto ⊃ gated: **rung 1**
    (`GEFION_TEMPLATE_AUTO_APPROVE`) auto-approves template-origin candidates,
    `reviewed_by='policy:template-auto'`; **rung 2**
    (`GEFION_EARNED_AUTONOMY`, threshold `GEFION_EARNED_AUTONOMY_N` default 3)
    auto-approves a generator's candidates once it has N human approvals with
    zero demotions of its promoted series — trust *derived* from audit history
    (no new state), so a demotion/disable revokes it automatically —
-   `reviewed_by='policy:earned:<generator>'`. The refusal invariant holds under
-   all rungs: a failed/missing dry-run never promotes. Unsetting any switch
+   `reviewed_by='policy:earned:<generator>'`; **rung 3**
+   (`GEFION_FULL_AUTONOMY`) auto-approves every candidate,
+   `reviewed_by='policy:full-auto'`, and emits a review-after digest
+   observation (#144) per promotion. The refusal invariant holds under all
+   rungs: a failed/missing dry-run never promotes. Unsetting any switch
    reverts that rung with no schema change.
 2. **Composite mode (macro-of-macro).** A market function whose `inputs`
    declare `{"series": [...]}` executes through `run_composite_function`:

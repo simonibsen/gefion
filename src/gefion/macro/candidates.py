@@ -301,9 +301,9 @@ def approve_candidate(conn, candidate_id: int,
 # layer on below, each behind its own fail-closed default-OFF switch, all
 # enforcing at this SAME door with the SAME refusal invariant.
 #
-# Switch precedence at the door: earned (rung 2) ⊃ template-auto (rung 1) ⊃
-# everything-gated. All OFF by default; a single unset of any switch reverts
-# that rung with no schema change.
+# Switch precedence at the door: full-auto (rung 3) ⊃ earned (rung 2) ⊃
+# template-auto (rung 1) ⊃ everything-gated. All OFF by default; a single unset
+# of any switch reverts that rung with no schema change.
 
 TEMPLATE_AUTO_APPROVER = "policy:template-auto"
 _TEMPLATE_AUTO_FLAG = "GEFION_TEMPLATE_AUTO_APPROVE"
@@ -313,6 +313,11 @@ EARNED_AUTO_APPROVER_PREFIX = "policy:earned:"
 _EARNED_AUTO_FLAG = "GEFION_EARNED_AUTONOMY"
 _EARNED_AUTO_N_FLAG = "GEFION_EARNED_AUTONOMY_N"
 DEFAULT_EARNED_AUTONOMY_N = 3
+
+# Rung 3 (#142): full autonomy + review-after digest.
+FULL_AUTO_APPROVER = "policy:full-auto"
+_FULL_AUTO_FLAG = "GEFION_FULL_AUTONOMY"
+FULL_AUTO_OBSERVER = "full_auto_gate"
 
 
 def _flag_on(name: str) -> bool:
@@ -350,6 +355,13 @@ def earned_autonomy_threshold() -> int:
     except ValueError:
         return DEFAULT_EARNED_AUTONOMY_N
     return val if val > 0 else DEFAULT_EARNED_AUTONOMY_N
+
+
+def full_autonomy_enabled() -> bool:
+    """Whether rung 3 (#142) is on: EVERY dry-run-passing candidate
+    auto-promotes regardless of origin/generator. Fail-closed default OFF via
+    ``GEFION_FULL_AUTONOMY``."""
+    return _flag_on(_FULL_AUTO_FLAG)
 
 
 def generator_autonomy_earned(conn, generator: Optional[str],
@@ -402,11 +414,13 @@ def generator_autonomy_earned(conn, generator: Optional[str],
 
 
 def _select_auto_policy(conn, c: Dict[str, Any]) -> Optional[str]:
-    """The one place precedence lives: earned ⊃ template-auto ⊃ gated. Returns
-    the ``reviewed_by`` string of the highest ON policy that admits candidate
-    ``c``, or None when it stays gated for a human. Callers have already
-    confirmed ``c`` is pending with a passing dry-run — this only decides which
-    door (never bypasses the refusal invariant)."""
+    """The one place precedence lives: full-auto ⊃ earned ⊃ template-auto ⊃
+    gated. Returns the ``reviewed_by`` string of the highest ON policy that
+    admits candidate ``c``, or None when it stays gated for a human. Callers
+    have already confirmed ``c`` is pending with a passing dry-run — this only
+    decides which door (never bypasses the refusal invariant)."""
+    if full_autonomy_enabled():
+        return FULL_AUTO_APPROVER
     if earned_autonomy_enabled():
         generator = c.get("generator")
         if generator and generator_autonomy_earned(conn, generator):
@@ -424,10 +438,11 @@ def maybe_auto_approve(conn, candidate_id: int) -> Optional[int]:
     human). Returns the promoted feature_functions id, or None when the
     candidate stays gated for human review.
 
-    Precedence: earned (rung 2) ⊃ template-auto (rung 1) ⊃ everything-gated. The
-    refusal invariant is enforced HERE (pending + passing dry-run) before any
-    policy is consulted, and again inside ``approve_candidate`` — a
-    failed/missing dry-run can never promote under any rung."""
+    Precedence: full-auto (rung 3) ⊃ earned (rung 2) ⊃ template-auto (rung 1) ⊃
+    everything-gated. The refusal invariant is enforced HERE (pending + passing
+    dry-run) before any policy is consulted, and again inside
+    ``approve_candidate`` — a failed/missing dry-run can never promote under any
+    rung. Rung-3 promotions also emit a review-after digest observation."""
     with create_span("macro.candidates.maybe_auto_approve",
                      candidate_id=candidate_id) as span:
         c = get_candidate(conn, candidate_id)
@@ -447,9 +462,66 @@ def maybe_auto_approve(conn, candidate_id: int) -> Optional[int]:
             set_attributes(span, auto_approved=False, gate_reason="gated")
             return None
         fid = approve_candidate(conn, candidate_id, approver=approver)
+        if approver == FULL_AUTO_APPROVER:
+            record_full_auto_digest(conn, get_candidate(conn, candidate_id))
         set_attributes(span, auto_approved=True, policy=approver,
                        promoted_function_id=fid)
         return fid
+
+
+def _has_full_auto_observation(conn, candidate_id: int) -> bool:
+    """Idempotency guard: at most one full-auto digest per candidate."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT 1 FROM system_observations
+               WHERE observer = %s AND evidence->>'candidate_id' = %s
+               LIMIT 1""",
+            (FULL_AUTO_OBSERVER, str(candidate_id)))
+        return cur.fetchone() is not None
+
+
+def record_full_auto_digest(conn, candidate: Optional[Dict[str, Any]]
+                            ) -> Optional[int]:
+    """Rung-3 review-after control (#142): record one ``system_observation``
+    per full-auto promotion so the open gate stays reviewable (the #144
+    machinery — observations never act; a human reviews the queue). Idempotent
+    per candidate: a repeat call never duplicates. Returns the observation id,
+    or None when nothing was recorded (no candidate, or already digested)."""
+    from gefion import observations
+
+    if candidate is None:
+        return None
+    cid = candidate["id"]
+    with create_span("macro.candidates.full_auto_digest",
+                     candidate_id=cid) as span:
+        if _has_full_auto_observation(conn, cid):
+            set_attributes(span, recorded=False)
+            return None
+        oid = observations.record(
+            conn,
+            observer=FULL_AUTO_OBSERVER,
+            category="improvement",
+            observation=(
+                f"candidate #{cid} ({candidate['name']}, "
+                f"origin={candidate['origin']}, "
+                f"generator={candidate.get('generator')}) was auto-promoted "
+                "under full autonomy (GEFION_FULL_AUTONOMY) — review-after."),
+            evidence={
+                "candidate_id": cid,
+                "name": candidate["name"],
+                "origin": candidate["origin"],
+                "generator": candidate.get("generator"),
+                "promoted_function_id": candidate.get("promoted_function_id"),
+                "reviewed_by": candidate.get("reviewed_by"),
+            },
+            suggested_action=(
+                "review the auto-promoted function; if unwanted, disable it "
+                "(`feature-function toggle` — which also revokes its "
+                "generator's earned autonomy) or delete it "
+                "(`feature-function delete`)."),
+        )
+        set_attributes(span, recorded=True, observation_id=oid)
+        return oid
 
 
 def reject_candidate(conn, candidate_id: int, reason: str,

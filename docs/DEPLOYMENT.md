@@ -39,7 +39,7 @@ chmod 600 .env
 # graduated rung at a time. Each switch is fail-closed default OFF — add a line
 # to opt in; remove it to revert THAT rung (no schema change). The refusal
 # invariant holds under every rung: a failed/missing dry-run never promotes.
-# Precedence: earned ⊃ template-auto ⊃ everything-gated.
+# Precedence: full-auto ⊃ earned ⊃ template-auto ⊃ everything-gated.
 #   # Rung 1 — auto-approve repo-reviewed template-origin candidates.
 #   #          Claude-origin bodies stay gated. reviewed_by='policy:template-auto'
 #   GEFION_TEMPLATE_AUTO_APPROVE=1
@@ -49,6 +49,10 @@ chmod 600 .env
 #   #          reviewed_by='policy:earned:<generator>'. N defaults to 3.
 #   GEFION_EARNED_AUTONOMY=1
 #   GEFION_EARNED_AUTONOMY_N=3
+#   # Rung 3 — full autonomy: every dry-run-passing candidate auto-promotes,
+#   #          reviewed_by='policy:full-auto', with a review-after digest
+#   #          observation (gefion observations list) per promotion.
+#   GEFION_FULL_AUTONOMY=1
 
 # 3. Services (images are version-pinned in the compose files — keep it that way)
 docker compose up -d postgres
