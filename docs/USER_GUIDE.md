@@ -546,10 +546,21 @@ gefion charts-clean --keep-days 30             # reap old chart HTML
 ### System observations (#144)
 
 The operating plane's notebook: runtime observers (the cycle runner, quality
-scans) and agent sessions record what they notice about the SYSTEM — power
-limitations, tuning opportunities, anomalies, hypotheses — the moment they
-notice it. The ledger holds observations, never actions: nothing acts on it
-automatically; adoption is always a human act.
+scans, the export watcher) and agent sessions record what they notice about
+the SYSTEM — power limitations, tuning opportunities, anomalies, hypotheses —
+the moment they notice it. The ledger holds observations, never actions:
+nothing acts on it automatically; adoption is always a human act.
+
+Runtime observers today:
+- **cycle runner** — a completed experiment cycle with zero FDR survivors
+  (a geometry/power fact worth recording, not throwing away).
+- **export watcher (#162)** — a machine-generated feature function that is
+  `active`, survived probation, and has either been active ≥ 30 days or feeds
+  a production model, yet is not captured in version control. It suggests
+  `feat-fx-export --functions <name>` + commit so proven alpha-generating
+  code gets code review and survives a restore/migration. It only records;
+  the export and commit are a human act. Runs nightly with
+  `gefion experiment probation-check` (also part of `gefion data-update`).
 
 ```bash
 gefion observe "h=20 buckets hover at the effective-N floor" \
