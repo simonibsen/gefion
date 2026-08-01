@@ -189,7 +189,7 @@
 
 ### Interfaces
 - Full CLI (`gefion` command with subcommands)
-- MCP server for natural language interaction (51 tools, RBAC with operator/developer roles)
+- MCP server for natural language interaction (always-on tools-first guidance in server instructions)
 - Claude Code skills: `/g2-dev` (development), `/g2` (operations), `/g2-services` (infrastructure)
 - Textual TUI (in development on `siUI` branch)
 
