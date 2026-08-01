@@ -416,6 +416,32 @@ gefion macro candidate reject --id 7 --reason "duplicates breadth_sma200"
 - Pre-approval, every execution door refuses by name:
   `'x' is a pending candidate — review with gefion macro candidate show`.
 
+##### Rung 1: auto-approve template-origin candidates (#142)
+
+The gate can be relaxed one graduated rung at a time. **Rung 1** trusts the
+lowest-risk class only: candidates whose body came from a **repo-reviewed
+template** (`origin='template'`) — the code was effectively reviewed when the
+template was written. When rung 1 is on, a template candidate that passes its
+dry-run is auto-promoted through the *same* door (`approve_candidate`), recorded
+as `reviewed_by='policy:template-auto'` so the audit ledger distinguishes a
+policy approval from a human one. LLM-generated bodies (`origin='claude'`) stay
+gated and always wait for a human.
+
+- **The switch:** a single environment flag, `GEFION_TEMPLATE_AUTO_APPROVE`.
+  Fail-closed **default OFF** — the gate stays mandatory as shipped until the
+  owner turns it on. Enable it by setting the variable to a truthy value
+  (`1`/`true`/`yes`), e.g. in the production `.env` or the nightly cron
+  environment.
+- **Revocation is cheap:** unset the variable (or set it falsy) and every
+  candidate is gated again on the next run — no schema change, no migration,
+  nothing to undo in the ledger.
+- **The refusal invariant is absolute:** a candidate with a failed or missing
+  dry-run can never promote, under any policy. Rung 1 rides the existing door,
+  which enforces the dry-run gate — the flag only decides whether template
+  candidates *knock*.
+- **Higher rungs are not built:** per-generator earned autonomy (rung 2) and
+  full review-after-the-fact autonomy (rung 3) remain open in #142.
+
 #### Composite market series — macro-of-macro (spec 014)
 
 A composite is a market function whose inputs are **named macro series**

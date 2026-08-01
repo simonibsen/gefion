@@ -193,7 +193,14 @@ Two flows sit on top of the market dispatcher (spec 011):
    `feature_functions` row (scope `market`, active) plus its paired
    macro-home `feature_definitions` row — so the nightly `derive --series
    all` adopts it with zero configuration. Every derive door refuses
-   unpromoted candidates by name.
+   unpromoted candidates by name. `approve_candidate` is the SOLE door
+   from candidate to `feature_functions`; graduated autonomy (#142) is a
+   policy at that one chokepoint, not a second door. **Rung 1** (env flag
+   `GEFION_TEMPLATE_AUTO_APPROVE`, fail-closed default OFF) auto-approves
+   template-origin candidates that pass their dry-run — attributed
+   `reviewed_by='policy:template-auto'`; Claude-origin bodies and any
+   failed/missing dry-run stay gated. Unsetting the flag reverts to
+   everything-gated with no schema change.
 2. **Composite mode (macro-of-macro).** A market function whose `inputs`
    declare `{"series": [...]}` executes through `run_composite_function`:
    per date the body receives that date's stored values of its declared
