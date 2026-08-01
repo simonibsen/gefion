@@ -439,8 +439,49 @@ gated and always wait for a human.
   dry-run can never promote, under any policy. Rung 1 rides the existing door,
   which enforces the dry-run gate — the flag only decides whether template
   candidates *knock*.
-- **Higher rungs are not built:** per-generator earned autonomy (rung 2) and
-  full review-after-the-fact autonomy (rung 3) remain open in #142.
+
+##### Rung 2: earned per-generator autonomy (#142)
+
+Rung 2 lets trust accrue to the specific **generator** that produced a
+candidate (the `generator` column on the ledger, e.g. `cycle_runner`). A
+generator earns autonomy once it has accumulated **N human approvals** with
+**zero demotions or disables** of any series it has already had promoted. Once
+earned, that generator's dry-run-passing candidates auto-promote — regardless of
+origin — recorded as `reviewed_by='policy:earned:<generator>'`.
+
+- **Trust is derived, not stored.** The condition is a pure function of the
+  audit history: human approvals are counted from the candidate ledger, and a
+  demotion is any of the generator's promoted `feature_functions` rows going
+  `status='demoted'` or `enabled=FALSE`. There is no new state and no schema
+  change.
+- **Revocation is automatic.** Auto-approved series ride the existing
+  experiments auto-demotion machinery as their probation window: the moment one
+  of a generator's series degrades and is disabled, the derived condition flips
+  and that generator is gated again on the next run. Only human approvals count
+  toward earning, so a generator can never bootstrap its own trust from prior
+  policy approvals.
+- **The switches:** `GEFION_EARNED_AUTONOMY` (fail-closed **default OFF**) turns
+  the rung on; `GEFION_EARNED_AUTONOMY_N` sets the threshold N (positive
+  integer, **default 3**; a malformed or non-positive value falls back to the
+  default rather than widening the gate).
+
+##### Rung 3: full autonomy with review-after (#142)
+
+Rung 3 is the top of the ladder: **every** dry-run-passing candidate
+auto-promotes regardless of origin or generator, recorded as
+`reviewed_by='policy:full-auto'`. The candidate ledger becomes a *retrospective*
+control — review-after rather than review-before — so each full-auto promotion
+also emits one **system observation** (`gefion observations list`, observer
+`full_auto_gate`) as a standing digest of what the open gate admitted. The
+digest is idempotent (one observation per candidate) and, like all observations
+(#144), never acts — it is a heads-up for a human to review.
+
+- **The switch:** `GEFION_FULL_AUTONOMY` (fail-closed **default OFF**).
+- **Precedence:** full-auto (rung 3) ⊃ earned (rung 2) ⊃ template-auto (rung 1)
+  ⊃ everything-gated. All three switches are independent and OFF by default;
+  unsetting any one reverts that rung with no schema change.
+- **The refusal invariant still holds:** a failed or missing dry-run can never
+  promote under *any* rung — the same one door enforces it.
 
 #### Composite market series — macro-of-macro (spec 014)
 
