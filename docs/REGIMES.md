@@ -296,6 +296,36 @@ stack, all at pre-registration:
 Until the meta-hunt admits something, model predictions are signals under
 test — nothing anywhere may treat them as validated forecasts.
 
+### The strategy_backtests rung (issue #105 — interrogating a strategy)
+
+`signal_source='strategy_backtests'` points the same machinery at a trading
+strategy: the hunted signal is a strategy's **equity curve**, materialized
+market-side as `macro_strategy_<config>_equity`. At discovery time the equity
+curve maps to per-observation strategy returns (`r_t = equity_t / equity_{t-1}
+− 1`) and each return is the per-observation score directly — so, bucketed by
+a candidate regime, the conditional test asks the honest question you ask of a
+strategy: *does it earn in this state?* Backtests generate; statistics judges.
+The equity→return mapping is causal by construction (`r_t` reads only equity
+at or before `t`), and the rung adds these refusals on top of the standard
+stack, all at pre-registration:
+
+- **One fit vintage per hunt** — declared signals carrying different fit
+  cutoffs refuse; the run row records each strategy's identity (config +
+  implementation) and its fit cutoff under the `strategy` search-space key.
+- **In-sample lookahead** — a declared fit cutoff refuses any equity value at
+  or before it (in-sample by construction).
+- **Coverage floor** — each equity series must cover the declared fraction
+  (default 95%) of the evaluable trading calendar, else the run refuses.
+- **Conservative entanglement** — a feature the strategy trades on is refused
+  as a conditioning atom (conditioning the strategy on its own input).
+
+The rung consumes an equity series materialized via
+`gefion.regimes.discovery.signals.materialize_strategy_equity` (zero DDL — the
+existing macro/computed-features molds). SPA (post-run + in-run, mean-form)
+and effective-N walk-forward grading are the SAME downstream as every rung.
+Until the meta-hunt admits something, a strategy's returns are signals under
+test — nothing may treat them as a validated edge.
+
 ### Sector-state vocabulary (spec 013)
 
 Sector aggregates widen the conditioning vocabulary beyond whole-market

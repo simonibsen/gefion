@@ -279,8 +279,8 @@ def test_rung_refuses_unknown_signal_source(world, atoms_file):
     r = CliRunner().invoke(app, [
         "regime", "discover", "start", "--name", "mds-badsource",
         "--atoms", str(atoms_file),
-        "--signal-source", "strategy_backtests",
+        "--signal-source", "no_such_source",
         "--universe-filter", "passthrough",
         "--db-url", schema.test_db_url()])
     assert r.exit_code == 1
-    assert "signal" in r.output.lower()
+    assert "unknown signal source" in r.output.lower()
