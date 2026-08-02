@@ -45,16 +45,11 @@ def setup_tables(conn):
         cur.execute("DROP TABLE IF EXISTS stock_ohlcv CASCADE;")
         cur.execute("DROP TABLE IF EXISTS stocks CASCADE;")
 
-        # Create stocks table
-        cur.execute("""
-            CREATE TABLE stocks (
-                id SERIAL PRIMARY KEY,
-                symbol TEXT NOT NULL UNIQUE,
-                exchange TEXT,
-                status TEXT
-            );
-        """)
+    # Use the canonical creator so stocks carries every column upsert_stock
+    # writes (name/asset_type/updated_at), not just the subset this test reads.
+    schema.create_stocks_table(conn)
 
+    with conn.cursor() as cur:
         # Create stock_ohlcv table
         cur.execute("""
             CREATE TABLE stock_ohlcv (

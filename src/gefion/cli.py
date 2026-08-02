@@ -4328,6 +4328,18 @@ def ingest_universe(
             raise typer.Exit(code=2)
         filtered = filter_listings(listings, exchange=exchange, status=status)
         symbols = [row["symbol"] for row in filtered]
+        # Keep the authoritative per-symbol listing metadata so ingest can persist
+        # exchange/name/asset_type onto the stocks row at registration (issue #192),
+        # instead of leaving them NULL until a separate `data listing-meta` pass.
+        listing_meta = {
+            row["symbol"]: {
+                "exchange": row.get("exchange"),
+                "name": row.get("name"),
+                "asset_type": row.get("asset_type"),
+            }
+            for row in filtered
+            if row.get("symbol")
+        }
         if limit:
             symbols = symbols[:limit]
         if not symbols:
@@ -4390,6 +4402,7 @@ def ingest_universe(
                     update_existing=update_existing,
                     progress=reporter,
                     target_date=target_date,
+                    listing_meta=listing_meta,
                 )
             if live:
                 live.update(reporter._build_table())
