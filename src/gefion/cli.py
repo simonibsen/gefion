@@ -15034,6 +15034,137 @@ def regime_discover_show(
         out.info(spa_line)
 
 
+@discover_app.command("power-baseline")
+def regime_discover_power_baseline(
+    name: str = typer.Option(..., "--name", help="Baseline run-set name (kebab-case slug)"),
+    atoms: str = typer.Option(..., "--atoms",
+                              help="Path to the FIXED atom-battery JSON ({\"atoms\": [...]})"),
+    signal: Optional[List[str]] = typer.Option(
+        None, "--signal", help="Signal feature(s) (default: active feature definitions)"),
+    fractions: str = typer.Option(
+        "0.25,0.5,0.75,1.0", "--fractions",
+        help="Comma-separated sector-stratified sweep fractions in (0, 1]"),
+    draws: int = typer.Option(
+        3, "--draws", help="Seeded draws per fraction (dispersion needs >= 2)"),
+    depth: int = typer.Option(2, "--depth",
+                              help="Max composition depth K (part of the fixed battery)"),
+    budget: int = typer.Option(100, "--budget",
+                               help="Per-run candidate budget (part of the fixed battery)"),
+    tier: List[str] = typer.Option(["grammar"], "--tier",
+                                   help="Tier(s) enabled: interaction|grammar"),
+    horizon_days: int = typer.Option(1, "--horizon-days", help="Forward-return horizon"),
+    holdout_weeks: int = typer.Option(6, "--holdout-weeks", help="Outer holdout width"),
+    min_effective_n: int = typer.Option(
+        20, "--min-effective-n",
+        help="Episode-based effective-sample floor per bucket (the discovery gate's own)"),
+    universe: Optional[str] = typer.Option(
+        None, "--universe",
+        help="Modeling universe name (default: the default universe; 'all' unfiltered)"),
+    correlation_window_days: int = typer.Option(
+        504, "--correlation-window-days",
+        help="Trailing window (calendar days) for the cross-sectional effective-N "
+             "correlation panel"),
+    max_date: Optional[str] = typer.Option(
+        None, "--max-date",
+        help="Declared vintage (YYYY-MM-DD): evaluate honestly as of a past date"),
+    seed: int = typer.Option(
+        42, "--seed", help="Base seed (per-draw seeds derive from it deterministically)"),
+    dataset: str = typer.Option("dev", "--dataset", help="Dataset version tag"),
+    output: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Write the full JSON report to this path"),
+    db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL override"),
+    json_output: Optional[bool] = typer.Option(None, "--json", help="Output as JSON"),
+) -> None:
+    """Measure how discovery admission power scales with universe size (phase 1 of #179).
+
+    Sector-stratified subsamples of the modeling universe at each fraction, several
+    seeded draws each; the SAME fixed candidate battery is evaluated by the real
+    discovery + SPA gate on every subsample, so power changes attribute to
+    effective-N (the correlation-discounted cross-section) alone. Emits a
+    power(effective-N) curve with the marginal admission-power at the frontier —
+    the predictor for what another exchange would buy. Heavy: one real discovery
+    run per (fraction, draw).
+    """
+    import json as _json
+    from datetime import datetime as _dt
+
+    from gefion.output import Column
+    from gefion.regimes.discovery.power_baseline import (PowerBaselineConfig,
+                                                         PowerBaselineError,
+                                                         run_power_baseline_db)
+
+    out = get_output(json_output)
+    try:
+        atom_list = _json.loads(Path(atoms).read_text())["atoms"]
+    except (OSError, KeyError, ValueError) as exc:
+        out.error(f"Cannot read atom battery {atoms}: {exc}")
+        raise typer.Exit(1)
+    try:
+        frac_tuple = tuple(float(x) for x in fractions.split(",") if x.strip())
+    except ValueError as exc:
+        out.error(f"Invalid --fractions {fractions!r}: {exc}")
+        raise typer.Exit(1)
+    vintage = None
+    if max_date:
+        try:
+            vintage = _dt.strptime(max_date, "%Y-%m-%d").date()
+        except ValueError:
+            out.error(f"Invalid --max-date {max_date!r}; expected YYYY-MM-DD")
+            raise typer.Exit(1)
+
+    with create_span("cli.regime-discover-power-baseline", run_name=name,
+                     fractions=len(frac_tuple), draws=draws), \
+            _regime_conn(db_url) as conn:
+        if signal:
+            signals_list = list(signal)
+        else:
+            with conn.cursor() as cur:
+                cur.execute("SELECT name FROM feature_definitions "
+                            "WHERE active = true ORDER BY name")
+                signals_list = [r[0] for r in cur.fetchall()]
+        config = PowerBaselineConfig(
+            name=name, atoms=atom_list, signals=signals_list,
+            fractions=frac_tuple, draws_per_fraction=draws, seed=seed,
+            depth=depth, budget=budget, tiers=tuple(tier),
+            horizon_days=horizon_days, holdout_weeks=holdout_weeks,
+            min_effective_n=min_effective_n, universe=universe,
+            dataset_version=dataset,
+            correlation_window_days=correlation_window_days)
+        try:
+            report = run_power_baseline_db(conn, config, max_date=vintage)
+        except (PowerBaselineError, LookupError) as exc:
+            out.error(f"Power baseline refused: {exc}")
+            raise typer.Exit(1)
+
+    if output:
+        Path(output).write_text(_json.dumps(report, indent=2))
+    marginal = report["marginal_admission_power"]
+    out.success(
+        f"Power baseline '{name}': {config.draws_per_fraction} draw(s) x "
+        f"{len(frac_tuple)} fraction(s); fixed battery "
+        f"{report['battery']['n_candidates']} candidates "
+        f"(fingerprint {(report['battery']['fingerprint'] or '')[:12]}); "
+        f"marginal admission-power per effective-N at frontier = "
+        f"{'n/a' if marginal is None else round(marginal, 5)}")
+    if out.json_mode:
+        out.json(report)
+    else:
+        spa_by_frac = {fr["fraction"]: fr["spa_p"]["mean"]
+                       for fr in report["fractions"]}
+        out.table(
+            columns=[Column("fraction"), Column("effective_n"), Column("admitted"),
+                     Column("admitted_std"), Column("spa_p_mean")],
+            rows=[[f"{p['fraction']:.2f}", f"{p['effective_n']:.1f}",
+                   f"{p['admitted']:.2f}", f"{p['admitted_std']:.2f}",
+                   ("-" if spa_by_frac.get(p["fraction"]) is None
+                    else f"{spa_by_frac[p['fraction']]:.3f}")]
+                  for p in report["curve"]],
+            json_data=report,
+        )
+        if output:
+            out.info(f"Report written to {output}")
+
+
 def entrypoint() -> None:  # pragma: no cover - thin wrapper
     # Suppress pkg_resources deprecation warning from google.rpc (OTEL dependency)
     import warnings
