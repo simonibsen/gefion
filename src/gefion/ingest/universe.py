@@ -195,6 +195,7 @@ def ingest_prices_for_symbols(
     status: Optional[str] = "Active",
     target_date: Optional[date] = None,
     since_date: Optional[date] = None,
+    listing_meta: Optional[Mapping[str, Mapping[str, object]]] = None,
 ) -> int:
     """
     Fetch and ingest prices for symbols in parallel.
@@ -211,6 +212,11 @@ def ingest_prices_for_symbols(
         status: Stock status to set (defaults to 'Active'). Set to None to not update status.
         target_date: Maximum date to allow (prevents inserting future/partial data).
                     Defaults to None (no limit).
+        listing_meta: Optional per-symbol listing metadata keyed by symbol, each a
+                    mapping with 'exchange'/'name'/'asset_type'. When present, the
+                    values are persisted onto the stocks row at registration so a
+                    fresh ingest records exchange (issue #192) instead of leaving it
+                    NULL until a separate `data listing-meta` pass.
 
     Returns:
         Total number of rows inserted
@@ -235,8 +241,16 @@ def ingest_prices_for_symbols(
     def fetch_worker(sym: str) -> None:
         nonlocal fetch_count
         try:
+            meta = (listing_meta or {}).get(sym) or {}
             with psycopg.connect(db_url) as conn:
-                data_id = upsert_stock(conn, sym, status=status)
+                data_id = upsert_stock(
+                    conn,
+                    sym,
+                    status=status,
+                    exchange=meta.get("exchange"),
+                    name=meta.get("name"),
+                    asset_type=meta.get("asset_type"),
+                )
 
                 if timeframe == "auto":
                     outputsize = decide_outputsize(conn, data_id, timeframe)

@@ -12,7 +12,14 @@ from psycopg.types.json import Json
 from gefion.observability import create_span, set_attributes, get_current_span
 
 
-def upsert_stock(conn: psycopg.Connection, symbol: str, status: Optional[str] = None) -> int:
+def upsert_stock(
+    conn: psycopg.Connection,
+    symbol: str,
+    status: Optional[str] = None,
+    exchange: Optional[str] = None,
+    name: Optional[str] = None,
+    asset_type: Optional[str] = None,
+) -> int:
     """
     Insert or update symbol in stocks table; return id.
 
@@ -20,25 +27,30 @@ def upsert_stock(conn: psycopg.Connection, symbol: str, status: Optional[str] = 
         conn: Database connection
         symbol: Stock symbol
         status: Optional status (e.g., 'Active', 'Inactive'). If None, status is not updated.
+        exchange: Optional exchange (e.g., 'NYSE', 'NASDAQ'), authoritative from
+            the listing row. Persisted at registration and kept correct on upsert
+            so exchange filters (#29/#30) and by-exchange cohorts (#191) work off a
+            fresh ingest instead of waiting for a separate `data listing-meta` pass.
+        name: Optional company name. An existing name is never clobbered.
+        asset_type: Optional asset type (e.g., 'Stock', 'ETF'), authoritative from
+            the listing row.
 
     Returns:
         Stock ID
+
+    Metadata (status/exchange/name/asset_type) is written using the same
+    COALESCE semantics as ``update_listing_metadata``: exchange/asset_type/status
+    prefer the incoming listing value but keep the existing one when the new is
+    NULL; an existing name wins over an incoming one. ``updated_at`` is stamped
+    whenever metadata is written (it was previously left NULL on new rows). When
+    no metadata is supplied the call is a pure registration that never touches an
+    existing row (``ON CONFLICT DO NOTHING``).
     """
+    has_metadata = any(v is not None for v in (status, exchange, name, asset_type))
     with conn.cursor() as cur:
-        if status is not None:
-            # Insert with status, or update status on conflict
-            cur.execute(
-                """
-                INSERT INTO stocks (symbol, status)
-                VALUES (%s, %s)
-                ON CONFLICT (symbol) DO UPDATE SET status = EXCLUDED.status
-                RETURNING id
-                """,
-                (symbol, status),
-            )
-            return cur.fetchone()[0]
-        else:
-            # Insert without status (leaves it NULL), or do nothing on conflict
+        if not has_metadata:
+            # Pure registration: insert the symbol, leave metadata NULL, and
+            # never mutate an existing row.
             cur.execute(
                 "INSERT INTO stocks (symbol) VALUES (%s) ON CONFLICT (symbol) DO NOTHING RETURNING id",
                 (symbol,),
@@ -49,6 +61,25 @@ def upsert_stock(conn: psycopg.Connection, symbol: str, status: Optional[str] = 
             # If insert was skipped (conflict), fetch existing ID
             cur.execute("SELECT id FROM stocks WHERE symbol = %s", (symbol,))
             return cur.fetchone()[0]
+
+        # Insert with metadata, or reconcile it on conflict. exchange/asset_type/
+        # status take the incoming (listing) value, falling back to the existing
+        # one; an existing name is preserved. updated_at records the write.
+        cur.execute(
+            """
+            INSERT INTO stocks (symbol, status, exchange, name, asset_type, updated_at)
+            VALUES (%s, %s, %s, %s, %s, now())
+            ON CONFLICT (symbol) DO UPDATE SET
+                status = COALESCE(EXCLUDED.status, stocks.status),
+                exchange = COALESCE(EXCLUDED.exchange, stocks.exchange),
+                asset_type = COALESCE(EXCLUDED.asset_type, stocks.asset_type),
+                name = COALESCE(stocks.name, EXCLUDED.name),
+                updated_at = now()
+            RETURNING id
+            """,
+            (symbol, status, exchange, name, asset_type),
+        )
+        return cur.fetchone()[0]
 
 
 def get_stocks_missing_fundamentals(conn: psycopg.Connection, limit: Optional[int] = None) -> List[Tuple[int, str]]:
