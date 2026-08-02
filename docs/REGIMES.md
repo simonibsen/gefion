@@ -453,7 +453,53 @@ budget/depth exhaustion) and sample-dependent refusals are recorded in the diagn
 ledger — the negative space is a learning signal, not noise.
 
 Every discovery operation is reachable via CLI (`gefion regime discover …`), MCP
-(`regime_discover_*` tools), and the UI **Regimes → Discovery** tab.
+(`regime_discover_*` tools), and the UI **Regimes → Discovery** tab. (The
+power-baseline harness below is CLI-only — it runs one full discovery per
+(fraction, draw), so a realistic sweep blows past the MCP subprocess timeout; it
+belongs to the operator as a batch job.)
+
+### Power baseline: how admission power scales with universe size (#180)
+
+Before growing the modeling universe to a new exchange (epic #179), we need to
+know what more symbols actually *buy* the discovery gate — and breadth is not the
+answer, because **correlated names add little**. `gefion regime discover
+power-baseline` measures the real thing on the existing NASDAQ cross-section:
+
+- **X-axis — effective-N, correlation-discounted.** Per subsample, the effective
+  independent-N of the symbol cross-section, `N_eff = N / (1 + (N-1)·ρ̄)` (Kish's
+  effective sample size over the per-symbol return correlations), NOT the raw
+  count. This is the spec-005 independence-adjustment *principle* ("effective N,
+  not raw count") carried from the time axis (005 counts independent episodes) to
+  the symbol cross-section; it is also exactly the effective N that sets the noise
+  of the cross-sectional aggregate the gate consumes (market-median features +
+  market-mean forward returns), which is *why* power scales with it.
+- **Y-axis — admitted-edge power.** The same **fixed candidate battery** (identical
+  atoms/depth/budget/tiers → byte-identical enumerated candidate set, verified by a
+  fingerprint across every draw) is run through the real discovery + SPA gate on
+  each subsample. Only the symbol set varies, so the change in admitted-edge count
+  and SPA p-distribution is attributable to N alone.
+- **Sweep.** Sector-stratified subsamples (sector read off `stocks`, mix preserved
+  so you measure N, not composition drift) at `--fractions` (default
+  25/50/75/100%), `--draws` seeded draws each, with across-draw dispersion reported
+  (one draw is too noisy).
+
+The report is a `power(effective-N)` curve plus the **marginal admission-power per
+added effective-N at the frontier** — the finite-difference slope between the two
+largest subsamples, i.e. the predictor for what another exchange would add. No new
+tables: each (fraction, draw) is an ordinary discovery run in the ledger, auditable
+and deletable; the JSON report is emitted to `--output` (optional) or stdout.
+
+```bash
+gefion regime discover power-baseline --name nasdaq-baseline \
+  --atoms battery.json --tier grammar --depth 1 --budget 50 \
+  --fractions 0.25,0.5,0.75,1.0 --draws 5 --output baseline.json
+```
+
+Direction is pinned to the literature and proved through the real gate
+(`tests/test_power_baseline_direction.py`): on a **planted** conditional edge,
+admission power **rises** with N; on **pure noise**, the admitted count stays at
+the false-positive floor regardless of N — more symbols never manufacture a signal
+that is not there.
 
 ## See also
 
