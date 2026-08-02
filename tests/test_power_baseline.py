@@ -15,6 +15,7 @@ The literature-pinned DIRECTION guarantees (power rises with N on a planted
 edge; noise stays at the false-positive floor) run the real gate and live in
 ``test_power_baseline_direction.py`` (DB).
 """
+import math
 import os
 import sys
 
@@ -23,9 +24,11 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
 from power_baseline_synth import (  # noqa: E402
+    all_ragged_returns,
     correlated_returns,
     independent_returns,
     make_per_symbol_universe,
+    ragged_correlated_returns,
 )
 
 from gefion.regimes.discovery import power_baseline as pb  # noqa: E402
@@ -116,6 +119,50 @@ def test_mean_pairwise_correlation_positive_for_shared_factor():
 def test_effective_n_single_symbol_is_one():
     rets = independent_returns(seed=6, n_symbols=1)
     assert pb.effective_cross_section_n(rets) == 1.0
+
+
+# --- ragged real cross-section (issue #183 regression) -----------------------
+
+def test_naive_intersection_collapses_on_ragged_histories():
+    """Pins the root cause: the complete-case intersection of EVERY symbol's
+    dates is empty on a ragged cross-section (staggered IPO/delist), which is why
+    the pre-fix effective-N degenerated to the raw count."""
+    rets = ragged_correlated_returns(seed=11)
+    common = set.intersection(*(set(dict(v)) for v in rets.values()))
+    assert len(common) == 0
+
+
+def test_effective_n_robust_to_ragged_histories():
+    """The regression for #183: on a genuinely correlated but ragged panel the
+    robust alignment must still discount — rho > 0 and effective-N meaningfully
+    below the raw count. Pre-fix (naive intersection) this returns rho == 0 and
+    effective_n == raw N, so this test FAILS against the old code."""
+    rets = ragged_correlated_returns(seed=11)
+    n_raw = sum(1 for v in rets.values() if v)
+    rho = pb.mean_pairwise_correlation(rets)
+    eff = pb.effective_cross_section_n(rets)
+    assert rho > 0.15                 # the shared factor is recovered
+    assert 1.0 <= eff < 0.8 * n_raw   # a meaningful correlation discount
+    # and the alignment reports what survived the ragged-tail pruning
+    al = pb.align_cross_section(rets)
+    assert not al.thin
+    assert al.n_symbols_in == n_raw
+    assert 2 <= al.n_symbols_kept < n_raw   # the IPO/delisted tail was dropped
+    assert al.n_dates >= 20                 # a dense complete-case panel
+
+
+def test_align_reports_thin_panel_instead_of_silent_zero():
+    """Coverage-threshold edge: when nothing clears the coverage bar the panel is
+    genuinely too thin to estimate a cross-sectional correlation. That must be
+    surfaced (thin=True, NaN correlation) — never a silent 0 that would masquerade
+    as 'uncorrelated' and inflate effective-N back to raw N."""
+    rets = all_ragged_returns(seed=12)
+    al = pb.align_cross_section(rets)
+    assert al.thin
+    assert al.n_symbols_kept < 2
+    assert math.isnan(al.mean_correlation)
+    assert math.isnan(pb.mean_pairwise_correlation(rets))
+    assert math.isnan(pb.effective_cross_section_n(rets))
 
 
 # --- fixed candidate battery fingerprint -------------------------------------

@@ -32,9 +32,11 @@ creates a result table of its own.
 """
 from __future__ import annotations
 
+import collections
 import dataclasses
 import datetime
 import hashlib
+import math
 import random
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -52,6 +54,16 @@ DEFAULT_DRAWS = 3
 # Correlation-estimation window for the real (DB) path: a couple of trading
 # years is stationary enough for a stable effective-N and keeps the query bounded.
 DEFAULT_CORRELATION_WINDOW_DAYS = 504
+# Ragged-alignment thresholds (issue #183). Real symbol histories are ragged
+# (staggered IPO/delisting, interior gaps), so the complete-case intersection of
+# EVERY symbol's dates collapses to empty; these bound how the survivor sub-panel
+# is carved out. A symbol must cover >= COVERAGE of the recent window to survive;
+# a date must be shared by >= COVERAGE of the survivors to enter the panel; the
+# dense complete-case panel must have >= MIN_ALIGNED_DATES columns to be trusted.
+DEFAULT_ALIGN_WINDOW_DATES = 504
+DEFAULT_MIN_SYMBOL_COVERAGE = 0.8
+DEFAULT_MIN_DATE_COVERAGE = 0.8
+DEFAULT_MIN_ALIGNED_DATES = 20
 
 
 class PowerBaselineError(ValueError):
@@ -90,59 +102,182 @@ def sector_stratified_subsample(
 
 # --- cross-sectional effective-N ---------------------------------------------
 
-def _aligned_matrix(returns_by_symbol: Dict[str, Series]) -> np.ndarray:
-    """Symbols x common-dates return matrix (complete cases only)."""
-    per_symbol = {s: dict(v) for s, v in returns_by_symbol.items() if v}
-    if not per_symbol:
-        return np.empty((0, 0))
-    common = set.intersection(*(set(d) for d in per_symbol.values()))
-    dates = sorted(common)
-    if not dates:
-        return np.empty((len(per_symbol), 0))
-    return np.array([[per_symbol[s][d] for d in dates]
-                     for s in sorted(per_symbol)], dtype=float)
+@dataclasses.dataclass
+class CrossSectionAlignment:
+    """A ragged symbol cross-section aligned to a dense complete-case panel.
 
-
-def mean_pairwise_correlation(returns_by_symbol: Dict[str, Series]) -> float:
-    """Average off-diagonal Pearson correlation across the symbol cross-section.
-
-    Vectorised via the standardised-row identity (no N x N matrix, so it scales
-    to thousands of symbols): standardise each symbol's return vector, then
-    mean_{i!=j} corr_ij = (||sum_i z_i||^2 / T - N) / (N(N-1)). Symbols with zero
-    return variance over the window are dropped (undefined correlation).
+    ``matrix`` is the ``(n_symbols_kept, n_dates)`` complete return panel the
+    vectorised correlation identity requires. The diagnostics record what the
+    ragged-tail pruning kept, so a panel that is genuinely too thin to estimate a
+    correlation is a *measured* outcome (``thin=True``, NaN correlation), never a
+    silent zero that would masquerade as 'uncorrelated' (issue #183).
     """
-    mat = _aligned_matrix(returns_by_symbol)
+
+    matrix: np.ndarray
+    n_symbols_in: int          # symbols with any returns (the raw cross-section)
+    n_symbols_kept: int        # survivors in the dense complete-case panel
+    n_dates: int               # dense complete-case dates
+    thin: bool                 # too thin to estimate a cross-sectional correlation
+    mean_correlation: float    # average off-diagonal Pearson rho; NaN when thin
+    effective_n: float         # Kish N_eff over n_symbols_in; NaN when thin
+
+
+def _correlation_from_dense_matrix(mat: np.ndarray) -> float:
+    """Average off-diagonal Pearson correlation of a dense complete ``(N, T)``
+    panel, vectorised via the standardised-row identity (no N x N matrix, so it
+    scales to thousands of symbols): standardise each row, then
+    ``mean_{i!=j} corr_ij = (||sum_i z_i||^2 / T - N) / (N(N-1))``. Symbols with
+    zero return variance are dropped (undefined correlation). Returns NaN when
+    fewer than two varying rows or two dates remain."""
     if mat.shape[0] < 2 or mat.shape[1] < 2:
-        return 0.0
+        return float("nan")
     means = mat.mean(axis=1, keepdims=True)
     stds = mat.std(axis=1, keepdims=True)
     keep = stds[:, 0] > 0
     mat, means, stds = mat[keep], means[keep], stds[keep]
     n, t = mat.shape
     if n < 2:
-        return 0.0
+        return float("nan")
     z = (mat - means) / stds                     # rows: mean 0, ||z_i||^2 = t
     colsum = z.sum(axis=0)
-    off_diag_sum = (float(colsum @ colsum) / t - n) / (n * (n - 1))
-    return off_diag_sum
+    return (float(colsum @ colsum) / t - n) / (n * (n - 1))
 
 
-def effective_cross_section_n(returns_by_symbol: Dict[str, Series]) -> float:
+def _complete_case_panel(
+    survivors: Dict[str, Dict[datetime.date, float]],
+    min_date_coverage: float,
+    min_dates: int,
+) -> Tuple[List[str], List[datetime.date]]:
+    """Carve a dense complete-case ``(symbols, dates)`` panel out of the ragged
+    survivors. Keep the dates shared by >= ``min_date_coverage`` of the survivors,
+    then take the dates every survivor covers. Scattered interior gaps (trading
+    halts) would otherwise thin that strict intersection, so the worst-covered
+    survivor is dropped one at a time until the common panel is dense enough
+    (>= ``min_dates``). On clean data (no interior gaps) the first pass already
+    succeeds, so this is a single O(N*T) sweep. Deterministic — ties break on the
+    symbol name."""
+    syms = sorted(survivors)
+    if len(syms) < 2:
+        return syms, []
+    date_counts: "collections.Counter[datetime.date]" = collections.Counter()
+    for s in syms:
+        date_counts.update(survivors[s].keys())
+    threshold = min_date_coverage * len(syms)
+    candidate = sorted(d for d, c in date_counts.items() if c >= threshold)
+    cand_set = set(candidate)
+    presence = {s: set(survivors[s].keys()) & cand_set for s in syms}
+    cur = list(syms)
+    while len(cur) >= 2:
+        common = [d for d in candidate if all(d in presence[s] for s in cur)]
+        if len(common) >= min_dates:
+            return cur, common
+        worst = max(cur, key=lambda s: (len(cand_set) - len(presence[s]), s))
+        cur.remove(worst)
+    return cur, []
+
+
+def align_cross_section(
+    returns_by_symbol: Dict[str, Series],
+    *,
+    window: int = DEFAULT_ALIGN_WINDOW_DATES,
+    min_symbol_coverage: float = DEFAULT_MIN_SYMBOL_COVERAGE,
+    min_date_coverage: float = DEFAULT_MIN_DATE_COVERAGE,
+    min_dates: int = DEFAULT_MIN_ALIGNED_DATES,
+) -> CrossSectionAlignment:
+    """Align a ragged real cross-section to a dense complete-case return panel.
+
+    Real symbol histories are ragged — recent IPOs, delistings and interior gaps —
+    so the complete-case intersection of EVERY symbol's dates collapses to empty
+    and the effective-N degenerates to the raw count (issue #183). This instead:
+
+    1. restricts to a recent dense window (the most recent ``window`` dates);
+    2. drops symbols whose coverage of that window is below ``min_symbol_coverage``
+       (the ragged tail: recent IPOs, early delistings, heavily-gapped names);
+    3. keeps the dates that at least ``min_date_coverage`` of the survivors share;
+    4. takes the complete-case panel on the survivors — non-empty now that the
+       ragged tail is gone — and computes the correlation-discounted effective-N.
+
+    ``N_eff = N / (1 + (N-1) * rho_bar)`` (Kish's effective sample size), with
+    ``rho_bar`` the average pairwise return correlation clamped to ``[0, 1)`` and
+    ``N`` the raw cross-section size, clamped to ``[1, N]``. If the survivor panel
+    is still too thin (< 2 symbols or < ``min_dates`` dates), that is surfaced
+    honestly (``thin=True``, NaN correlation and effective-N) rather than being
+    reported as an uncorrelated cross-section.
+    """
+    with create_span("discovery.power_baseline.align_cross_section") as span:
+        per_symbol = {s: dict(v) for s, v in returns_by_symbol.items() if v}
+        n_in = len(per_symbol)
+
+        def _thin(matrix: np.ndarray, kept: int, n_dates: int) -> CrossSectionAlignment:
+            set_attributes(span, n_symbols_in=n_in, n_symbols_kept=kept,
+                           n_dates=n_dates, thin=True)
+            return CrossSectionAlignment(
+                matrix, n_in, kept, n_dates, True, float("nan"), float("nan"))
+
+        if n_in < 2:
+            return _thin(np.empty((n_in, 0)), n_in, 0)
+
+        # 1. recent dense window: the most recent `window` observed dates.
+        all_dates = sorted(set().union(*(set(d) for d in per_symbol.values())))
+        if len(all_dates) > window:
+            all_dates = all_dates[-window:]
+        win = set(all_dates)
+        n_win = len(all_dates)
+        per_symbol = {s: {d: dv[d] for d in dv.keys() & win}
+                      for s, dv in per_symbol.items()}
+
+        # 2. drop the ragged tail: symbols below the window-coverage threshold.
+        min_cov_dates = min_symbol_coverage * n_win
+        survivors = {s: dv for s, dv in per_symbol.items()
+                     if len(dv) >= min_cov_dates}
+
+        # 3 + 4. dense complete-case panel on the survivors.
+        kept_syms, kept_dates = _complete_case_panel(
+            survivors, min_date_coverage, min_dates)
+        n_dates = len(kept_dates)
+        if len(kept_syms) < 2 or n_dates < min_dates:
+            matrix = (np.array([[survivors[s][d] for d in kept_dates]
+                                for s in kept_syms], dtype=float)
+                      if kept_syms and kept_dates
+                      else np.empty((len(kept_syms), n_dates)))
+            return _thin(matrix, len(kept_syms), n_dates)
+
+        matrix = np.array([[survivors[s][d] for d in kept_dates]
+                           for s in kept_syms], dtype=float)
+        rho = _correlation_from_dense_matrix(matrix)
+        if math.isnan(rho):                       # all survivors constant (rare)
+            return _thin(matrix, len(kept_syms), n_dates)
+
+        rho_c = max(0.0, min(0.999999, rho))
+        eff = n_in / (1.0 + (n_in - 1) * rho_c)
+        eff = float(max(1.0, min(float(n_in), eff)))
+        set_attributes(span, n_symbols_in=n_in, n_symbols_kept=len(kept_syms),
+                       n_dates=n_dates, thin=False)
+        return CrossSectionAlignment(
+            matrix, n_in, len(kept_syms), n_dates, False, float(rho), eff)
+
+
+def mean_pairwise_correlation(
+    returns_by_symbol: Dict[str, Series], **kwargs: Any) -> float:
+    """Average off-diagonal Pearson correlation across the symbol cross-section,
+    robust to ragged histories (see :func:`align_cross_section`). NaN when the
+    aligned survivor panel is too thin to estimate a correlation."""
+    return align_cross_section(returns_by_symbol, **kwargs).mean_correlation
+
+
+def effective_cross_section_n(
+    returns_by_symbol: Dict[str, Series], **kwargs: Any) -> float:
     """Correlation-discounted effective independent-N of the symbol cross-section.
 
-    ``N_eff = N / (1 + (N-1) * rho_bar)`` with ``rho_bar`` the average pairwise
-    return correlation (clamped to [0, 1)). This is Kish's effective sample size —
-    equivalently the effective N that sets the variance of the cross-sectional
-    mean the discovery gate consumes — so it is the right X-axis for admission
-    power. Clamped to [1, N]. A single symbol has effective-N 1.
-    """
+    ``N_eff = N / (1 + (N-1) * rho_bar)`` — Kish's effective sample size, the
+    right X-axis for admission power because it sets the variance of the
+    cross-sectional mean the discovery gate consumes. A single symbol has
+    effective-N 1; a ragged panel too thin to align returns NaN (surfaced, not
+    silently collapsed to the raw N). See :func:`align_cross_section`."""
     n = sum(1 for v in returns_by_symbol.values() if v)
     if n <= 1:
         return float(n)
-    rho = mean_pairwise_correlation(returns_by_symbol)
-    rho = max(0.0, min(0.999999, rho))
-    eff = n / (1.0 + (n - 1) * rho)
-    return float(max(1.0, min(float(n), eff)))
+    return align_cross_section(returns_by_symbol, **kwargs).effective_n
 
 
 # --- fixed candidate battery -------------------------------------------------
@@ -288,8 +423,10 @@ def run_power_baseline(
                             f"fraction {fraction} drew an empty subsample from "
                             f"{len(members)} members — raise the fraction")
                     returns = returns_for_subsample(subsample)
-                    eff_n = effective_cross_section_n(returns)
-                    rho = mean_pairwise_correlation(returns)
+                    alignment = align_cross_section(
+                        returns, window=config.correlation_window_days)
+                    eff_n = alignment.effective_n
+                    rho = alignment.mean_correlation
                     market = market_for_subsample(subsample)
 
                     pct = int(round(fraction * 100))
@@ -330,6 +467,9 @@ def run_power_baseline(
                         "draw": draw, "seed": seed, "run_id": summary["run_id"],
                         "n_symbols": len(subsample), "effective_n": eff_n,
                         "mean_correlation": rho,
+                        "n_symbols_aligned": alignment.n_symbols_kept,
+                        "n_aligned_dates": alignment.n_dates,
+                        "alignment_thin": alignment.thin,
                         "n_admitted": summary["n_admitted"],
                         "family_size": summary["family_size"],
                         "spa_p_consistent": spa_p,
@@ -339,6 +479,7 @@ def run_power_baseline(
 
                 spa_vals = [d["spa_p_consistent"] for d in draws
                             if d["spa_p_consistent"] is not None]
+                n_thin = sum(1 for d in draws if d["alignment_thin"])
                 fr_result = {
                     "fraction": fraction,
                     "effective_n": summarize([d["effective_n"] for d in draws]),
@@ -346,13 +487,21 @@ def run_power_baseline(
                     "n_symbols": summarize([d["n_symbols"] for d in draws]),
                     "mean_correlation": summarize(
                         [d["mean_correlation"] for d in draws]),
+                    "n_symbols_aligned": summarize(
+                        [d["n_symbols_aligned"] for d in draws]),
+                    "n_aligned_dates": summarize(
+                        [d["n_aligned_dates"] for d in draws]),
+                    "thin_draws": n_thin,
                     "spa_p": summarize(spa_vals),
                     "draws": draws,
                 }
                 per_fraction.append(fr_result)
                 set_attributes(fspan,
                                effective_n_mean=fr_result["effective_n"]["mean"],
-                               admitted_mean=fr_result["admitted"]["mean"])
+                               admitted_mean=fr_result["admitted"]["mean"],
+                               n_symbols_aligned_mean=fr_result[
+                                   "n_symbols_aligned"]["mean"],
+                               thin_draws=n_thin)
 
         curve = assemble_curve(per_fraction)
         marginal = marginal_admission_power(curve)

@@ -165,3 +165,87 @@ def independent_returns(seed: int, n_symbols: int, n_days: int = 250) -> Dict[st
     dates = business_days(n_days)
     return {f"SYN{i:04d}": list(zip(dates, rng.normal(size=n_days)))
             for i in range(n_symbols)}
+
+
+def ragged_correlated_returns(
+    seed: int,
+    n_core: int = 40,
+    n_ipo: int = 10,
+    n_delisted: int = 10,
+    n_days: int = 300,
+    common_scale: float = 0.07,
+    idio_scale: float = 0.09,
+    interior_gap_frac: float = 0.015,
+) -> Dict[str, Series]:
+    """A genuinely correlated cross-section with RAGGED histories (issue #183).
+
+    Every symbol shares a common market factor (so the panel is truly correlated
+    — average pairwise rho well above zero), then real-world raggedness is layered
+    on so the naive complete-case intersection of EVERY symbol's dates collapses:
+
+    - ``n_core`` long-history names with lightly staggered starts (the correlated
+      core that a robust alignment should recover);
+    - ``n_ipo`` recent-IPO names that begin only near the end of the window;
+    - ``n_delisted`` names that stop trading early in the window;
+    - a few interior gaps (trading halts) dropped at random from every symbol.
+
+    The core spans (roughly) the whole window while the IPO tail starts late and
+    the delisted tail ends early, so ``set.intersection`` over all symbols is
+    empty — exactly the degenerate panel that made effective-N collapse to raw N.
+    Deterministic under ``seed``.
+    """
+    rng = np.random.default_rng(seed)
+    dates = business_days(n_days)
+    common = rng.normal(scale=common_scale, size=n_days)
+
+    def _drop_interior(series: List[Tuple[datetime.date, float]]):
+        if len(series) <= 5 or interior_gap_frac <= 0:
+            return series
+        k = max(1, int(round(interior_gap_frac * len(series))))
+        gaps = set(rng.choice(len(series), size=k, replace=False).tolist())
+        return [p for j, p in enumerate(series) if j not in gaps]
+
+    out: Dict[str, Series] = {}
+    idx = 0
+    # correlated long-history core (lightly staggered starts, full to the end)
+    for i in range(n_core):
+        start = int(round((i / max(1, n_core)) * (n_days * 0.08)))  # 0..~24
+        eps = rng.normal(scale=idio_scale, size=n_days)
+        series = list(zip(dates[start:], (common + eps)[start:]))
+        out[f"CORE{idx:04d}"] = _drop_interior(series)
+        idx += 1
+    # recent-IPO tail: only the last ~15 sessions exist (coverage far below 80%)
+    for i in range(n_ipo):
+        start = n_days - 15
+        eps = rng.normal(scale=idio_scale, size=n_days)
+        series = list(zip(dates[start:], (common + eps)[start:]))
+        out[f"IPO{idx:04d}"] = _drop_interior(series)
+        idx += 1
+    # early-delisted tail: only the first ~110 sessions exist
+    for i in range(n_delisted):
+        end = 110
+        eps = rng.normal(scale=idio_scale, size=n_days)
+        series = list(zip(dates[:end], (common + eps)[:end]))
+        out[f"DEAD{idx:04d}"] = _drop_interior(series)
+        idx += 1
+    return out
+
+
+def all_ragged_returns(
+    seed: int, n_symbols: int = 30, n_days: int = 300, slice_len: int = 40,
+) -> Dict[str, Series]:
+    """A pathologically ragged panel: every symbol covers only a short, largely
+    disjoint slice of the window, so NO symbol clears an 80% coverage threshold.
+    The robust alignment must report a *measured thin panel*, not a silent zero.
+    """
+    rng = np.random.default_rng(seed)
+    dates = business_days(n_days)
+    common = rng.normal(scale=0.05, size=n_days)
+    out: Dict[str, Series] = {}
+    step = max(1, (n_days - slice_len) // max(1, n_symbols - 1))
+    for i in range(n_symbols):
+        lo = min(i * step, n_days - slice_len)
+        hi = lo + slice_len
+        eps = rng.normal(scale=0.03, size=n_days)
+        out[f"THIN{i:04d}"] = list(zip(dates[lo:hi], (common + eps)[lo:hi]))
+    return out
