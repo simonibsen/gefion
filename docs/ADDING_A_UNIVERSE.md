@@ -93,6 +93,12 @@ Ordered cheapest-and-most-decisive first, so a "no" costs an afternoon, not a we
 - [ ] **Point-in-time classification** — as-of sector/industry + fundamentals.
 - [ ] **Data quality at scale** — run the spec-008 quality catalog + chokepoint
       exclusion over the new names before admitting them.
+- [ ] **Exchange-specific test symbols** — each exchange publishes its own
+      test/placeholder symbol family (NASDAQ's `Z*ZZT` set; NYSE has its own).
+      Add the new exchange's to `universe.test_tickers` in
+      `data-quality/catalog.yaml`, or they leak in as junk rows. (Most other
+      catalog bounds are definitional and exchange-agnostic — tune only what a
+      quality run flags.)
 - [ ] **Cross-sectional / regime drift** — recompute + re-derive regimes as a
       new vintage.
 - [ ] **Re-vintage = full recompute, not splice** — verify no discontinuity at
