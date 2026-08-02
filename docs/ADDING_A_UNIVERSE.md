@@ -17,6 +17,35 @@ constraint is *samples*, not *signal*, and only in proportion to **effective-N**
 (correlation-discounted), not raw symbol count. Measure it, don't assume it
 (see Phase 1).
 
+## First ask: how *different* is this universe?
+
+The payoff bends with the **character** of the addition, not the count. Assess
+where the candidate sits on the similarity axis before expecting a given kind of
+value — there is a real tension:
+
+> The more *different* a universe, the more it adds as independent information and
+> diversification — but the **less** its edges transfer and the **harder** it is to
+> pool. Similar = easy but low-info; different = high-info but hard.
+
+- **Similar universe** (another US equity exchange — NYSE, NYSE American, IEX):
+  ~all correlated with what you already have, so it **does not lower the average
+  correlation** → no new discovery power, and **diminishing returns** with each
+  addition. Its value is the **opportunity set** (more names to pick winners/losers
+  from, fatter tails, capacity), edges **transfer** well, and pooling is easy with
+  light conditioning.
+- **Different universe** (international equities, other asset classes): less
+  correlated → **raises the effective-N ceiling → real new discovery power**. But
+  the tension bites: edges **transfer less** (different drivers/regimes), pooling is
+  **harder** (very different universes may need *separate* models, not one pooled
+  brain), the scope carry-over **breaks** (non-equity lacks the same fundamentals/
+  indicator scaffolding), and **measurement artifacts** creep in (non-synchronous
+  trading hours make cross-market correlations look artificially low).
+
+**The effective-N ceiling is not universal.** Whatever the current universe's
+correlation-bound ceiling is (measured ~10–13 for all-US-equity as of 2026-08),
+it is a property of *that* universe — it **rises as you genuinely diversify**, and
+does not carry over to a cross-asset or cross-geography program.
+
 ## The core rule: existing work carries over by *scope*
 
 Work already done does **not** migrate uniformly. How each feature carries over
