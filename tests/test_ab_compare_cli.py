@@ -57,6 +57,16 @@ def stub_pipeline(monkeypatch):
         return _canned_report()
 
     monkeypatch.setattr("gefion.backtest.ab_compare.run_ab_compare", fake_run)
+
+    # The CLI opens a DB connection before delegating to run_ab_compare; stub it
+    # so these CLI-wiring tests need no live DB (the unit-test CI job has none).
+    import contextlib
+
+    @contextlib.contextmanager
+    def fake_db(url=None):
+        yield object()
+
+    monkeypatch.setattr("gefion.cli_helpers.db_connection", fake_db)
     return captured
 
 
