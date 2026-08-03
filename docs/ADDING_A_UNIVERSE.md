@@ -132,8 +132,9 @@ Ordered cheapest-and-most-decisive first, so a "no" costs an afternoon, not a we
       new vintage.
 - [ ] **Re-vintage = full recompute, not splice** — verify no discontinuity at
       the vintage boundary.
-- [ ] **Exchange filters (#29/#30)** — enforce once `stocks.exchange` is
-      populated; a prerequisite of admitting a second exchange.
+- [ ] **Exchange scoping** — universe rules already filter by exchange (the 015
+      `exchange` predicate); this needs `stocks.exchange` populated, which the
+      ingest now does. Admit the new exchange via a universe rule (config, not code).
 - [ ] **Scale posture (#154)** — feat-compute likely crosses ~60 min; the
       `macro_series` split is the pre-designed escape hatch.
 
@@ -151,7 +152,8 @@ honest** (where clean designs silently rot). Plan around those, not the build.
 
 - Epic **#179** — multi-exchange universe expansion.
 - **#154** — `computed_features` scale posture / the `macro_series` split.
-- **#29/#30** — exchange-filter enforcement.
+- **#192** — `stocks.exchange` persistence on ingest (enables exchange-scoped
+  universe rules).
 - Specs: 005 (effective-N), 006 (discovery), 007 (entity model), 010 (SPA
   re-verdict), 011 (market dispatcher scope), 013 (sector signals), 015
   (modeling universe), 016 (industry series), 017 (fundamentals vintage).
