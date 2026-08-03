@@ -138,6 +138,42 @@ def export_dataset_artifacts(
                                         on_progress=on_progress)
 
 
+def _run_coverage_audit(conn, *, manifest, symbols, feature_names,
+                        exclude_features, labels_df, on_progress=None) -> None:
+    """Run the #191 coverage-bias audit over the assembled dataset.
+
+    Advisory and strictly NON-BLOCKING: any failure is swallowed (logged via
+    the progress callback) so it can never fail an otherwise-good build. Skips
+    silently when the dataset has no name/version to stamp provenance against
+    (the audit records into ``ml_datasets.universe`` keyed by name+version).
+    """
+    name = manifest.get("name")
+    version = manifest.get("version")
+    if not name or not version:
+        return
+    try:
+        from gefion.ml.coverage import audit_dataset_coverage
+
+        overrides = manifest.get("coverage_audit") or {}
+        report = audit_dataset_coverage(
+            conn, name=name, version=version, symbols=symbols,
+            feature_names=feature_names, exclude_features=exclude_features,
+            labels_df=labels_df, universe=manifest.get("universe"),
+            **overrides)
+        n_flagged = len(report.get("flagged", []))
+        if on_progress:
+            if n_flagged:
+                on_progress(
+                    f"⚠️  Coverage audit: {n_flagged} feature flag(s) — see "
+                    "`gefion observations list` (non-blocking, review before "
+                    "training)")
+            else:
+                on_progress("Coverage audit: no bias flagged")
+    except Exception as e:  # pragma: no cover - defensive, must not block build
+        if on_progress:
+            on_progress(f"⚠️  Coverage audit skipped: {e}")
+
+
 def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None):
     def emit_progress(msg: str) -> None:
         if on_progress:
@@ -376,6 +412,15 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                     else:
                         labels_df.to_csv(labels_path, index=False)
                     emit_progress(f"Labels computed: {len(labels_df):,} records")
+                    # Coverage-bias audit (#191): now that the feature matrix
+                    # and labels are assembled for this universe/date-range,
+                    # audit each feature's coverage overall + by cohort and
+                    # flag bias. Advisory + NON-BLOCKING — never fail the build.
+                    _run_coverage_audit(conn, manifest=manifest, symbols=symbols,
+                                        feature_names=feature_names,
+                                        exclude_features=exclude_features,
+                                        labels_df=labels_df,
+                                        on_progress=emit_progress)
                 else:
                     emit_progress("⚠️  WARNING: No labels computed (insufficient price history for horizons).")
             else:

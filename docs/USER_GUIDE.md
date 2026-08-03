@@ -71,6 +71,29 @@ gefion ml dataset-build \
   --export
 ```
 
+**Coverage-bias audit (#191).** During `--export`, once the feature matrix and
+labels are assembled, every feature's coverage is audited automatically —
+overall, and by **exchange** and **sector** cohort. The dataset build is where
+features meet the universe and bias enters the model: a data-gated feature with
+uneven coverage (the canonical case — fundamentals ~99% covered on NASDAQ but
+0% on NYSE) lets a model learn a **data artifact** ("missing PE ratio" becomes a
+proxy for "is-NYSE") as if it were signal. The audit flags two shapes:
+
+- **Cohort disparity** — for a partial-coverage feature, a max-vs-min cohort
+  coverage gap `>= 0.30` (default) among cohorts with `>= 30` members.
+- **Missing-not-at-random (MNAR)** — the feature's missingness indicator
+  correlates with the label (`|point-biserial| >= 0.10`, default).
+
+Market-scope / macro features (not per-stock) carry no exchange/sector cohort
+and are skipped for cohort analysis. Thresholds are tunable module constants in
+`gefion.ml.coverage` (`MIN_COHORT_SIZE`, `COVERAGE_DISPARITY_THRESHOLD`,
+`MNAR_LABEL_THRESHOLD`). The audit is **advisory and non-blocking**: the build
+always proceeds. Per-feature coverage (overall + by cohort) is recorded in the
+dataset provenance (`ml_datasets.universe.coverage` — every model carries its
+coverage profile), and each flagged feature emits one reviewable **system
+observation** (observer `coverage_audit`; see *System observations* below). A
+human reviews the flags before training — observations never act (#144).
+
 #### 2. Train Models
 
 Train quantile regression models for each horizon:
@@ -628,6 +651,13 @@ Runtime observers today:
   code gets code review and survives a restore/migration. It only records;
   the export and commit are a human act. Runs nightly with
   `gefion experiment probation-check` (also part of `gefion data-update`).
+- **coverage audit (#191)** — at ML dataset build (`ml dataset-build
+  --export`), a feature whose coverage is biased by exchange/sector cohort, or
+  whose missingness correlates with the label. Flags the exact low/high cohorts
+  (e.g. NYSE 0% vs NASDAQ 99%) so a model does not learn "missing data == this
+  cohort" as signal. Non-blocking; one open observation per (dataset+version,
+  feature, bias-kind), idempotent across rebuilds. Coverage also rides the
+  dataset provenance (`ml_datasets.universe.coverage`).
 
 ```bash
 gefion observe "h=20 buckets hover at the effective-N floor" \

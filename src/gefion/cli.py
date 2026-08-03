@@ -675,7 +675,9 @@ def ml_dataset_build(
     payload = dict(manifest)   # shallow: shares the universe dict by design
 
     with db_connection(db_url) as conn:
-        init_schema_tables(conn, ["ml_datasets"])
+        # ml_datasets for the manifest; system_observations for the #191
+        # coverage-bias audit that runs during --export.
+        init_schema_tables(conn, ["ml_datasets", "system_observations"])
 
         # Universe provenance stamp (spec 015): recorded in the manifest file
         # and the ml_datasets.universe JSONB before anything persists
