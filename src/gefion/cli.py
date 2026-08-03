@@ -10262,6 +10262,115 @@ def backtest_compare(
         raise typer.Exit(1)
 
 
+@backtest_app.command("ab-compare")
+def backtest_ab_compare(
+    arm_a: str = typer.Option(
+        ..., "--arm-a",
+        help="Universe A name (the narrow opportunity set, e.g. nasdaq-only)"),
+    arm_b: str = typer.Option(
+        ..., "--arm-b",
+        help="Universe B name (the wider opportunity set, e.g. nasdaq-plus-nyse)"),
+    start_date: str = typer.Option(
+        ..., "--start-date", help="Backtest/OOS start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(
+        ..., "--end-date", help="Backtest/OOS end date (YYYY-MM-DD)"),
+    horizons: str = typer.Option(
+        "7,30", "--horizons", help="Comma-separated label horizons in days"),
+    horizon_days: int = typer.Option(
+        7, "--horizon-days", help="Traded prediction horizon (days)"),
+    return_threshold: float = typer.Option(
+        0.02, "--return-threshold",
+        help="q50 magnitude to trigger a long/short (the decile proxy)"),
+    downside_limit: float = typer.Option(
+        -0.05, "--downside-limit", help="Max acceptable q10 downside for a long"),
+    rebalance_days: int = typer.Option(
+        20, "--rebalance-days", help="Days between rebalances (match the horizon)"),
+    max_positions: int = typer.Option(
+        20, "--max-positions", help="Max concurrent positions per side"),
+    algorithm: str = typer.Option(
+        "xgboost", "--algorithm", help="Pooled model algorithm"),
+    n_estimators: Optional[int] = typer.Option(
+        None, "--n-estimators", help="Model n_estimators (matched across arms)"),
+    max_depth: Optional[int] = typer.Option(
+        None, "--max-depth", help="Model max_depth (matched across arms)"),
+    initial_cash: float = typer.Option(
+        100000.0, "--initial-cash", help="Initial portfolio cash per arm"),
+    attribution: bool = typer.Option(
+        False, "--attribution",
+        help="Add Arm C: train on B, trade A only (isolates data vs opportunity)"),
+    json_output: bool = typer.Option(
+        False, "--json", help="Output the comparison report as JSON"),
+) -> None:
+    """Controlled A/B: one pooled model per universe, realized-portfolio compare.
+
+    Runs the SAME pipeline (dataset-build -> pooled train -> predict ->
+    long/short-on-q50 backtest) on universe A and universe B with matched
+    dates, horizons, hyperparameters and strategy params. The ONLY thing that
+    differs is the universe. Reports per-arm return / Sharpe / max drawdown
+    plus position breadth, tail richness and a capacity proxy, the A->B
+    deltas, and the negative-transfer diagnostic (is B worse on the shared
+    universe-A names?). It REPORTS; a human decides (owner gate).
+
+    The actual NASDAQ vs NASDAQ+NYSE run is gated on a real NYSE ingest
+    (epic #179); this is the harness, ready to run.
+
+    Examples:
+        # Decide whether NASDAQ+NYSE beats NASDAQ-only, with attribution
+        gefion backtest ab-compare --arm-a nasdaq-only \\
+          --arm-b nasdaq-plus-nyse --start-date 2018-01-01 \\
+          --end-date 2023-12-31 --horizon-days 30 --attribution --json
+    """
+    from datetime import datetime
+    from gefion.backtest import ab_compare
+    from gefion.cli_helpers import db_connection
+
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        horizon_list = [int(h) for h in horizons.split(",") if h.strip()]
+
+        hyperparams: dict = {"algorithm": algorithm}
+        if n_estimators is not None:
+            hyperparams["n_estimators"] = n_estimators
+        if max_depth is not None:
+            hyperparams["max_depth"] = max_depth
+
+        config = ab_compare.MatchedConfig(
+            start_date=start,
+            end_date=end,
+            split_spec={"scheme": "walk_forward", "oos": True},
+            horizons=horizon_list,
+            horizon_days=horizon_days,
+            hyperparams=hyperparams,
+            strategy_params={
+                "return_threshold": return_threshold,
+                "downside_limit": downside_limit,
+                "rebalance_days": rebalance_days,
+                "max_positions": max_positions,
+            },
+            initial_capital=initial_cash,
+        )
+
+        db_url = os.getenv("DATABASE_URL", SETTINGS.database_url)
+        with db_connection(db_url) as conn:
+            report = ab_compare.run_ab_compare(
+                arm_a_universe=arm_a,
+                arm_b_universe=arm_b,
+                config=config,
+                conn=conn,
+                attribution=attribution,
+            )
+
+        if json_output:
+            emit("A/B comparison complete", data=report, json_output=json_output)
+        else:
+            print(ab_compare.format_ab_report(report))
+
+    except Exception as e:
+        emit_error(f"A/B comparison failed: {e}", json_output=json_output)
+        raise typer.Exit(1)
+
+
 @app.command("mcp-setup")
 def mcp_setup(
     db_url: Optional[str] = typer.Option(None, help="Database URL (default: from environment or postgresql://gefion:gefionpass@localhost:5432/gefion)"),

@@ -137,6 +137,46 @@ Activity:
 - Max drawdown of 64.18% shows significant downside risk
 - Only 1 trade executed (low activity, possible data issues or poor momentum signals)
 
+## Universe A/B comparison (the go/no-go)
+
+`gefion backtest ab-compare` answers a specific question: is a **wider
+universe** worth it as an *opportunity set*? It runs a controlled A/B — the
+SAME pipeline (dataset-build → pooled train → predict → long/short-on-q50
+backtest) on two universes, walk-forward out-of-sample, and compares the
+**realized portfolios**.
+
+```bash
+gefion backtest ab-compare \
+  --arm-a nasdaq-only --arm-b nasdaq-plus-nyse \
+  --start-date 2018-01-01 --end-date 2023-12-31 \
+  --horizon-days 30 --attribution --json
+```
+
+- **Arm A** = universe A (narrow). **Arm B** = universe B (wide). Dates, folds,
+  horizons, hyperparameters and strategy params are **matched** — the ONLY
+  thing that differs is the universe (one shared `MatchedConfig`, so this can't
+  silently rot). One pooled model per arm — never "train A, test B".
+- **Arm C** (`--attribution`) trains on B but trades the universe-A members
+  only, isolating the *data* effect from the *opportunity* effect.
+
+It reports, per arm: return / Sharpe / max drawdown, plus **position breadth**
+(avg names held), **tail richness** (the realized long-minus-short decile
+spread), and a **capacity proxy** (median dollar-volume of traded names); the
+**A→B deltas**; and the **negative-transfer diagnostic** — restrict both arms
+to the shared universe-A names and check whether B captured a *weaker* edge
+there. If so, the wider universe **diluted** the edge (the risk epic #179
+flagged). The harness REPORTS; a human weighs the deltas against the dilution
+verdict (owner gate) — it never auto-decides.
+
+The strategy reuses the existing `MLSignalStrategy` (`mode=long_short`,
+quantile): it longs names with `q50 ≥ --return-threshold` and shorts names with
+`q50 ≤ −(--return-threshold)` — a q50-threshold long/short that stands in for
+the top/bottom-decile cut.
+
+The actual NASDAQ vs NASDAQ+NYSE run is gated on a real NYSE ingest (epic
+#179 phases 1-2); this command is the harness, ready to run. Also available as
+the `backtest_ab_compare` MCP tool.
+
 ## Built-in Strategies
 
 ### Momentum Strategy
