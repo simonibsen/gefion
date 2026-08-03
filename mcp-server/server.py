@@ -1321,6 +1321,38 @@ async def list_tools() -> List[Tool]:
                 "required": ["start_date", "end_date"],
             },
         ),
+        Tool(
+            name="backtest_ab_compare",
+            description=(
+                "Universe A/B backtest harness (issue #197): train + trade one "
+                "pooled model per universe, walk-forward OOS, and compare "
+                "REALIZED PORTFOLIO outcomes to decide whether a wider universe "
+                "(e.g. NASDAQ+NYSE) beats a narrower one (NASDAQ-only) as an "
+                "opportunity set. Matched dates/horizons/hyperparameters across "
+                "arms — only the universe differs. Reports return / Sharpe / max "
+                "drawdown plus position breadth, tail richness and a capacity "
+                "proxy, the A->B deltas, and the negative-transfer diagnostic "
+                "(is B worse on the shared universe-A names?). Reports; does not "
+                "auto-decide."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "arm_a": {"type": "string", "description": "Universe A name (narrow, e.g. nasdaq-only)"},
+                    "arm_b": {"type": "string", "description": "Universe B name (wide, e.g. nasdaq-plus-nyse)"},
+                    "start_date": {"type": "string", "description": "Backtest/OOS start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "Backtest/OOS end date (YYYY-MM-DD)"},
+                    "horizons": {"type": "string", "description": "Comma-separated label horizons in days", "default": "7,30"},
+                    "horizon_days": {"type": "integer", "description": "Traded prediction horizon", "default": 7},
+                    "return_threshold": {"type": "number", "description": "q50 magnitude to trigger a long/short", "default": 0.02},
+                    "rebalance_days": {"type": "integer", "description": "Days between rebalances", "default": 20},
+                    "algorithm": {"type": "string", "description": "Pooled model algorithm", "default": "xgboost"},
+                    "initial_cash": {"type": "number", "description": "Initial portfolio cash per arm", "default": 100000},
+                    "attribution": {"type": "boolean", "description": "Add Arm C: train on B, trade A only (data vs opportunity)"},
+                },
+                "required": ["arm_a", "arm_b", "start_date", "end_date"],
+            },
+        ),
 
         # ============================================================
         # AI Experimentation Framework Tools
@@ -2884,6 +2916,8 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             result = await _backtest_run(arguments)
         elif name == "backtest_compare":
             result = await _backtest_compare(arguments)
+        elif name == "backtest_ab_compare":
+            result = await _backtest_ab_compare(arguments)
         # Experiment tools
         elif name == "experiment_propose":
             result = await _experiment_propose(arguments)
@@ -5202,6 +5236,46 @@ async def _backtest_compare(args: Dict[str, Any]) -> Dict[str, Any]:
         return await executor.run(*cmd)
 
     return await _execute_with_health_check(['postgres'], _compare)
+
+
+async def _backtest_ab_compare(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Universe A/B backtest harness — realized-portfolio go/no-go (#197)."""
+    async def _ab_compare():
+        cmd = ['backtest', 'ab-compare', '--json']
+
+        # Universes (the only per-arm axis).
+        if args.get('arm_a'):
+            cmd.extend(['--arm-a', args['arm_a']])
+        if args.get('arm_b'):
+            cmd.extend(['--arm-b', args['arm_b']])
+
+        # Matched window.
+        if args.get('start_date'):
+            cmd.extend(['--start-date', args['start_date']])
+        if args.get('end_date'):
+            cmd.extend(['--end-date', args['end_date']])
+
+        # Matched horizons / strategy / model params.
+        if args.get('horizons'):
+            cmd.extend(['--horizons', args['horizons']])
+        if args.get('horizon_days') is not None:
+            cmd.extend(['--horizon-days', str(args['horizon_days'])])
+        if args.get('return_threshold') is not None:
+            cmd.extend(['--return-threshold', str(args['return_threshold'])])
+        if args.get('rebalance_days') is not None:
+            cmd.extend(['--rebalance-days', str(args['rebalance_days'])])
+        if args.get('algorithm'):
+            cmd.extend(['--algorithm', args['algorithm']])
+        if args.get('initial_cash') is not None:
+            cmd.extend(['--initial-cash', str(args['initial_cash'])])
+
+        # Optional attribution arm (C).
+        if args.get('attribution'):
+            cmd.append('--attribution')
+
+        return await executor.run(*cmd)
+
+    return await _execute_with_health_check(['postgres'], _ab_compare)
 
 
 # ============================================================================

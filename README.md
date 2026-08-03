@@ -246,6 +246,7 @@ AI-generated feature functions run in a security sandbox (whitelisted imports: n
 |---------|-------------|
 | `gefion backtest run` | Run backtest for a trading strategy (`--mode long_short` for short-side execution) |
 | `gefion backtest compare` | Compare multiple strategies side-by-side |
+| `gefion backtest ab-compare` | Universe A/B harness: pooled model per universe, compare realized portfolios + negative-transfer diagnostic |
 | `gefion strategy list` | List registered strategies |
 | `gefion strategy create-config` | Create a strategy configuration |
 | `gefion strategy configs` | List saved strategy configurations |

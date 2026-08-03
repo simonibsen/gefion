@@ -1258,6 +1258,7 @@ documented here or in a section above.
 
 - `backtest_run` — backtest a strategy with optional realistic execution (costs, slippage). `mode=long_short` (spec 009) enables short-side execution so strategies act on bearish signals; the result carries `short_costs`, `margin_events`, and an `exposure` series — surface those, never a short's return without its borrow/dividend/margin costs. Default `long_only` is byte-identical to before.
 - `backtest_compare` — side-by-side strategy comparison (return, Sharpe, drawdown).
+- `backtest_ab_compare` — universe A/B harness (issue #197): trains + trades one pooled model per universe (walk-forward OOS, matched config — only the universe differs) and compares realized portfolios to decide whether a wider opportunity set (e.g. NASDAQ+NYSE) beats a narrower one (NASDAQ-only). Reports return / Sharpe / drawdown plus position breadth, tail richness and a capacity proxy, the A→B deltas, and the **negative-transfer diagnostic** (is B worse on the shared universe-A names? ⇒ the wider universe diluted the edge). Optional `attribution` arm C (train on B, trade A) splits the data effect from the opportunity effect. It reports; a human decides. The actual NASDAQ vs NASDAQ+NYSE run is gated on a real NYSE ingest (epic #179).
 - `strategy_list` — registered strategies with defaults.
 - `strategy_configs` — saved strategy configurations.
 - `strategy_create_config` — create a named strategy configuration.
