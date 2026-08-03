@@ -263,10 +263,12 @@ class TestBuildPathWiring:
 
         calls = {}
 
-        def spy(conn, *, name, version, symbols, feature_names, labels_df,
-                exclude_features=None, universe=None, **kwargs):
+        def spy(conn, *, name, version, symbols, labels_df, feature_presence,
+                universe=None, **kwargs):
             calls.update(name=name, version=version, symbols=list(symbols),
-                         features=list(feature_names), n_labels=len(labels_df))
+                         presence={k: sorted(v)
+                                   for k, v in feature_presence.items()},
+                         n_labels=len(labels_df))
             return {"grid_rows": 0, "features": {}, "flagged": []}
 
         monkeypatch.setattr(coverage_mod, "audit_dataset_coverage", spy)
@@ -274,17 +276,20 @@ class TestBuildPathWiring:
         labels_df = pd.DataFrame({
             "symbol": ["A", "B"], "date": ["2024-01-02", "2024-01-02"],
             "forward_return": [0.01, -0.02]})
+        # The build hands the audit the presence it assembled in memory as it
+        # exported the feature matrix — not a symbol/feature list to re-query.
+        feature_presence = {"f1": {("A", "2024-01-02")}}
         progress = []
         dataset_mod._run_coverage_audit(
             None,
             manifest={"name": "wired", "version": "v9", "universe": {}},
-            symbols=["A", "B"], feature_names=["f1"], exclude_features=[],
-            labels_df=labels_df, on_progress=progress.append)
+            symbols=["A", "B"], labels_df=labels_df,
+            feature_presence=feature_presence, on_progress=progress.append)
 
         assert calls["name"] == "wired"
         assert calls["version"] == "v9"
         assert calls["symbols"] == ["A", "B"]
-        assert calls["features"] == ["f1"]
+        assert calls["presence"] == {"f1": [("A", "2024-01-02")]}
         assert calls["n_labels"] == 2
 
     def test_run_coverage_audit_never_raises(self, monkeypatch):
@@ -302,7 +307,7 @@ class TestBuildPathWiring:
         # Must swallow the error (no raise) and report a skip.
         dataset_mod._run_coverage_audit(
             None, manifest={"name": "n", "version": "v", "universe": {}},
-            symbols=["A"], feature_names=["f"], exclude_features=[],
+            symbols=["A"], feature_presence={"f": {("A", "2024-01-02")}},
             labels_df=pd.DataFrame({"symbol": ["A"], "date": ["2024-01-02"],
                                     "forward_return": [0.0]}),
             on_progress=progress.append)
@@ -347,34 +352,36 @@ def _seed_biased_dataset(conn, dataset_name, version, *,
                          n_nasdaq=6, n_nyse=6, feature=PFX + "_pe"):
     """Insert NASDAQ + NYSE stocks and a feature present ONLY on NASDAQ.
 
-    Returns (symbols, feature_name, labels_df) ready for the audit.
+    Deliberately seeds NO ``computed_features`` rows: since #196 the audit
+    derives feature presence from the in-memory matrix the build already
+    assembled, not a fresh ``computed_features`` scan. Presence is returned
+    directly, mirroring what the export accumulates while streaming features.
+
+    Returns (symbols, feature_name, labels_df, feature_presence) — ready for
+    the audit.
     """
     import pandas as pd
 
     _cleanup(conn)
     symbols = []
     labels_rows = []
+    feature_presence: dict = {feature: set()}
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO feature_definitions (name, function_name, "
-            "entity_table) VALUES (%s, %s, 'stocks') RETURNING id",
+            "entity_table) VALUES (%s, %s, 'stocks')",
             (feature, feature + "_fn"))
-        feat_id = cur.fetchone()[0]
         for i in range(n_nasdaq + n_nyse):
             exch = "NASDAQ" if i < n_nasdaq else "NYSE"
             sym = f"{PFX}{i}"
             symbols.append(sym)
             cur.execute(
                 "INSERT INTO stocks (symbol, exchange, sector) "
-                "VALUES (%s, %s, %s) RETURNING id",
+                "VALUES (%s, %s, %s)",
                 (sym, exch, "Tech"))
-            sid = cur.fetchone()[0]
-            # Feature present only on NASDAQ.
+            # Feature present only on NASDAQ (in the in-memory matrix).
             if exch == "NASDAQ":
-                cur.execute(
-                    "INSERT INTO computed_features (data_id, date, "
-                    "feature_id, value) VALUES (%s, '2024-01-02', %s, %s)",
-                    (sid, feat_id, 1.5 + i))
+                feature_presence[feature].add((sym, "2024-01-02"))
             # Label independent of exchange (balanced within present/absent),
             # so ONLY the cohort-coverage disparity flags — not MNAR.
             labels_rows.append(
@@ -393,7 +400,7 @@ def _seed_biased_dataset(conn, dataset_name, version, *,
         "split_spec": {"type": "walk_forward"},
         "artifact_uri": "x/manifest.json", "checksum": "x",
     })
-    return symbols, feature, labels_df
+    return symbols, feature, labels_df, feature_presence
 
 
 def test_audit_records_coverage_in_provenance(db_conn):
@@ -402,12 +409,13 @@ def test_audit_records_coverage_in_provenance(db_conn):
     from gefion.ml.coverage import audit_dataset_coverage
 
     name, version = PFX + "_prov", "v1"
-    symbols, feature, labels_df = _seed_biased_dataset(db_conn, name, version)
+    symbols, feature, labels_df, presence = _seed_biased_dataset(
+        db_conn, name, version)
     universe = {"symbols": symbols}
 
     audit_dataset_coverage(
         db_conn, name=name, version=version, symbols=symbols,
-        feature_names=[feature], labels_df=labels_df, universe=universe,
+        feature_presence=presence, labels_df=labels_df, universe=universe,
         min_cohort_size=2,
     )
 
@@ -430,11 +438,12 @@ def test_audit_emits_observation_for_biased_feature(db_conn):
     from gefion.ml.coverage import audit_dataset_coverage
 
     name, version = PFX + "_obs", "v1"
-    symbols, feature, labels_df = _seed_biased_dataset(db_conn, name, version)
+    symbols, feature, labels_df, presence = _seed_biased_dataset(
+        db_conn, name, version)
 
     audit_dataset_coverage(
         db_conn, name=name, version=version, symbols=symbols,
-        feature_names=[feature], labels_df=labels_df,
+        feature_presence=presence, labels_df=labels_df,
         universe={"symbols": symbols}, min_cohort_size=2)
 
     with db_conn.cursor() as cur:
@@ -456,12 +465,13 @@ def test_audit_idempotent_no_duplicate_observation(db_conn):
     from gefion.ml.coverage import audit_dataset_coverage
 
     name, version = PFX + "_idem", "v1"
-    symbols, feature, labels_df = _seed_biased_dataset(db_conn, name, version)
+    symbols, feature, labels_df, presence = _seed_biased_dataset(
+        db_conn, name, version)
 
     for _ in range(2):
         audit_dataset_coverage(
             db_conn, name=name, version=version, symbols=symbols,
-            feature_names=[feature], labels_df=labels_df,
+            feature_presence=presence, labels_df=labels_df,
             universe={"symbols": symbols}, min_cohort_size=2)
 
     with db_conn.cursor() as cur:
@@ -470,6 +480,42 @@ def test_audit_idempotent_no_duplicate_observation(db_conn):
             "AND review_state = 'open' AND evidence->>'dataset' = %s",
             (OBSERVER, name))
         assert cur.fetchone()[0] == 1
+
+
+def test_audit_does_not_query_computed_features(db_conn):
+    """Perf guard (#196): the audit derives per-feature presence from the
+    in-memory feature matrix, NOT a fresh scan of the huge computed_features
+    hypertable. Seed ZERO computed_features rows, supply presence in memory,
+    and assert the bias is still flagged from that in-memory matrix — proving
+    the audit does not depend on the DB re-query. A regression that
+    reintroduced the query would see empty presence (0% coverage everywhere)
+    and flag nothing, failing this test."""
+    from gefion.ml.coverage import audit_dataset_coverage
+
+    name, version = PFX + "_noq", "v1"
+    symbols, feature, labels_df, presence = _seed_biased_dataset(
+        db_conn, name, version)
+
+    # The heavy table is empty for these entities: the ONLY presence source is
+    # the in-memory matrix we pass in.
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM computed_features cf JOIN stocks s "
+            "ON s.id = cf.data_id WHERE s.symbol = ANY(%s)", (symbols,))
+        assert cur.fetchone()[0] == 0
+
+    report = audit_dataset_coverage(
+        db_conn, name=name, version=version, symbols=symbols,
+        feature_presence=presence, labels_df=labels_df,
+        universe={"symbols": symbols}, record=False, min_cohort_size=2)
+
+    feat = report["features"][feature]
+    assert feat["overall"] == pytest.approx(0.5, abs=0.05)
+    assert feat["scope"] == "stock"  # scope still resolved via feature_definitions
+    assert feat["by_cohort"]["exchange"]["NYSE"] == pytest.approx(0.0)
+    assert feat["by_cohort"]["exchange"]["NASDAQ"] == pytest.approx(1.0)
+    cohort_flags = [f for f in feat["flags"] if f["kind"] == "cohort_bias"]
+    assert cohort_flags, "biased feature must flag from the in-memory presence"
 
 
 def test_export_hook_records_coverage(db_conn, tmp_path):

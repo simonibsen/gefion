@@ -138,9 +138,13 @@ def export_dataset_artifacts(
                                         on_progress=on_progress)
 
 
-def _run_coverage_audit(conn, *, manifest, symbols, feature_names,
-                        exclude_features, labels_df, on_progress=None) -> None:
+def _run_coverage_audit(conn, *, manifest, symbols, labels_df,
+                        feature_presence, on_progress=None) -> None:
     """Run the #191 coverage-bias audit over the assembled dataset.
+
+    ``feature_presence`` is the in-memory feature matrix the export just
+    assembled (feature name -> set of ``(symbol, date_str)`` present keys), so
+    the audit computes coverage without re-scanning ``computed_features`` (#196).
 
     Advisory and strictly NON-BLOCKING: any failure is swallowed (logged via
     the progress callback) so it can never fail an otherwise-good build. Skips
@@ -157,9 +161,8 @@ def _run_coverage_audit(conn, *, manifest, symbols, feature_names,
         overrides = manifest.get("coverage_audit") or {}
         report = audit_dataset_coverage(
             conn, name=name, version=version, symbols=symbols,
-            feature_names=feature_names, exclude_features=exclude_features,
-            labels_df=labels_df, universe=manifest.get("universe"),
-            **overrides)
+            labels_df=labels_df, feature_presence=feature_presence,
+            universe=manifest.get("universe"), **overrides)
         n_flagged = len(report.get("flagged", []))
         if on_progress:
             if n_flagged:
@@ -285,6 +288,17 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
     emit_progress("Exporting features...")
     feature_rows: list[dict[str, Any]] = []
     feature_count = 0
+    # Presence accumulated in the SAME pass that writes the feature matrix, so
+    # the coverage audit (#191) reads it from memory instead of re-scanning the
+    # computed_features hypertable a second time (#196). feature name -> set of
+    # (symbol, date_str) where the feature is present (non-null).
+    feature_presence: dict[str, set] = {}
+
+    def _record_presence(mapped_row: dict[str, Any]) -> None:
+        if mapped_row["value"] is not None:
+            feature_presence.setdefault(mapped_row["feature_name"], set()).add(
+                (mapped_row["symbol"], str(mapped_row["date"])))
+
     try:
         # First check if computed_features has any data
         with conn.cursor() as cur:
@@ -337,13 +351,20 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
             def feature_mapper(row):
                 return {"symbol": row[0], "date": row[1], "feature_name": row[2], "value": row[3]}
 
+            # Tap the single export pass to record presence for the audit.
+            def feature_mapper_recording(row):
+                mapped = feature_mapper(row)
+                _record_presence(mapped)
+                return mapped
+
             if export_format == "csv":
                 # Stream directly to CSV - much lower memory usage
-                feature_count = _stream_to_csv(cur, features_path, features_header, feature_mapper)
+                feature_count = _stream_to_csv(cur, features_path, features_header, feature_mapper_recording)
             else:
                 # For parquet, need all data in memory
                 for row in cur:
-                    feature_rows.append(feature_mapper(row))
+                    mapped = feature_mapper_recording(row)
+                    feature_rows.append(mapped)
                 feature_count = len(feature_rows)
                 _write_to_file(feature_rows, features_path, features_header, export_format)
     except Exception:
@@ -412,14 +433,15 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                     else:
                         labels_df.to_csv(labels_path, index=False)
                     emit_progress(f"Labels computed: {len(labels_df):,} records")
-                    # Coverage-bias audit (#191): now that the feature matrix
-                    # and labels are assembled for this universe/date-range,
-                    # audit each feature's coverage overall + by cohort and
-                    # flag bias. Advisory + NON-BLOCKING — never fail the build.
+                    # Coverage-bias audit (#191): the feature matrix and labels
+                    # are already assembled for this universe/date-range, so the
+                    # audit reads presence from memory (feature_presence, #196)
+                    # rather than re-scanning computed_features. Audits each
+                    # feature's coverage overall + by cohort and flags bias.
+                    # Advisory + NON-BLOCKING — never fail the build.
                     _run_coverage_audit(conn, manifest=manifest, symbols=symbols,
-                                        feature_names=feature_names,
-                                        exclude_features=exclude_features,
                                         labels_df=labels_df,
+                                        feature_presence=feature_presence,
                                         on_progress=emit_progress)
                 else:
                     emit_progress("⚠️  WARNING: No labels computed (insufficient price history for horizons).")
