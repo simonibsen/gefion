@@ -247,37 +247,50 @@ def test_stock_metadata_cache_clear(conn):
 
 
 def test_caching_reduces_query_count(conn):
-    """Test that caching reduces the number of database queries."""
-    import time
+    """Caching collapses N per-symbol lookups into a single batched query.
+
+    Asserts on the deterministic query *count* (100 -> 1), not a wall-clock
+    ratio. The old ratio threshold (cached must be >5x faster) was noise-
+    sensitive under CI load — it once measured 4.2x and failed even though
+    the cache was working correctly. Query count is the invariant the cache
+    actually guarantees, and it does not flake.
+    """
+    from unittest.mock import patch
 
     # Create 100 test stocks
     symbols = [f"PERF{i}" for i in range(100)]
     for sym in symbols:
         upsert_stock(conn, sym)
 
-    # Method 1: Individual queries (uncached)
-    start = time.time()
-    ids_uncached = {}
-    for sym in symbols:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM stocks WHERE symbol = %s;", (sym,))
-            result = cur.fetchone()
-            if result:
-                ids_uncached[sym] = result[0]
-    time_uncached = time.time() - start
+    # Count executes issued by each approach by wrapping Cursor.execute.
+    orig_execute = psycopg.Cursor.execute
+    counter = {"n": 0}
 
-    # Method 2: Single batch query (cached)
-    start = time.time()
-    ids_cached = prefetch_stock_ids(conn, symbols)
-    time_cached = time.time() - start
+    def counting_execute(self, *args, **kwargs):
+        counter["n"] += 1
+        return orig_execute(self, *args, **kwargs)
 
-    # Verify same results
+    # Method 1: Individual queries (uncached) — one execute per symbol.
+    counter["n"] = 0
+    with patch.object(psycopg.Cursor, "execute", counting_execute):
+        ids_uncached = {}
+        for sym in symbols:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM stocks WHERE symbol = %s;", (sym,))
+                result = cur.fetchone()
+                if result:
+                    ids_uncached[sym] = result[0]
+    uncached_queries = counter["n"]
+
+    # Method 2: Single batch query (cached) — one execute total.
+    counter["n"] = 0
+    with patch.object(psycopg.Cursor, "execute", counting_execute):
+        ids_cached = prefetch_stock_ids(conn, symbols)
+    cached_queries = counter["n"]
+
+    # Same results, far fewer round-trips.
     assert ids_uncached == ids_cached
-
-    # Cached should be significantly faster
-    print(f"\nUncached (100 queries): {time_uncached:.3f}s")
-    print(f"Cached (1 query): {time_cached:.3f}s")
-    print(f"Speed-up: {time_uncached / time_cached:.1f}x")
-
-    assert time_cached < time_uncached / 5, \
-        f"Cached lookup should be much faster (got {time_uncached / time_cached:.1f}x)"
+    assert uncached_queries == len(symbols), \
+        f"uncached path should issue one query per symbol, got {uncached_queries}"
+    assert cached_queries == 1, \
+        f"prefetch should batch into a single query, issued {cached_queries}"
