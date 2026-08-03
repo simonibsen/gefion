@@ -359,46 +359,29 @@ def record_coverage_provenance(conn, name: str, version: str,
 
 
 # --------------------------------------------------------------------------
-# DB-backed orchestrator — assembles inputs from the DB + labels, records
+# DB-backed orchestrator — presence comes from the in-memory feature matrix
+# the build already assembled; only cheap metadata is read from the DB.
 # --------------------------------------------------------------------------
-def _fetch_presence_and_scope(
-    conn, symbols: Sequence[str], feature_names: Sequence[str],
-    exclude_features: Optional[Sequence[str]], grid_dates: Set[str],
-) -> Tuple[Dict[str, Set[GridKey]], Dict[str, bool]]:
-    """Presence (non-null feature values) restricted to the grid, plus each
-    feature's cohort-eligibility (per-stock vs market/macro scope).
+def _fetch_feature_scope(conn, feature_names: Sequence[str]
+                         ) -> Dict[str, bool]:
+    """Cohort-eligibility (per-stock vs market/macro scope) per feature.
 
-    Feature selection mirrors the export: whitelist ``feature_names`` when
-    given, else blacklist ``exclude_features``. A feature is cohort-eligible
-    iff its ``feature_definitions.entity_table = 'stocks'`` — market/macro
-    features (any other entity table) are per-date, not per-stock.
+    A tiny metadata read, NOT a scan of ``computed_features``: a feature is
+    cohort-eligible iff its ``feature_definitions.entity_table = 'stocks'`` —
+    market/macro features (any other entity table) are per-date, not per-stock,
+    so they have no exchange/sector cohort. Features with no definition row
+    default (in ``compute_coverage_report``) to eligible.
     """
-    where = ["s.symbol = ANY(%s)", "cf.value IS NOT NULL"]
-    params: List[Any] = [list(symbols)]
-    if feature_names:
-        where.append("fd.name = ANY(%s)")
-        params.append(list(feature_names))
-    elif exclude_features:
-        where.append("fd.name != ALL(%s)")
-        params.append(list(exclude_features))
-
-    presence: Dict[str, Set[GridKey]] = {}
     eligible: Dict[str, bool] = {}
+    if not feature_names:
+        return eligible
     with conn.cursor() as cur:
         cur.execute(
-            f"""SELECT s.symbol, cf.date, fd.name, fd.entity_table
-                FROM computed_features cf
-                JOIN feature_definitions fd ON fd.id = cf.feature_id
-                JOIN stocks s ON s.id = cf.data_id
-                WHERE {' AND '.join(where)}""",
-            tuple(params))
-        for sym, date, fname, entity_table in cur:
-            datekey = str(date)
-            if datekey not in grid_dates:
-                continue
-            presence.setdefault(fname, set()).add((sym, datekey))
-            eligible[fname] = (entity_table == "stocks")
-    return presence, eligible
+            "SELECT name, entity_table FROM feature_definitions "
+            "WHERE name = ANY(%s)", (list(feature_names),))
+        for name, entity_table in cur:
+            eligible[name] = (entity_table == "stocks")
+    return eligible
 
 
 def _fetch_cohorts(conn, symbols: Sequence[str]
@@ -420,9 +403,8 @@ def audit_dataset_coverage(
     name: str,
     version: str,
     symbols: Sequence[str],
-    feature_names: Sequence[str],
     labels_df,
-    exclude_features: Optional[Sequence[str]] = None,
+    feature_presence: Mapping[str, Set[GridKey]],
     universe: Optional[Dict[str, Any]] = None,
     record: bool = True,
     min_cohort_size: int = MIN_COHORT_SIZE,
@@ -431,16 +413,24 @@ def audit_dataset_coverage(
 ) -> Dict[str, Any]:
     """Audit a built dataset's per-feature coverage and surface any bias.
 
-    Assembles the inputs from the DB (feature presence, exchange/sector
-    cohorts, feature scope) and the in-memory ``labels_df`` (the reference
-    grid + numeric target), computes the report, and — when ``record`` —
-    stamps it into the dataset provenance and emits one idempotent OPEN
-    observation per flagged feature.
+    Presence comes from ``feature_presence`` — the in-memory feature matrix the
+    build already assembled while exporting features (#196). The audit does NOT
+    re-scan the ``computed_features`` hypertable; it reads only cheap metadata
+    from the DB: the exchange/sector cohort map (a small ``stocks`` query) and
+    per-feature scope (a small ``feature_definitions`` query). The reference
+    grid + numeric target come from the in-memory ``labels_df``. When
+    ``record``, the report is stamped into the dataset provenance and one
+    idempotent OPEN observation is emitted per flagged feature.
 
-    ``labels_df`` is a pandas DataFrame with at least ``symbol``, ``date`` and
-    ``forward_return`` columns (as assembled by the dataset export). The grid
-    is its distinct (symbol, date) rows; the numeric label per grid row is the
-    mean forward return across horizons.
+    Args:
+        feature_presence: feature name -> set of ``(symbol, date_str)`` grid
+            keys where the feature is present (non-null), as accumulated by the
+            export. Keys outside the label grid are ignored harmlessly.
+        labels_df: a pandas DataFrame with at least ``symbol``, ``date`` and
+            ``forward_return`` columns. The grid is its distinct (symbol, date)
+            rows; the numeric label per grid row is the mean forward return
+            across horizons.
+        symbols: the grid's entities, for the exchange/sector cohort lookup.
 
     Non-blocking and best-effort: returns the report; recording failures are
     the caller's to tolerate (the build must proceed regardless).
@@ -453,7 +443,7 @@ def audit_dataset_coverage(
 
         # Reference grid: distinct (symbol, date) with a numeric label (mean
         # forward return across horizons). Dates normalised to strings so the
-        # grid and the DB presence keys join reliably.
+        # grid and the in-memory presence keys join reliably.
         df = labels_df.copy()
         df["date"] = df["date"].astype(str)
         grouped = df.groupby(["symbol", "date"])["forward_return"].mean()
@@ -461,10 +451,14 @@ def audit_dataset_coverage(
             (sym, date): float(val)
             for (sym, date), val in grouped.items()
         }
-        grid_dates: Set[str] = {k[1] for k in grid_labels}
 
-        presence, eligible = _fetch_presence_and_scope(
-            conn, symbols, feature_names, exclude_features, grid_dates)
+        # Presence is supplied in memory — no computed_features scan. Only the
+        # tiny metadata reads (feature scope, entity cohorts) hit the DB.
+        presence: Dict[str, Set[GridKey]] = {
+            fname: set(keys)
+            for fname, keys in (feature_presence or {}).items()
+        }
+        eligible = _fetch_feature_scope(conn, list(presence.keys()))
         cohorts = _fetch_cohorts(conn, symbols)
 
         report = compute_coverage_report(
