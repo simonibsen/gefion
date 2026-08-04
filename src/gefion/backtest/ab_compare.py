@@ -79,6 +79,10 @@ class MatchedConfig:
     hyperparams: Dict[str, Any]       # pooled-model hyperparameters
     strategy_params: Dict[str, Any]   # long/short decile strategy params
     initial_capital: float = 100000.0
+    # Per-horizon 5-class label thresholds for dataset-build (one each per
+    # horizon). None => run_arm falls back to 2%/5%. Shared across arms.
+    weak_thresholds: Optional[List[float]] = None
+    strong_thresholds: Optional[List[float]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """JSON-serializable echo of the matched config (for the report)."""
@@ -91,6 +95,8 @@ class MatchedConfig:
             "hyperparams": self.hyperparams,
             "strategy_params": self.strategy_params,
             "initial_capital": self.initial_capital,
+            "weak_thresholds": self.weak_thresholds,
+            "strong_thresholds": self.strong_thresholds,
         }
 
 
@@ -495,6 +501,13 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
         model_name = f"ab_{spec.label.lower()}_{spec.train_universe}_model"
         model_version = stamp
         horizons_csv = ",".join(str(h) for h in config.horizons)
+        # dataset-build requires one weak+strong class threshold PER horizon
+        # (it has no default and errors otherwise). Matched across arms; fall
+        # back to 2% weak / 5% strong moves when the config doesn't set them.
+        weak = config.weak_thresholds or [0.02] * len(config.horizons)
+        strong = config.strong_thresholds or [0.05] * len(config.horizons)
+        weak_csv = ",".join(str(w) for w in weak)
+        strong_csv = ",".join(str(s) for s in strong)
 
         # 1) Build dataset over the TRAIN universe (pooled — all members).
         _run_cli([
@@ -504,6 +517,8 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
             "--start-date", config.start_date.isoformat(),
             "--end-date", config.end_date.isoformat(),
             "--horizons", horizons_csv,
+            "--weak-thresholds", weak_csv,
+            "--strong-thresholds", strong_csv,
             "--export", "--force",
         ])
 

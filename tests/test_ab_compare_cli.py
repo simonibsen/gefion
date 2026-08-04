@@ -119,6 +119,21 @@ class TestAbCompareCli:
         assert stub_pipeline["arm_a"] == "nasdaq-only"
         assert stub_pipeline["arm_b"] == "nasdaq-plus-nyse"
 
+    def test_threshold_flags_map_into_matched_config(self, stub_pipeline):
+        result = runner.invoke(app, [
+            "backtest", "ab-compare",
+            "--arm-a", "nasdaq-only", "--arm-b", "nasdaq-plus-nyse",
+            "--start-date", "2020-01-01", "--end-date", "2020-06-30",
+            "--horizons", "7,30",
+            "--weak-thresholds", "0.01,0.03",
+            "--strong-thresholds", "0.04,0.08",
+            "--json",
+        ])
+        assert result.exit_code == 0, result.output
+        cfg = stub_pipeline["config"]
+        assert cfg.weak_thresholds == [0.01, 0.03]
+        assert cfg.strong_thresholds == [0.04, 0.08]
+
     def test_attribution_flag_threads_through(self, stub_pipeline):
         result = runner.invoke(app, [
             "backtest", "ab-compare",
