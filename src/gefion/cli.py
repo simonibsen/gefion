@@ -10278,6 +10278,14 @@ def backtest_ab_compare(
         "7,30", "--horizons", help="Comma-separated label horizons in days"),
     horizon_days: int = typer.Option(
         7, "--horizon-days", help="Traded prediction horizon (days)"),
+    weak_thresholds: Optional[str] = typer.Option(
+        None, "--weak-thresholds",
+        help="Comma-separated weak class thresholds, one per horizon "
+             "(default 0.02 each); matched across arms"),
+    strong_thresholds: Optional[str] = typer.Option(
+        None, "--strong-thresholds",
+        help="Comma-separated strong class thresholds, one per horizon "
+             "(default 0.05 each); matched across arms"),
     return_threshold: float = typer.Option(
         0.02, "--return-threshold",
         help="q50 magnitude to trigger a long/short (the decile proxy)"),
@@ -10328,6 +10336,10 @@ def backtest_ab_compare(
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
         horizon_list = [int(h) for h in horizons.split(",") if h.strip()]
+        weak_list = ([float(w) for w in weak_thresholds.split(",") if w.strip()]
+                     if weak_thresholds else None)
+        strong_list = ([float(s) for s in strong_thresholds.split(",") if s.strip()]
+                       if strong_thresholds else None)
 
         hyperparams: dict = {"algorithm": algorithm}
         if n_estimators is not None:
@@ -10349,6 +10361,8 @@ def backtest_ab_compare(
                 "max_positions": max_positions,
             },
             initial_capital=initial_cash,
+            weak_thresholds=weak_list,
+            strong_thresholds=strong_list,
         )
 
         db_url = os.getenv("DATABASE_URL", SETTINGS.database_url)
