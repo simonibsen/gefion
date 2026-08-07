@@ -8274,6 +8274,20 @@ def _fundamentals_update_impl(
                    "errors": errors, "write_errors": write_errors})
 
 
+def _update_stock_current_state(cur, stock_id, name, sector, industry) -> None:
+    """Update current-state name/sector/industry for a stock.
+
+    Does NOT touch stocks.exchange: since #192, universe-ingest (LISTING_STATUS)
+    is the authoritative writer of that column, and OVERVIEW's looser taxonomy
+    (US / PINK / NYSE ARCA / OTC* / AMEX) must not clobber it (#207).
+    """
+    cur.execute("""
+        UPDATE stocks
+        SET name = %s, sector = %s, industry = %s, updated_at = NOW()
+        WHERE id = %s
+    """, (name or None, sector or None, industry or None, stock_id))
+
+
 def _write_fundamentals_results(conn, results) -> Dict[str, int]:
     """Write fetched OVERVIEW results, fault-isolated per symbol.
 
@@ -8308,17 +8322,11 @@ def _write_fundamentals_results(conn, results) -> Dict[str, int]:
         name = overview.get("Name", "")
         sector = normalize_sector(overview.get("Sector"))
         industry = normalize_industry(overview.get("Industry"))
-        stock_exchange = overview.get("Exchange", "")
         fundamentals = None
         try:
             with conn.transaction():
                 with conn.cursor() as cur:
-                    cur.execute("""
-                        UPDATE stocks
-                        SET name = %s, sector = %s, industry = %s, exchange = %s, updated_at = NOW()
-                        WHERE id = %s
-                    """, (name or None, sector or None, industry or None,
-                          stock_exchange or None, stock_id))
+                    _update_stock_current_state(cur, stock_id, name, sector, industry)
 
                     # Insert time-series fundamentals data. Classification
                     # history (018): sector/industry ride the vintage row —
