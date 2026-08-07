@@ -8132,7 +8132,8 @@ def _parse_overview_fundamentals(overview: dict) -> dict:
 
 
 def _stale_fundamentals_stocks(conn, max_age_days: int, force: bool,
-                               limit: Optional[int]) -> list:
+                               limit: Optional[int],
+                               exchange: Optional[str] = None) -> list:
     """Stocks whose FUNDAMENTALS are stale or absent (017).
 
     Freshness keys off stocks_fundamentals' own MAX(date) per stock — never
@@ -8151,6 +8152,9 @@ def _stale_fundamentals_stocks(conn, max_age_days: int, force: bool,
         WHERE s.asset_type IS DISTINCT FROM 'ETF'
     """
     params: list = []
+    if exchange:
+        query += " AND s.exchange = %s"
+        params.append(exchange)
     if not force:
         query += (" AND (f.last_fetch IS NULL "
                   "OR f.last_fetch < CURRENT_DATE - %s::int)")
@@ -8188,12 +8192,10 @@ def _fundamentals_update_impl(
 
     # Get stocks whose fundamentals are stale/absent (017: freshness from
     # the fundamentals data itself, never the shared stocks.updated_at).
-    # Note: exchange is not enforced as a filter — this command is what
-    # populates stocks.exchange, so filtering by it would skip rows that
-    # still need their first update.
     with db_connection(url) as conn:
         stocks = _stale_fundamentals_stocks(conn, max_age_days=max_age_days,
-                                            force=force, limit=limit)
+                                            force=force, limit=limit,
+                                            exchange=exchange)
 
     if not stocks:
         if json_output:
