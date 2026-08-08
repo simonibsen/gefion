@@ -20,7 +20,9 @@ Usage:
         span.end()
 
 Configuration:
-    OTEL_ENABLED: Enable/disable OpenTelemetry (default: false)
+    OTEL_ENABLED: Enable/disable OpenTelemetry (default: on for interactive
+        local dev runs — a real terminal, no CI marker; off otherwise, e.g.
+        tests, CI, cron, worktree agents, or piped/redirected output)
     OTEL_SERVICE_NAME: Service name for traces (default: gefion)
     OTEL_EXPORTER: Exporter type - otlp or console (default: otlp)
     OTEL_OTLP_ENDPOINT: OTLP endpoint (default: http://localhost:4317)
@@ -28,12 +30,40 @@ Configuration:
 """
 
 import os
+import sys
 import logging
 from contextlib import contextmanager
 from typing import Optional, Any, Dict
 
+
+def _default_otel_enabled() -> bool:
+    """Default OTEL state when OTEL_ENABLED is not set explicitly.
+
+    True only for interactive local dev runs (a real terminal, no CI
+    marker). Tests are forced off via conftest.py regardless of this
+    default. Non-interactive runs (CI, cron, worktree agents, piped or
+    redirected stdout) stay off unless OTEL_ENABLED is set explicitly —
+    a known blind spot this default doesn't try to solve.
+    """
+    if os.getenv("CI"):
+        return False
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _resolve_otel_enabled() -> bool:
+    """Resolve the effective OTEL_ENABLED value: explicit env var wins,
+    otherwise fall back to _default_otel_enabled()."""
+    raw = os.getenv("OTEL_ENABLED")
+    if raw is not None:
+        return raw.lower() in ("true", "1", "yes")
+    return _default_otel_enabled()
+
+
 # Check if OTEL is enabled before importing heavy dependencies
-OTEL_ENABLED = os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
+OTEL_ENABLED = _resolve_otel_enabled()
 
 if OTEL_ENABLED:
     from opentelemetry import trace
@@ -261,7 +291,7 @@ def reinitialize() -> bool:
         return True  # Already good
 
     # Re-read from environment
-    env_enabled = os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
+    env_enabled = _resolve_otel_enabled()
     if not env_enabled:
         return False
 
