@@ -357,11 +357,14 @@ class MLSignalStrategy:
 
         buy_candidates.sort(key=lambda x: x["q50"], reverse=True)
 
-        available_slots = self.max_positions - len(positions) + len(
-            [s for s in signals if s["action"] == "sell"]
-        )
+        # max_positions is enforced PER SIDE (#210): count only existing longs
+        # against the long budget (a short must not steal a long slot), and take
+        # the highest-conviction longs up to the cap.
+        existing_longs = sum(1 for sh in positions.values() if sh > 0)
+        n_sells = len([s for s in signals if s["action"] == "sell"])
+        long_slots = max(0, self.max_positions - existing_longs + n_sells)
 
-        for candidate in buy_candidates[:available_slots]:
+        for candidate in buy_candidates[:long_slots]:
             symbol = candidate["symbol"]
             price = current_prices[symbol]
             position_value = initial_cash * self.position_size
@@ -375,20 +378,31 @@ class MLSignalStrategy:
                     "reason": f"ML signal (q50={candidate['q50']:.2%}, q10={candidate['q10']:.2%})",
                 })
 
-        # Short bearish names (long_short only): a strongly negative q50 on a
-        # name we don't hold.
+        # Short the most-bearish names (long_short only), capped at max_positions
+        # PER SIDE (#210): rank by conviction and take the top short slots, rather
+        # than shorting every bearish name (the ~2000-short book that degenerated
+        # the A/B). Existing shorts consume the short budget.
         if self.mode == "long_short":
-            for symbol, pred in predictions.items():
-                if symbol in positions or symbol not in current_prices:
-                    continue
-                if pred["q50"] <= -self.return_threshold:
-                    price = current_prices[symbol]
-                    shares = int((initial_cash * self.position_size) / price)
-                    if shares > 0:
-                        signals.append({
-                            "action": "short", "symbol": symbol, "shares": shares,
-                            "reason": f"ML bearish short (q50={pred['q50']:.2%})",
-                        })
+            short_candidates = [
+                {"symbol": s, "q50": p["q50"]}
+                for s, p in predictions.items()
+                if s not in positions and s in current_prices
+                and p["q50"] <= -self.return_threshold
+            ]
+            short_candidates.sort(key=lambda x: x["q50"])  # most negative first
+            existing_shorts = sum(1 for sh in positions.values() if sh < 0)
+            n_covers = len([s for s in signals if s["action"] == "cover"])
+            short_slots = max(0, self.max_positions - existing_shorts + n_covers)
+
+            for candidate in short_candidates[:short_slots]:
+                symbol = candidate["symbol"]
+                price = current_prices[symbol]
+                shares = int((initial_cash * self.position_size) / price)
+                if shares > 0:
+                    signals.append({
+                        "action": "short", "symbol": symbol, "shares": shares,
+                        "reason": f"ML bearish short (q50={candidate['q50']:.2%})",
+                    })
 
         return signals
 
@@ -435,11 +449,13 @@ class MLSignalStrategy:
 
         buy_candidates.sort(key=lambda x: x["margin"], reverse=True)
 
-        available_slots = self.max_positions - len(positions) + len(
-            [s for s in signals if s["action"] == "sell"]
-        )
+        # max_positions PER SIDE (#210): count only existing longs against the
+        # long budget; take the highest-margin longs up to the cap.
+        existing_longs = sum(1 for sh in positions.values() if sh > 0)
+        n_sells = len([s for s in signals if s["action"] == "sell"])
+        long_slots = max(0, self.max_positions - existing_longs + n_sells)
 
-        for candidate in buy_candidates[:available_slots]:
+        for candidate in buy_candidates[:long_slots]:
             symbol = candidate["symbol"]
             price = current_prices[symbol]
             position_value = initial_cash * self.position_size
@@ -453,23 +469,33 @@ class MLSignalStrategy:
                     "reason": f"ML classifier ({candidate['class']}, p={candidate['probability']:.2%})",
                 })
 
-        # Short bearish names (long_short only): a confident down-class on a
-        # name we don't hold.
+        # Short the most-confident bearish names (long_short only), capped at
+        # max_positions PER SIDE (#210): rank by probability, take the top slots.
         if self.mode == "long_short":
+            short_candidates = []
             for symbol, pred in predictions.items():
                 if symbol in positions or symbol not in current_prices:
                     continue
                 if pred["predicted_class"] in bearish_classes:
                     prob = pred.get(f"p_{pred['predicted_class']}", 0)
                     if prob >= self.confidence_threshold:
-                        price = current_prices[symbol]
-                        shares = int((initial_cash * self.position_size) / price)
-                        if shares > 0:
-                            signals.append({
-                                "action": "short", "symbol": symbol,
-                                "shares": shares,
-                                "reason": f"ML bearish short ({pred['predicted_class']}, p={prob:.2%})",
-                            })
+                        short_candidates.append(
+                            {"symbol": symbol,
+                             "cls": pred["predicted_class"], "prob": prob})
+            short_candidates.sort(key=lambda x: x["prob"], reverse=True)
+            existing_shorts = sum(1 for sh in positions.values() if sh < 0)
+            n_covers = len([s for s in signals if s["action"] == "cover"])
+            short_slots = max(0, self.max_positions - existing_shorts + n_covers)
+
+            for candidate in short_candidates[:short_slots]:
+                symbol = candidate["symbol"]
+                price = current_prices[symbol]
+                shares = int((initial_cash * self.position_size) / price)
+                if shares > 0:
+                    signals.append({
+                        "action": "short", "symbol": symbol, "shares": shares,
+                        "reason": f"ML bearish short ({candidate['cls']}, p={candidate['prob']:.2%})",
+                    })
 
         return signals
 
