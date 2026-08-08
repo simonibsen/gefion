@@ -16,6 +16,12 @@ from urllib.parse import urlparse
 import psycopg
 import pytest
 
+# Force tracing off for the pytest process itself, before any gefion import
+# (observability.py otherwise defaults OTEL_ENABLED on for interactive dev
+# runs — see #185). This must run before the gefion imports below so that
+# gefion.observability picks it up at import time.
+os.environ["OTEL_ENABLED"] = "false"
+
 from gefion.cli_helpers import upsert_feature_function
 from gefion.db.schema import test_db_url
 
