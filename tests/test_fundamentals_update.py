@@ -372,11 +372,14 @@ def test_fundamentals_update_inserts_into_stocks_fundamentals():
     assert 2800000000000 in params or "2800000000000" in str(params), "market_cap should be included"
 
 
-def test_fundamentals_update_writes_exchange():
-    """The stocks UPDATE must persist the OVERVIEW Exchange field.
+def test_fundamentals_update_does_not_write_exchange():
+    """The stocks UPDATE must NOT touch the exchange column.
 
-    stocks.exchange exists in the schema but was never populated; exchange
-    filters elsewhere depend on this write (issue #29).
+    Issue #29 originally had OVERVIEW write stocks.exchange, but since #192
+    universe-ingest (LISTING_STATUS) is the authoritative writer of that
+    column. OVERVIEW's looser taxonomy (US / PINK / NYSE ARCA / OTC* / AMEX)
+    was clobbering it (#207) — the current-state UPDATE here must be limited
+    to name/sector/industry.
     """
     from gefion.cli import _fundamentals_update_impl
     from gefion.alphavantage.client import AlphaVantageClient
@@ -432,8 +435,8 @@ def test_fundamentals_update_writes_exchange():
     )
 
     sql, params = stock_updates[0]
-    assert "exchange" in sql, f"UPDATE must set exchange column, got: {sql}"
-    assert "NASDAQ" in params, f"Exchange value from OVERVIEW must be written, got params: {params}"
+    assert "exchange" not in sql, f"UPDATE must not set exchange column, got: {sql}"
+    assert "NASDAQ" not in params, f"Exchange value from OVERVIEW must not be written, got params: {params}"
 
 
 def test_fundamentals_update_parses_numeric_fields():
