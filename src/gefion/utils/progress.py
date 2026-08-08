@@ -219,6 +219,8 @@ class ProgressReporter:
             payload["max_workers"] = getattr(self, "max_workers", None)
         if hasattr(self, "writer_workers"):
             payload["writer_workers"] = getattr(self, "writer_workers", None)
+        if hasattr(self, "max_parallel_functions"):
+            payload["max_parallel_functions"] = getattr(self, "max_parallel_functions", None)
         if meta:
             payload.update(meta)
         typer.echo(json.dumps(payload))

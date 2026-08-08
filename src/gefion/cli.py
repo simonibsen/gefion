@@ -7610,12 +7610,25 @@ def _features_compute_impl(
             profiles: List[Dict[str, Any]] = []
             timings_totals: Dict[str, float] = {}
 
+            # Resolved max_parallel_functions: mirrors the default applied in
+            # gefion.features.dispatcher.compute_features (cpu_count - 2) so the
+            # reported value matches what actually governs parallel_functions.
+            resolved_max_parallel_functions = (
+                max_parallel_functions if isinstance(max_parallel_functions, int) else max(2, cpu_count - 2)
+            )
+
             # Set up progress reporting
             reporter = ProgressReporter(total=len(symbol_list), json_output=json_output, enabled=progress)
             reporter.mode = "dispatcher"
             reporter.workers = start_workers
+            # max_workers/writer_workers reflect the RESOLVED CLI configuration
+            # (respecting --max-workers/--writer-workers), not the live
+            # resource-tuned ceiling from the adaptive limiter — that ceiling
+            # fluctuates with host resources and would be misleading in a
+            # diagnostic --json stream (see #214).
             reporter.max_workers = max_w
             reporter.writer_workers = writer_workers
+            reporter.max_parallel_functions = resolved_max_parallel_functions
             reporter.batch_size = feature_batch_size
             live: Optional[Live] = None
             if progress and not json_output:
@@ -7738,12 +7751,11 @@ def _features_compute_impl(
                 # Process stocks in batches with adaptive worker scaling
                 for batch_symbols in chunked(symbol_list, 50):
                     current_workers = limiter.value()
-                    current_max_workers = limiter.max_workers
-                    current_writer_workers = limiter.get_writer_workers()
                     current_batch_size = limiter.get_batch_size()
                     reporter.workers = current_workers
-                    reporter.max_workers = current_max_workers
-                    reporter.writer_workers = current_writer_workers
+                    # NOTE: reporter.max_workers / reporter.writer_workers stay
+                    # pinned to the resolved CLI configuration set above — see
+                    # the comment there (#214).
                     reporter.batch_size = current_batch_size
 
                     prev_resource_errors = reporter.resource_errors
