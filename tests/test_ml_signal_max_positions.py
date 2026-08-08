@@ -97,3 +97,23 @@ def test_long_only_never_shorts_and_respects_cap():
         preds, {}, prices, 100_000.0)
     assert not any(s["action"] == "short" for s in signals)
     assert len([s for s in signals if s["action"] == "buy"]) == 3
+
+
+def test_quantile_assignment_direction_is_not_inverted():
+    """Planted-signal directional test (#210): a clearly-positive q50 goes LONG
+    and a clearly-negative q50 goes SHORT — the q50->side assignment is NOT
+    inverted. Consequence: a short-heavy book reflects the *model's* predictions
+    (a negative directional bias meeting a symmetric absolute threshold), not a
+    selection-code bug. See the diagnosis on #210."""
+    strat = MLSignalStrategy(mode="long_short", max_positions=10,
+                             return_threshold=0.02, position_size=0.1)
+    preds = {
+        "STRONG_UP": {"q50": 0.20, "q10": 0.05, "q90": 0.40},
+        "STRONG_DOWN": {"q50": -0.20, "q10": -0.40, "q90": -0.05},
+    }
+    prices = {"STRONG_UP": 100.0, "STRONG_DOWN": 100.0}
+    signals = strat._generate_quantile_signals_from_predictions(
+        preds, {}, prices, 100_000.0)
+    by_symbol = {s["symbol"]: s["action"] for s in signals}
+    assert by_symbol.get("STRONG_UP") == "buy"      # positive q50 -> long
+    assert by_symbol.get("STRONG_DOWN") == "short"  # negative q50 -> short
