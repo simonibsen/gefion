@@ -50,6 +50,7 @@ class BacktestEngine:
         volume_data: Optional[Dict[str, Dict[date, int]]] = None,
         volatility_data: Optional[Dict[str, Dict[date, float]]] = None,
         mode: str = "long_only",
+        max_gross_exposure: Optional[float] = None,
     ):
         """
         Initialize backtesting engine.
@@ -77,6 +78,16 @@ class BacktestEngine:
         self.start_date = start_date
         self.end_date = end_date
         self.mode = mode
+        # Gross-exposure budget (#211): total gross notional (long + short,
+        # marked-to-market) may not exceed equity × max_gross_exposure, so
+        # returns stay physical no matter how large/many the requested positions.
+        # long_only defaults to 1.0 — a no-op, since buy() already self-limits to
+        # cash (preserves the reproducibility gate); long_short defaults to 2.0
+        # (a dollar-neutral 100% long / 100% short book). Enforced long_short-only.
+        if max_gross_exposure is not None:
+            self.max_gross_exposure = float(max_gross_exposure)
+        else:
+            self.max_gross_exposure = 2.0 if mode == "long_short" else 1.0
 
         # Optional advanced features
         self.costs = costs
@@ -175,6 +186,59 @@ class BacktestEngine:
             "gross": (long_notional + short_notional) / denom,
             "net": (long_notional - short_notional) / denom,
         }
+
+    def _planned_open_shares(self, signal, portfolio, current_prices,
+                             current_date) -> int:
+        """Intended share count for an OPENING signal (buy/short) before any
+        gross-exposure scaling — mirrors how _execute_signal sizes it, so the
+        pre-scan and the execution agree. 0 for non-opening or unpriced signals."""
+        action = signal.get("action")
+        symbol = signal.get("symbol")
+        price = current_prices.get(symbol)
+        if action not in ("buy", "short") or price is None or price <= 0:
+            return 0
+        if action == "buy" and self.position_sizer:
+            volatility = self.volatility_data.get(symbol, {}).get(current_date)
+            return max(0, self.position_sizer.calculate_shares(
+                portfolio_value=portfolio.calculate_equity(current_prices),
+                price=price, symbol=symbol, volatility=volatility))
+        return max(0, int(signal.get("shares", 0)))
+
+    def _open_scale(self, signals, portfolio, current_prices,
+                    current_date) -> float:
+        """Factor in [0, 1] to scale this bar's opening trades so post-bar gross
+        notional stays within equity × max_gross_exposure (#211). 1.0 when the
+        requested book already fits. Same-bar closes (sell/cover) free budget
+        first, so a rebalance that flattens then re-opens is not penalised for
+        the book it is about to close. Deterministic — independent of signal
+        order (a single factor scales the whole opening batch), so it clamps
+        rather than dropping trades by iteration order."""
+        equity = portfolio.calculate_equity(current_prices)
+        budget = max(0.0, equity) * self.max_gross_exposure
+        gross = 0.0
+        for symbol, position in portfolio.positions.items():
+            price = current_prices.get(symbol, position["avg_price"])
+            gross += abs(position["shares"]) * price
+        closing = 0.0
+        opening = 0.0
+        for signal in signals:
+            action = signal.get("action")
+            symbol = signal.get("symbol")
+            price = current_prices.get(symbol)
+            if price is None:
+                continue
+            if action in ("sell", "cover"):
+                position = portfolio.positions.get(symbol)
+                if position:
+                    closing += min(abs(int(signal.get("shares", 0))),
+                                   abs(position["shares"])) * price
+            elif action in ("buy", "short"):
+                opening += self._planned_open_shares(
+                    signal, portfolio, current_prices, current_date) * price
+        room = max(0.0, budget - max(0.0, gross - closing))
+        if opening <= 0 or opening <= room:
+            return 1.0
+        return room / opening
 
     def _get_historical_prices(self, current_date: date) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -284,10 +348,18 @@ class BacktestEngine:
                     strategy_signals, portfolio, current_prices
                 )
 
-            # Execute strategy signals
+            # Execute strategy signals. In long_short, scale this bar's OPENING
+            # trades (buy/short) so post-bar gross notional stays within the
+            # gross-exposure budget (#211). long_only is untouched (scale = 1.0).
+            open_scale = 1.0
+            if self.mode == "long_short":
+                open_scale = self._open_scale(
+                    strategy_signals, portfolio, current_prices, current_date
+                )
             for signal in strategy_signals:
                 executed_trade = self._execute_signal(
-                    signal, portfolio, current_prices, current_date
+                    signal, portfolio, current_prices, current_date,
+                    size_scale=open_scale,
                 )
                 if executed_trade:
                     trades.append(executed_trade)
@@ -338,6 +410,7 @@ class BacktestEngine:
         portfolio: Portfolio,
         current_prices: Dict[str, float],
         current_date: date,
+        size_scale: float = 1.0,
     ) -> Optional[Dict[str, Any]]:
         """
         Execute a single trading signal with costs, slippage, and sizing.
@@ -382,6 +455,14 @@ class BacktestEngine:
                 symbol=symbol,
                 volatility=volatility,
             )
+            if shares <= 0:
+                return None
+
+        # Gross-exposure clamp (#211): scale opening trades (buy/short) to fit the
+        # bar's gross-exposure budget. size_scale is 1.0 in long_only, so this is
+        # a no-op there (preserves the reproducibility gate).
+        if size_scale < 1.0 and action in ("buy", "short"):
+            shares = int(shares * size_scale)
             if shares <= 0:
                 return None
 
