@@ -27,6 +27,9 @@ Configuration:
     OTEL_EXPORTER: Exporter type - otlp or console (default: otlp)
     OTEL_OTLP_ENDPOINT: OTLP endpoint (default: http://localhost:4317)
     OTEL_SAMPLING_RATE: Sampling rate 0.0-1.0 (default: 1.0)
+    OTEL_MAX_EXPORT_BATCH_SIZE: Max spans per export batch (default: 128).
+        Bounds each OTLP export message well under the collector's 4 MiB
+        gRPC receive limit — see #212.
 """
 
 import os
@@ -135,6 +138,7 @@ def _initialize_otel() -> bool:
         service_name = os.getenv("OTEL_SERVICE_NAME", "gefion")
         exporter_type = os.getenv("OTEL_EXPORTER", "otlp").lower()
         sampling_rate = float(os.getenv("OTEL_SAMPLING_RATE", "1.0"))
+        max_export_batch_size = int(os.getenv("OTEL_MAX_EXPORT_BATCH_SIZE", "128"))
     except Exception as e:
         logger.error(f"Failed to parse OpenTelemetry configuration: {e}")
         return False
@@ -168,8 +172,11 @@ def _initialize_otel() -> bool:
         logger.error(f"Unknown exporter type: {exporter_type}")
         return False
 
-    # Add span processor
-    processor = BatchSpanProcessor(exporter)
+    # Add span processor. Cap max_export_batch_size well under the OTLP
+    # gRPC receive limit (4 MiB) — the SDK default (512 spans) let
+    # span-heavy long jobs build export messages over that limit, which the
+    # collector rejects with RESOURCE_EXHAUSTED and silently drops (#212).
+    processor = BatchSpanProcessor(exporter, max_export_batch_size=max_export_batch_size)
     provider.add_span_processor(processor)
 
     # Set global tracer provider
