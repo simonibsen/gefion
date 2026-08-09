@@ -195,6 +195,22 @@ storage, and the feat-compute sweep are deliberately NOT filtered (observe
 everything, model a subset). Anything producing stored results should stamp
 `resolved.provenance()` (name + fingerprint) into its result payload.
 
+## Explaining concepts: the three-register ladder (writing convention)
+
+When explaining a CONCEPT on a conceptual/learning surface (docs, curriculum,
+onboarding prose — not API reference or code comments), reach for up to three
+registers, in order: **plain language** -> an everyday **analogy** -> the precise
+**system term** (e.g. "market state" -> "weather pattern" -> regime).
+
+The analogy is the sharp edge, not a checklist item: use it ONLY when the concept
+is genuinely counterintuitive and pressure-test it before writing it down — a
+forced or wrong analogy plants a false intuition, which is worse than no analogy
+at all. Most concepts only need two registers (plain language -> term).
+
+**Non-goal**: do NOT retrofit three headed sections onto every doc or every
+concept — that's padding and reads templated. Apply the ladder selectively, in
+prose, where a concept is actually hard to grasp.
+
 ## Patterns & Gotchas (living reference)
 
 - **DB-is-source-of-truth functions (spec 011)**: market-level function
