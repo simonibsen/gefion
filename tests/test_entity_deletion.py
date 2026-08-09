@@ -109,6 +109,34 @@ def test_confirm_deletes_values_then_entity_cascade_parity(conn):
         assert cur.fetchone()[0] == 0
 
 
+def test_confirm_deletes_stock_ohlcv_rows(conn):
+    """Issue #206 FIX #1: entity-delete must not rely solely on the
+    stock_ohlcv ON DELETE CASCADE — it doesn't reach compressed chunks, so
+    price rows can survive a deleted stock (orphans that later crash
+    universe refresh with a ForeignKeyViolation). The delete path must
+    explicitly remove stock_ohlcv rows for the entity before/along with the
+    stocks row."""
+    from gefion.db.ingest import insert_stock_ohlcv
+    with conn.cursor() as cur:
+        stock_id, _ = _seed_stock(cur, "DELT6", with_feature_values=False)
+    insert_stock_ohlcv(conn, stock_id, [
+        {"date": date(2026, 1, 5), "open": 1, "high": 1, "low": 1,
+         "close": 1, "adjusted_close": 1, "volume": 100},
+        {"date": date(2026, 1, 6), "open": 1, "high": 1, "low": 1,
+         "close": 1, "adjusted_close": 1, "volume": 100},
+    ])
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM stock_ohlcv WHERE data_id = %s", (stock_id,))
+        assert cur.fetchone()[0] == 2
+    summary = deletion.execute_delete(conn, "stocks", "DELT6")
+    assert summary["cascade_rows_deleted"].get("stock_ohlcv") == 2
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM stock_ohlcv WHERE data_id = %s", (stock_id,))
+        assert cur.fetchone()[0] == 0
+        cur.execute("SELECT count(*) FROM stocks WHERE symbol = 'DELT6'")
+        assert cur.fetchone()[0] == 0
+
+
 def test_restrict_blockers_refuse_with_the_list(conn):
     """A RESTRICT/NO-ACTION dependent with rows blocks deletion and the
     refusal names it. The dependent table is created here — relying on a

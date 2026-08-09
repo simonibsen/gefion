@@ -136,9 +136,18 @@ def plan_delete(conn, entity_table: str, key: str) -> Dict[str, Any]:
 
 
 def execute_delete(conn, entity_table: str, key: str) -> Dict[str, Any]:
-    """Delete for real: feature values (per registry) first, then the entity
-    row. Refuses with the blocker list if any RESTRICT/NO-ACTION dependent has
-    rows; CASCADE dependents are handled by the database."""
+    """Delete for real: feature values (per registry) first, then CASCADE
+    FK dependents explicitly, then the entity row. Refuses with the blocker
+    list if any RESTRICT/NO-ACTION dependent has rows.
+
+    CASCADE dependents are deleted explicitly rather than left to the
+    database FK cascade: ON DELETE CASCADE does not reach rows living in
+    compressed hypertable chunks (e.g. stock_ohlcv), which would otherwise
+    orphan them under the deleted parent (issue #206). A targeted
+    ``DELETE ... WHERE <fk_column> = id`` decompresses only the affected
+    segments (TimescaleDB 2.12+ compressed DML) and works identically
+    whether or not the child table is compressed.
+    """
     with create_span("entities.deletion.execute",
                      entity_table=entity_table) as span:
         plan = plan_delete(conn, entity_table, key)
@@ -150,6 +159,9 @@ def execute_delete(conn, entity_table: str, key: str) -> Dict[str, Any]:
                 "those rows first (or via their own lifecycle commands)")
         entity_id = plan["entity"]["id"]
         ident = entity_identifier(conn, entity_table)
+        cascade_children = [d for d in plan["fk_dependents"]
+                            if d["on_delete"] == "CASCADE"]
+        cascade_rows_deleted: Dict[str, int] = {}
         with conn.cursor() as cur:
             cur.execute(
                 """DELETE FROM computed_features
@@ -158,14 +170,24 @@ def execute_delete(conn, entity_table: str, key: str) -> Dict[str, Any]:
                 (entity_id, entity_table),
             )
             values_deleted = cur.rowcount
+            for child in cascade_children:
+                cur.execute(
+                    sql.SQL("DELETE FROM {} WHERE {} = %s").format(
+                        sql.Identifier(*child["table"].split(".")),
+                        sql.Identifier(child["fk_column"])),
+                    (entity_id,),
+                )
+                cascade_rows_deleted[child["table"]] = cur.rowcount
             cur.execute(
                 sql.SQL("DELETE FROM {} WHERE id = %s").format(ident),
                 (entity_id,),
             )
         set_attributes(span, entity_id=entity_id,
-                       feature_values_deleted=values_deleted)
+                       feature_values_deleted=values_deleted,
+                       cascade_rows_deleted=sum(cascade_rows_deleted.values()))
         return {
             "entity": plan["entity"],
             "feature_values_deleted": values_deleted,
+            "cascade_rows_deleted": cascade_rows_deleted,
             "fk_dependents": plan["fk_dependents"],
         }
