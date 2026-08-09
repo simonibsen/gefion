@@ -122,7 +122,7 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
         self.enable_emergency_brake = enable_emergency_brake
         self.emergency_brake_triggered = False
 
-        self.last_check_time = time.time()  # Initialize to current time
+        self.last_check_time = time.monotonic()  # Initialize to current monotonic time
         self.last_resource_max = max_workers
         self.last_writer_workers = writer_workers
         self.last_batch_size = batch_size
@@ -370,8 +370,10 @@ class ResourceAwareAdaptiveLimiter(AdaptiveLimiter):
                 # Don't scale up - return current without calling parent
                 return self.current
 
-        # Check if it's time to re-evaluate resources
-        current_time = time.time()
+        # Check if it's time to re-evaluate resources. Uses a monotonic clock
+        # since this measures elapsed time and must not be affected by
+        # wall-clock adjustments (e.g. NTP stepping the clock backward).
+        current_time = time.monotonic()
         if current_time - self.last_check_time >= self.check_interval:
             self._update_resource_limits()
             self.last_check_time = current_time

@@ -162,28 +162,38 @@ def test_resource_aware_limiter_emits_messages_on_scaling():
 def test_resource_aware_limiter_periodic_checking():
     """
     Test that limiter checks resources periodically via record_batch.
+
+    Uses a fake monotonic clock instead of a real sleep so the test is
+    deterministic and immune to scheduling jitter under load.
     """
     messages = []
-    limiter = ResourceAwareAdaptiveLimiter(
-        start_workers=2,
-        max_workers=10,
-        check_interval_seconds=0.1,  # Very short interval for testing
-        emit_func=lambda msg: messages.append(msg),
-    )
+    fake_time = [1_000.0]
 
-    # Note: __init__ calls _update_resource_limits() which sets last_check_time
-    # So we need to record the time after initialization
-    initial_check_time = limiter.last_check_time
-    assert initial_check_time > 0  # Should be set
+    with patch("gefion.utils.adaptive.time.monotonic", side_effect=lambda: fake_time[0]):
+        limiter = ResourceAwareAdaptiveLimiter(
+            start_workers=2,
+            max_workers=10,
+            check_interval_seconds=0.1,  # Very short interval for testing
+            emit_func=lambda msg: messages.append(msg),
+            # Isolate the periodic-check behavior under test from the
+            # emergency-brake path, which would otherwise short-circuit
+            # record_batch() before the interval check on low-memory hosts.
+            enable_emergency_brake=False,
+        )
 
-    # Wait for interval to pass
-    time.sleep(0.15)
+        # Note: __init__ calls _update_resource_limits() which sets last_check_time
+        # So we need to record the time after initialization
+        initial_check_time = limiter.last_check_time
+        assert initial_check_time > 0  # Should be set
 
-    # record_batch call should trigger resource check
-    limiter.record_batch(errors=0)
+        # Advance the fake clock past the interval (no real sleep)
+        fake_time[0] += 0.15
 
-    # Should have updated check time
-    assert limiter.last_check_time > initial_check_time
+        # record_batch call should trigger resource check
+        limiter.record_batch(errors=0)
+
+        # Should have updated check time
+        assert limiter.last_check_time > initial_check_time
 
 
 def test_resource_aware_limiter_get_resource_info():
