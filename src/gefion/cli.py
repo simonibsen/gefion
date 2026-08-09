@@ -29,7 +29,7 @@ from gefion.features.dispatcher import compute_features
 from gefion.config import load_settings
 from gefion.db import schema
 from psycopg.types.json import Json
-from gefion.observability import create_span, set_attributes, add_event, get_current_span, shutdown as otel_shutdown
+from gefion.observability import create_span, set_attributes, add_event, get_current_span, shutdown as otel_shutdown, _resolve_otel_enabled
 from gefion.db import migrate
 from gefion import health
 from gefion.db.ingest import (
@@ -4944,8 +4944,7 @@ def span_check(
 ) -> None:
     """Check recent traces in the configured backend (Tempo by default)."""
     with create_span("cli.span-check"):
-        otel_enabled = os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
-        if not otel_enabled:
+        if not _resolve_otel_enabled():
             emit(
                 "OTEL_ENABLED is not true; traces may be missing.",
                 data={"hint": "export $(cat .env.example | xargs)"},
