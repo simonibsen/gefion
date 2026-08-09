@@ -3,6 +3,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import date
 
+import pytest
+import typer
+
 import gefion.cli as cli
 import gefion.ingest.universe as universe
 import gefion.db.ingest as ingest
@@ -396,3 +399,86 @@ def test_span_check_no_warning_when_otel_defaults_enabled(monkeypatch):
     )
 
     assert not any("OTEL_ENABLED" in msg for msg in warnings)
+
+
+def _span_check_messages(monkeypatch) -> list[tuple[str, bool]]:
+    messages: list[tuple[str, bool]] = []
+
+    def fake_emit(message, data=None, json_output=None, error=False):
+        messages.append((message, error))
+
+    monkeypatch.setattr(cli, "emit", fake_emit)
+    monkeypatch.setattr(cli, "emit_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli.os, "getenv", lambda key, default=None: "true" if key == "OTEL_ENABLED" else default)
+    return messages
+
+
+def test_span_check_reports_degraded_backend_on_query_error(monkeypatch):
+    spans: list[DummySpan] = []
+    _install_common_stubs(monkeypatch, symbols=["AAA"], active_feature_defs=0, spans=spans)
+    messages = _span_check_messages(monkeypatch)
+
+    def fail_search(*args, **kwargs):
+        raise RuntimeError("503 Server Error: Service Unavailable")
+
+    monkeypatch.setattr(cli, "_tempo_get_json", fail_search)
+    monkeypatch.setattr(cli, "_tempo_ready_status", lambda *a, **k: {"ready": False, "detail": "HTTP 503"})
+
+    with pytest.raises(typer.Exit):
+        cli.span_check(
+            backend="tempo",
+            tempo_url="http://localhost:3200",
+            service_name="gefion",
+            limit=10,
+            trace_id=None,
+            show_spans=False,
+            json_output=True,
+        )
+
+    assert any(err and "degraded/unreachable" in msg for msg, err in messages)
+    assert not any("no traces" in msg.lower() for msg, err in messages)
+
+
+def test_span_check_reports_no_traces_when_backend_healthy_and_empty(monkeypatch):
+    spans: list[DummySpan] = []
+    _install_common_stubs(monkeypatch, symbols=["AAA"], active_feature_defs=0, spans=spans)
+    messages = _span_check_messages(monkeypatch)
+
+    monkeypatch.setattr(cli, "_tempo_get_json", lambda *a, **k: {"traces": [], "metrics": {"inspectedTraces": 0}})
+    monkeypatch.setattr(cli, "_tempo_ready_status", lambda *a, **k: {"ready": True, "detail": "ready"})
+
+    cli.span_check(
+        backend="tempo",
+        tempo_url="http://localhost:3200",
+        service_name="gefion",
+        limit=10,
+        trace_id=None,
+        show_spans=False,
+        json_output=True,
+    )
+
+    assert any("no traces" in msg.lower() for msg, err in messages)
+    assert not any("degraded/unreachable" in msg for msg, err in messages)
+
+
+def test_span_check_reports_degraded_backend_when_empty_but_not_ready(monkeypatch):
+    spans: list[DummySpan] = []
+    _install_common_stubs(monkeypatch, symbols=["AAA"], active_feature_defs=0, spans=spans)
+    messages = _span_check_messages(monkeypatch)
+
+    monkeypatch.setattr(cli, "_tempo_get_json", lambda *a, **k: {"traces": [], "metrics": {"inspectedTraces": 0}})
+    monkeypatch.setattr(cli, "_tempo_ready_status", lambda *a, **k: {"ready": False, "detail": "HTTP 503"})
+
+    with pytest.raises(typer.Exit):
+        cli.span_check(
+            backend="tempo",
+            tempo_url="http://localhost:3200",
+            service_name="gefion",
+            limit=10,
+            trace_id=None,
+            show_spans=False,
+            json_output=True,
+        )
+
+    assert any(err and "degraded/unreachable" in msg for msg, err in messages)
+    assert not any("no traces" in msg.lower() for msg, err in messages)

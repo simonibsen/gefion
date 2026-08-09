@@ -138,6 +138,18 @@ def _tempo_get_json(tempo_url: str, path: str, *, params: Optional[dict] = None,
     return resp.json()
 
 
+def _tempo_ready_status(tempo_url: str, timeout_s: float = 3.0) -> dict:
+    """Check Tempo's /ready endpoint. Never raises — degraded/unreachable is a valid result."""
+    url = f"{tempo_url.rstrip('/')}/ready"
+    try:
+        resp = requests.get(url, timeout=timeout_s)
+    except Exception as exc:
+        return {"ready": False, "detail": str(exc)}
+    if resp.status_code == 200:
+        return {"ready": True, "detail": "ready"}
+    return {"ready": False, "detail": f"HTTP {resp.status_code}"}
+
+
 def _export_feature_functions(conn, names: Optional[List[str]] = None) -> list[dict]:
     where = ""
     params: List[str] = []
@@ -4827,19 +4839,33 @@ def _span_check_impl(
             params={"tags": f"service.name={service_name}", "limit": limit},
         )
     except Exception as exc:
+        ready = _tempo_ready_status(tempo_url)
         emit_error(
-            f"Tempo search failed: {exc}",
+            f"Tempo backend degraded/unreachable: {exc}",
             json_output=json_output,
-            data={"hint": f"Ensure Tempo is running and reachable at {tempo_url} (docker compose -f docker/tempo/docker-compose.tempo.yml up -d)"},
+            data={
+                "tempo_url": tempo_url,
+                "tempo_ready": ready["ready"],
+                "tempo_ready_detail": ready["detail"],
+                "hint": f"Ensure Tempo is running and reachable at {tempo_url} (docker compose -f docker/tempo/docker-compose.tempo.yml up -d)",
+            },
         )
 
     traces = search.get("traces") or []
     trace_count = (search.get("metrics") or {}).get("inspectedTraces", 0)
     if not traces:
+        ready = _tempo_ready_status(tempo_url)
+        if not ready["ready"]:
+            emit_error(
+                f"Tempo backend degraded/unreachable: {ready['detail']}",
+                json_output=json_output,
+                data={"tempo_url": tempo_url, "tempo_ready": False, "tempo_ready_detail": ready["detail"]},
+            )
         emit(
             f"No traces found for service '{service_name}'",
             data={
                 "tempo_url": tempo_url,
+                "tempo_ready": True,
                 "hint": "Generate traces with: export $(cat .env.example | xargs) && .venv/bin/python tests/test_otel_smoke.py",
             },
             json_output=json_output,
