@@ -1680,6 +1680,7 @@ def ml_predict_backfill(
                    prediction_date=None,
                    start_date=start_d.isoformat(), end_date=end_d.isoformat(),
                    symbols=",".join(uni_symbols), exchange=None, limit=None,
+                   max_workers=None,
                    db_url=db_url, json_output=json_output)
         _materialize_signals()
         emit(f"Backfill window {start_d} → {end_d} done in "
@@ -1697,6 +1698,7 @@ def ml_predict(
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbol list (optional)"),
     exchange: Optional[str] = typer.Option(None, help="Exchange name for universe selection (optional)"),
     limit: Optional[int] = typer.Option(None, help="Optional universe limit (exchange mode)"),
+    max_workers: Optional[int] = typer.Option(None, "--max-workers", help="Max parallel workers for per-symbol prediction writes (auto if not set)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (defaults to env DATABASE_URL)"),
     json_output: Optional[bool] = typer.Option(None, "--json", help="Output result/error as JSON"),
 ) -> None:
@@ -1719,8 +1721,11 @@ def ml_predict(
             --start-date 2025-11-01 --end-date 2025-12-31 --symbols AAPL,MSFT
     """
     import pandas as pd
+    import multiprocessing
     from gefion.ml.models import load_model_artifact, predict_quantiles
     from gefion.ml.store import get_ml_dataset
+
+    resolved_max_workers = max(1, max_workers) if max_workers is not None else max(1, multiprocessing.cpu_count() - 1)
 
     sym_list = parse_comma_separated(symbols) or []
     if not sym_list and not exchange:
@@ -1939,6 +1944,16 @@ def ml_predict(
             )
             run_id = int(cur.fetchone()[0])
 
+        # Bounded worker pool for per-symbol prediction writes (#213) — mirrors
+        # gefion.features.dispatcher's per-symbol execution model used by
+        # feat-compute. Only opened when actually parallelizing; each worker
+        # acquires its own pooled connection (psycopg.Connection isn't
+        # thread-safe), same pattern as feat-compute's process_stock().
+        predict_pool_owned = False
+        if resolved_max_workers > 1 and db_pool.get_pool() is None:
+            db_pool.init_pool(_db_url(db_url), min_size=2, max_size=resolved_max_workers + 2)
+            predict_pool_owned = True
+
         for date_idx, current_date in enumerate(dates_to_process, 1):
             if len(dates_to_process) > 1:
                 emit(
@@ -1992,6 +2007,8 @@ def ml_predict(
                             f"Run 'gefion data-update' to compute features first.",
                             json_output=json_output,
                         )
+                    if predict_pool_owned:
+                        db_pool.close_pool()
                     return
 
             # Convert to DataFrame and pivot to wide format
@@ -2003,18 +2020,30 @@ def ml_predict(
                 aggfunc="first"
             )
 
-            date_predictions = 0
+            # Prediction math is unchanged: one vectorized predict_quantiles()
+            # call per horizon, across the full symbol batch (row-independent,
+            # so grouping/parallelizing the WRITE below can't change values).
+            horizon_predictions = {}
             for horizon in horizons:
                 model_data = horizon_models[horizon]
-                predictions = predict_quantiles(model_data, features_wide)
+                horizon_predictions[horizon] = predict_quantiles(model_data, features_wide)
 
-                # Insert predictions into database
-                with conn.cursor() as cur:
-                    for data_id in predictions.index:
-                        q10 = Decimal(str(predictions.loc[data_id, "q10"]))
-                        q50 = Decimal(str(predictions.loc[data_id, "q50"]))
-                        q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+            # Group prediction rows by symbol (data_id) so the DB write can be
+            # dispatched across a bounded worker pool, one task per symbol —
+            # mirrors gefion.features.dispatcher's per-symbol execution model
+            # used by feat-compute (#213).
+            symbol_rows: Dict[int, List[Tuple[int, Decimal, Decimal, Decimal]]] = {}
+            for horizon, predictions in horizon_predictions.items():
+                for data_id in predictions.index:
+                    q10 = Decimal(str(predictions.loc[data_id, "q10"]))
+                    q50 = Decimal(str(predictions.loc[data_id, "q50"]))
+                    q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+                    symbol_rows.setdefault(int(data_id), []).append((horizon, q10, q50, q90))
 
+            def write_symbol_predictions(write_conn, data_id, rows):
+                written = 0
+                with write_conn.cursor() as cur:
+                    for horizon, q10, q50, q90 in rows:
                         cur.execute(
                             """
                             INSERT INTO predictions
@@ -2028,14 +2057,31 @@ def ml_predict(
                               run_id = EXCLUDED.run_id,
                               created_at = NOW();
                             """,
-                            (model_id, int(data_id), current_date, horizon,
+                            (model_id, data_id, current_date, horizon,
                              'quantile',
                              Json({"q10": float(q10), "q50": float(q50), "q90": float(q90)}),
                              Json({"model_version": model_version}),
                              run_id),
                         )
-                        date_predictions += 1
-                        grand_total_predictions += 1
+                        written += 1
+                return written
+
+            date_predictions = 0
+            if resolved_max_workers <= 1 or len(symbol_rows) <= 1:
+                for data_id in sorted(symbol_rows):
+                    date_predictions += write_symbol_predictions(conn, data_id, symbol_rows[data_id])
+            else:
+                def _write_task(data_id):
+                    with db_pool.get_connection() as worker_conn:
+                        worker_conn.autocommit = True
+                        return write_symbol_predictions(worker_conn, data_id, symbol_rows[data_id])
+
+                with ThreadPoolExecutor(max_workers=resolved_max_workers) as executor:
+                    futures = {executor.submit(_write_task, data_id): data_id for data_id in symbol_rows}
+                    for future in as_completed(futures):
+                        date_predictions += future.result()
+
+            grand_total_predictions += date_predictions
 
             dates_processed += 1
 
@@ -2043,6 +2089,9 @@ def ml_predict(
                 for horizon in horizons:
                     preds_per_horizon = len(features_wide)
                     emit(f"  Stored {preds_per_horizon} predictions for {horizon}-day horizon", json_output=json_output)
+
+        if predict_pool_owned:
+            db_pool.close_pool()
 
         # Mark run as complete
         with conn.cursor() as cur:

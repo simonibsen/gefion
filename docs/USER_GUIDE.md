@@ -139,6 +139,10 @@ gefion ml predict \
 
 Fetches features from `computed_features`, generates q10/q50/q90 predictions, stores in `quantile_predictions`.
 
+Per-symbol prediction writes are parallelized across a bounded worker pool
+(same pattern as `feat-compute`), defaulting to `cpu_count - 1`; override with
+`--max-workers`.
+
 #### 3b. Vintage models and the point-in-time backfill (spec 012)
 
 A **vintage model** is trained strictly on data up to a declared cutoff:
