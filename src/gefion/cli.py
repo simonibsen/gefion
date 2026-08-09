@@ -1965,144 +1965,148 @@ def ml_predict(
             db_pool.init_pool(_db_url(db_url), min_size=2, max_size=resolved_max_workers + 2)
             predict_pool_owned = True
 
-        for date_idx, current_date in enumerate(dates_to_process, 1):
-            if len(dates_to_process) > 1:
-                emit(
-                    f"[{date_idx}/{len(dates_to_process)}] Processing {current_date}...",
-                    data={"date_idx": date_idx, "total_dates": len(dates_to_process), "current_date": current_date},
-                    json_output=json_output,
-                )
-            else:
-                emit(f"Generating predictions for {len(universe)} symbols on {current_date}", json_output=json_output)
-
-            # Fetch features for all symbols on current_date
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT cf.data_id, fd.name, cf.value
-                    FROM computed_features cf
-                    JOIN feature_definitions fd ON cf.feature_id = fd.id
-                    WHERE cf.data_id = ANY(%s)
-                      AND cf.date = %s
-                      AND fd.name = ANY(%s);
-                    """,
-                    (data_ids, current_date, feature_names),
-                )
-                features_data = cur.fetchall()
-
-            if not features_data:
-                # Skip dates without features in batch mode
+        # The pool this call owns MUST be closed on every exit path (including
+        # exceptions raised mid-backfill) — otherwise a single bad date leaves
+        # the global db_pool singleton open, and every later command/test in
+        # the same process silently reuses that (possibly undersized) stale
+        # pool instead of sizing a fresh one for its own needs (#213).
+        try:
+            for date_idx, current_date in enumerate(dates_to_process, 1):
                 if len(dates_to_process) > 1:
-                    dates_skipped += 1
-                    continue
+                    emit(
+                        f"[{date_idx}/{len(dates_to_process)}] Processing {current_date}...",
+                        data={"date_idx": date_idx, "total_dates": len(dates_to_process), "current_date": current_date},
+                        json_output=json_output,
+                    )
                 else:
-                    # Single date mode - show helpful error
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "SELECT MAX(date) FROM computed_features WHERE data_id = ANY(%s)",
-                            (data_ids,),
-                        )
-                        row = cur.fetchone()
-                        latest_date = row[0] if row else None
+                    emit(f"Generating predictions for {len(universe)} symbols on {current_date}", json_output=json_output)
 
-                    if latest_date:
-                        emit_error(
-                            f"No features found for {current_date}. "
-                            f"Latest available: {latest_date}. "
-                            f"Run 'gefion data-update' to compute features for more recent dates.",
-                            json_output=json_output,
-                        )
+                # Fetch features for all symbols on current_date
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT cf.data_id, fd.name, cf.value
+                        FROM computed_features cf
+                        JOIN feature_definitions fd ON cf.feature_id = fd.id
+                        WHERE cf.data_id = ANY(%s)
+                          AND cf.date = %s
+                          AND fd.name = ANY(%s);
+                        """,
+                        (data_ids, current_date, feature_names),
+                    )
+                    features_data = cur.fetchall()
+
+                if not features_data:
+                    # Skip dates without features in batch mode
+                    if len(dates_to_process) > 1:
+                        dates_skipped += 1
+                        continue
                     else:
-                        emit_error(
-                            f"No features found for {current_date}. "
-                            f"Run 'gefion data-update' to compute features first.",
-                            json_output=json_output,
-                        )
-                    if predict_pool_owned:
-                        db_pool.close_pool()
-                    return
+                        # Single date mode - show helpful error
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT MAX(date) FROM computed_features WHERE data_id = ANY(%s)",
+                                (data_ids,),
+                            )
+                            row = cur.fetchone()
+                            latest_date = row[0] if row else None
 
-            # Convert to DataFrame and pivot to wide format
-            features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
-            features_wide = features_df.pivot_table(
-                index="data_id",
-                columns="feature_name",
-                values="value",
-                aggfunc="first"
-            )
+                        if latest_date:
+                            emit_error(
+                                f"No features found for {current_date}. "
+                                f"Latest available: {latest_date}. "
+                                f"Run 'gefion data-update' to compute features for more recent dates.",
+                                json_output=json_output,
+                            )
+                        else:
+                            emit_error(
+                                f"No features found for {current_date}. "
+                                f"Run 'gefion data-update' to compute features first.",
+                                json_output=json_output,
+                            )
+                        return
 
-            # Prediction math is unchanged: one vectorized predict_quantiles()
-            # call per horizon, across the full symbol batch (row-independent,
-            # so grouping/parallelizing the WRITE below can't change values).
-            horizon_predictions = {}
-            for horizon in horizons:
-                model_data = horizon_models[horizon]
-                horizon_predictions[horizon] = predict_quantiles(model_data, features_wide)
+                # Convert to DataFrame and pivot to wide format
+                features_df = pd.DataFrame(features_data, columns=["data_id", "feature_name", "value"])
+                features_wide = features_df.pivot_table(
+                    index="data_id",
+                    columns="feature_name",
+                    values="value",
+                    aggfunc="first"
+                )
 
-            # Group prediction rows by symbol (data_id) so the DB write can be
-            # dispatched across a bounded worker pool, one task per symbol —
-            # mirrors gefion.features.dispatcher's per-symbol execution model
-            # used by feat-compute (#213).
-            symbol_rows: Dict[int, List[Tuple[int, Decimal, Decimal, Decimal]]] = {}
-            for horizon, predictions in horizon_predictions.items():
-                for data_id in predictions.index:
-                    q10 = Decimal(str(predictions.loc[data_id, "q10"]))
-                    q50 = Decimal(str(predictions.loc[data_id, "q50"]))
-                    q90 = Decimal(str(predictions.loc[data_id, "q90"]))
-                    symbol_rows.setdefault(int(data_id), []).append((horizon, q10, q50, q90))
-
-            def write_symbol_predictions(write_conn, data_id, rows):
-                written = 0
-                with write_conn.cursor() as cur:
-                    for horizon, q10, q50, q90 in rows:
-                        cur.execute(
-                            """
-                            INSERT INTO predictions
-                              (model_id, data_id, prediction_date, horizon_days,
-                               prediction_type, prediction_values, metadata, run_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
-                            DO UPDATE SET
-                              prediction_values = EXCLUDED.prediction_values,
-                              metadata = EXCLUDED.metadata,
-                              run_id = EXCLUDED.run_id,
-                              created_at = NOW();
-                            """,
-                            (model_id, data_id, current_date, horizon,
-                             'quantile',
-                             Json({"q10": float(q10), "q50": float(q50), "q90": float(q90)}),
-                             Json({"model_version": model_version}),
-                             run_id),
-                        )
-                        written += 1
-                return written
-
-            date_predictions = 0
-            if resolved_max_workers <= 1 or len(symbol_rows) <= 1:
-                for data_id in sorted(symbol_rows):
-                    date_predictions += write_symbol_predictions(conn, data_id, symbol_rows[data_id])
-            else:
-                def _write_task(data_id):
-                    with db_pool.get_connection() as worker_conn:
-                        worker_conn.autocommit = True
-                        return write_symbol_predictions(worker_conn, data_id, symbol_rows[data_id])
-
-                with ThreadPoolExecutor(max_workers=resolved_max_workers) as executor:
-                    futures = {executor.submit(_write_task, data_id): data_id for data_id in symbol_rows}
-                    for future in as_completed(futures):
-                        date_predictions += future.result()
-
-            grand_total_predictions += date_predictions
-
-            dates_processed += 1
-
-            if len(dates_to_process) == 1:
+                # Prediction math is unchanged: one vectorized predict_quantiles()
+                # call per horizon, across the full symbol batch (row-independent,
+                # so grouping/parallelizing the WRITE below can't change values).
+                horizon_predictions = {}
                 for horizon in horizons:
-                    preds_per_horizon = len(features_wide)
-                    emit(f"  Stored {preds_per_horizon} predictions for {horizon}-day horizon", json_output=json_output)
+                    model_data = horizon_models[horizon]
+                    horizon_predictions[horizon] = predict_quantiles(model_data, features_wide)
 
-        if predict_pool_owned:
-            db_pool.close_pool()
+                # Group prediction rows by symbol (data_id) so the DB write can be
+                # dispatched across a bounded worker pool, one task per symbol —
+                # mirrors gefion.features.dispatcher's per-symbol execution model
+                # used by feat-compute (#213).
+                symbol_rows: Dict[int, List[Tuple[int, Decimal, Decimal, Decimal]]] = {}
+                for horizon, predictions in horizon_predictions.items():
+                    for data_id in predictions.index:
+                        q10 = Decimal(str(predictions.loc[data_id, "q10"]))
+                        q50 = Decimal(str(predictions.loc[data_id, "q50"]))
+                        q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+                        symbol_rows.setdefault(int(data_id), []).append((horizon, q10, q50, q90))
+
+                def write_symbol_predictions(write_conn, data_id, rows):
+                    written = 0
+                    with write_conn.cursor() as cur:
+                        for horizon, q10, q50, q90 in rows:
+                            cur.execute(
+                                """
+                                INSERT INTO predictions
+                                  (model_id, data_id, prediction_date, horizon_days,
+                                   prediction_type, prediction_values, metadata, run_id)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
+                                DO UPDATE SET
+                                  prediction_values = EXCLUDED.prediction_values,
+                                  metadata = EXCLUDED.metadata,
+                                  run_id = EXCLUDED.run_id,
+                                  created_at = NOW();
+                                """,
+                                (model_id, data_id, current_date, horizon,
+                                 'quantile',
+                                 Json({"q10": float(q10), "q50": float(q50), "q90": float(q90)}),
+                                 Json({"model_version": model_version}),
+                                 run_id),
+                            )
+                            written += 1
+                    return written
+
+                date_predictions = 0
+                if resolved_max_workers <= 1 or len(symbol_rows) <= 1:
+                    for data_id in sorted(symbol_rows):
+                        date_predictions += write_symbol_predictions(conn, data_id, symbol_rows[data_id])
+                else:
+                    def _write_task(data_id):
+                        with db_pool.get_connection() as worker_conn:
+                            worker_conn.autocommit = True
+                            return write_symbol_predictions(worker_conn, data_id, symbol_rows[data_id])
+
+                    with ThreadPoolExecutor(max_workers=resolved_max_workers) as executor:
+                        futures = {executor.submit(_write_task, data_id): data_id for data_id in symbol_rows}
+                        for future in as_completed(futures):
+                            date_predictions += future.result()
+
+                grand_total_predictions += date_predictions
+
+                dates_processed += 1
+
+                if len(dates_to_process) == 1:
+                    for horizon in horizons:
+                        preds_per_horizon = len(features_wide)
+                        emit(f"  Stored {preds_per_horizon} predictions for {horizon}-day horizon", json_output=json_output)
+        finally:
+            if predict_pool_owned:
+                db_pool.close_pool()
 
         # Mark run as complete
         with conn.cursor() as cur:

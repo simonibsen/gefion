@@ -270,3 +270,44 @@ def test_predict_auto_workers_capped_by_available_connections(fixture_env, monke
     # available=10, buffer=5 -> capped worker count = 5, pool max_size = 5+2=7
     # (cpu_count=33 alone would otherwise yield workers=32, max_size=34)
     assert captured["max_size"] == 7
+
+
+def test_predict_closes_pool_on_mid_run_exception(fixture_env, monkeypatch):
+    """A failure partway through the (parallel) prediction loop must still
+    close the pool `ml predict` owns.
+
+    Without this, one bad run leaves the global db_pool singleton open and
+    every later command/test in the same process silently reuses that
+    stale, possibly undersized pool instead of sizing a fresh one for its
+    own needs — this is what caused the CI PoolTimeout in an unrelated,
+    later test (#213 fix round 2): a prior run's pool leaked because the
+    close only ran on the happy path, not on exceptions.
+    """
+    from gefion.db import pool as db_pool_module
+    import gefion.ml.models as ml_models
+
+    assert db_pool_module.get_pool() is None
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated prediction failure")
+
+    monkeypatch.setattr(ml_models, "predict_quantiles", boom)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        [
+            "ml", "predict",
+            "--model-name", "zzpartest_model",
+            "--model-version", "v1",
+            "--prediction-date", PREDICTION_DATE,
+            "--symbols", ",".join(fixture_env["symbols"]),
+            "--max-workers", "4",
+            "--db-url", fixture_env["url"],
+            "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    assert db_pool_module.get_pool() is None, (
+        "predict must close the pool it owns even when the run raises"
+    )
