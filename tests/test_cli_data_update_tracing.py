@@ -336,7 +336,7 @@ def test_span_check_warns_when_otel_disabled(monkeypatch):
         main_span=main_span,
     )
 
-    monkeypatch.setattr(cli.os, "getenv", lambda key, default=None: "false" if key == "OTEL_ENABLED" else default)
+    monkeypatch.setattr(cli, "_resolve_otel_enabled", lambda: False)
     monkeypatch.setattr(cli, "_tempo_get_json", lambda *args, **kwargs: {"traces": [{"traceID": "t1"}], "metrics": {"inspectedTraces": 1}})
     warnings: list[str] = []
 
@@ -357,3 +357,42 @@ def test_span_check_warns_when_otel_disabled(monkeypatch):
     )
 
     assert any("OTEL_ENABLED" in msg for msg in warnings)
+
+
+def test_span_check_no_warning_when_otel_defaults_enabled(monkeypatch):
+    """#222: interactive dev runs default OTEL on even with OTEL_ENABLED
+    unset (#185). span-check must consult the same resolver instead of
+    re-deriving the flag with a hardcoded 'false' fallback, or it prints a
+    stale 'OTEL_ENABLED is not true' hint while tracing is actually active."""
+    spans: list[DummySpan] = []
+    main_span = DummySpan("cli.data-update", {})
+    _install_common_stubs(
+        monkeypatch,
+        symbols=["AAA"],
+        active_feature_defs=0,
+        spans=spans,
+        main_span=main_span,
+    )
+
+    monkeypatch.delenv("OTEL_ENABLED", raising=False)
+    monkeypatch.setattr(cli, "_resolve_otel_enabled", lambda: True)
+    monkeypatch.setattr(cli, "_tempo_get_json", lambda *args, **kwargs: {"traces": [{"traceID": "t1"}], "metrics": {"inspectedTraces": 1}})
+    warnings: list[str] = []
+
+    def fake_emit(message, *args, **kwargs):
+        warnings.append(message)
+
+    monkeypatch.setattr(cli, "emit", fake_emit)
+    monkeypatch.setattr(cli, "emit_json", lambda *args, **kwargs: None)
+
+    cli.span_check(
+        backend="tempo",
+        tempo_url="http://localhost:3200",
+        service_name="g2",
+        limit=1,
+        trace_id="t1",
+        show_spans=False,
+        json_output=True,
+    )
+
+    assert not any("OTEL_ENABLED" in msg for msg in warnings)
