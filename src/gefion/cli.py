@@ -1724,8 +1724,19 @@ def ml_predict(
     import multiprocessing
     from gefion.ml.models import load_model_artifact, predict_quantiles
     from gefion.ml.store import get_ml_dataset
+    from gefion.utils.db_load import get_available_connections
 
-    resolved_max_workers = max(1, max_workers) if max_workers is not None else max(1, multiprocessing.cpu_count() - 1)
+    if max_workers is not None:
+        resolved_max_workers = max(1, max_workers)
+    else:
+        # Connection-aware cap, mirroring feat-compute's worker budget
+        # (gefion.utils.db_load.get_available_connections): a cpu_count-only
+        # bound can request more pooled connections than the DB actually has
+        # headroom for (e.g. a small test DB), causing PoolTimeout (#213).
+        avail_tuple = get_available_connections(_db_url(db_url))
+        available = avail_tuple[0] if avail_tuple else None
+        cpu_based = max(1, multiprocessing.cpu_count() - 1)
+        resolved_max_workers = max(1, min(cpu_based, available - 5)) if available else cpu_based
 
     sym_list = parse_comma_separated(symbols) or []
     if not sym_list and not exchange:

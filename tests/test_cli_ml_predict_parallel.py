@@ -225,3 +225,48 @@ def test_predict_help_documents_max_workers():
     result = runner.invoke(cli.app, ["ml", "predict", "--help"])
     assert result.exit_code == 0
     assert "--max-workers" in result.output
+
+
+def test_predict_auto_workers_capped_by_available_connections(fixture_env, monkeypatch):
+    """When --max-workers is unset, the resolved worker count must be capped
+    by actually-available DB connections, not just cpu_count.
+
+    A cpu_count-only bound can ask the pool for more connections than the DB
+    has headroom for — this is what caused a PoolTimeout in CI's DB-backed
+    suite (predict-backfill on a many-core runner against a small test DB,
+    #213 fix round 1).
+    """
+    import multiprocessing
+
+    from gefion.db import pool as db_pool_module
+    from gefion.utils import db_load
+
+    monkeypatch.setattr(multiprocessing, "cpu_count", lambda: 33)
+    monkeypatch.setattr(db_load, "get_available_connections", lambda url: (10, 100, 90))
+
+    captured = {}
+    real_init_pool = db_pool_module.init_pool
+
+    def spy_init_pool(*args, **kwargs):
+        captured["max_size"] = kwargs.get("max_size")
+        return real_init_pool(*args, **kwargs)
+
+    monkeypatch.setattr(db_pool_module, "init_pool", spy_init_pool)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        [
+            "ml", "predict",
+            "--model-name", "zzpartest_model",
+            "--model-version", "v1",
+            "--prediction-date", PREDICTION_DATE,
+            "--symbols", ",".join(fixture_env["symbols"]),
+            "--db-url", fixture_env["url"],
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # available=10, buffer=5 -> capped worker count = 5, pool max_size = 5+2=7
+    # (cpu_count=33 alone would otherwise yield workers=32, max_size=34)
+    assert captured["max_size"] == 7
