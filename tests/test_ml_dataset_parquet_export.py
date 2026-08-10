@@ -31,7 +31,9 @@ class _FakeCursor:
         self._sql = sql
         self._params = params
 
-        if "stock_ohlcv" in sql:
+        if "COUNT(*)" in sql:
+            self._rows = [(len(self._price_data),)]
+        elif "stock_ohlcv" in sql:
             self._rows = self._price_data
         elif "computed_features" in sql:
             self._rows = self._feature_data

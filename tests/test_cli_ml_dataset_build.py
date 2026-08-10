@@ -264,3 +264,102 @@ def test_ml_dataset_build_export_flag_calls_exporter(tmp_path, monkeypatch):
     assert called["export"] == 1
     # Verify feature discovery populated the payload
     assert discovered["features"] == ["indicator_rsi_14", "indicator_sma_20"]
+
+
+def _dummy_db(monkeypatch):
+    """Shared DummyConn/DummyCtx wiring for the --export CLI tests below."""
+
+    class DummyCursor:
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    class DummyConn:
+        def cursor(self):
+            return DummyCursor()
+
+    class DummyCtx:
+        def __enter__(self):
+            return DummyConn()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(cli, "db_connection", lambda *a, **k: DummyCtx())
+    monkeypatch.setattr(cli, "init_schema_tables", lambda *a, **k: None)
+
+    import gefion.ml.store as store
+
+    monkeypatch.setattr(store, "upsert_ml_dataset", lambda conn, payload: 1)
+
+
+def test_ml_dataset_build_symbol_batch_size_threads_into_manifest(tmp_path, monkeypatch):
+    """--symbol-batch-size (#209) reaches export_dataset_artifacts via the
+    manifest, so the chunked exporter actually uses the operator's value."""
+    _dummy_db(monkeypatch)
+
+    captured = {}
+
+    import gefion.ml.dataset as ds
+
+    def fake_export(conn, *, manifest, out_dir, on_progress=None):
+        captured["manifest"] = manifest
+
+    monkeypatch.setattr(ds, "export_dataset_artifacts", fake_export)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli.app,
+        [
+            "ml", "dataset-build",
+            "--name", "mvp", "--version", "v1",
+            "--symbols", "IBM",
+            "--symbol-batch-size", "50",
+            "--out-dir", str(tmp_path),
+            "--export", "--json",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["manifest"]["symbol_batch_size"] == 50
+
+
+def test_ml_dataset_build_reports_too_large_error(tmp_path, monkeypatch):
+    """The #209 guardrail's DatasetBuildTooLargeError surfaces as a clean
+    CLI error (exit 1, message shown) rather than an unhandled traceback."""
+    _dummy_db(monkeypatch)
+
+    import gefion.ml.dataset as ds
+
+    def fake_export(conn, *, manifest, out_dir, on_progress=None):
+        raise ds.DatasetBuildTooLargeError(
+            "Estimated ~9,000,000 rows for a 50-symbol batch exceeds the "
+            "3,000,000-row guardrail. Lower --symbol-batch-size, or narrow "
+            "--start-date/--end-date to shrink the window.")
+
+    monkeypatch.setattr(ds, "export_dataset_artifacts", fake_export)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli.app,
+        [
+            "ml", "dataset-build",
+            "--name", "mvp", "--version", "v1",
+            "--symbols", "IBM",
+            "--out-dir", str(tmp_path),
+            "--export", "--json",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "guardrail" in res.output.lower()
+    assert "symbol-batch-size" in res.output.lower()
