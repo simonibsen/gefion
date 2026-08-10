@@ -266,6 +266,57 @@ class TestBoundedMemoryStructural:
         assert sorted(seen) == sorted(symbols)
 
 
+class TestLabelErrorHandling:
+    """A mid-build failure in label computation (e.g. a bug in the label
+    math for one batch) must not leave a partial, silently-truncated labels
+    artifact on disk — pre-#209 label computation was all-or-nothing, and
+    that invariant must hold even though labels are now written batch by
+    batch."""
+
+    def test_mid_batch_label_failure_removes_partial_labels_file(
+        self, tmp_path, monkeypatch
+    ):
+        import gefion.ml.dataset as dataset_mod
+
+        symbols = [f"ERR{i}" for i in range(4)]
+        price_rows = _make_price_rows(symbols, n_days=10)
+
+        real_compute = dataset_mod._compute_batch_labels
+        calls = {"n": 0}
+
+        def flaky_compute(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise ValueError("simulated label math bug")
+            return real_compute(*args, **kwargs)
+
+        monkeypatch.setattr(dataset_mod, "_compute_batch_labels", flaky_compute)
+
+        messages = []
+        out_dir = tmp_path / "flaky"
+        dataset_mod.export_dataset_artifacts(
+            _FakeConn(price_rows),
+            manifest=_manifest(symbols, symbol_batch_size=1),
+            out_dir=out_dir,
+            on_progress=messages.append,
+        )
+
+        # At least one batch succeeded before the failure (proving this
+        # exercises the "partial data already written" path, not just an
+        # immediate first-batch failure).
+        assert calls["n"] >= 2
+
+        assert not (out_dir / "labels.csv").exists(), (
+            "a labels file survived a mid-build label failure — it covers "
+            "only some symbols but nothing on disk signals that"
+        )
+        # Prices are unaffected by a labels-only failure.
+        assert (out_dir / "prices.csv").exists()
+        assert len(_read_csv_rows(out_dir / "prices.csv")) == len(price_rows)
+
+        assert any("Failed to compute labels" in m for m in messages)
+
+
 class TestGuardrail:
     """The guardrail refuses an impossible build up front rather than
     inviting the OOM killer, and names the limit + a way out."""

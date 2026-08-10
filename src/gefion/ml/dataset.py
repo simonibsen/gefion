@@ -540,6 +540,17 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
         price_writer.close()
         if labels_writer is not None:
             labels_writer.close()
+            if labels_error is not None:
+                # A batch raised mid-build (:532-534): batches before the
+                # failure already wrote real rows to labels_path. Keeping
+                # that partial file would silently truncate coverage with
+                # no signal beyond a progress-log warning (downstream
+                # readers load labels.csv/.parquet directly, unaware of
+                # row count). Pre-#209 label computation was all-or-nothing;
+                # restore that here by discarding the partial artifact.
+                labels_path.unlink(missing_ok=True)
+                labels_count = 0
+                grid_labels = {}
     except Exception:
         for w in (price_writer, labels_writer):
             if w is not None:
