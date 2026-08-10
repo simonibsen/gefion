@@ -88,6 +88,7 @@ BUILTIN_STRATEGIES: Dict[str, Dict[str, Any]] = {
             "prediction_type": "quantile",
             "return_threshold": 0.02,
             "max_positions": 10,
+            "selection": "absolute",
         },
         "tags": ["ml", "quantile-regression", "classifier", "predictions"],
     },

@@ -286,6 +286,14 @@ class TestMLSignalStrategyRegistration:
         assert "return_threshold" in defaults
         assert "max_positions" in defaults
 
+    def test_ml_signal_default_selection_is_absolute(self):
+        """selection (#220) must default to 'absolute' so existing configs
+        stay byte-identical."""
+        from gefion.strategies.dispatcher import BUILTIN_STRATEGIES
+
+        defaults = BUILTIN_STRATEGIES["ml_signal"]["default_params"]
+        assert defaults["selection"] == "absolute"
+
 
 class TestMLSignalLookAheadProtection:
     """Test that strategy avoids look-ahead bias."""
