@@ -540,7 +540,7 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
         price_writer.close()
         if labels_writer is not None:
             labels_writer.close()
-            if labels_error is not None:
+            if labels_error is not None or labels_count == 0:
                 # A batch raised mid-build (:532-534): batches before the
                 # failure already wrote real rows to labels_path. Keeping
                 # that partial file would silently truncate coverage with
@@ -548,6 +548,16 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                 # readers load labels.csv/.parquet directly, unaware of
                 # row count). Pre-#209 label computation was all-or-nothing;
                 # restore that here by discarding the partial artifact.
+                #
+                # Same cleanup applies when labels_count is 0 with no error
+                # (e.g. every symbol's history is shorter than every
+                # horizon): the writer was opened eagerly (because
+                # valid_horizons was non-empty) and unconditionally writes a
+                # header, so an empty-but-present labels file would
+                # otherwise survive where pre-#209 none did — short-
+                # circuiting the labels_csv.exists() check downstream
+                # readers rely on (classifier.py / cli.py) in favor of a
+                # less specific "insufficient data" error.
                 labels_path.unlink(missing_ok=True)
                 labels_count = 0
                 grid_labels = {}

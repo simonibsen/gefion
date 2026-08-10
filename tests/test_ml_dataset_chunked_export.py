@@ -316,6 +316,37 @@ class TestLabelErrorHandling:
 
         assert any("Failed to compute labels" in m for m in messages)
 
+    def test_zero_label_rows_with_valid_horizons_leaves_no_labels_file(
+        self, tmp_path
+    ):
+        """Every symbol's history is shorter than every horizon, so each
+        batch's forward shift is all-NaN and dropna() empties every batch's
+        label frame. valid_horizons is non-empty (thresholds are fine), so
+        the writer is opened eagerly and unconditionally writes a header —
+        without the fix, a header-only labels.csv/.parquet would survive
+        where pre-#209 (`if not labels_df.empty:`) never wrote one."""
+        symbols = [f"SHORT{i}" for i in range(3)]
+        # 2 days of history, horizon 3: shift(-3) is NaN for every row.
+        price_rows = _make_price_rows(symbols, n_days=2)
+
+        messages = []
+        for fmt in ("csv", "parquet"):
+            out_dir = tmp_path / f"zero_{fmt}"
+            export_dataset_artifacts(
+                _FakeConn(price_rows),
+                manifest=_manifest(symbols, format=fmt, symbol_batch_size=1,
+                                   horizons_days=(3,)),
+                out_dir=out_dir,
+                on_progress=messages.append,
+            )
+            assert not (out_dir / f"labels.{fmt}").exists(), (
+                f"an empty-but-present labels.{fmt} survived a zero-label "
+                "build — pre-#209 no file was written in this case"
+            )
+            assert (out_dir / f"prices.{fmt}").exists()
+
+        assert any("No labels computed" in m for m in messages)
+
 
 class TestGuardrail:
     """The guardrail refuses an impossible build up front rather than
