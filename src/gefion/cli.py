@@ -10354,6 +10354,10 @@ def backtest_ab_compare(
         20, "--rebalance-days", help="Days between rebalances (match the horizon)"),
     max_positions: int = typer.Option(
         20, "--max-positions", help="Max concurrent positions per side"),
+    selection: str = typer.Option(
+        "absolute", "--selection",
+        help="MLSignalStrategy candidate selection mode: 'absolute' "
+             "(default, today's behavior) or 'rank' (opt-in, #237)"),
     algorithm: str = typer.Option(
         "xgboost", "--algorithm", help="Pooled model algorithm"),
     n_estimators: Optional[int] = typer.Option(
@@ -10391,6 +10395,14 @@ def backtest_ab_compare(
     from gefion.backtest import ab_compare
     from gefion.cli_helpers import db_connection
 
+    valid_selections = ("absolute", "rank")
+    if selection not in valid_selections:
+        emit_error(
+            f"Invalid --selection '{selection}'; must be one of: "
+            f"{', '.join(valid_selections)}",
+            json_output=json_output,
+        )
+
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -10418,6 +10430,7 @@ def backtest_ab_compare(
                 "downside_limit": downside_limit,
                 "rebalance_days": rebalance_days,
                 "max_positions": max_positions,
+                "selection": selection,
             },
             initial_capital=initial_cash,
             weak_thresholds=weak_list,
