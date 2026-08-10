@@ -8,9 +8,12 @@ though the per-side cap from #210 already limits each side to
 `max_positions`.
 
 `selection="rank"` fixes this: instead of an absolute magnitude cutoff, the
-floor is just sign agreement (q50 > 0 for longs, q50 < 0 for shorts), and the
-top `max_positions` by conviction on each side are taken. Thin days
-under-fill rather than trading against the signal's own sign.
+floor is just sign agreement (q50 > 0 for longs, q50 < 0 for shorts; class
+membership for the classifier path), and the top `max_positions` by
+conviction on each side are taken. return_threshold (quantile) and
+confidence_threshold (classifier) are not applied as entry gates in rank
+mode. Thin days under-fill rather than trading against the signal's own
+sign. The exit/sell check is unaffected by `selection` in both paths.
 
 Default stays `selection="absolute"` — today's behavior, byte-identical.
 """
@@ -236,26 +239,44 @@ def test_classifier_rank_direction_top_k_each_side():
 
 
 def test_classifier_rank_balances_book_under_bias():
-    """Analogous balance check for the classifier path: even when bearish
-    candidates vastly outnumber bullish ones, each side is independently
-    capped at K and rank selection doesn't change that -- the classifier's
-    class-membership filter is already a sign floor, not an absolute
-    magnitude cutoff, so it doesn't exhibit #220's bug. This test locks in
-    that both 'absolute' and 'rank' already balance to K/K here."""
+    """Analogous to the quantile balance regression: a confidence-skewed
+    classifier (bullish candidates all below confidence_threshold, bearish
+    candidates all above it -- the classifier's analogue of q50 median
+    -0.97%) starves the long side under absolute selection even though K
+    sign-agreeing (class-matching) bullish names exist. Rank mode must not
+    hard-gate entries on confidence_threshold and must recover K/K."""
     K = 5
-    preds, prices = _classifier_preds(n_up=5, n_down=15)
+    preds, prices = _classifier_preds(
+        n_up=5, n_down=15,
+        up_prob=lambda i: 0.10 + 0.05 * i,    # 0.10..0.30, all < 0.5 threshold
+        down_prob=lambda i: 0.60 + 0.01 * i,  # 0.60..0.74, all >= 0.5 threshold
+    )
 
-    for selection in ("absolute", "rank"):
-        strat = MLSignalStrategy(mode="long_short", max_positions=K,
-                                 prediction_type="classifier", selection=selection,
-                                 trend_classes=["strong_up"],
-                                 confidence_threshold=0.5, position_size=0.1)
-        signals = strat._generate_classifier_signals_from_predictions(
-            preds, {}, prices, 100_000.0)
-        buys = [s for s in signals if s["action"] == "buy"]
-        shorts = [s for s in signals if s["action"] == "short"]
-        assert len(buys) == K, f"selection={selection}"
-        assert len(shorts) == K, f"selection={selection}"
+    absolute_strat = MLSignalStrategy(mode="long_short", max_positions=K,
+                                      prediction_type="classifier", selection="absolute",
+                                      trend_classes=["strong_up"],
+                                      confidence_threshold=0.5, position_size=0.1)
+    absolute_signals = absolute_strat._generate_classifier_signals_from_predictions(
+        preds, {}, prices, 100_000.0)
+    absolute_buys = [s for s in absolute_signals if s["action"] == "buy"]
+    absolute_shorts = [s for s in absolute_signals if s["action"] == "short"]
+    # Demonstrates the bug: every bullish candidate is below confidence_threshold,
+    # even though 5 (=K) sign-agreeing (class-matching) candidates exist.
+    assert len(absolute_buys) == 0
+    assert len(absolute_shorts) == K
+
+    rank_strat = MLSignalStrategy(mode="long_short", max_positions=K,
+                                  prediction_type="classifier", selection="rank",
+                                  trend_classes=["strong_up"],
+                                  confidence_threshold=0.5, position_size=0.1)
+    rank_signals = rank_strat._generate_classifier_signals_from_predictions(
+        preds, {}, prices, 100_000.0)
+    rank_buys = [s for s in rank_signals if s["action"] == "buy"]
+    rank_shorts = [s for s in rank_signals if s["action"] == "short"]
+
+    assert len(rank_buys) == K, f"rank mode should fill the long side to K: {len(rank_buys)}"
+    assert len(rank_shorts) == K
+    assert all(preds[s["symbol"]]["predicted_class"] == "strong_up" for s in rank_buys)
 
 
 def test_classifier_rank_thin_day_underfills_without_backfill():
@@ -274,6 +295,30 @@ def test_classifier_rank_thin_day_underfills_without_backfill():
     assert len(buys) == 3, "only 3 names classified bullish -- must not backfill to 5"
     assert all(preds[s["symbol"]]["predicted_class"] == "strong_up" for s in buys)
     assert len(shorts) == K
+
+
+def test_classifier_rank_exit_confidence_gate_unchanged():
+    """selection='rank' only relaxes confidence_threshold on entry candidates
+    (buy/short) -- the exit/sell check for an existing bearish position keeps
+    hard-gating on confidence_threshold in both modes. A low-confidence
+    bearish classification on a held position must not trigger a sell
+    regardless of selection."""
+    preds = {
+        "HELD": {"predicted_class": "strong_down", "p_strong_down": 0.30,
+                  "margin": 0.30},
+    }
+    prices = {"HELD": 100.0}
+    positions = {"HELD": 10}
+
+    for selection in ("absolute", "rank"):
+        strat = MLSignalStrategy(mode="long_short", max_positions=5,
+                                 prediction_type="classifier", selection=selection,
+                                 trend_classes=["strong_up"],
+                                 confidence_threshold=0.5, position_size=0.1)
+        signals = strat._generate_classifier_signals_from_predictions(
+            preds, positions, prices, 100_000.0)
+        sells = [s for s in signals if s["action"] == "sell"]
+        assert sells == [], f"selection={selection}: low-confidence bearish call must not force an exit"
 
 
 def test_classifier_selection_param_accepted_and_defaults_to_absolute():

@@ -169,10 +169,15 @@ class MLSignalStrategy:
       each side (return_threshold for quantile; confidence_threshold + class
       membership for classifier). A directionally-biased model can starve one
       side under this mode -- see #220.
-    - "rank": requires only sign agreement (q50 > 0 for longs, q50 < 0 for
-      shorts) and takes the top max_positions by conviction on each side, so
-      the book is balanced by construction. Thin days under-fill rather than
-      trading against the signal's own sign.
+    - "rank": requires only sign agreement -- q50 > 0 / q50 < 0 for quantile,
+      class membership (trend_classes / bearish down-classes) for classifier
+      -- and takes the top max_positions by conviction on each side (q50 for
+      quantile; margin/probability for classifier), so the book is balanced
+      by construction. return_threshold (quantile) and confidence_threshold
+      (classifier) are not applied as entry gates in this mode -- sign
+      agreement is the floor. Thin days under-fill rather than trading
+      against the signal's own sign. The exit/sell check is unaffected by
+      `selection` in both prediction paths.
     """
 
     def __init__(
@@ -220,7 +225,12 @@ class MLSignalStrategy:
             downside_limit: Max acceptable q10 downside (quantile mode);
                 applies to longs in both selection modes
             trend_classes: Classes that trigger buy (classifier mode)
-            confidence_threshold: Min probability for action (classifier mode)
+            confidence_threshold: Min probability for action (classifier
+                mode). Applies to entries (buy/short candidates) and to the
+                exit/sell check in "absolute" selection. In "rank" selection
+                it still gates exits, but entries drop it -- class membership
+                is the sign floor, and the top max_positions by margin/
+                probability are taken per side.
             position_size: Fraction of capital per position (0-1)
             max_positions: Maximum concurrent positions per side
             rebalance_days: Days between signal evaluation
@@ -477,6 +487,13 @@ class MLSignalStrategy:
                             "reason": f"bearish ({pred['predicted_class']}, p={prob:.2%})",
                         })
 
+        # Find buy candidates. Class membership (trend_classes) is the sign
+        # floor in both modes. "absolute" additionally hard-gates on
+        # confidence_threshold; "rank" drops that gate for entries -- sign
+        # agreement plus top-K by margin is the floor, same principle as the
+        # quantile path's return_threshold treatment (#220). The exit/sell
+        # check below is untouched in both modes (out of scope: #220 only
+        # covers entry candidate selection).
         buy_candidates = []
         for symbol, pred in predictions.items():
             if symbol not in current_prices:
@@ -486,7 +503,11 @@ class MLSignalStrategy:
 
             if pred["predicted_class"] in self.trend_classes:
                 prob = pred.get(f"p_{pred['predicted_class']}", 0)
-                if prob >= self.confidence_threshold:
+                qualifies = (
+                    True if self.selection == "rank"
+                    else prob >= self.confidence_threshold
+                )
+                if qualifies:
                     buy_candidates.append({
                         "symbol": symbol,
                         "class": pred["predicted_class"],
@@ -525,7 +546,11 @@ class MLSignalStrategy:
                     continue
                 if pred["predicted_class"] in bearish_classes:
                     prob = pred.get(f"p_{pred['predicted_class']}", 0)
-                    if prob >= self.confidence_threshold:
+                    qualifies = (
+                        True if self.selection == "rank"
+                        else prob >= self.confidence_threshold
+                    )
+                    if qualifies:
                         short_candidates.append(
                             {"symbol": symbol,
                              "cls": pred["predicted_class"], "prob": prob})

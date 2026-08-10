@@ -285,6 +285,7 @@ trade them directly without additional filters.
 | prediction_type | str | quantile | "quantile" or "classifier" |
 | return_threshold | float | 0.02 | Min q50 to buy (quantile mode) |
 | max_positions | int | 10 | Maximum concurrent positions |
+| selection | str | absolute | "absolute": filter candidates by return_threshold/confidence_threshold. "rank": require only sign agreement (q50>0/q50<0, or class membership) and take the top max_positions by conviction per side -- balances the book under a directionally-biased model (#220) |
 
 **Quantile Mode Example:**
 
