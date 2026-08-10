@@ -303,6 +303,42 @@ def conn():
 - Run: `ENABLE_DB_TESTS=1 DATABASE_URL="postgresql://gefion:gefionpass@localhost:6432/gefion" OTEL_ENABLED=false .venv/bin/python -m pytest`
 - Pre-flight: drop `gefion_test` first so the suite runs against a fresh DB (conftest recreates it).
 
+#### Cross-test schema isolation (issue #195)
+
+All DB tests share one `public` schema in `gefion_test` — there is no
+per-test transaction rollback (gefion's DB tests do DDL, commit, and use
+TimescaleDB hypertables, which don't survive being wrapped in a rolled-back
+transaction). If your test **drops or reshapes a canonical table** (one
+`db-init`/`sql/schema.sql` creates — `stocks`, `ml_datasets`,
+`strategy_registry`, etc.), you MUST restore it before your module ends:
+
+```python
+@pytest.fixture(scope="module", autouse=True)
+def _restore_db_after_module():
+    yield
+    if os.getenv("ENABLE_DB_TESTS") == "1":
+        from conftest import restore_test_db
+        restore_test_db()
+```
+
+`restore_test_db()` (`tests/conftest.py`) drops and recreates the `public`
+schema, then re-runs `db-init`. Without it, whichever module happens to run
+next inherits your gutted or reshaped schema — and a dropped table can leave
+its `SERIAL` sequence behind, which collides with a later
+`CREATE TABLE ... SERIAL` (`pg_class_relname_nsp_index` UniqueViolation). It's
+order-dependent, so the victim is a random, unrelated test, not the offender.
+
+Tests that create their **own throwaway tables** (e.g. `enttest_*`,
+`orphtest_*`) don't need this — just drop them `CASCADE` so you don't leave
+a table with dependents behind.
+
+A module-scoped autouse guard fixture in `tests/conftest.py`
+(`_schema_isolation_guard`) fingerprints `public` (every table/sequence name)
+before and after each test module and fails that module by name, listing
+what was added/removed, if the fingerprint doesn't match — so a missing
+restore indicts itself instead of surfacing as a mysterious failure in some
+later module. It's inert when `ENABLE_DB_TESTS != 1`.
+
 ### Adding a database table (checklist)
 
 0. **Row vs table first** (spec 007). Before proposing DDL, ask whether the new

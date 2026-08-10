@@ -5,7 +5,6 @@ These tests define the expected behavior of the gefion db-migrate command.
 """
 import os
 import tempfile
-from pathlib import Path
 
 import psycopg
 import pytest
@@ -32,23 +31,20 @@ def conn():
 
 @pytest.fixture(scope="module", autouse=True)
 def restore_migration_baseline(conn):
-    """Restore real migration records after this module's tests.
+    """Restore canonical DB state after this module's tests.
 
-    Tests here drop schema_migrations and insert fake records. Without
-    restoring the baseline afterwards, any later db-init against the test
+    Tests here drop schema_migrations, insert fake records, and apply
+    throwaway migration files that create their own tables (table1,
+    test_table, baseline_table1, ...). Without a full restore afterwards,
+    those leak into later modules, and any later db-init against the test
     database replays historical migrations on an already-current schema and
-    fails on since-dropped tables like quantile_predictions (issue #29).
+    fails on since-dropped tables like quantile_predictions (issue #29,
+    #195).
     """
     yield
-
-    import gefion
-    from gefion.db.migrate import baseline_migrations, ensure_migrations_table
-
-    migrations_dir = Path(gefion.__file__).parent.parent.parent / "sql" / "migrations"
-    with conn.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS schema_migrations CASCADE;")
-    ensure_migrations_table(conn)
-    baseline_migrations(conn, migrations_dir)
+    if os.getenv("ENABLE_DB_TESTS") == "1":
+        from conftest import restore_test_db
+        restore_test_db()
 
 
 @pytest.fixture
@@ -533,7 +529,7 @@ class TestVerifySchemaObjects:
 
         # Cleanup
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS test_verify_table;")
+            cur.execute("DROP TABLE IF EXISTS test_verify_table CASCADE;")
 
     def test_verify_missing_table(self, conn):
         """Verify a table that doesn't exist."""
@@ -561,7 +557,7 @@ class TestVerifySchemaObjects:
 
         # Cleanup
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS test_col_table;")
+            cur.execute("DROP TABLE IF EXISTS test_col_table CASCADE;")
 
     def test_verify_missing_column(self, conn):
         """Verify a column that doesn't exist."""
@@ -580,7 +576,7 @@ class TestVerifySchemaObjects:
 
         # Cleanup
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS test_col_missing;")
+            cur.execute("DROP TABLE IF EXISTS test_col_missing CASCADE;")
 
     def test_verify_existing_index(self, conn):
         """Verify an index that exists."""
@@ -598,7 +594,7 @@ class TestVerifySchemaObjects:
 
         # Cleanup
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS test_idx_table;")
+            cur.execute("DROP TABLE IF EXISTS test_idx_table CASCADE;")
 
     def test_verify_missing_index(self, conn):
         """Verify an index that doesn't exist."""
@@ -691,7 +687,7 @@ class TestRepairMigration:
 
         # Cleanup
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS repair_test;")
+            cur.execute("DROP TABLE IF EXISTS repair_test CASCADE;")
 
     def test_repair_nonexistent_version(self, conn, tmp_path, clean_migrations_table):
         """Repair should fail for nonexistent version."""
@@ -730,4 +726,4 @@ class TestRepairMigration:
 
         # Cleanup
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS repair_new;")
+            cur.execute("DROP TABLE IF EXISTS repair_new CASCADE;")

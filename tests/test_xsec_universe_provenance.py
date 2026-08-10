@@ -139,7 +139,7 @@ class TestCanonicalCreator:
     def test_creator_upgrades_legacy_shape(self, conn):
         """Idempotent on a pre-provenance table: columns get added."""
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS cross_sectional_features")
+            cur.execute("DROP TABLE IF EXISTS cross_sectional_features CASCADE")
             cur.execute("""
                 CREATE TABLE cross_sectional_features (
                     data_id INTEGER NOT NULL,

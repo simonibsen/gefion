@@ -102,6 +102,22 @@ def compute(rows, specs):
         cur.execute("DELETE FROM feature_definitions WHERE name = %s", ("test_indicator",))
         cur.execute("DELETE FROM feature_functions WHERE name = %s", ("test_compute",))
         cur.execute("DELETE FROM stocks WHERE symbol = %s", ("TEST",))
+        # This module runs the real dispatcher, which computes EVERY active feature
+        # for the test stock — including seeded definitions like indicator_psar, not
+        # just the test's own. Its writer threads can also land rows after
+        # close_pool() returns, so the delete above (scoped to this stock's data_id)
+        # misses late arrivals. Whatever the timing, a computed_features row whose
+        # stock no longer exists is an orphan by definition, so sweep them: nothing
+        # legitimate can reference a deleted stock.
+        #
+        # Left behind, these broke tests/test_entity_orphans.py, which asserts a
+        # clean database reports zero orphans (#195). That failure predates the
+        # isolation work — it was masked because some later module happened to gut
+        # the schema before the orphan scan ran.
+        cur.execute(
+            "DELETE FROM computed_features WHERE NOT EXISTS "
+            "(SELECT 1 FROM stocks s WHERE s.id = computed_features.data_id)"
+        )
 
 
 def test_writer_threads_use_separate_connections(db_conn, setup_db):

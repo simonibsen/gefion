@@ -30,14 +30,14 @@ def _conn():
 def conn():
     c = _conn()
     with c.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS enttest_ok, enttest_badpk")
+        cur.execute("DROP TABLE IF EXISTS enttest_ok, enttest_badpk CASCADE")
         cur.execute("CREATE TABLE enttest_ok (id SERIAL PRIMARY KEY, name TEXT)")
         cur.execute("CREATE TABLE enttest_badpk (key TEXT PRIMARY KEY)")
         cur.execute("DELETE FROM feature_definitions WHERE name LIKE 'enttest_%'")
     yield c
     with c.cursor() as cur:
         cur.execute("DELETE FROM feature_definitions WHERE name LIKE 'enttest_%'")
-        cur.execute("DROP TABLE IF EXISTS enttest_ok, enttest_badpk")
+        cur.execute("DROP TABLE IF EXISTS enttest_ok, enttest_badpk CASCADE")
     c.close()
 
 

@@ -37,7 +37,7 @@ def _conn():
 def conn():
     c = _conn()
     with c.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS orphtest_entities")
+        cur.execute("DROP TABLE IF EXISTS orphtest_entities CASCADE")
         cur.execute("CREATE TABLE orphtest_entities (id SERIAL PRIMARY KEY, name TEXT)")
         cur.execute("DELETE FROM stocks WHERE symbol = 'ORPHT1'")
         cur.execute("INSERT INTO stocks (symbol, name) VALUES ('ORPHT1', 'Anchor') RETURNING id")
@@ -61,7 +61,7 @@ def conn():
         cur.execute("DELETE FROM computed_features WHERE feature_id = %s", (feature_id,))
         cur.execute("DELETE FROM feature_definitions WHERE name LIKE 'orphtest_%'")
         cur.execute("DELETE FROM stocks WHERE symbol = 'ORPHT1'")
-        cur.execute("DROP TABLE IF EXISTS orphtest_entities")
+        cur.execute("DROP TABLE IF EXISTS orphtest_entities CASCADE")
     c.close()
 
 

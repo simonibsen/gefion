@@ -149,6 +149,82 @@ def restore_test_db() -> None:
         )
 
 
+def schema_fingerprint(conn) -> set:
+    """Return the set of (relname, relkind) for tables/sequences in `public`.
+
+    Restricted to relkind 'r' (table) and 'S' (sequence) — cheap enough to
+    run before/after every module, and it catches an orphaned sequence left
+    by a DROP TABLE that didn't own it, which is the exact shape of the
+    `ml_datasets_id_seq` collision in issue #195.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT c.relname, c.relkind
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind IN ('r', 'S')
+            """
+        )
+        return {(row[0], row[1]) for row in cur.fetchall()}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _schema_isolation_guard(request):
+    """Fail the offending module if it leaves `public` schema mutated.
+
+    Fingerprints the schema before and after each test module. A module that
+    drops/reshapes canonical tables without restoring via restore_test_db()
+    ends this fixture's teardown with a different fingerprint than it
+    started with, so THIS module fails — pointing at the offender directly
+    instead of letting a later, unrelated module trip over the leftover
+    state (issue #195).
+
+    SCOPE — it catches schema pollution only. The fingerprint is
+    (relname, relkind), so it sees tables and sequences appearing or
+    disappearing; it is blind to DATA left behind in tables that still exist.
+    That gap is real and cost us a live example: test_dispatcher_writer_thread_safety
+    left orphaned computed_features rows, which this guard cannot see, and
+    tests/test_entity_orphans.py failed as the downstream victim. Data cleanup
+    remains each module's own responsibility in its teardown. Widening this to
+    row-level state would mean snapshotting every table per module — far too
+    expensive for the payoff.
+    """
+    if os.getenv("ENABLE_DB_TESTS") != "1":
+        yield
+        return
+
+    url = test_db_url()
+    try:
+        with psycopg.connect(url) as conn:
+            before = schema_fingerprint(conn)
+    except psycopg.OperationalError:
+        # DB not reachable — the module's own fixtures will skip/report this;
+        # the guard has nothing useful to compare.
+        yield
+        return
+
+    yield
+
+    with psycopg.connect(url) as conn:
+        after = schema_fingerprint(conn)
+
+    if before != after:
+        added = sorted(after - before)
+        removed = sorted(before - after)
+        details = []
+        if added:
+            details.append(f"added: {added}")
+        if removed:
+            details.append(f"removed: {removed}")
+        pytest.fail(
+            f"{request.node.name} left the public schema mutated "
+            f"({'; '.join(details)}). Modules that drop or reshape canonical "
+            "tables must restore via a module-scoped autouse fixture that "
+            "calls restore_test_db() (see conftest.restore_test_db)."
+        )
+
+
 def create_test_function(conn, name: str = "test_func", returns_value: str = "close") -> None:
     """
     Create a simple test function in the database.
