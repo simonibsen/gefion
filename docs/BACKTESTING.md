@@ -171,7 +171,10 @@ verdict (owner gate) — it never auto-decides.
 The strategy reuses the existing `MLSignalStrategy` (`mode=long_short`,
 quantile): it longs names with `q50 ≥ --return-threshold` and shorts names with
 `q50 ≤ −(--return-threshold)` — a q50-threshold long/short that stands in for
-the top/bottom-decile cut.
+the top/bottom-decile cut. Pass `--selection rank` to trade
+`MLSignalStrategy`'s rank-based mode instead (sign agreement + top
+`--max-positions` by conviction per side, see #237); the default `absolute`
+selection matches the behavior above and every existing invocation.
 
 The actual NASDAQ vs NASDAQ+NYSE run is gated on a real NYSE ingest (epic
 #179 phases 1-2); this command is the harness, ready to run. Also available as

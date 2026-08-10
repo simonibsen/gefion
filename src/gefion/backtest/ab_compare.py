@@ -35,6 +35,7 @@ phases 1-2); this is the harness, ready to run.
 """
 from __future__ import annotations
 
+import logging
 import os
 import statistics
 from collections import defaultdict
@@ -43,6 +44,8 @@ from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from gefion.observability import create_span, set_attributes
+
+logger = logging.getLogger(__name__)
 
 # Metrics we surface per arm and diff A→B. Order = report/table column order.
 _ARM_METRIC_KEYS = (
@@ -53,6 +56,13 @@ _ARM_METRIC_KEYS = (
     "position_breadth",
     "tail_richness",
     "capacity_proxy",
+)
+
+# strategy_params keys run_arm forwards to MLSignalStrategy. Anything else is
+# dropped (and, since #236, warned about) rather than silently ignored.
+_STRATEGY_PARAM_KEYS = (
+    "return_threshold", "downside_limit", "position_size",
+    "max_positions", "rebalance_days", "selection",
 )
 
 _TRADING_DAYS_PER_YEAR = 252.0
@@ -562,6 +572,14 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
             end_date=config.end_date,
             universe=None if trade_members else spec.trade_universe,
         )
+        dropped = [k for k in config.strategy_params
+                   if k not in _STRATEGY_PARAM_KEYS]
+        if dropped:
+            logger.warning(
+                "run_arm: dropping unsupported strategy_params keys: %s",
+                dropped)
+            set_attributes(span, dropped_strategy_params=dropped)
+
         strat = MLSignalStrategy(
             model_name=model_name,
             model_version=model_version,
@@ -570,8 +588,7 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
             mode="long_short",
             db_url=db_url,
             **{k: v for k, v in config.strategy_params.items()
-               if k in ("return_threshold", "downside_limit", "position_size",
-                        "max_positions", "rebalance_days")},
+               if k in _STRATEGY_PARAM_KEYS},
         )
 
         def strategy_fn(current_date, portfolio, prices):
