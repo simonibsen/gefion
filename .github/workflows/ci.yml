@@ -37,7 +37,12 @@ jobs:
           if [ -z "$CHANGED" ]; then
             echo "docs_only=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if echo "$CHANGED" | grep -qvE '^(docs/|specs/|memory/|\.claude/)|\.md$'; then
+          # NOTE: .claude/ is deliberately NOT in this list. It holds executable
+          # configuration — hooks that run on every Edit/Write, permission rules,
+          # settings — not documentation. Classifying it doc-only let a broken hook
+          # reach main without the suite ever running, and left such PRs unmergeable
+          # besides (the skipped jobs are required checks, so they stay "expected").
+          if echo "$CHANGED" | grep -qvE '^(docs/|specs/|memory/)|\.md$'; then
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
           else
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
