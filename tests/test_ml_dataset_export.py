@@ -5,28 +5,36 @@ from gefion.ml.dataset import export_dataset_artifacts
 
 
 class _FakeCursor:
-    def __init__(self):
-        self._rows = []
-        self._call_count = 0
+    """Dispatches on SQL content (not call order) so adding queries — e.g.
+    the #209 batch-feasibility guardrail COUNT(*) — doesn't silently
+    misdirect an unrelated query's canned response to it."""
 
-    def execute(self, *args, **kwargs):
-        self._call_count += 1
-        # First call: prices query - return sample price data
-        if self._call_count == 1:
-            from datetime import date
-            self._rows = [
-                ("IBM", date(2024, 1, 1), 100.0, 105.0, 99.0, 103.0, 103.0, 1000000),
-                ("IBM", date(2024, 1, 2), 103.0, 108.0, 102.0, 106.0, 106.0, 1100000),
-            ]
-        # Second call: features query - return empty (not testing features)
-        else:
-            self._rows = []
+    def __init__(self):
+        self._sql = ""
+        self._price_rows = []
+
+    def execute(self, sql, params=None):
+        self._sql = sql
+        if self._price_rows:
+            return
+        from datetime import date
+        self._price_rows = [
+            ("IBM", date(2024, 1, 1), 100.0, 105.0, 99.0, 103.0, 103.0, 1000000),
+            ("IBM", date(2024, 1, 2), 103.0, 108.0, 102.0, 106.0, 106.0, 1100000),
+        ]
+
+    def _rows(self):
+        if "COUNT(*)" in self._sql:
+            return [(len(self._price_rows),)]
+        if "stock_ohlcv" in self._sql:
+            return list(self._price_rows)
+        return []  # features query - not under test here
 
     def fetchall(self):
-        return list(self._rows)
+        return self._rows()
 
     def __iter__(self):
-        return iter(self._rows)
+        return iter(self._rows())
 
     def __enter__(self):
         return self
@@ -110,27 +118,35 @@ def test_export_handles_decimal_prices(tmp_path):
     from datetime import date
 
     class DecimalCursor:
-        def __init__(self):
-            self._call_count = 0
+        """Dispatches on SQL content (see _FakeCursor above for why)."""
 
-        def execute(self, *args, **kwargs):
-            self._call_count += 1
+        _PRICE_ROWS = [
+            ("TEST", date(2024, 1, 1), Decimal("100.00"), Decimal("105.00"),
+             Decimal("99.00"), Decimal("103.00"), Decimal("103.00"), 1000000),
+            ("TEST", date(2024, 1, 2), Decimal("103.00"), Decimal("108.00"),
+             Decimal("102.00"), Decimal("106.00"), Decimal("106.00"), 1100000),
+            ("TEST", date(2024, 1, 3), Decimal("106.00"), Decimal("110.00"),
+             Decimal("105.00"), Decimal("109.00"), Decimal("109.00"), 1200000),
+        ]
+
+        def __init__(self):
+            self._sql = ""
+
+        def execute(self, sql, params=None):
+            self._sql = sql
+
+        def _rows(self):
+            if "COUNT(*)" in self._sql:
+                return [(len(self._PRICE_ROWS),)]
+            if "stock_ohlcv" in self._sql:
+                return list(self._PRICE_ROWS)
+            return []
 
         def fetchall(self):
-            return list(self)
+            return self._rows()
 
         def __iter__(self):
-            if self._call_count == 1:
-                # Return prices as Decimal (like PostgreSQL NUMERIC)
-                return iter([
-                    ("TEST", date(2024, 1, 1), Decimal("100.00"), Decimal("105.00"),
-                     Decimal("99.00"), Decimal("103.00"), Decimal("103.00"), 1000000),
-                    ("TEST", date(2024, 1, 2), Decimal("103.00"), Decimal("108.00"),
-                     Decimal("102.00"), Decimal("106.00"), Decimal("106.00"), 1100000),
-                    ("TEST", date(2024, 1, 3), Decimal("106.00"), Decimal("110.00"),
-                     Decimal("105.00"), Decimal("109.00"), Decimal("109.00"), 1200000),
-                ])
-            return iter([])
+            return iter(self._rows())
 
         def __enter__(self):
             return self
