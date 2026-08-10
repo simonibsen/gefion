@@ -71,6 +71,16 @@ gefion ml dataset-build \
   --export
 ```
 
+**Bounded memory (#209).** `--export` writes prices and labels in batches of
+symbols (default 200; tune with `--symbol-batch-size`), so peak memory stays
+roughly flat regardless of universe size — a multi-year, multi-thousand-symbol
+build no longer needs to hold the whole universe's price/label history in
+memory at once. Batches are chosen by SYMBOL, never by date, since a symbol's
+forward-return labels need its whole history in one place. If even a single
+symbol's own history would overflow the row guardrail, the build refuses up
+front with a message naming the limit — narrow `--start-date`/`--end-date` or
+lower `--symbol-batch-size` and retry.
+
 **Coverage-bias audit (#191).** During `--export`, once the feature matrix and
 labels are assembled, every feature's coverage is audited automatically —
 overall, and by **exchange** and **sector** cohort. The dataset build is where

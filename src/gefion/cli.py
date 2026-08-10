@@ -577,6 +577,12 @@ def ml_dataset_build(
     features: Optional[str] = typer.Option(None, help="Comma-separated feature names to include (whitelist mode)"),
     exclude_features: Optional[str] = typer.Option(None, help="Comma-separated feature names to exclude (blacklist mode)"),
     format: str = typer.Option("csv", help="Export format: csv (default) or parquet"),
+    symbol_batch_size: Optional[int] = typer.Option(
+        None, "--symbol-batch-size",
+        help="Symbols processed per chunk during --export (#209): bounds "
+             "peak memory to roughly one batch's price/label history "
+             "regardless of universe size. Default 200; lower it for very "
+             "long histories, raise it on hosts with more memory to spare."),
     out_dir: Path = typer.Option(Path("datasets"), help="Output directory for dataset manifest"),
     export: bool = typer.Option(False, "--export/--no-export", help="Export dataset artifacts (requires DB data)"),
     force: bool = typer.Option(False, "--force", help="Overwrite existing dataset if it exists"),
@@ -670,6 +676,7 @@ def ml_dataset_build(
     manifest = {
         **({"start_date": start_date} if start_date else {}),
         **({"end_date": end_date} if end_date else {}),
+        **({"symbol_batch_size": symbol_batch_size} if symbol_batch_size else {}),
         "name": name,
         "version": version,
         "universe": universe,
@@ -753,14 +760,19 @@ def ml_dataset_build(
 
         dataset_id = upsert_ml_dataset(conn, payload)
         if export:
-            from gefion.ml.dataset import export_dataset_artifacts
+            from gefion.ml.dataset import (DatasetBuildTooLargeError,
+                                           export_dataset_artifacts)
 
-            export_dataset_artifacts(
-                conn,
-                manifest=manifest,
-                out_dir=dataset_dir,
-                on_progress=lambda msg: emit(msg, json_output=json_output),
-            )
+            try:
+                export_dataset_artifacts(
+                    conn,
+                    manifest=manifest,
+                    out_dir=dataset_dir,
+                    on_progress=lambda msg: emit(msg, json_output=json_output),
+                )
+            except DatasetBuildTooLargeError as exc:
+                emit_error(str(exc), json_output=json_output)
+                raise typer.Exit(1)
             # Export resolution added resolved_count to the shared universe
             # dict — persist the completed stamp (manifest file + DB row)
             manifest_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
@@ -10342,6 +10354,10 @@ def backtest_ab_compare(
         20, "--rebalance-days", help="Days between rebalances (match the horizon)"),
     max_positions: int = typer.Option(
         20, "--max-positions", help="Max concurrent positions per side"),
+    selection: str = typer.Option(
+        "absolute", "--selection",
+        help="MLSignalStrategy candidate selection mode: 'absolute' "
+             "(default, today's behavior) or 'rank' (opt-in, #237)"),
     algorithm: str = typer.Option(
         "xgboost", "--algorithm", help="Pooled model algorithm"),
     n_estimators: Optional[int] = typer.Option(
@@ -10379,6 +10395,14 @@ def backtest_ab_compare(
     from gefion.backtest import ab_compare
     from gefion.cli_helpers import db_connection
 
+    valid_selections = ("absolute", "rank")
+    if selection not in valid_selections:
+        emit_error(
+            f"Invalid --selection '{selection}'; must be one of: "
+            f"{', '.join(valid_selections)}",
+            json_output=json_output,
+        )
+
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -10406,6 +10430,7 @@ def backtest_ab_compare(
                 "downside_limit": downside_limit,
                 "rebalance_days": rebalance_days,
                 "max_positions": max_positions,
+                "selection": selection,
             },
             initial_capital=initial_cash,
             weak_thresholds=weak_list,
