@@ -1,0 +1,180 @@
+"""Maintenance margin + forced liquidation (#217).
+
+TDD: written FIRST. #211 bounds gross exposure at ENTRY only; nothing intervened
+on the mark-to-market path *between* rebalances, so a losing long/short book
+could compound past -100% (an impossible, unfunded account). A broker calls
+margin before that happens: per-bar, if equity / gross_exposure drops below
+`RiskLimits.maintenance_margin`, close just enough of the largest unrealised
+loser(s) to restore the ratio above maintenance + a small buffer.
+"""
+import datetime as dt
+
+from gefion.backtest.costs import TransactionCosts
+from gefion.backtest.engine import BacktestEngine
+from gefion.backtest.portfolio import Portfolio
+from gefion.backtest.risk import RiskLimits, RiskManager
+
+D = dt.date
+
+
+def _price_path(start_price, days, daily_growth):
+    """`days` closes starting at start_price, compounding by daily_growth/day."""
+    prices = []
+    p = start_price
+    for i in range(days):
+        prices.append(p)
+        p *= 1.0 + daily_growth
+    return prices
+
+
+def _prices(closes, symbol="AAA"):
+    dates = [D(2025, 1, 1) + dt.timedelta(days=i) for i in range(len(closes))]
+    return [{"symbol": symbol, "date": d, "close": c} for d, c in zip(dates, closes)]
+
+
+def _short_once(shares, symbol="AAA"):
+    def strat(current_date, portfolio, historical):
+        if current_date == D(2025, 1, 1):
+            return [{"action": "short", "symbol": symbol, "shares": shares}]
+        return []
+    return strat
+
+
+def test_equity_never_goes_below_negative_100_pct():
+    """A short sized to #211's own long_short default budget (2x equity),
+    against a price that keeps rising for many bars, must not be allowed to
+    compound past a -100% return -- the account would be unfundable."""
+    cash = 10_000.0
+    # 200 shares @ 100 = 20_000 notional = 2x equity, i.e. the max_gross_exposure
+    # default budget for long_short -- an aggressive but not out-of-budget book.
+    closes = _price_path(100.0, days=60, daily_growth=0.04)  # ~4%/day, sharp rise
+    prices = _prices(closes)
+    engine = BacktestEngine(
+        price_data=prices, strategy=_short_once(200), initial_cash=cash,
+        start_date=prices[0]["date"], end_date=prices[-1]["date"],
+        mode="long_short",
+    )  # no risk_manager passed -- margin call must be on by default
+    result = engine.run()
+
+    assert result["metrics"]["total_return"] > -1.0
+    assert any(t.get("reason") == "margin_call" for t in result["trades"]), \
+        "expected at least one forced liquidation along the sharp rise"
+    assert any(e["action"] == "forced_cover" for e in result["margin_events"])
+
+
+def test_partial_liquidation_restores_ratio_without_closing_everything():
+    """A mild breach is de-risked just enough -- the position survives, and the
+    post-liquidation ratio clears the maintenance threshold."""
+    limits = RiskLimits(maintenance_margin=0.25)
+    rm = RiskManager(limits)
+
+    portfolio = Portfolio(initial_cash=0.0)
+    portfolio.cash = 12_400.0
+    portfolio.positions = {"AAA": {"shares": -100, "avg_price": 100.0}}
+    prices = {"AAA": 100.0}
+
+    equity = portfolio.calculate_equity(prices)
+    gross = 100 * prices["AAA"]
+    assert equity / gross < 0.25  # sanity: scenario is actually breached
+
+    exits = rm.generate_exit_signals(portfolio, prices)
+    assert len(exits) == 1
+    assert exits[0]["symbol"] == "AAA"
+    assert exits[0]["action"] == "cover"
+    assert 0 < exits[0]["shares"] < 100  # partial -- not a full close
+
+    portfolio.cover(symbol="AAA", shares=exits[0]["shares"], price=100.0,
+                     date=D(2025, 1, 1))
+
+    assert portfolio.positions  # book still holds the position
+    new_equity = portfolio.calculate_equity(prices)
+    new_gross = abs(portfolio.positions["AAA"]["shares"]) * prices["AAA"]
+    assert new_equity / new_gross >= 0.25
+
+
+def test_no_refire_immediately_after_liquidation():
+    """The bar right after a liquidation, at the same prices, does not
+    trigger a second one -- proves the restore buffer isn't razor-thin."""
+    limits = RiskLimits(maintenance_margin=0.25)
+    rm = RiskManager(limits)
+
+    portfolio = Portfolio(initial_cash=0.0)
+    portfolio.cash = 12_400.0
+    portfolio.positions = {"AAA": {"shares": -100, "avg_price": 100.0}}
+    prices = {"AAA": 100.0}
+
+    exits = rm.generate_exit_signals(portfolio, prices)
+    assert exits  # first call breaches
+    portfolio.cover(symbol="AAA", shares=exits[0]["shares"], price=100.0,
+                     date=D(2025, 1, 1))
+
+    refire = rm.generate_exit_signals(portfolio, prices)
+    assert refire == []
+
+
+def test_liquidation_order_is_largest_unrealised_loser_first():
+    """Given two losing shorts, the position causing the bigger loss closes
+    first."""
+    limits = RiskLimits(maintenance_margin=0.25)
+    rm = RiskManager(limits)
+
+    portfolio = Portfolio(initial_cash=0.0)
+    # AAA: entry 100 -> 140, loss 2_000. BBB: entry 100 -> 110, loss 500.
+    portfolio.positions = {
+        "AAA": {"shares": -50, "avg_price": 100.0},
+        "BBB": {"shares": -50, "avg_price": 100.0},
+    }
+    prices = {"AAA": 140.0, "BBB": 110.0}
+    # cash chosen so equity / gross breaches 0.25
+    gross = 50 * 140.0 + 50 * 110.0
+    portfolio.cash = 2_000.0 + gross  # equity = 2_000
+
+    exits = rm.generate_exit_signals(portfolio, prices)
+    assert exits
+    assert exits[0]["symbol"] == "AAA"  # the bigger loser closes first
+
+
+def test_long_only_byte_identical_with_or_without_default_margin_risk_manager():
+    """long_only must be unaffected: cash-funded buys keep equity/gross >= 1
+    always, so the maintenance-margin check (default-on for long_short) is a
+    structural no-op there -- assert exact equality, not just that it passes."""
+    closes = _price_path(100.0, days=20, daily_growth=-0.05)  # a real drawdown
+    prices = _prices(closes)
+
+    def buy_and_hold(current_date, portfolio, historical):
+        if current_date == D(2025, 1, 1):
+            return [{"action": "buy", "symbol": "AAA", "shares": 50}]
+        return []
+
+    def run(risk_manager):
+        return BacktestEngine(
+            price_data=list(prices), strategy=buy_and_hold, initial_cash=10_000.0,
+            start_date=prices[0]["date"], end_date=prices[-1]["date"],
+            mode="long_only", risk_manager=risk_manager,
+        ).run()
+
+    baseline = run(None)
+    with_default_margin_rm = run(RiskManager(RiskLimits()))
+
+    assert with_default_margin_rm["equity_curve"] == baseline["equity_curve"]
+    assert with_default_margin_rm["trades"] == baseline["trades"]
+    assert with_default_margin_rm["metrics"] == baseline["metrics"]
+
+
+def test_margin_call_liquidation_pays_costs():
+    """A forced liquidation is a real trade -- it must incur commission like
+    any ordinary exit, not a costless teleport out of the position."""
+    cash = 10_000.0
+    closes = _price_path(100.0, days=60, daily_growth=0.04)
+    prices = _prices(closes)
+    costs = TransactionCosts(commission_per_trade=5.0)
+    engine = BacktestEngine(
+        price_data=prices, strategy=_short_once(200), initial_cash=cash,
+        start_date=prices[0]["date"], end_date=prices[-1]["date"],
+        mode="long_short", costs=costs,
+    )
+    result = engine.run()
+
+    margin_trades = [t for t in result["trades"] if t.get("reason") == "margin_call"]
+    assert margin_trades
+    assert all(t.get("cost", 0) > 0 for t in margin_trades)
