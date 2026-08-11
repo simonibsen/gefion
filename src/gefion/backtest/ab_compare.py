@@ -35,13 +35,16 @@ phases 1-2); this is the harness, ready to run.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Callable, Dict, List, Optional, Set
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set
 
 from gefion.observability import create_span, set_attributes
 
@@ -309,6 +312,7 @@ def build_ab_report(
     config: MatchedConfig,
     negative_transfer: Dict[str, Any],
     attribution: bool = False,
+    checkpoint_provenance: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Assemble the JSON-serializable A/B comparison report."""
     summaries = {label: compute_arm_summary(arm)
@@ -322,7 +326,7 @@ def build_ab_report(
         # effect (wider training data) from the opportunity effect.
         deltas["A_to_C"] = compute_deltas(summaries["A"], summaries["C"])
 
-    return {
+    report = {
         "config": config.to_dict(),
         "arms": summaries,
         "deltas": deltas,
@@ -330,6 +334,12 @@ def build_ab_report(
         "attribution": attribution,
         "note": _REPORT_NOTE,
     }
+    if checkpoint_provenance is not None:
+        # Per #234: which arms were reused from a checkpoint vs recomputed —
+        # a reader of the report should be able to see this without digging
+        # through logs.
+        report["checkpoint_provenance"] = checkpoint_provenance
+    return report
 
 
 def _fmt(value: float, pct: bool = False) -> str:
@@ -380,6 +390,18 @@ def format_ab_report(report: Dict[str, Any]) -> str:
         lines.append("A→B deltas (Arm B − Arm A):")
         for key in _ARM_METRIC_KEYS:
             lines.append(f"  {key.ljust(label_w)} {deltas.get(key, 0.0):+.4f}")
+
+    # Checkpoint provenance — which arms were reused vs recomputed (#234).
+    cp = report.get("checkpoint_provenance")
+    if cp:
+        lines.append("")
+        lines.append("Checkpoint provenance:")
+        for lbl in labels:
+            info = cp.get(lbl)
+            if info is None:
+                continue
+            status = "reused checkpoint" if info.get("reused") else "recomputed"
+            lines.append(f"  Arm {lbl}: {status} (key={info.get('key', '')[:12]})")
 
     # Negative-transfer verdict — the go/no-go signal.
     nt = report.get("negative_transfer", {})
@@ -625,6 +647,146 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
 
 
 # --------------------------------------------------------------------------- #
+# Per-arm checkpoint + resume (issue #234).
+#
+# A failed arm-B attempt should not force a ~1h arm-A rebuild. Each arm is
+# keyed by a sha256 hash of everything that can affect its result — arm
+# label, universe NAMES, the RESOLVED universe MEMBER SETS, and the full
+# MatchedConfig (which itself carries the date range and model/strategy
+# params). Membership is included, not just the name, because
+# `universe_members` resolves point-in-time (effective-dated exclusions,
+# spec 015) — the member set under a fixed name can drift day to day, and a
+# multi-day retry sequence (the exact scenario this feature targets) can
+# span such a drift. The key is deliberately conservative: when in doubt
+# about whether an input matters, it goes in the hash, because a spurious
+# rebuild costs an hour and a spurious reuse costs a wrong verdict on a
+# multi-week investigation. Checkpoints are plain JSON files, one per key,
+# next to the rest of gefion's run/session state.
+# --------------------------------------------------------------------------- #
+def default_checkpoint_dir() -> Path:
+    """Where per-arm checkpoints live.
+
+    ``GEFION_AB_CHECKPOINT_DIR`` overrides; otherwise ``~/.gefion/`` (the same
+    home used for conversation history / UI errors / charts).
+    """
+    env_dir = os.getenv("GEFION_AB_CHECKPOINT_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path.home() / ".gefion" / "ab_compare_checkpoints"
+
+
+def compute_arm_key(
+        spec: ArmSpec, config: MatchedConfig,
+        train_universe_members: Iterable[str],
+        trade_universe_members: Iterable[str]) -> str:
+    """Stable sha256 hash of everything that affects this arm's result.
+
+    Includes the arm label (two arms with identical universes/config but
+    different labels are still tracked separately), both universe NAMES, the
+    RESOLVED member set of each universe, and the full ``MatchedConfig``
+    (which carries the date range and model/strategy params) so any change
+    to a matched input forces a rebuild.
+
+    The resolved member set matters because universe membership is resolved
+    point-in-time (``universe_members`` defaults ``as_of`` to today and joins
+    effective-dated exclusions) — it is not a fixed function of the name.
+    Keying on the name alone would let a checkpoint silently outlive a
+    membership change (e.g. a data-quality exclusion landing between runs),
+    reusing yesterday's member set under today's name. Callers must resolve
+    membership via the same ``universe_resolver`` used to run the arm.
+    """
+    payload = {
+        "label": spec.label,
+        "train_universe": spec.train_universe,
+        "trade_universe": spec.trade_universe,
+        "train_universe_members": sorted(train_universe_members),
+        "trade_universe_members": sorted(trade_universe_members),
+        "config": config.to_dict(),
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                           default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _checkpoint_path(checkpoint_dir: Path, key: str) -> Path:
+    return checkpoint_dir / f"{key}.json"
+
+
+def _serialize_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """JSON-safe copy of a positions/equity-curve row list (dates -> ISO)."""
+    out = []
+    for row in rows:
+        row = dict(row)
+        if isinstance(row.get("date"), date):
+            row["date"] = row["date"].isoformat()
+        out.append(row)
+    return out
+
+
+def _deserialize_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out = []
+    for row in rows:
+        row = dict(row)
+        if isinstance(row.get("date"), str):
+            row["date"] = date.fromisoformat(row["date"])
+        out.append(row)
+    return out
+
+
+def _arm_result_to_dict(result: ArmResult) -> Dict[str, Any]:
+    return {
+        "label": result.label,
+        "train_universe": result.train_universe,
+        "trade_universe": result.trade_universe,
+        "metrics": result.metrics,
+        "equity_curve": _serialize_rows(result.equity_curve),
+        "positions": _serialize_rows(result.positions),
+        "n_trading_days": result.n_trading_days,
+        "artifacts": result.artifacts,
+    }
+
+
+def _arm_result_from_dict(data: Dict[str, Any]) -> ArmResult:
+    return ArmResult(
+        label=data["label"],
+        train_universe=data["train_universe"],
+        trade_universe=data["trade_universe"],
+        metrics=data["metrics"],
+        equity_curve=_deserialize_rows(data["equity_curve"]),
+        positions=_deserialize_rows(data["positions"]),
+        n_trading_days=data["n_trading_days"],
+        artifacts=data.get("artifacts", {}),
+    )
+
+
+def load_arm_checkpoint(checkpoint_dir: Path, key: str) -> Optional[ArmResult]:
+    """Load a checkpointed ArmResult, or None on a miss.
+
+    A checkpoint that exists but fails to parse is treated as a miss (never
+    a crash, never a guess) — conservative in the same direction as the key
+    itself: rebuild rather than risk acting on unreadable state.
+    """
+    path = _checkpoint_path(checkpoint_dir, key)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        return _arm_result_from_dict(data)
+    except (json.JSONDecodeError, OSError, KeyError) as exc:
+        logger.warning(
+            "ab_compare: checkpoint %s is unreadable (%s) — rebuilding",
+            path, exc)
+        return None
+
+
+def save_arm_checkpoint(checkpoint_dir: Path, key: str, result: ArmResult) -> None:
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    path = _checkpoint_path(checkpoint_dir, key)
+    path.write_text(json.dumps(_arm_result_to_dict(result), indent=2,
+                               sort_keys=True, default=str))
+
+
+# --------------------------------------------------------------------------- #
 # Orchestrator.
 # --------------------------------------------------------------------------- #
 def run_ab_compare(
@@ -635,6 +797,8 @@ def run_ab_compare(
     attribution: bool = False,
     arm_runner: Callable[[ArmSpec, MatchedConfig, Any], ArmResult] = run_arm,
     universe_resolver: Callable[[Any, str], Set[str]] = _default_universe_resolver,
+    resume: bool = True,
+    checkpoint_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Run the matched A/B (A/B/C) experiment and build the comparison report.
 
@@ -642,6 +806,14 @@ def run_ab_compare(
     only per-arm input, so "matched config" is structural. ``arm_runner`` and
     ``universe_resolver`` are injectable so the heavy per-arm pipeline can be
     stubbed in tests.
+
+    Per #234: each arm is checkpointed under a hash of everything that can
+    affect its result (see ``compute_arm_key``). With ``resume=True``
+    (default) a checkpointed arm is loaded and ``arm_runner`` is skipped for
+    it — so a failed arm B no longer forces a ~1h arm-A rebuild. Pass
+    ``resume=False`` to force every arm to recompute (still refreshes the
+    checkpoints). The report's ``checkpoint_provenance`` records, per arm,
+    whether it was reused.
     """
     with create_span("backtest.ab_compare",
                      arm_a=arm_a_universe, arm_b=arm_b_universe,
@@ -655,21 +827,61 @@ def run_ab_compare(
             specs.append(ArmSpec("C", train_universe=arm_b_universe,
                                  trade_universe=arm_a_universe))
 
+        ckpt_dir = Path(checkpoint_dir) if checkpoint_dir is not None \
+            else default_checkpoint_dir()
+
+        # Universe membership is resolved point-in-time (spec 015's
+        # effective-dated exclusions), not a fixed function of the name — so
+        # it must be resolved fresh on every run, BEFORE the checkpoint
+        # lookup, and folded into the key (see compute_arm_key). Cache per
+        # name within this run: several specs can share a universe name
+        # (Arm A's train/trade, or Arm C reusing Arm B's train universe).
+        resolved_members: Dict[str, List[str]] = {}
+
+        def _resolve(name: str) -> List[str]:
+            if name not in resolved_members:
+                resolved_members[name] = sorted(universe_resolver(conn, name))
+            return resolved_members[name]
+
         arm_results: Dict[str, ArmResult] = {}
+        checkpoint_provenance: Dict[str, Dict[str, Any]] = {}
         for spec in specs:
-            arm_results[spec.label] = arm_runner(spec, config, conn)
+            train_members = _resolve(spec.train_universe)
+            trade_members = _resolve(spec.trade_universe)
+            key = compute_arm_key(spec, config, train_members, trade_members)
+            cached = load_arm_checkpoint(ckpt_dir, key) if resume else None
+            if cached is not None:
+                logger.info(
+                    "ab_compare: reusing checkpointed arm %s (key=%s)",
+                    spec.label, key[:12])
+                result = cached
+                reused = True
+            else:
+                result = arm_runner(spec, config, conn)
+                save_arm_checkpoint(ckpt_dir, key, result)
+                logger.info(
+                    "ab_compare: computed arm %s and saved checkpoint (key=%s)",
+                    spec.label, key[:12])
+                reused = False
+            arm_results[spec.label] = result
+            checkpoint_provenance[spec.label] = {"reused": reused, "key": key}
 
         # Shared cross-section = the universe-A member set (A ⊆ B by design;
-        # intersect to stay correct even if that ever stops holding).
-        members_a = set(universe_resolver(conn, arm_a_universe))
-        members_b = set(universe_resolver(conn, arm_b_universe))
+        # intersect to stay correct even if that ever stops holding). Both
+        # universes were already resolved above (Arm A/B's train_universe
+        # equal arm_a_universe/arm_b_universe by construction).
+        members_a = set(_resolve(arm_a_universe))
+        members_b = set(_resolve(arm_b_universe))
         shared_members = members_a & members_b if members_b else members_a
 
         nt = negative_transfer_diagnostic(
             arm_results["A"], arm_results["B"], shared_members)
 
-        report = build_ab_report(arm_results, config, nt, attribution=attribution)
+        report = build_ab_report(arm_results, config, nt, attribution=attribution,
+                                 checkpoint_provenance=checkpoint_provenance)
         set_attributes(span, arms=len(arm_results),
                        diluted=nt["diluted"],
-                       shared_members=len(shared_members))
+                       shared_members=len(shared_members),
+                       arms_reused=sum(1 for p in checkpoint_provenance.values()
+                                       if p["reused"]))
         return report

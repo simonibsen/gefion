@@ -15,6 +15,18 @@ from datetime import date
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolated_ab_checkpoint_dir(tmp_path, monkeypatch):
+    """Every test gets its own checkpoint dir (#234).
+
+    Without this, tests that don't explicitly pass ``checkpoint_dir`` would
+    read/write the real ``~/.gefion/ab_compare_checkpoints`` and could get a
+    stale reuse from a previous test/run — the exact hazard this feature
+    exists to prevent, just relocated into the test suite.
+    """
+    monkeypatch.setenv("GEFION_AB_CHECKPOINT_DIR", str(tmp_path / "ab_checkpoints"))
+
+
 # --------------------------------------------------------------------------- #
 # Fixtures — synthetic ArmResults with a known, hand-checkable structure.
 # --------------------------------------------------------------------------- #
@@ -336,3 +348,338 @@ class TestReportShape:
         report = self._run()
         note = report["note"].lower()
         assert "human" in note or "not" in note
+
+    def test_checkpoint_provenance_surfaces_in_human_table(self):
+        from gefion.backtest.ab_compare import build_ab_report, format_ab_report
+
+        arm_a = _arm_result("A", "nasdaq-only", "nasdaq-only", [])
+        arm_b = _arm_result("B", "nasdaq-plus-nyse", "nasdaq-plus-nyse", [])
+        nt = {"arm_a_edge": 0.0, "arm_b_edge": 0.0, "delta": 0.0,
+              "diluted": False, "n_shared_b": 0, "verdict": "no dilution"}
+        report = build_ab_report(
+            {"A": arm_a, "B": arm_b}, _config(), nt,
+            checkpoint_provenance={
+                "A": {"reused": True, "key": "abc123"},
+                "B": {"reused": False, "key": "def456"},
+            },
+        )
+        assert report["checkpoint_provenance"]["A"]["reused"] is True
+        text = format_ab_report(report)
+        assert "reused" in text.lower()
+        assert "abc123" in text
+
+
+# --------------------------------------------------------------------------- #
+# 6. Per-arm checkpoint + resume (issue #234).
+# --------------------------------------------------------------------------- #
+def _variant_config(base, **overrides):
+    """Build a MatchedConfig equal to ``base`` except for the given fields."""
+    from gefion.backtest.ab_compare import MatchedConfig
+
+    data = dict(
+        start_date=base.start_date,
+        end_date=base.end_date,
+        split_spec=base.split_spec,
+        horizons=base.horizons,
+        horizon_days=base.horizon_days,
+        hyperparams=base.hyperparams,
+        strategy_params=base.strategy_params,
+        initial_capital=base.initial_capital,
+        weak_thresholds=base.weak_thresholds,
+        strong_thresholds=base.strong_thresholds,
+    )
+    data.update(overrides)
+    return MatchedConfig(**data)
+
+
+# One representative change per MatchedConfig field that affects an arm's
+# result. Exhaustive over the fields, per the brief: this is the test that
+# protects the A/B verdict from a stale reuse.
+_CONFIG_FIELD_VARIANTS = [
+    ("start_date", date(2020, 1, 2)),
+    ("end_date", date(2020, 12, 30)),
+    ("split_spec", {"scheme": "walk_forward", "folds": 5, "oos": True}),
+    ("horizons", [7, 60]),
+    ("horizon_days", 14),
+    ("hyperparams", {"max_depth": 6, "n_estimators": 500}),
+    ("strategy_params", {"decile": 0.1, "mode": "long_short", "selection": "rank"}),
+    ("initial_capital", 250_000.0),
+    ("weak_thresholds", [0.03, 0.03]),
+    ("strong_thresholds", [0.07, 0.07]),
+]
+
+
+def _spy_runner(calls):
+    def runner(spec, config, conn):
+        calls.append(spec.label)
+        return _arm_result(spec.label, spec.train_universe, spec.trade_universe, [
+            _pos(date(2020, 1, 1), "AAA", "long", 0.05, 500.0, 1_000_000.0),
+        ])
+    return runner
+
+
+class TestCheckpointKey:
+    def test_stable_for_identical_inputs(self):
+        from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
+
+        spec = ArmSpec("A", train_universe="nasdaq-only")
+        cfg = _config()
+        assert (compute_arm_key(spec, cfg, ["AAA"], ["AAA"])
+                == compute_arm_key(spec, cfg, ["AAA"], ["AAA"]))
+
+    def test_changes_with_universe(self):
+        from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
+
+        cfg = _config()
+        key1 = compute_arm_key(
+            ArmSpec("A", train_universe="nasdaq-only"), cfg, ["AAA"], ["AAA"])
+        key2 = compute_arm_key(
+            ArmSpec("A", train_universe="nyse-only"), cfg, ["AAA"], ["AAA"])
+        assert key1 != key2
+
+    def test_changes_with_label(self):
+        """Label is part of the key (brief: 'key each arm by ... arm label')."""
+        from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
+
+        cfg = _config()
+        key_a = compute_arm_key(ArmSpec("A", train_universe="u"), cfg, ["AAA"], ["AAA"])
+        key_c = compute_arm_key(ArmSpec("C", train_universe="u"), cfg, ["AAA"], ["AAA"])
+        assert key_a != key_c
+
+    @pytest.mark.parametrize("field_name,new_value", _CONFIG_FIELD_VARIANTS)
+    def test_changes_with_every_matched_config_field(self, field_name, new_value):
+        from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
+
+        spec = ArmSpec("A", train_universe="nasdaq-only")
+        base_cfg = _config()
+        changed_cfg = _variant_config(base_cfg, **{field_name: new_value})
+        assert (compute_arm_key(spec, base_cfg, ["AAA"], ["AAA"])
+                != compute_arm_key(spec, changed_cfg, ["AAA"], ["AAA"]))
+
+    def test_changes_with_universe_membership_even_when_name_is_unchanged(self):
+        """Universe membership is resolved point-in-time (``universe_members``
+        defaults ``as_of`` to today and joins effective-dated exclusions), so
+        the member SET under a fixed name can drift day to day. The key must
+        pin the resolved membership, not just the name — otherwise a
+        checkpoint from before a data-quality exclusion landed would be
+        silently reused after it lands (review finding #234)."""
+        from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
+
+        spec = ArmSpec("A", train_universe="nasdaq-only")
+        cfg = _config()
+        key1 = compute_arm_key(spec, cfg, ["AAA", "BBB"], ["AAA", "BBB"])
+        key2 = compute_arm_key(spec, cfg, ["AAA"], ["AAA"])
+        assert key1 != key2
+
+    def test_key_independent_of_member_set_order(self):
+        """Membership is a set, not a sequence — resolver iteration order
+        must not perturb the key (that would make reuse flaky, not just
+        conservative)."""
+        from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
+
+        spec = ArmSpec("A", train_universe="nasdaq-only")
+        cfg = _config()
+        key1 = compute_arm_key(spec, cfg, ["AAA", "BBB"], ["AAA"])
+        key2 = compute_arm_key(spec, cfg, ["BBB", "AAA"], ["AAA"])
+        assert key1 == key2
+
+
+class TestCheckpointResume:
+    def _kwargs(self, tmp_path, calls, **extra):
+        return dict(
+            arm_a_universe="nasdaq-only",
+            arm_b_universe="nasdaq-plus-nyse",
+            config=_config(),
+            arm_runner=_spy_runner(calls),
+            universe_resolver=lambda conn, name: {"AAA"},
+            checkpoint_dir=tmp_path,
+            **extra,
+        )
+
+    def test_identical_rerun_reuses_every_arm_and_report_is_unchanged(self, tmp_path):
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        calls = []
+        report1 = run_ab_compare(**self._kwargs(tmp_path, calls))
+        assert calls == ["A", "B"]
+
+        calls.clear()
+        report2 = run_ab_compare(**self._kwargs(tmp_path, calls))
+        assert calls == []
+        assert report1["arms"] == report2["arms"]
+        assert report2["checkpoint_provenance"]["A"]["reused"] is True
+        assert report2["checkpoint_provenance"]["B"]["reused"] is True
+
+    def test_first_run_is_not_reused(self, tmp_path):
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        calls = []
+        report = run_ab_compare(**self._kwargs(tmp_path, calls))
+        assert report["checkpoint_provenance"]["A"]["reused"] is False
+        assert report["checkpoint_provenance"]["B"]["reused"] is False
+
+    @pytest.mark.parametrize("field_name,new_value", _CONFIG_FIELD_VARIANTS)
+    def test_changed_config_field_forces_rebuild_of_both_arms(
+            self, tmp_path, field_name, new_value):
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        calls = []
+        base_kwargs = self._kwargs(tmp_path, calls)
+        run_ab_compare(**base_kwargs)
+        calls.clear()
+
+        changed_cfg = _variant_config(base_kwargs["config"], **{field_name: new_value})
+        changed_kwargs = dict(base_kwargs, config=changed_cfg)
+        run_ab_compare(**changed_kwargs)
+        # The shared config changed, so BOTH arms must rebuild — reusing
+        # either would risk exactly the stale-verdict hazard the brief warns
+        # about.
+        assert calls == ["A", "B"]
+
+    def test_changed_universe_rebuilds_only_that_arm(self, tmp_path):
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        calls = []
+        run_ab_compare(**self._kwargs(tmp_path, calls))
+        calls.clear()
+        kwargs = self._kwargs(tmp_path, calls)
+        kwargs["arm_b_universe"] = "nyse-only"
+        run_ab_compare(**kwargs)
+        # Arm A's key is unchanged (same universe + config) -> reused.
+        # Arm B's universe changed -> rebuilt.
+        assert calls == ["B"]
+
+    def test_partial_resume_after_mid_run_failure(self, tmp_path):
+        """The actual NYSE-retry scenario: arm A checkpoints, arm B raises;
+        on re-run arm A is reused and only arm B recomputes."""
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        calls = []
+        attempts = {"B": 0}
+
+        def flaky_runner(spec, config, conn):
+            calls.append(spec.label)
+            if spec.label == "B":
+                attempts["B"] += 1
+                if attempts["B"] == 1:
+                    raise RuntimeError("arm B blew up (simulated window failure)")
+            return _arm_result(spec.label, spec.train_universe, spec.trade_universe, [])
+
+        kwargs = dict(
+            arm_a_universe="nasdaq-only",
+            arm_b_universe="nasdaq-plus-nyse",
+            config=_config(),
+            arm_runner=flaky_runner,
+            universe_resolver=lambda conn, name: {"AAA"},
+            checkpoint_dir=tmp_path,
+        )
+        with pytest.raises(RuntimeError):
+            run_ab_compare(**kwargs)
+        assert calls == ["A", "B"]
+
+        calls.clear()
+        report = run_ab_compare(**kwargs)
+        assert calls == ["B"]
+        assert report["checkpoint_provenance"]["A"]["reused"] is True
+        assert report["checkpoint_provenance"]["B"]["reused"] is False
+
+    def test_no_resume_forces_rebuild_of_every_arm(self, tmp_path):
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        calls = []
+        run_ab_compare(**self._kwargs(tmp_path, calls))
+        calls.clear()
+
+        run_ab_compare(**self._kwargs(tmp_path, calls, resume=False))
+        assert calls == ["A", "B"]
+
+    def test_no_resume_still_refreshes_the_checkpoint(self, tmp_path):
+        """A --no-resume run must overwrite the checkpoint, so a later
+        resumed run picks up the fresh result, not the stale one."""
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        calls = []
+        run_ab_compare(**self._kwargs(tmp_path, calls))
+        calls.clear()
+        run_ab_compare(**self._kwargs(tmp_path, calls, resume=False))
+        assert calls == ["A", "B"]
+
+        calls.clear()
+        run_ab_compare(**self._kwargs(tmp_path, calls))
+        assert calls == []  # the refreshed checkpoint is reused
+
+    def test_universe_membership_drift_forces_rebuild_under_unchanged_name(
+            self, tmp_path):
+        """The actual review scenario: a data-quality exclusion lands for a
+        symbol between runs, changing arm A's universe membership while its
+        NAME ('nasdaq-only') stays the same. A stale checkpoint keyed only on
+        the name would be silently reused with day-1 membership, corrupting
+        the verdict. It must instead be treated as a miss and rebuilt."""
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        calls = []
+        membership = {
+            "nasdaq-only": {"AAA", "BBB"},
+            "nasdaq-plus-nyse": {"AAA", "BBB", "CCC"},
+        }
+
+        def resolver(conn, name):
+            return set(membership[name])
+
+        kwargs = dict(
+            arm_a_universe="nasdaq-only",
+            arm_b_universe="nasdaq-plus-nyse",
+            config=_config(),
+            arm_runner=_spy_runner(calls),
+            universe_resolver=resolver,
+            checkpoint_dir=tmp_path,
+        )
+        run_ab_compare(**kwargs)
+        assert calls == ["A", "B"]
+
+        # A data-quality exclusion lands for "nasdaq-only" — same universe
+        # name, different membership. "nasdaq-plus-nyse" is untouched.
+        calls.clear()
+        membership["nasdaq-only"] = {"AAA"}
+        report = run_ab_compare(**kwargs)
+        assert calls == ["A"]  # membership drift forces A to rebuild
+        assert report["checkpoint_provenance"]["A"]["reused"] is False
+        assert report["checkpoint_provenance"]["B"]["reused"] is True
+
+
+class TestCheckpointDir:
+    def test_default_checkpoint_dir_honors_env_override(self, monkeypatch, tmp_path):
+        from gefion.backtest.ab_compare import default_checkpoint_dir
+
+        override = tmp_path / "custom-checkpoints"
+        monkeypatch.setenv("GEFION_AB_CHECKPOINT_DIR", str(override))
+        assert default_checkpoint_dir() == override
+
+    def test_default_checkpoint_dir_falls_back_to_gefion_home(self, monkeypatch):
+        from pathlib import Path
+
+        from gefion.backtest.ab_compare import default_checkpoint_dir
+
+        monkeypatch.delenv("GEFION_AB_CHECKPOINT_DIR", raising=False)
+        assert default_checkpoint_dir() == (
+            Path.home() / ".gefion" / "ab_compare_checkpoints")
+
+    def test_corrupt_checkpoint_file_is_treated_as_a_miss(self, tmp_path):
+        """Conservative-by-construction: a checkpoint that fails to parse
+        must trigger a rebuild, never a crash or a guess."""
+        from gefion.backtest.ab_compare import ArmSpec, compute_arm_key, run_ab_compare
+
+        key = compute_arm_key(
+            ArmSpec("A", train_universe="nasdaq-only"), _config(), ["AAA"], ["AAA"])
+        (tmp_path / f"{key}.json").write_text("not valid json{{{")
+
+        calls = []
+        run_ab_compare(
+            arm_a_universe="nasdaq-only",
+            arm_b_universe="nasdaq-plus-nyse",
+            config=_config(),
+            arm_runner=_spy_runner(calls),
+            universe_resolver=lambda conn, name: {"AAA"},
+            checkpoint_dir=tmp_path,
+        )
+        assert calls == ["A", "B"]
