@@ -168,6 +168,36 @@ there. If so, the wider universe **diluted** the edge (the risk epic #179
 flagged). The harness REPORTS; a human weighs the deltas against the dilution
 verdict (owner gate) — it never auto-decides.
 
+#### Missing measurements are absent, never zero (issue #248)
+
+A metric the run could not measure is reported as **`null`** (JSON) / `None`
+(Python) — never as `0.0`, `NaN`, or any other number-shaped stand-in. This is
+deliberate: a plausible-looking value flows through every consumer that isn't
+specifically guarding for it, so it gets believed. An absent one fails at the
+point of use.
+
+Two fields this affects:
+
+- **`arm_a_shared_pnl` / `arm_b_shared_pnl`** in the negative-transfer block are
+  `null` when any restricted position carries no realized PnL. That is the normal
+  case for an **opening** trade — PnL is realized on the sell/cover leg, so a book
+  still holding its positions has none to report. Previously the ledger fabricated
+  `pnl: 0.0` on open and the diagnostic defaulted again on read, producing a
+  confident `0.0` that measured nothing.
+- **`sharpe`** (and the derived A→B delta) is `null` when the period-return series
+  is degenerate — too short, or zero-variance — rather than emitting a ratio that
+  contradicts the sign of the return.
+
+**The negative-transfer verdict is unaffected.** It is computed from `edge`
+(derived from each position's `raw_return`, a required field), not from the PnL
+fields, so `null` PnL does not weaken or alter the dilution call.
+
+When consuming the report programmatically, treat these as nullable:
+
+```bash
+gefion backtest ab-compare ... --json | jq '.arms.B.sharpe // "n/a"'
+```
+
 The strategy reuses the existing `MLSignalStrategy` (`mode=long_short`,
 quantile): it longs names with `q50 ≥ --return-threshold` and shorts names with
 `q50 ≤ −(--return-threshold)` — a q50-threshold long/short that stands in for
