@@ -424,14 +424,17 @@ class TestCheckpointKey:
 
         spec = ArmSpec("A", train_universe="nasdaq-only")
         cfg = _config()
-        assert compute_arm_key(spec, cfg) == compute_arm_key(spec, cfg)
+        assert (compute_arm_key(spec, cfg, ["AAA"], ["AAA"])
+                == compute_arm_key(spec, cfg, ["AAA"], ["AAA"]))
 
     def test_changes_with_universe(self):
         from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
 
         cfg = _config()
-        key1 = compute_arm_key(ArmSpec("A", train_universe="nasdaq-only"), cfg)
-        key2 = compute_arm_key(ArmSpec("A", train_universe="nyse-only"), cfg)
+        key1 = compute_arm_key(
+            ArmSpec("A", train_universe="nasdaq-only"), cfg, ["AAA"], ["AAA"])
+        key2 = compute_arm_key(
+            ArmSpec("A", train_universe="nyse-only"), cfg, ["AAA"], ["AAA"])
         assert key1 != key2
 
     def test_changes_with_label(self):
@@ -439,8 +442,8 @@ class TestCheckpointKey:
         from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
 
         cfg = _config()
-        key_a = compute_arm_key(ArmSpec("A", train_universe="u"), cfg)
-        key_c = compute_arm_key(ArmSpec("C", train_universe="u"), cfg)
+        key_a = compute_arm_key(ArmSpec("A", train_universe="u"), cfg, ["AAA"], ["AAA"])
+        key_c = compute_arm_key(ArmSpec("C", train_universe="u"), cfg, ["AAA"], ["AAA"])
         assert key_a != key_c
 
     @pytest.mark.parametrize("field_name,new_value", _CONFIG_FIELD_VARIANTS)
@@ -450,7 +453,35 @@ class TestCheckpointKey:
         spec = ArmSpec("A", train_universe="nasdaq-only")
         base_cfg = _config()
         changed_cfg = _variant_config(base_cfg, **{field_name: new_value})
-        assert compute_arm_key(spec, base_cfg) != compute_arm_key(spec, changed_cfg)
+        assert (compute_arm_key(spec, base_cfg, ["AAA"], ["AAA"])
+                != compute_arm_key(spec, changed_cfg, ["AAA"], ["AAA"]))
+
+    def test_changes_with_universe_membership_even_when_name_is_unchanged(self):
+        """Universe membership is resolved point-in-time (``universe_members``
+        defaults ``as_of`` to today and joins effective-dated exclusions), so
+        the member SET under a fixed name can drift day to day. The key must
+        pin the resolved membership, not just the name — otherwise a
+        checkpoint from before a data-quality exclusion landed would be
+        silently reused after it lands (review finding #234)."""
+        from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
+
+        spec = ArmSpec("A", train_universe="nasdaq-only")
+        cfg = _config()
+        key1 = compute_arm_key(spec, cfg, ["AAA", "BBB"], ["AAA", "BBB"])
+        key2 = compute_arm_key(spec, cfg, ["AAA"], ["AAA"])
+        assert key1 != key2
+
+    def test_key_independent_of_member_set_order(self):
+        """Membership is a set, not a sequence — resolver iteration order
+        must not perturb the key (that would make reuse flaky, not just
+        conservative)."""
+        from gefion.backtest.ab_compare import ArmSpec, compute_arm_key
+
+        spec = ArmSpec("A", train_universe="nasdaq-only")
+        cfg = _config()
+        key1 = compute_arm_key(spec, cfg, ["AAA", "BBB"], ["AAA"])
+        key2 = compute_arm_key(spec, cfg, ["BBB", "AAA"], ["AAA"])
+        assert key1 == key2
 
 
 class TestCheckpointResume:
@@ -577,6 +608,44 @@ class TestCheckpointResume:
         run_ab_compare(**self._kwargs(tmp_path, calls))
         assert calls == []  # the refreshed checkpoint is reused
 
+    def test_universe_membership_drift_forces_rebuild_under_unchanged_name(
+            self, tmp_path):
+        """The actual review scenario: a data-quality exclusion lands for a
+        symbol between runs, changing arm A's universe membership while its
+        NAME ('nasdaq-only') stays the same. A stale checkpoint keyed only on
+        the name would be silently reused with day-1 membership, corrupting
+        the verdict. It must instead be treated as a miss and rebuilt."""
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        calls = []
+        membership = {
+            "nasdaq-only": {"AAA", "BBB"},
+            "nasdaq-plus-nyse": {"AAA", "BBB", "CCC"},
+        }
+
+        def resolver(conn, name):
+            return set(membership[name])
+
+        kwargs = dict(
+            arm_a_universe="nasdaq-only",
+            arm_b_universe="nasdaq-plus-nyse",
+            config=_config(),
+            arm_runner=_spy_runner(calls),
+            universe_resolver=resolver,
+            checkpoint_dir=tmp_path,
+        )
+        run_ab_compare(**kwargs)
+        assert calls == ["A", "B"]
+
+        # A data-quality exclusion lands for "nasdaq-only" — same universe
+        # name, different membership. "nasdaq-plus-nyse" is untouched.
+        calls.clear()
+        membership["nasdaq-only"] = {"AAA"}
+        report = run_ab_compare(**kwargs)
+        assert calls == ["A"]  # membership drift forces A to rebuild
+        assert report["checkpoint_provenance"]["A"]["reused"] is False
+        assert report["checkpoint_provenance"]["B"]["reused"] is True
+
 
 class TestCheckpointDir:
     def test_default_checkpoint_dir_honors_env_override(self, monkeypatch, tmp_path):
@@ -600,7 +669,8 @@ class TestCheckpointDir:
         must trigger a rebuild, never a crash or a guess."""
         from gefion.backtest.ab_compare import ArmSpec, compute_arm_key, run_ab_compare
 
-        key = compute_arm_key(ArmSpec("A", train_universe="nasdaq-only"), _config())
+        key = compute_arm_key(
+            ArmSpec("A", train_universe="nasdaq-only"), _config(), ["AAA"], ["AAA"])
         (tmp_path / f"{key}.json").write_text("not valid json{{{")
 
         calls = []

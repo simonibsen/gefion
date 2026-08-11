@@ -44,7 +44,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set
 
 from gefion.observability import create_span, set_attributes
 
@@ -651,12 +651,17 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
 #
 # A failed arm-B attempt should not force a ~1h arm-A rebuild. Each arm is
 # keyed by a sha256 hash of everything that can affect its result — arm
-# label, universes, and the full MatchedConfig (which itself carries the
-# date range and model/strategy params). The key is deliberately
-# conservative: when in doubt about whether an input matters, it goes in the
-# hash, because a spurious rebuild costs an hour and a spurious reuse costs a
-# wrong verdict on a multi-week investigation. Checkpoints are plain JSON
-# files, one per key, next to the rest of gefion's run/session state.
+# label, universe NAMES, the RESOLVED universe MEMBER SETS, and the full
+# MatchedConfig (which itself carries the date range and model/strategy
+# params). Membership is included, not just the name, because
+# `universe_members` resolves point-in-time (effective-dated exclusions,
+# spec 015) — the member set under a fixed name can drift day to day, and a
+# multi-day retry sequence (the exact scenario this feature targets) can
+# span such a drift. The key is deliberately conservative: when in doubt
+# about whether an input matters, it goes in the hash, because a spurious
+# rebuild costs an hour and a spurious reuse costs a wrong verdict on a
+# multi-week investigation. Checkpoints are plain JSON files, one per key,
+# next to the rest of gefion's run/session state.
 # --------------------------------------------------------------------------- #
 def default_checkpoint_dir() -> Path:
     """Where per-arm checkpoints live.
@@ -670,18 +675,32 @@ def default_checkpoint_dir() -> Path:
     return Path.home() / ".gefion" / "ab_compare_checkpoints"
 
 
-def compute_arm_key(spec: ArmSpec, config: MatchedConfig) -> str:
+def compute_arm_key(
+        spec: ArmSpec, config: MatchedConfig,
+        train_universe_members: Iterable[str],
+        trade_universe_members: Iterable[str]) -> str:
     """Stable sha256 hash of everything that affects this arm's result.
 
     Includes the arm label (two arms with identical universes/config but
-    different labels are still tracked separately), both universes, and the
-    full ``MatchedConfig`` (which carries the date range and model/strategy
-    params) so any change to a matched input forces a rebuild.
+    different labels are still tracked separately), both universe NAMES, the
+    RESOLVED member set of each universe, and the full ``MatchedConfig``
+    (which carries the date range and model/strategy params) so any change
+    to a matched input forces a rebuild.
+
+    The resolved member set matters because universe membership is resolved
+    point-in-time (``universe_members`` defaults ``as_of`` to today and joins
+    effective-dated exclusions) — it is not a fixed function of the name.
+    Keying on the name alone would let a checkpoint silently outlive a
+    membership change (e.g. a data-quality exclusion landing between runs),
+    reusing yesterday's member set under today's name. Callers must resolve
+    membership via the same ``universe_resolver`` used to run the arm.
     """
     payload = {
         "label": spec.label,
         "train_universe": spec.train_universe,
         "trade_universe": spec.trade_universe,
+        "train_universe_members": sorted(train_universe_members),
+        "trade_universe_members": sorted(trade_universe_members),
         "config": config.to_dict(),
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
@@ -811,10 +830,25 @@ def run_ab_compare(
         ckpt_dir = Path(checkpoint_dir) if checkpoint_dir is not None \
             else default_checkpoint_dir()
 
+        # Universe membership is resolved point-in-time (spec 015's
+        # effective-dated exclusions), not a fixed function of the name — so
+        # it must be resolved fresh on every run, BEFORE the checkpoint
+        # lookup, and folded into the key (see compute_arm_key). Cache per
+        # name within this run: several specs can share a universe name
+        # (Arm A's train/trade, or Arm C reusing Arm B's train universe).
+        resolved_members: Dict[str, List[str]] = {}
+
+        def _resolve(name: str) -> List[str]:
+            if name not in resolved_members:
+                resolved_members[name] = sorted(universe_resolver(conn, name))
+            return resolved_members[name]
+
         arm_results: Dict[str, ArmResult] = {}
         checkpoint_provenance: Dict[str, Dict[str, Any]] = {}
         for spec in specs:
-            key = compute_arm_key(spec, config)
+            train_members = _resolve(spec.train_universe)
+            trade_members = _resolve(spec.trade_universe)
+            key = compute_arm_key(spec, config, train_members, trade_members)
             cached = load_arm_checkpoint(ckpt_dir, key) if resume else None
             if cached is not None:
                 logger.info(
@@ -833,9 +867,11 @@ def run_ab_compare(
             checkpoint_provenance[spec.label] = {"reused": reused, "key": key}
 
         # Shared cross-section = the universe-A member set (A ⊆ B by design;
-        # intersect to stay correct even if that ever stops holding).
-        members_a = set(universe_resolver(conn, arm_a_universe))
-        members_b = set(universe_resolver(conn, arm_b_universe))
+        # intersect to stay correct even if that ever stops holding). Both
+        # universes were already resolved above (Arm A/B's train_universe
+        # equal arm_a_universe/arm_b_universe by construction).
+        members_a = set(_resolve(arm_a_universe))
+        members_b = set(_resolve(arm_b_universe))
         shared_members = members_a & members_b if members_b else members_a
 
         nt = negative_transfer_diagnostic(

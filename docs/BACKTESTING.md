@@ -189,11 +189,19 @@ recomputed — so if arm B fails (e.g. while narrowing a date window to fit
 memory), re-running does not force a completed arm A to rebuild.
 
 - The checkpoint key is a hash of everything that can affect the arm's
-  result: the arm label, both universes, and the full matched config (dates,
-  horizons, hyperparameters, strategy params including `--selection`). Any
-  change to any of those — not just the universe — forces a rebuild of the
+  result: the arm label, both universe names, the **resolved member set** of
+  each universe, and the full matched config (dates, horizons,
+  hyperparameters, strategy params including `--selection`). Any change to
+  any of those — not just the universe name — forces a rebuild of the
   affected arm(s); the shared `MatchedConfig` means a config change forces
   **both** A and B to rebuild, since they're matched by construction.
+- Universe membership is resolved point-in-time (effective-dated
+  exclusions), not fixed by the name — so a checkpoint keyed only on the
+  name could otherwise silently outlive a membership change (e.g. a
+  data-quality exclusion landing between a multi-day retry sequence).
+  Membership is re-resolved and re-checked against the key on every run, so
+  a checkpoint from before such a change is treated as stale and rebuilt,
+  never silently reused with outdated membership.
 - Reuse is logged (`ab_compare: reusing checkpointed arm ...`) and recorded in
   the report under `checkpoint_provenance` (and in the human-readable table),
   so a reader can see which arms were reused vs recomputed for that run.
