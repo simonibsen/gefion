@@ -144,7 +144,7 @@ def test_restrict_blockers_refuse_with_the_list(conn):
     modules rebuild tables in the shared test DB (issue #29 lesson)."""
     with conn.cursor() as cur:
         stock_id, _ = _seed_stock(cur, "DELT3", with_feature_values=False)
-        cur.execute("DROP TABLE IF EXISTS deltest_blocker")
+        cur.execute("DROP TABLE IF EXISTS deltest_blocker CASCADE")
         cur.execute(
             """CREATE TABLE deltest_blocker (
                    id SERIAL PRIMARY KEY,
@@ -162,7 +162,7 @@ def test_restrict_blockers_refuse_with_the_list(conn):
             assert cur.fetchone()[0] == 1
     finally:
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS deltest_blocker")
+            cur.execute("DROP TABLE IF EXISTS deltest_blocker CASCADE")
 
 
 def test_audit_ledgers_are_never_in_scope(conn):

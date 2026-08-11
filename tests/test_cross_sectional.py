@@ -24,6 +24,16 @@ def get_db_url():
     return schema.test_db_url()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_db_after_module():
+    """Restore canonical test DB state after this module's destructive
+    per-test cleanup (issue #195)."""
+    yield
+    if os.getenv("ENABLE_DB_TESTS") == "1":
+        from conftest import restore_test_db
+        restore_test_db()
+
+
 @pytest.fixture
 def db_conn():
     """Create a test database connection."""

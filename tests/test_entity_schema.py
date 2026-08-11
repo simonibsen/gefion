@@ -49,14 +49,34 @@ def test_entity_table_column_exists_with_stocks_default(conn):
     assert data_type == "text"
 
 
-def test_existing_definitions_default_to_stocks(conn):
-    """Migration A is a behavioral no-op: every pre-existing definition resolves
-    against stocks (SC-201's schema-level half)."""
+def test_every_definition_names_a_real_entity_table(conn):
+    """Migration A's surviving guarantee: no definition points at a missing table.
+
+    This previously asserted that NO definition had a non-stocks entity_table —
+    true when `stocks` was the only entity, and retired by the macro home
+    (007/011): db-init now seeds macro_vix against macro_series, so the claim is
+    false the moment the schema is canonical (#235).
+
+    It kept passing only because an earlier module dropped and recreated
+    feature_definitions without the seeded macro row, so the suite's own
+    pollution was hiding it. Restoring proper isolation (#195) exposed it.
+
+    Migration A's real schema-level guarantee — that the column defaults to
+    'stocks', so pre-existing rows were unaffected — is already covered by
+    test_entity_table_column_exists_with_stocks_default above. What remains worth
+    asserting is referential: every definition must name a table that exists.
+    """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT count(*) FROM feature_definitions WHERE entity_table != 'stocks'"
+            """SELECT name, entity_table
+               FROM feature_definitions
+               WHERE entity_table IS NULL
+                  OR entity_table = ''
+                  OR to_regclass('public.' || entity_table) IS NULL
+               ORDER BY name"""
         )
-        assert cur.fetchone()[0] == 0
+        dangling = cur.fetchall()
+    assert dangling == [], f"definitions naming a nonexistent entity table: {dangling}"
 
 
 # --- Part 2: FK retirement + the macro home (Migration B) ----------------------
