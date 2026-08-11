@@ -29,7 +29,7 @@ class SearchStrategy(ABC):
         pass
 
     @abstractmethod
-    def report(self, params: Dict[str, Any], score: float) -> None:
+    def report(self, params: Dict[str, Any], score: Optional[float]) -> None:
         """
         Report result of a trial.
 
@@ -100,7 +100,7 @@ class GridSearch(SearchStrategy):
         self.index += 1
         return params
 
-    def report(self, params: Dict[str, Any], score: float) -> None:
+    def report(self, params: Dict[str, Any], score: Optional[float]) -> None:
         """Grid search doesn't adapt based on results."""
         pass  # No-op for grid search
 
@@ -152,7 +152,7 @@ class RandomSearch(SearchStrategy):
         self.trials += 1
         return params
 
-    def report(self, params: Dict[str, Any], score: float) -> None:
+    def report(self, params: Dict[str, Any], score: Optional[float]) -> None:
         """Random search doesn't adapt based on results."""
         pass  # No-op for random search
 
@@ -247,7 +247,7 @@ class BayesianSearch(SearchStrategy):
 
         return params
 
-    def report(self, params: Dict[str, Any], score: float) -> None:
+    def report(self, params: Dict[str, Any], score: Optional[float]) -> None:
         """
         Report result of a trial to update the optimization model.
 

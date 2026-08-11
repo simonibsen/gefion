@@ -26,14 +26,20 @@ def calculate_metrics(
         Dict with metrics:
             - total_return: Total return (fraction)
             - max_drawdown: Maximum drawdown (fraction, negative)
-            - sharpe_ratio: Sharpe ratio (annualized, assuming daily data)
+            - sharpe_ratio: Sharpe ratio (annualized, assuming daily data),
+              or ``float('nan')`` when it isn't a meaningful number (too
+              little data, zero variance, or equity that went non-positive)
+              -- a real (if unusual) float, so existing formatting/sorting
+              of this field elsewhere in the codebase keeps working, while
+              still being explicitly "not a number" rather than a
+              misleading 0.0
             - num_trades: Number of equity curve points
     """
     if not equity_curve:
         return {
             "total_return": 0.0,
             "max_drawdown": 0.0,
-            "sharpe_ratio": 0.0,
+            "sharpe_ratio": float("nan"),
             "num_trades": 0,
         }
 
@@ -95,23 +101,36 @@ def _calculate_sharpe_ratio(equity_curve: List[Dict[str, Any]]) -> float:
         equity_curve: List of {date, equity} points
 
     Returns:
-        Annualized Sharpe ratio
+        Annualized Sharpe ratio, or ``float('nan')`` when it isn't a
+        meaningful number (see below) -- never a finite-looking value that
+        isn't one. NaN (rather than None) so every existing caller that
+        formats/compares this field as a plain float keeps working.
     """
     if len(equity_curve) < 2:
-        return 0.0
+        return float("nan")
+
+    # A non-positive equity point makes that day's percentage return
+    # undefined. Previously such days were silently skipped rather than
+    # rejected, which biased the sample to whichever days stayed solvent --
+    # e.g. an arm whose equity collapses past zero (an unbounded,
+    # un-margin-called short blowup, #217) would have every day after the
+    # collapse dropped, leaving a Sharpe computed only from the healthier
+    # early slice, decoupled from the actual (deeply negative) outcome
+    # (#248: reported +1.196 Sharpe alongside a -204% total return). Once
+    # equity has gone non-positive, the ratio is not meaningful.
+    if any(point["equity"] <= 0 for point in equity_curve):
+        return float("nan")
 
     # Calculate daily returns
     returns = []
     for i in range(1, len(equity_curve)):
         prev_equity = equity_curve[i - 1]["equity"]
         curr_equity = equity_curve[i]["equity"]
-
-        if prev_equity > 0:
-            daily_return = (curr_equity - prev_equity) / prev_equity
-            returns.append(daily_return)
+        daily_return = (curr_equity - prev_equity) / prev_equity
+        returns.append(daily_return)
 
     if not returns:
-        return 0.0
+        return float("nan")
 
     # Mean and std of daily returns
     mean_return = sum(returns) / len(returns)
@@ -119,7 +138,9 @@ def _calculate_sharpe_ratio(equity_curve: List[Dict[str, Any]]) -> float:
     std_return = math.sqrt(variance)
 
     if std_return == 0:
-        return 0.0
+        # Zero variance is a different claim than "market neutral" (0.0) --
+        # the ratio is undefined, not zero.
+        return float("nan")
 
     # Annualize (assuming 252 trading days)
     sharpe = (mean_return / std_return) * math.sqrt(252)
