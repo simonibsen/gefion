@@ -285,6 +285,133 @@ def test_query_predictions_filter_by_date(db_with_prereqs):
     assert dates == {date(2026, 3, 26), date(2026, 3, 27)}
 
 
+# ---------------------------------------------------------------------------
+# Batch insert tests
+# ---------------------------------------------------------------------------
+
+def test_batch_insert_upsert_preserved(db_with_prereqs):
+    """Writing the same key twice through the batched path updates, not duplicates."""
+    from gefion.db.predictions import insert_predictions_batch, query_predictions
+
+    conn, stock_id, model_id = db_with_prereqs
+    pred_date = date(2026, 3, 27)
+    row = {
+        "model_id": model_id, "data_id": stock_id,
+        "prediction_date": pred_date, "horizon_days": 5,
+        "prediction_type": "quantile",
+        "prediction_values": {"q10": -0.02, "q50": 0.01, "q90": 0.04},
+        "metadata": {}, "run_id": None,
+    }
+
+    with conn.cursor() as cur:
+        insert_predictions_batch(cur, [row])
+
+    with conn.cursor() as cur:
+        first_created_at = query_predictions(cur, prediction_type="quantile", model_id=model_id)[0]["created_at"]
+
+    updated_row = dict(row, prediction_values={"q10": -0.03, "q50": 0.02, "q90": 0.05})
+    with conn.cursor() as cur:
+        insert_predictions_batch(cur, [updated_row])
+
+    with conn.cursor() as cur:
+        rows = query_predictions(cur, prediction_type="quantile", model_id=model_id)
+
+    assert len(rows) == 1
+    assert float(rows[0]["q50"]) == pytest.approx(0.02, abs=1e-4)
+    assert rows[0]["created_at"] >= first_created_at
+
+
+def test_batch_insert_partial_final_batch_writes_all_rows(db_with_prereqs):
+    """A row count that isn't a multiple of batch_size still writes every row to the DB."""
+    from gefion.db.predictions import insert_predictions_batch, query_predictions
+
+    conn, stock_id, model_id = db_with_prereqs
+    pred_date = date(2026, 3, 27)
+    rows = [
+        {
+            "model_id": model_id, "data_id": stock_id,
+            "prediction_date": date(2026, 3, day), "horizon_days": 5,
+            "prediction_type": "quantile",
+            "prediction_values": {"q10": -0.01, "q50": 0.01, "q90": 0.03},
+            "metadata": {}, "run_id": None,
+        }
+        for day in range(20, 27)  # 7 distinct dates, same key otherwise
+    ]
+
+    with conn.cursor() as cur:
+        written = insert_predictions_batch(cur, rows, batch_size=3)
+
+    assert written == 7
+
+    with conn.cursor() as cur:
+        result = query_predictions(cur, prediction_type="quantile", model_id=model_id)
+
+    assert len(result) == 7
+
+
+def test_batch_insert_values_survive_intact_no_misassociation(db_with_prereqs):
+    """JSONB round-trips per-symbol, and metadata/run_id land on the right row."""
+    from gefion.db.predictions import insert_predictions_batch, query_predictions
+
+    conn, stock_id, model_id = db_with_prereqs
+    pred_date = date(2026, 3, 27)
+
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO stocks (symbol) VALUES ('MSFT_PRED_TEST') RETURNING id")
+        stock_id_2 = cur.fetchone()[0]
+
+        cur.execute(
+            "INSERT INTO ml_runs (run_type, status, run_config, started_at) "
+            "VALUES ('predict', 'running', '{}', NOW()) RETURNING id"
+        )
+        run_id_1 = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO ml_runs (run_type, status, run_config, started_at) "
+            "VALUES ('predict', 'running', '{}', NOW()) RETURNING id"
+        )
+        run_id_2 = cur.fetchone()[0]
+
+    rows = [
+        {
+            "model_id": model_id, "data_id": stock_id,
+            "prediction_date": pred_date, "horizon_days": 5,
+            "prediction_type": "quantile",
+            "prediction_values": {"q10": -0.02, "q50": 0.01, "q90": 0.04},
+            "metadata": {"model_version": "v1"}, "run_id": run_id_1,
+        },
+        {
+            "model_id": model_id, "data_id": stock_id_2,
+            "prediction_date": pred_date, "horizon_days": 5,
+            "prediction_type": "quantile",
+            "prediction_values": {"q10": -0.05, "q50": -0.01, "q90": 0.02},
+            "metadata": {"model_version": "v2"}, "run_id": run_id_2,
+        },
+    ]
+
+    with conn.cursor() as cur:
+        insert_predictions_batch(cur, rows)
+
+    with conn.cursor() as cur:
+        result_rows = query_predictions(cur, prediction_type="quantile", model_id=model_id)
+
+    by_data_id = {r["data_id"]: r for r in result_rows}
+    assert set(by_data_id) == {stock_id, stock_id_2}
+
+    r1 = by_data_id[stock_id]
+    assert float(r1["q10"]) == pytest.approx(-0.02, abs=1e-4)
+    assert float(r1["q50"]) == pytest.approx(0.01, abs=1e-4)
+    assert float(r1["q90"]) == pytest.approx(0.04, abs=1e-4)
+    assert r1["model_version"] == "v1"
+    assert r1["run_id"] == run_id_1
+
+    r2 = by_data_id[stock_id_2]
+    assert float(r2["q10"]) == pytest.approx(-0.05, abs=1e-4)
+    assert float(r2["q50"]) == pytest.approx(-0.01, abs=1e-4)
+    assert float(r2["q90"]) == pytest.approx(0.02, abs=1e-4)
+    assert r2["model_version"] == "v2"
+    assert r2["run_id"] == run_id_2
+
+
 def test_query_predictions_filter_by_data_id(db_with_prereqs):
     """query_predictions filters by data_id (stock)."""
     from gefion.db.predictions import insert_quantile_prediction, query_predictions
