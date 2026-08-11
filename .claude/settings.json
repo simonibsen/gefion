@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 scripts/tdd_enforce.py"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/tdd_enforce.py\""
           }
         ]
       }
