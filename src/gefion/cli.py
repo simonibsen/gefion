@@ -10369,6 +10369,11 @@ def backtest_ab_compare(
     attribution: bool = typer.Option(
         False, "--attribution",
         help="Add Arm C: train on B, trade A only (isolates data vs opportunity)"),
+    no_resume: bool = typer.Option(
+        False, "--no-resume",
+        help="Force every arm to rebuild, ignoring any cached checkpoints "
+             "(default: reuse a checkpointed arm when its inputs are "
+             "unchanged, see docs/BACKTESTING.md)"),
     json_output: bool = typer.Option(
         False, "--json", help="Output the comparison report as JSON"),
 ) -> None:
@@ -10445,6 +10450,7 @@ def backtest_ab_compare(
                 config=config,
                 conn=conn,
                 attribution=attribution,
+                resume=not no_resume,
             )
 
         if json_output:

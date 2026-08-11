@@ -54,6 +54,7 @@ def stub_pipeline(monkeypatch):
         captured["arm_b"] = arm_b_universe
         captured["config"] = config
         captured["attribution"] = attribution
+        captured["resume"] = kwargs.get("resume")
         return _canned_report()
 
     monkeypatch.setattr("gefion.backtest.ab_compare.run_ab_compare", fake_run)
@@ -143,6 +144,26 @@ class TestAbCompareCli:
         ])
         assert result.exit_code == 0, result.output
         assert stub_pipeline["attribution"] is True
+
+    def test_resume_defaults_true(self, stub_pipeline):
+        result = runner.invoke(app, [
+            "backtest", "ab-compare",
+            "--arm-a", "nasdaq-only", "--arm-b", "nasdaq-plus-nyse",
+            "--start-date", "2020-01-01", "--end-date", "2020-06-30",
+            "--json",
+        ])
+        assert result.exit_code == 0, result.output
+        assert stub_pipeline["resume"] is True
+
+    def test_no_resume_flag_forces_rebuild(self, stub_pipeline):
+        result = runner.invoke(app, [
+            "backtest", "ab-compare",
+            "--arm-a", "nasdaq-only", "--arm-b", "nasdaq-plus-nyse",
+            "--start-date", "2020-01-01", "--end-date", "2020-06-30",
+            "--no-resume", "--json",
+        ])
+        assert result.exit_code == 0, result.output
+        assert stub_pipeline["resume"] is False
 
     def test_human_output_renders_table(self, stub_pipeline):
         result = runner.invoke(app, [
