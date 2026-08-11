@@ -1347,5 +1347,154 @@ class TestExperimentChaining:
         assert results["completed_trials"] >= 1
 
 
+class TestNanScoreHandling:
+    """Regression tests for #248's review finding: `calculate_metrics`
+    changed its degenerate-case sentinel from 0.0 to float('nan') (#248),
+    and `ExperimentConfig.objective_metric` defaults to "sharpe_ratio" --
+    so a NaN trial score must not silently corrupt `best_score` tracking
+    (NaN compares False against everything, so a NaN best_score can never
+    be beaten) or crash the trial INSERT (experiment_trials.metrics is
+    JSONB, which -- confirmed against a live Postgres -- rejects a bare
+    NaN token that Python's own json module would happily emit)."""
+
+    @pytest.fixture
+    def db_url(self):
+        from gefion.db.schema import test_db_url
+        return test_db_url()
+
+    @pytest.fixture
+    def ensure_tables(self, db_url):
+        import psycopg
+        from pathlib import Path
+
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_name = 'experiments'
+                    )
+                """)
+                exists = cur.fetchone()[0]
+                if not exists:
+                    migration_path = Path(__file__).parent.parent / "sql" / "migrations" / "20241229_experiments.sql"
+                    if migration_path.exists():
+                        migration_sql = migration_path.read_text()
+                        cur.execute(migration_sql)
+                        conn.commit()
+
+    @pytest.fixture
+    def runner(self, db_url, ensure_tables):
+        from gefion.experiments.core import ExperimentRunner
+        return ExperimentRunner(db_url)
+
+    def _config(self, **overrides):
+        from gefion.experiments.core import ExperimentConfig
+        base = dict(
+            name="test_nan_score",
+            experiment_type="strategy_params",
+            search_space={"lookback_days": {"type": "categorical", "choices": [5]}},
+            max_trials=1,
+            symbols=["AAPL"],
+            start_date="2024-01-01",
+            end_date="2024-03-01",
+            extra_config={"strategy": "momentum"},
+        )
+        base.update(overrides)
+        return ExperimentConfig(**base)
+
+    def test_nan_score_does_not_crash_trial_storage(self, runner, db_url, monkeypatch):
+        """A NaN metric must serialize to JSON null in experiment_trials.metrics
+        and leave score NULL -- not crash the INSERT or fabricate a number."""
+        import psycopg
+        from gefion.experiments.types.strategy_params import StrategyParamExperiment
+
+        monkeypatch.setattr(
+            StrategyParamExperiment, "evaluate",
+            lambda self, params: {"sharpe_ratio": float("nan"), "total_return": -1.0},
+        )
+
+        exp_id = runner.propose(self._config(name="test_nan_storage"))
+        runner.approve(exp_id)
+        result = runner.run(exp_id)
+
+        assert result["status"] == "completed"
+
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT metrics, score FROM experiment_trials WHERE experiment_id = %s",
+                    (exp_id,),
+                )
+                metrics, score = cur.fetchone()
+
+        assert metrics["sharpe_ratio"] is None
+        assert score is None
+
+    def test_nan_score_does_not_freeze_best_score(self, runner, monkeypatch):
+        """A NaN-scoring first trial must not permanently lock best_score at
+        NaN -- a later trial with a real score must still win."""
+        from gefion.experiments.types.strategy_params import StrategyParamExperiment
+
+        calls = {"n": 0}
+
+        def fake_evaluate(self, params):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"sharpe_ratio": float("nan"), "total_return": -1.0}
+            return {"sharpe_ratio": 1.5, "total_return": 0.2}
+
+        monkeypatch.setattr(StrategyParamExperiment, "evaluate", fake_evaluate)
+
+        exp_id = runner.propose(self._config(
+            name="test_nan_then_valid",
+            search_space={"lookback_days": {"type": "categorical", "choices": [5, 10]}},
+            max_trials=2,
+        ))
+        runner.approve(exp_id)
+        result = runner.run(exp_id)
+
+        assert result["best_score"] == 1.5
+
+    def test_all_nan_scores_leave_best_score_none(self, runner, monkeypatch):
+        """If every trial's objective is NaN, best_score must stay explicitly
+        None -- never a fabricated number."""
+        from gefion.experiments.types.strategy_params import StrategyParamExperiment
+
+        monkeypatch.setattr(
+            StrategyParamExperiment, "evaluate",
+            lambda self, params: {"sharpe_ratio": float("nan"), "total_return": -1.0},
+        )
+
+        exp_id = runner.propose(self._config(name="test_all_nan"))
+        runner.approve(exp_id)
+        result = runner.run(exp_id)
+
+        assert result["best_score"] is None
+        experiment = runner.get(exp_id)
+        assert experiment["best_score"] is None
+
+    def test_json_safe_metrics_replaces_non_finite_with_none(self):
+        """`_json_safe_metrics` is the guard that keeps a NaN/inf metric out
+        of the JSONB INSERT; finite values must pass through untouched."""
+        import math
+        from gefion.experiments.core import _json_safe_metrics
+
+        metrics = {
+            "sharpe_ratio": float("nan"),
+            "total_return": -1.286,
+            "blew_up": float("inf"),
+        }
+        safe = _json_safe_metrics(metrics)
+
+        assert safe["sharpe_ratio"] is None
+        assert safe["blew_up"] is None
+        assert safe["total_return"] == -1.286
+        # json.dumps must not choke or emit a non-standard token
+        import json
+        assert "NaN" not in json.dumps(safe)
+        assert "Infinity" not in json.dumps(safe)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -6,6 +6,7 @@ for managing experiment lifecycle (propose, approve, reject, run).
 """
 import hashlib
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Dict, Any, Optional, List
@@ -63,6 +64,24 @@ def is_duplicate_experiment(
             return True
 
     return False
+
+
+def _json_safe_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """Replace non-finite floats (NaN/Infinity) with ``None``.
+
+    ``experiment_trials.metrics`` is JSONB, which -- unlike Python's
+    ``json`` module -- strictly follows the JSON spec and has no NaN/
+    Infinity literal (confirmed: PostgreSQL rejects ``'{"x": NaN}'::jsonb``
+    with "invalid input syntax for type json"). A metric like
+    ``sharpe_ratio`` can legitimately be ``float('nan')`` for a degenerate
+    trial (#248); serialize that as JSON ``null`` rather than let the
+    INSERT crash the whole experiment on one bad trial.
+    """
+    return {
+        key: (None if isinstance(value, float) and not math.isfinite(value)
+              else value)
+        for key, value in metrics.items()
+    }
 
 
 @dataclass
@@ -615,11 +634,22 @@ class ExperimentRunner:
                 # Evaluate params
                 metrics = evaluator.evaluate(params)
                 score = metrics.get(objective_metric, 0.0)
+                # A metric (e.g. sharpe_ratio, #248) can be NaN for a
+                # degenerate trial. NaN "compares" as neither greater nor
+                # less than anything, so it would silently freeze
+                # best_score at NaN forever (the first NaN trial wins and
+                # can never be beaten) -- treat it as no valid score for
+                # this trial rather than a plausible-looking number.
+                if isinstance(score, float) and math.isnan(score):
+                    score = None
 
                 trial_end = datetime.now()
                 duration = (trial_end - trial_start).total_seconds()
 
-                # Report to search strategy
+                # Report to search strategy. `score=None` tells
+                # BayesianSearch's optuna study this trial FAILed (rather
+                # than reporting a bogus objective value); Grid/Random
+                # search ignore it either way.
                 search.report(params, score)
 
                 # Store trial result
@@ -627,7 +657,7 @@ class ExperimentRunner:
                     experiment_id=experiment_id,
                     trial_number=trial_number,
                     params=params,
-                    metrics=metrics,
+                    metrics=_json_safe_metrics(metrics),
                     score=score,
                     started_at=trial_start,
                     completed_at=trial_end,
@@ -636,22 +666,24 @@ class ExperimentRunner:
 
                 completed_trials += 1
 
-                # Update best score
-                if best_score is None:
-                    best_score = score
-                    best_params = params
-                elif objective_direction == "maximize" and score > best_score:
-                    best_score = score
-                    best_params = params
-                elif objective_direction == "minimize" and score < best_score:
-                    best_score = score
-                    best_params = params
+                # Update best score (skip trials with no valid score)
+                if score is not None:
+                    if best_score is None:
+                        best_score = score
+                        best_params = params
+                    elif objective_direction == "maximize" and score > best_score:
+                        best_score = score
+                        best_params = params
+                    elif objective_direction == "minimize" and score < best_score:
+                        best_score = score
+                        best_params = params
 
                 # Update experiment progress
                 self._update_progress(experiment_id, completed_trials, best_score)
 
-                # Check goal achievement
-                if goal_type and goal_target is not None:
+                # Check goal achievement (nothing to check until a trial
+                # has produced a valid score)
+                if goal_type and goal_target is not None and best_score is not None:
                     goal_achieved = self._check_goal(
                         score=best_score,
                         goal_type=goal_type,
@@ -742,7 +774,7 @@ class ExperimentRunner:
         trial_number: int,
         params: Dict[str, Any],
         metrics: Dict[str, Any],
-        score: float,
+        score: Optional[float],
         started_at: datetime,
         completed_at: datetime,
         duration: float,

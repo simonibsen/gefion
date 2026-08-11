@@ -201,6 +201,18 @@ def _capacity_proxy(positions: List[Dict[str, Any]]) -> float:
     return float(statistics.median(vols))
 
 
+def _none_if_nan(value: float) -> Optional[float]:
+    """`calculate_metrics` reports an undefined Sharpe as ``float('nan')``
+    (#248) -- a real float, so it's fine for internal arithmetic, but a bare
+    NaN token is not valid JSON (Python's ``json`` module emits one anyway;
+    strict parsers reject it, and PostgreSQL's own jsonb input function does
+    too). Report-surfaced fields translate it to ``None`` at the boundary,
+    same as `_shared_edge`'s `total_pnl` (#248 defect 1) -- explicitly
+    absent, never a value that merely looks like a number.
+    """
+    return None if math.isnan(value) else value
+
+
 def compute_arm_summary(arm: ArmResult) -> Dict[str, Any]:
     """Roll a realized ArmResult up to the comparison metrics (per #197)."""
     total_return = float(arm.metrics.get("total_return", 0.0))
@@ -212,7 +224,7 @@ def compute_arm_summary(arm: ArmResult) -> Dict[str, Any]:
         "trade_universe": arm.trade_universe,
         "total_return": total_return,
         "annualized_return": _annualized_return(total_return, arm.n_trading_days),
-        "sharpe": float(arm.metrics.get("sharpe_ratio", 0.0)),
+        "sharpe": _none_if_nan(float(arm.metrics.get("sharpe_ratio", 0.0))),
         "max_drawdown": float(arm.metrics.get("max_drawdown", 0.0)),
         "position_breadth": _position_breadth(arm.positions),
         "tail_richness": _tail_richness(arm.positions),
@@ -224,12 +236,18 @@ def compute_arm_summary(arm: ArmResult) -> Dict[str, Any]:
 
 
 def compute_deltas(summary_a: Dict[str, Any],
-                   summary_b: Dict[str, Any]) -> Dict[str, float]:
-    """B − A for each numeric comparison metric (positive ⇒ B improved on it)."""
-    return {
-        key: float(summary_b.get(key, 0.0)) - float(summary_a.get(key, 0.0))
-        for key in _ARM_METRIC_KEYS
-    }
+                   summary_b: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    """B − A for each numeric comparison metric (positive ⇒ B improved on it).
+
+    Either side being absent (e.g. an undefined Sharpe, #248) makes the
+    delta undefined too -- ``None``, not a value computed against a
+    fabricated 0.0.
+    """
+    deltas: Dict[str, Optional[float]] = {}
+    for key in _ARM_METRIC_KEYS:
+        va, vb = summary_a.get(key, 0.0), summary_b.get(key, 0.0)
+        deltas[key] = None if va is None or vb is None else float(vb) - float(va)
+    return deltas
 
 
 # --------------------------------------------------------------------------- #
@@ -350,8 +368,8 @@ def build_ab_report(
     return report
 
 
-def _fmt(value: float, pct: bool = False) -> str:
-    if isinstance(value, float) and math.isnan(value):
+def _fmt(value: Optional[float], pct: bool = False) -> str:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
         return "n/a"
     if pct:
         return f"{value * 100:.2f}%"
