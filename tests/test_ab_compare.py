@@ -233,6 +233,99 @@ class TestNegativeTransfer:
 
 
 # --------------------------------------------------------------------------- #
+# 3b. Shared PnL (issue #248) — must never silently default to 0.0.
+# --------------------------------------------------------------------------- #
+class TestSharedPnl:
+    def test_shared_pnl_is_none_when_positions_lack_it(self):
+        """The exact bug: opening-trade positions carry no real dollar pnl
+        (pnl realizes on the CLOSING trade). Reporting it as 0.0 makes a
+        missing measurement look like a real, authoritative figure."""
+        from gefion.backtest.ab_compare import negative_transfer_diagnostic
+
+        shared = {"AAA"}
+        arm_a = _arm_result("A", "u", "u", [
+            _pos(date(2020, 1, 1), "AAA", "long", 0.05, None, 1e6),
+        ])
+        arm_b = _arm_result("B", "v", "v", [
+            _pos(date(2020, 1, 1), "AAA", "long", 0.02, None, 1e6),
+        ])
+        nt = negative_transfer_diagnostic(arm_a, arm_b, shared)
+        assert nt["arm_a_shared_pnl"] is None
+        assert nt["arm_b_shared_pnl"] is None
+
+    def test_shared_pnl_sums_real_values_when_present(self):
+        from gefion.backtest.ab_compare import negative_transfer_diagnostic
+
+        shared = {"AAA", "BBB"}
+        arm_a = _arm_result("A", "u", "u", [
+            _pos(date(2020, 1, 1), "AAA", "long", 0.05, 500.0, 1e6),
+            _pos(date(2020, 1, 1), "BBB", "short", -0.02, 200.0, 1e6),
+        ])
+        arm_b = _arm_result("B", "v", "v", [
+            _pos(date(2020, 1, 1), "AAA", "long", 0.02, 100.0, 1e6),
+        ])
+        nt = negative_transfer_diagnostic(arm_a, arm_b, shared)
+        assert nt["arm_a_shared_pnl"] == pytest.approx(700.0)
+        assert nt["arm_b_shared_pnl"] == pytest.approx(100.0)
+
+    def test_shared_pnl_partial_data_is_not_reported_as_a_full_total(self):
+        """One shared position missing pnl must not silently shrink the
+        sum -- that reports a partial total as if it were complete."""
+        from gefion.backtest.ab_compare import negative_transfer_diagnostic
+
+        shared = {"AAA", "BBB"}
+        arm_a = _arm_result("A", "u", "u", [
+            _pos(date(2020, 1, 1), "AAA", "long", 0.05, 500.0, 1e6),
+            _pos(date(2020, 1, 1), "BBB", "short", -0.02, None, 1e6),
+        ])
+        arm_b = _arm_result("B", "v", "v", [
+            _pos(date(2020, 1, 1), "AAA", "long", 0.02, 100.0, 1e6),
+        ])
+        nt = negative_transfer_diagnostic(arm_a, arm_b, shared)
+        assert nt["arm_a_shared_pnl"] is None
+
+    def test_verdict_and_edges_unaffected_by_pnl_availability(self):
+        """Locks in: `diluted` and the edge values derive only from
+        raw_return, never from pnl -- a later refactor must not couple them."""
+        from gefion.backtest.ab_compare import negative_transfer_diagnostic
+
+        shared = {"AAA"}
+        arm_a = _arm_result("A", "u", "u", [
+            _pos(date(2020, 1, 1), "AAA", "long", 0.10, None, 1e6),
+        ])
+        arm_b = _arm_result("B", "v", "v", [
+            _pos(date(2020, 1, 1), "AAA", "long", 0.03, 999999.0, 1e6),
+        ])
+        nt = negative_transfer_diagnostic(arm_a, arm_b, shared)
+        assert nt["diluted"] is True
+        assert nt["arm_a_edge"] == pytest.approx(0.10)
+        assert nt["arm_b_edge"] == pytest.approx(0.03)
+
+
+class TestPositionsLedgerPnl:
+    def test_opening_trades_never_get_a_fabricated_pnl(self):
+        """Root cause of the bug: `_build_positions_ledger` only keeps
+        opening trades (buy/short), but BacktestEngine only stamps `pnl` on
+        CLOSING trades (sell/cover) -- so an opening trade's `t.get("pnl",
+        0.0)` was always the silent default, never a measurement."""
+        from gefion.backtest.ab_compare import _build_positions_ledger
+
+        trades = [
+            {"date": date(2020, 1, 1), "action": "buy", "symbol": "AAA",
+             "shares": 10, "price": 100.0},
+        ]
+        price_data = [
+            {"symbol": "AAA", "date": date(2020, 1, 1), "close": 100.0,
+             "volume": 1000},
+            {"symbol": "AAA", "date": date(2020, 1, 8), "close": 110.0,
+             "volume": 1000},
+        ]
+        ledger = _build_positions_ledger(trades, price_data, horizon_days=7)
+        assert len(ledger) == 1
+        assert ledger[0]["pnl"] is None
+
+
+# --------------------------------------------------------------------------- #
 # 4. Attribution Arm C wiring.
 # --------------------------------------------------------------------------- #
 class TestAttribution:

@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import statistics
 from collections import defaultdict
@@ -244,10 +245,17 @@ def _shared_edge(positions: List[Dict[str, Any]],
     """
     restricted = [p for p in positions if p["symbol"] in shared_members]
     if not restricted:
-        return {"edge": 0.0, "n": 0, "total_pnl": 0.0}
+        return {"edge": 0.0, "n": 0, "total_pnl": None}
     edges = [p["raw_return"] if p["side"] == "long" else -p["raw_return"]
              for p in restricted]
-    total_pnl = sum(float(p.get("pnl", 0.0)) for p in restricted)
+    # Realized dollar pnl is only known for positions that carry it (see
+    # `_build_positions_ledger`: opening trades don't, closing trades do).
+    # A missing value on ANY restricted position means the total cannot be
+    # trusted as complete, so it's reported absent rather than as a partial
+    # sum passed off as the total (#248).
+    known_pnls = [p["pnl"] for p in restricted if p.get("pnl") is not None]
+    total_pnl = (sum(known_pnls) if len(known_pnls) == len(restricted)
+                 else None)
     return {"edge": statistics.fmean(edges), "n": len(restricted),
             "total_pnl": total_pnl}
 
@@ -343,6 +351,8 @@ def build_ab_report(
 
 
 def _fmt(value: float, pct: bool = False) -> str:
+    if isinstance(value, float) and math.isnan(value):
+        return "n/a"
     if pct:
         return f"{value * 100:.2f}%"
     return f"{value:.4f}"
@@ -389,7 +399,9 @@ def format_ab_report(report: Dict[str, Any]) -> str:
         lines.append("")
         lines.append("A→B deltas (Arm B − Arm A):")
         for key in _ARM_METRIC_KEYS:
-            lines.append(f"  {key.ljust(label_w)} {deltas.get(key, 0.0):+.4f}")
+            delta = deltas.get(key, 0.0)
+            delta_str = "n/a" if math.isnan(delta) else f"{delta:+.4f}"
+            lines.append(f"  {key.ljust(label_w)} {delta_str}")
 
     # Checkpoint provenance — which arms were reused vs recomputed (#234).
     cp = report.get("checkpoint_provenance")
@@ -502,7 +514,11 @@ def _build_positions_ledger(
             "symbol": t["symbol"],
             "side": side,
             "raw_return": raw_return,
-            "pnl": float(t.get("pnl", 0.0)),
+            # Realized dollar pnl belongs to the CLOSING trade (sell/cover),
+            # which this ledger doesn't retain -- an opening trade (buy/
+            # short) never carries one. Explicitly absent, never a fabricated
+            # 0.0 (#248).
+            "pnl": None,
             "dollar_volume": _dollar_volume(t["symbol"], t["date"]),
         })
     return ledger
