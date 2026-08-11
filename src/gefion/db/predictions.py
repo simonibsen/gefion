@@ -6,6 +6,58 @@ from psycopg import sql
 from psycopg.types.json import Json
 
 from gefion.observability import create_span, set_attributes
+from gefion.utils.adaptive import chunked
+
+# Rows per batched INSERT statement. Each row binds 8 params, so this keeps a
+# statement's parameter count (up to 4000) far under libpq's 65535 limit while
+# still collapsing a predict run's writes from one-execute-per-row to one per
+# ~500 rows (see #245 — 1.95M-row predict runs took 74+ min at one row/execute).
+DEFAULT_PREDICTIONS_BATCH_SIZE = 500
+
+
+def insert_predictions_batch(
+    cur,
+    rows: List[Dict[str, Any]],
+    batch_size: int = DEFAULT_PREDICTIONS_BATCH_SIZE,
+) -> int:
+    """Upsert many prediction rows via one multi-row INSERT per batch_size chunk.
+
+    Each row dict must have: model_id, data_id, prediction_date, horizon_days,
+    prediction_type, prediction_values (dict), metadata (dict, optional),
+    run_id (optional). Preserves the same ON CONFLICT upsert semantics as
+    insert_prediction. Returns the number of rows written.
+    """
+    total = len(rows)
+    if total == 0:
+        return 0
+
+    for chunk in chunked(rows, batch_size):
+        with create_span("db.predictions.insert_batch", batch_size=len(chunk)):
+            placeholders = ", ".join(["(%s, %s, %s, %s, %s, %s, %s, %s)"] * len(chunk))
+            params: List[Any] = []
+            for row in chunk:
+                params.extend([
+                    row["model_id"], row["data_id"], row["prediction_date"], row["horizon_days"],
+                    row["prediction_type"], Json(row["prediction_values"]),
+                    Json(row.get("metadata") or {}), row.get("run_id"),
+                ])
+            cur.execute(
+                f"""
+                INSERT INTO predictions
+                    (model_id, data_id, prediction_date, horizon_days,
+                     prediction_type, prediction_values, metadata, run_id)
+                VALUES {placeholders}
+                ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
+                DO UPDATE SET
+                    prediction_values = EXCLUDED.prediction_values,
+                    metadata = EXCLUDED.metadata,
+                    run_id = EXCLUDED.run_id,
+                    created_at = NOW()
+                """,
+                params,
+            )
+
+    return total
 
 
 def insert_prediction(

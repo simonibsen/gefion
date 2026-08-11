@@ -28,6 +28,7 @@ from gefion.cli_helpers import (
 from gefion.features.dispatcher import compute_features
 from gefion.config import load_settings
 from gefion.db import schema
+from gefion.db.predictions import insert_predictions_batch
 from psycopg.types.json import Json
 from gefion.observability import create_span, set_attributes, add_event, get_current_span, shutdown as otel_shutdown, _resolve_otel_enabled
 from gefion.db import migrate
@@ -2033,33 +2034,24 @@ def ml_predict(
                 predictions = predict_quantiles(model_data, features_wide)
 
                 # Insert predictions into database
-                with conn.cursor() as cur:
-                    for data_id in predictions.index:
-                        q10 = Decimal(str(predictions.loc[data_id, "q10"]))
-                        q50 = Decimal(str(predictions.loc[data_id, "q50"]))
-                        q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+                rows = []
+                for data_id in predictions.index:
+                    q10 = Decimal(str(predictions.loc[data_id, "q10"]))
+                    q50 = Decimal(str(predictions.loc[data_id, "q50"]))
+                    q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+                    rows.append({
+                        "model_id": model_id, "data_id": int(data_id),
+                        "prediction_date": current_date, "horizon_days": horizon,
+                        "prediction_type": "quantile",
+                        "prediction_values": {"q10": float(q10), "q50": float(q50), "q90": float(q90)},
+                        "metadata": {"model_version": model_version},
+                        "run_id": run_id,
+                    })
 
-                        cur.execute(
-                            """
-                            INSERT INTO predictions
-                              (model_id, data_id, prediction_date, horizon_days,
-                               prediction_type, prediction_values, metadata, run_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
-                            DO UPDATE SET
-                              prediction_values = EXCLUDED.prediction_values,
-                              metadata = EXCLUDED.metadata,
-                              run_id = EXCLUDED.run_id,
-                              created_at = NOW();
-                            """,
-                            (model_id, int(data_id), current_date, horizon,
-                             'quantile',
-                             Json({"q10": float(q10), "q50": float(q50), "q90": float(q90)}),
-                             Json({"model_version": model_version}),
-                             run_id),
-                        )
-                        date_predictions += 1
-                        grand_total_predictions += 1
+                with conn.cursor() as cur:
+                    insert_predictions_batch(cur, rows)
+                date_predictions += len(rows)
+                grand_total_predictions += len(rows)
 
             dates_processed += 1
 
@@ -3458,60 +3450,51 @@ def ml_predict_classifier(
             predictions.index = features_wide.index
 
             # Store predictions in database
-            total_predictions = 0
+            rows = []
+            for data_id in predictions.index:
+                pred_row = predictions.loc[data_id]
+                predicted_class = pred_row["predicted_class"]
+
+                # Get class probabilities (columns start with "probability_")
+                prob_cols = [c for c in predictions.columns if c.startswith("probability_")]
+                class_probs = {c.replace("probability_", ""): float(pred_row[c]) for c in prob_cols}
+
+                # Extract individual probabilities for table columns
+                p_strong_up = class_probs.get("strong_up", 0.0)
+                p_weak_up = class_probs.get("weak_up", 0.0)
+                p_neutral = class_probs.get("flat", 0.0)
+                p_weak_down = class_probs.get("weak_down", 0.0)
+                p_strong_down = class_probs.get("strong_down", 0.0)
+
+                # Calculate margin (difference between top 2 probabilities)
+                sorted_probs = sorted(class_probs.values(), reverse=True)
+                margin = sorted_probs[0] - sorted_probs[1] if len(sorted_probs) > 1 else sorted_probs[0]
+
+                # Calculate entropy: -sum(p * log(p)) for non-zero p
+                import math
+                entropy = -sum(p * math.log(p) for p in class_probs.values() if p > 0)
+
+                rows.append({
+                    "model_id": model_id, "data_id": int(data_id),
+                    "prediction_date": pred_date, "horizon_days": horizon,
+                    "prediction_type": "trend_class",
+                    "prediction_values": {
+                        "predicted_class": predicted_class,
+                        "p_strong_up": p_strong_up,
+                        "p_weak_up": p_weak_up,
+                        "p_neutral": p_neutral,
+                        "p_weak_down": p_weak_down,
+                        "p_strong_down": p_strong_down,
+                        "entropy": entropy,
+                        "margin": margin,
+                    },
+                    "metadata": {},
+                    "run_id": None,
+                })
+
             with conn.cursor() as cur:
-                for data_id in predictions.index:
-                    pred_row = predictions.loc[data_id]
-                    predicted_class = pred_row["predicted_class"]
-
-                    # Get class probabilities (columns start with "probability_")
-                    prob_cols = [c for c in predictions.columns if c.startswith("probability_")]
-                    class_probs = {c.replace("probability_", ""): float(pred_row[c]) for c in prob_cols}
-
-                    # Extract individual probabilities for table columns
-                    p_strong_up = class_probs.get("strong_up", 0.0)
-                    p_weak_up = class_probs.get("weak_up", 0.0)
-                    p_neutral = class_probs.get("flat", 0.0)
-                    p_weak_down = class_probs.get("weak_down", 0.0)
-                    p_strong_down = class_probs.get("strong_down", 0.0)
-
-                    # Calculate margin (difference between top 2 probabilities)
-                    sorted_probs = sorted(class_probs.values(), reverse=True)
-                    margin = sorted_probs[0] - sorted_probs[1] if len(sorted_probs) > 1 else sorted_probs[0]
-
-                    # Calculate entropy: -sum(p * log(p)) for non-zero p
-                    import math
-                    entropy = -sum(p * math.log(p) for p in class_probs.values() if p > 0)
-
-                    cur.execute(
-                        """
-                        INSERT INTO predictions
-                          (model_id, data_id, prediction_date, horizon_days,
-                           prediction_type, prediction_values, metadata, run_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
-                        DO UPDATE SET
-                          prediction_values = EXCLUDED.prediction_values,
-                          metadata = EXCLUDED.metadata,
-                          run_id = EXCLUDED.run_id,
-                          created_at = NOW();
-                        """,
-                        (model_id, int(data_id), pred_date, horizon,
-                         'trend_class',
-                         Json({
-                             "predicted_class": predicted_class,
-                             "p_strong_up": p_strong_up,
-                             "p_weak_up": p_weak_up,
-                             "p_neutral": p_neutral,
-                             "p_weak_down": p_weak_down,
-                             "p_strong_down": p_strong_down,
-                             "entropy": entropy,
-                             "margin": margin,
-                         }),
-                         Json({}),
-                         None),
-                    )
-                    total_predictions += 1
+                insert_predictions_batch(cur, rows)
+            total_predictions = len(rows)
 
             conn.commit()
             grand_total_predictions += total_predictions
@@ -3982,32 +3965,23 @@ def ml_predict_ensemble(
                 predictions = predict_ensemble(ensemble, features_wide)
 
                 # Insert predictions into database
-                with conn.cursor() as cur:
-                    for data_id in predictions.index:
-                        q10 = Decimal(str(predictions.loc[data_id, "q10"]))
-                        q50 = Decimal(str(predictions.loc[data_id, "q50"]))
-                        q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+                rows = []
+                for data_id in predictions.index:
+                    q10 = Decimal(str(predictions.loc[data_id, "q10"]))
+                    q50 = Decimal(str(predictions.loc[data_id, "q50"]))
+                    q90 = Decimal(str(predictions.loc[data_id, "q90"]))
+                    rows.append({
+                        "model_id": model_id, "data_id": int(data_id),
+                        "prediction_date": pred_date, "horizon_days": horizon,
+                        "prediction_type": "quantile",
+                        "prediction_values": {"q10": float(q10), "q50": float(q50), "q90": float(q90)},
+                        "metadata": {"model_version": model_version},
+                        "run_id": run_id,
+                    })
 
-                        cur.execute(
-                            """
-                            INSERT INTO predictions
-                              (model_id, data_id, prediction_date, horizon_days,
-                               prediction_type, prediction_values, metadata, run_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (model_id, data_id, prediction_date, horizon_days, prediction_type)
-                            DO UPDATE SET
-                              prediction_values = EXCLUDED.prediction_values,
-                              metadata = EXCLUDED.metadata,
-                              run_id = EXCLUDED.run_id,
-                              created_at = NOW();
-                            """,
-                            (model_id, int(data_id), pred_date, horizon,
-                             'quantile',
-                             Json({"q10": float(q10), "q50": float(q50), "q90": float(q90)}),
-                             Json({"model_version": model_version}),
-                             run_id),
-                        )
-                        total_predictions += 1
+                with conn.cursor() as cur:
+                    insert_predictions_batch(cur, rows)
+                total_predictions += len(rows)
 
                 emit(f"  Stored {len(predictions)} predictions for {horizon}-day horizon", json_output=json_output)
 
