@@ -176,7 +176,75 @@ one. Two independent controls keep it physical:
 
   **This changes existing `long_short` results.** A book that used to report a
   return below -100% was describing an account that couldn't exist — margin
-  calls now step in before that happens, the same way a real broker would.
+  calls now step in before that happens, in most cases, the same way a real
+  broker would. The margin call is **reactive**, though: it only evaluates
+  once per bar, off that bar's own closing price, and a book of many
+  correlated shorts can gap straight through zero equity in a single bar
+  before it gets a chance to de-risk anything. The equity floor below is the
+  backstop for exactly that case.
+
+## Equity floor: a backtest can never report below -100% (#255)
+
+**This floor applies to any `long_short` backtest with a margin model
+attached** — and `long_short` engines have one attached *by default*: #217's
+auto-attach (above) means a plain `mode="long_short"` engine, with no
+`risk_manager` passed at all, already has a `RiskManager(RiskLimits())`
+underneath it (`maintenance_margin=0.25`). The clamp represents that broker's
+intervention, so it fires wherever the broker does — regardless of whether
+you configured it yourself or the engine attached it for you:
+
+- **`mode="long_short"`, no `risk_manager` passed** → #217's auto-attach
+  supplies the default margin model, so the floor is live. This is the
+  common case, including `gefion backtest ab-compare`'s own engine
+  construction.
+- **An explicit `RiskManager(RiskLimits())` (or any `RiskLimits` with
+  `maintenance_margin` set) passed in** → the floor is live, same as above.
+- **An explicit `RiskManager(RiskLimits(maintenance_margin=None))`** → the
+  only way to turn the broker off. With no margin model at all, equity is
+  never clamped — a `long_short` book can (and, if it blows up violently
+  enough, will) report a return below -100%, negative equity included. This
+  is deliberate — see `test_negative_equity_is_represented_not_clamped` in
+  `tests/test_backtest_short_risk.py`, which constructs the engine this way
+  specifically to exercise that path.
+
+Whatever happens intra-book once a margin model IS attached — a margin call
+that fires too late, a gap the maintenance-margin check couldn't see coming —
+**the reported result is floored at -100%.** Once mark-to-market equity
+reaches `<= 0` on a bar:
+
+- all remaining positions are closed and equity is set to **exactly `0.0`**;
+- the account is marked **blown**, with the date it happened recorded
+  alongside the flag;
+- **the engine stops trading for the rest of the run** — no further signals
+  are generated and no further trades execute. A wiped account has no capital
+  left to trade with.
+
+`total_return` and `max_drawdown` fall out of this for free: with the last
+equity-curve point clamped to `0.0`, `total_return == -1.0` exactly and
+`max_drawdown` cannot exceed `-1.0` either. Both are **absolute floors** —
+past zero, the number says nothing about the strategy anymore; a loss beyond
+the account is the broker's problem, not the strategy's P&L.
+
+The flag surfaces on the engine result:
+
+```python
+result = engine.run()
+result["blown"]       # bool
+result["blown_date"]  # date the account was wiped, or None if it never was
+```
+
+and per-arm in `gefion backtest ab-compare` — an arm that was wiped is **not
+comparable** to one that traded through, even if both happen to show a bad
+`total_return`, so the report and the human-readable table call it out
+explicitly (`Blown: YES (2020-06-01)` vs `Blown: no`) rather than letting a
+flat `-100%` for one arm blend in with an ordinary bad number. `ab-compare`'s
+own engine construction passes `mode="long_short"` with no explicit
+`risk_manager`, so per the condition above it gets #217's default margin
+model and the #255 floor along with it — a wiped arm reports `Blown: YES`.
+
+`long_only` cannot reach this floor: a cash-funded book always has
+`equity / gross_exposure >= 1.0` (the same reasoning #211 and #217 rely on),
+so the clamp is a structural no-op there.
 
 ## Universe A/B comparison (the go/no-go)
 

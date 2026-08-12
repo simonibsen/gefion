@@ -251,6 +251,47 @@ class BacktestEngine:
             return 1.0
         return room / opening
 
+    def _has_margin_model(self) -> bool:
+        """Whether a broker enforcing maintenance margin exists (#255).
+
+        The #255 equity floor represents a broker's intervention, so it
+        applies whenever the engine actually has a margin model attached --
+        whether the caller passed a RiskManager explicitly or #217's
+        long_short auto-attach supplied one. Only a RiskManager with
+        `maintenance_margin` explicitly set to None disables it; no
+        configured broker -> no clamp, equity is represented faithfully,
+        negative or not.
+        """
+        return (
+            self.risk_manager is not None
+            and self.risk_manager.limits.maintenance_margin is not None
+        )
+
+    def _apply_equity_floor(
+        self, portfolio: Portfolio, current_prices: Dict[str, float],
+        equity: float, current_date: date,
+    ) -> tuple[float, bool]:
+        """Clamp mark-to-market equity at zero and foreclose the account (#255).
+
+        A backtest must never REPORT a return below -100% -- past zero the
+        number describes an account that can't exist; that's the broker's
+        problem, not the strategy's P&L. `#217's maintenance-margin call is
+        reactive and can't always catch a violent, correlated move before it
+        carries equity through zero (see docs/BACKTESTING.md) -- this is the
+        backstop that makes -100% an absolute floor regardless.
+
+        `<= 0` (not `< 0`): the account is gone the instant equity reaches
+        exactly zero, not just once it dips below.
+
+        Returns (possibly-clamped equity, whether this call just blew the
+        account). Positions/cash are only mutated when it did.
+        """
+        if equity > 0:
+            return equity, False
+        portfolio.positions = {}
+        portfolio.cash = 0.0
+        return 0.0, True
+
     def _get_historical_prices(self, current_date: date) -> Dict[str, List[Dict[str, Any]]]:
         """
         Get historical prices up to (and including) current date.
@@ -309,6 +350,8 @@ class BacktestEngine:
         trades = []
         equity_curve = []
         exposure_curve: List[Dict[str, Any]] = []
+        blown = False
+        blown_date: Optional[date] = None
 
         for current_date in self._trading_dates:
             # Get current prices for this date
@@ -395,9 +438,23 @@ class BacktestEngine:
 
             # Record equity for this date
             equity = portfolio.calculate_equity(current_prices)
+
+            # Clamp equity at zero and mark the account blown (#255) -- a
+            # backtest must never report a return below -100%, but ONLY when
+            # a broker (margin model) exists to enforce it.
+            just_blown = False
+            if self._has_margin_model():
+                equity, just_blown = self._apply_equity_floor(
+                    portfolio, current_prices, equity, current_date)
+
             equity_curve.append({"date": current_date, "equity": equity})
             exposure_curve.append(
                 self._bar_exposure(portfolio, current_prices, equity, current_date))
+
+            if just_blown:
+                blown = True
+                blown_date = current_date
+                break  # stop trading for the remainder of the run
 
         # Calculate metrics
         from gefion.backtest.metrics import calculate_metrics
@@ -414,6 +471,8 @@ class BacktestEngine:
             borrow_total=self._borrow_total,
             dividends_total=self._dividends_total,
             margin_events=len(self._margin_events),
+            blown=blown,
+            blown_date=str(blown_date) if blown_date else "",
         )
 
         logger.info(
@@ -427,7 +486,9 @@ class BacktestEngine:
                 "short_costs": {"borrow_total": self._borrow_total,
                                 "dividends_total": self._dividends_total},
                 "margin_events": self._margin_events,
-                "exposure": exposure_curve}
+                "exposure": exposure_curve,
+                "blown": blown,
+                "blown_date": blown_date}
 
     def _execute_signal(
         self,

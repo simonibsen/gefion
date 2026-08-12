@@ -46,7 +46,8 @@ def _config():
 
 
 def _arm_result(label, train_uni, trade_uni, positions, *,
-                total_return=0.20, sharpe=1.5, max_dd=-0.10, n_days=252):
+                total_return=0.20, sharpe=1.5, max_dd=-0.10, n_days=252,
+                blown=False, blown_date=None):
     """Build an ArmResult with an equity-curve summary + a positions ledger."""
     from gefion.backtest.ab_compare import ArmResult
 
@@ -61,6 +62,8 @@ def _arm_result(label, train_uni, trade_uni, positions, *,
                        "equity": 100000.0 * (1 + total_return)}],
         positions=positions,
         n_trading_days=n_days,
+        blown=blown,
+        blown_date=blown_date,
     )
 
 
@@ -185,6 +188,25 @@ class TestArmSummary:
         d = compute_deltas(compute_arm_summary(arm_a), compute_arm_summary(arm_b))
         assert d["total_return"] == pytest.approx(0.15)
         assert d["sharpe"] == pytest.approx(0.4)
+
+    def test_blown_flag_and_date_surface_in_summary(self):
+        """#255: an arm that was wiped is not comparable to one that traded
+        through -- the summary must say so explicitly, not just report a
+        -1.0 total_return that looks like any other bad run."""
+        from gefion.backtest.ab_compare import compute_arm_summary
+
+        arm = _arm_result("B", "u", "u", [], total_return=-1.0,
+                          blown=True, blown_date=date(2020, 3, 17))
+        s = compute_arm_summary(arm)
+        assert s["blown"] is True
+        assert s["blown_date"] == "2020-03-17"
+
+    def test_blown_defaults_false_with_no_date_for_a_surviving_arm(self):
+        from gefion.backtest.ab_compare import compute_arm_summary
+
+        s = compute_arm_summary(_arm_result("A", "u", "u", []))
+        assert s["blown"] is False
+        assert s["blown_date"] is None
 
 
 # --------------------------------------------------------------------------- #
@@ -442,6 +464,24 @@ class TestReportShape:
         note = report["note"].lower()
         assert "human" in note or "not" in note
 
+    def test_blown_flag_surfaces_per_arm_in_report_and_human_table(self):
+        from gefion.backtest.ab_compare import build_ab_report, format_ab_report
+
+        arm_a = _arm_result("A", "nasdaq-only", "nasdaq-only", [])
+        arm_b = _arm_result("B", "nasdaq-plus-nyse", "nasdaq-plus-nyse", [],
+                            total_return=-1.0, blown=True,
+                            blown_date=date(2020, 6, 1))
+        nt = {"arm_a_edge": 0.0, "arm_b_edge": 0.0, "delta": 0.0,
+              "diluted": False, "n_shared_b": 0, "verdict": "no dilution"}
+        report = build_ab_report({"A": arm_a, "B": arm_b}, _config(), nt)
+
+        assert report["arms"]["A"]["blown"] is False
+        assert report["arms"]["B"]["blown"] is True
+        assert report["arms"]["B"]["blown_date"] == "2020-06-01"
+
+        text = format_ab_report(report)
+        assert "2020-06-01" in text
+
     def test_checkpoint_provenance_surfaces_in_human_table(self):
         from gefion.backtest.ab_compare import build_ab_report, format_ab_report
 
@@ -610,6 +650,32 @@ class TestCheckpointResume:
         report = run_ab_compare(**self._kwargs(tmp_path, calls))
         assert report["checkpoint_provenance"]["A"]["reused"] is False
         assert report["checkpoint_provenance"]["B"]["reused"] is False
+
+    def test_blown_flag_and_date_survive_a_checkpoint_round_trip(self, tmp_path):
+        """A blown arm reused from checkpoint (#234) must still report
+        blown=True with its original date — not silently lost on reuse."""
+        from gefion.backtest.ab_compare import run_ab_compare
+
+        def blown_runner(spec, config, conn):
+            return _arm_result(spec.label, spec.train_universe,
+                               spec.trade_universe, [], total_return=-1.0,
+                               blown=(spec.label == "B"),
+                               blown_date=date(2020, 4, 9)
+                               if spec.label == "B" else None)
+
+        kwargs = dict(self._kwargs(tmp_path, []), arm_runner=blown_runner)
+        report1 = run_ab_compare(**kwargs)
+        assert report1["arms"]["B"]["blown"] is True
+        assert report1["arms"]["B"]["blown_date"] == "2020-04-09"
+
+        calls = []
+        kwargs = dict(self._kwargs(tmp_path, calls), arm_runner=blown_runner)
+        report2 = run_ab_compare(**kwargs)
+        assert calls == []  # both reused from checkpoint
+        assert report2["arms"]["B"]["blown"] is True
+        assert report2["arms"]["B"]["blown_date"] == "2020-04-09"
+        assert report2["arms"]["A"]["blown"] is False
+        assert report2["arms"]["A"]["blown_date"] is None
 
     @pytest.mark.parametrize("field_name,new_value", _CONFIG_FIELD_VARIANTS)
     def test_changed_config_field_forces_rebuild_of_both_arms(

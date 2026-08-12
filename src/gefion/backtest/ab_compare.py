@@ -153,6 +153,12 @@ class ArmResult:
     positions: List[Dict[str, Any]]         # realized ledger (see above)
     n_trading_days: int                     # for annualization
     artifacts: Dict[str, Any] = field(default_factory=dict)  # dataset/model provenance
+    # Account-blown flag + date (#255) — BacktestEngine clamps equity at zero
+    # and stops trading once it's wiped. An arm that was wiped is not
+    # comparable to one that traded through, so this rides the ArmResult
+    # rather than being buried inside `metrics`.
+    blown: bool = False
+    blown_date: Optional[date] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -232,6 +238,8 @@ def compute_arm_summary(arm: ArmResult) -> Dict[str, Any]:
         "n_positions": len(arm.positions),
         "n_long": len(longs),
         "n_short": len(shorts),
+        "blown": arm.blown,
+        "blown_date": arm.blown_date.isoformat() if arm.blown_date else None,
     }
 
 
@@ -388,6 +396,8 @@ def format_ab_report(report: Dict[str, Any]) -> str:
         ("Annualized return", lambda s: _fmt(s["annualized_return"], pct=True), False),
         ("Sharpe", lambda s: _fmt(s["sharpe"]), False),
         ("Max drawdown", lambda s: _fmt(s["max_drawdown"], pct=True), False),
+        ("Blown",
+         lambda s: f"YES ({s['blown_date']})" if s["blown"] else "no", False),
         ("Position breadth", lambda s: f"{s['position_breadth']:.1f}", False),
         ("Tail richness", lambda s: _fmt(s["tail_richness"], pct=True), False),
         ("Capacity proxy ($vol)", lambda s: f"{s['capacity_proxy']:,.0f}", False),
@@ -677,6 +687,8 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
             n_trading_days=len(bt.get("equity_curve", [])),
             artifacts={"dataset": f"{ds_name}:{ds_version}",
                        "model": f"{model_name}:{model_version}"},
+            blown=bt.get("blown", False),
+            blown_date=bt.get("blown_date"),
         )
 
 
@@ -777,10 +789,13 @@ def _arm_result_to_dict(result: ArmResult) -> Dict[str, Any]:
         "positions": _serialize_rows(result.positions),
         "n_trading_days": result.n_trading_days,
         "artifacts": result.artifacts,
+        "blown": result.blown,
+        "blown_date": result.blown_date.isoformat() if result.blown_date else None,
     }
 
 
 def _arm_result_from_dict(data: Dict[str, Any]) -> ArmResult:
+    blown_date = data.get("blown_date")
     return ArmResult(
         label=data["label"],
         train_universe=data["train_universe"],
@@ -790,6 +805,8 @@ def _arm_result_from_dict(data: Dict[str, Any]) -> ArmResult:
         positions=_deserialize_rows(data["positions"]),
         n_trading_days=data["n_trading_days"],
         artifacts=data.get("artifacts", {}),
+        blown=data.get("blown", False),
+        blown_date=date.fromisoformat(blown_date) if blown_date else None,
     )
 
 
