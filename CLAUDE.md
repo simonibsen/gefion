@@ -108,6 +108,36 @@ Before exiting plan mode, verify:
 - Use type hints for all function signatures
 - Add docstrings for public functions
 
+### Failure semantics (NON-NEGOTIABLE)
+
+When a code path cannot determine the right answer, it must **stop, or make the
+absence explicit**. Never substitute a plausible-looking value; never take the
+permissive branch on an error path.
+
+- **Missing measurement → `None` / field absent.** Never `0.0`, never `NaN`. Both
+  are number-shaped: they satisfy `isinstance(x, float)`, survive
+  `dict.get(key, default)` untouched, and poison comparisons silently. An absent
+  value fails at the point of use, which is the property being bought.
+- **Unparseable input → the blocking branch.** An undetermined verdict is not
+  approval; an unreadable config is not the default.
+- **Failed operation → abort.** Do not continue with partial state, and do not
+  publish a result derived from it.
+- **Dropped input → warn, naming what was dropped.** Silent filtering is how a
+  parameter goes missing for weeks.
+
+This is not abstract. Every one of these was a real defect, all found 2026-08-10/11:
+
+| What happened | Cost |
+|---|---|
+| `M` pushed after a failed rebase ("pushing as-is") | Force-pushed `main` over two work branches; PRs auto-closed (007 #25) |
+| Reviewer verdict regex didn't match its prose | `request-changes` shipped as a ready PR (007 #24) |
+| `p.get("pnl", 0.0)` on positions that carry no realized PnL | Report published a measured-looking `0.0` (#248) |
+| `NaN` used as the replacement sentinel | Survived `.get(k, default)`, froze `best_score`, wrote invalid JSON (#248) |
+| Backtest let equity go negative | -204% returns; the account traded past broke (#217, #255) |
+| Strategy-param allowlist dropped unknown keys silently | `selection` never reached the strategy; rank mode unreachable from the A/B (#236) |
+
+The reasoning behind each choice is in `docs/DEVELOPMENT.md`.
+
 ### Observability (NON-NEGOTIABLE)
 - New modules MUST import from `gefion.observability` — the pre-commit hook blocks commits of significant files without it
 - Use `with create_span("module.function", key=value) as span:` for significant operations

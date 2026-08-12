@@ -461,3 +461,48 @@ configuration, not schema:
   spans dropped; data unaffected). For bulk jobs either raise Tempo's
   `max_recv_msg_size`, shrink the exporter's `max_export_batch_size`, or run with
   `OTEL_ENABLED=false` and rely on DB-pulse monitoring.
+
+## Fail closed: why absence beats a sentinel (convention)
+
+`CLAUDE.md` carries the rule; this is the reasoning, so it can be applied to cases the
+rule didn't anticipate.
+
+**The pattern.** Nearly every expensive defect found on 2026-08-10/11 shared one
+shape: on a path where the code could not determine the right answer, it took the
+*permissive* branch. It pushed anyway, approved anyway, returned a number anyway,
+kept trading anyway. None of them raised. Each produced a well-formed, confident,
+wrong result — which is strictly worse than a crash, because a crash gets
+investigated and a plausible number gets believed.
+
+**Why `None` and not `0.0`.** A zero is a measurement. `arm_a_shared_pnl: 0.0` reads
+as "we measured the shared PnL and it was nothing," when the truth was "no position
+carried realized PnL, because PnL is realized on the sell/cover leg." A reader
+comparing two arms learns nothing while believing they have. `None` forces the
+question at the point of use.
+
+**Why `None` and not `NaN`.** This one cost us a round. `NaN` looks like the safe
+choice — it's explicitly "not a number" — but it *is* a `float`. It satisfies
+`isinstance(x, float)`, passes through `dict.get(key, default)` without triggering
+the default (the key exists!), and every comparison against it is `False`. In
+`experiments/core.py` that meant a NaN-scoring trial could permanently freeze
+`best_score`, and an invalid `NaN` token was written into JSONB. A value that
+*looks* numeric to every consumer not specifically guarding for it is exactly the
+failure being fixed, wearing a different hat.
+
+**Why "abort" and not "continue with what we have".** `M` used to warn on a failed
+rebase and push regardless. That assumes the failure left the good state intact; a
+rebase that stops before applying anything leaves `HEAD` at the *base*, so "push
+as-is" force-pushed `main` over two work branches and GitHub closed the PRs. The
+guard that fixed it is one line — refuse to push a head equal to the base — and it
+works without knowing why the rebase failed. **Prefer the cheap invariant to the
+clever diagnosis.**
+
+**Why silent drops are their own category.** A filter that discards unknown keys
+without comment is indistinguishable from one that handled them. #237 added a
+`selection` parameter; the A/B harness's allowlist dropped it; rank mode was
+unreachable from the harness for as long as it took someone to notice. The fix was a
+warning naming the dropped keys — behavior unchanged, visibility restored.
+
+**Applying it.** When adding a default, ask: *if this default is wrong, what does the
+caller see?* If the answer is "a plausible value they'll act on," it's the wrong
+default. Prefer failing, or being absent, or being loud.
