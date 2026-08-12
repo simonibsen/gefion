@@ -137,6 +137,47 @@ Activity:
 - Max drawdown of 64.18% shows significant downside risk
 - Only 1 trade executed (low activity, possible data issues or poor momentum signals)
 
+## Account model: gross-exposure budget and maintenance margin
+
+`long_short` backtests simulate a real margin account, not an infinite-credit
+one. Two independent controls keep it physical:
+
+- **Entry-sizing budget (#211)**: opening trades (buy/short) for a bar are
+  scaled down so post-bar gross notional (long + short, marked-to-market)
+  stays within `equity × max_gross_exposure` — `2.0` by default for
+  `long_short` (a dollar-neutral 100% long / 100% short book), `1.0` for
+  `long_only` (a no-op; `buy()` already self-limits to cash). This bounds how
+  big a *new* position can be, but does nothing about a position's path
+  *between* rebalances.
+- **Maintenance margin (#217)**: every bar, mark-to-market, the engine checks
+  `equity / gross_exposure` against `RiskLimits.maintenance_margin` (default
+  `0.25`, matching Reg-T). If the ratio drops below that — a losing short (or
+  long) has moved against the book since the last rebalance — the account is
+  force-liquidated: **just enough** of the position is closed, **largest
+  unrealised loser first**, to restore the ratio to `maintenance_margin` plus
+  a small buffer (so the very next bar's ordinary price noise doesn't
+  immediately re-trigger it). `RiskLimits.initial_margin` (default `0.50`,
+  Reg-T) is declared alongside it for the same account model but isn't read by
+  this check — it applies to opening a position, which is #211/#250's
+  territory, not this one.
+
+  This is **on by default for `long_short`** — it applies even if you never
+  construct a `RiskManager` yourself, the same way the gross-exposure budget
+  above defaults on. Pass a `RiskManager(RiskLimits(maintenance_margin=None))`
+  explicitly if you need to disable it (e.g. to reproduce old, pre-#217
+  numbers for comparison). `long_only` is unaffected: a cash-funded book can
+  never have `equity / gross_exposure` fall below `1.0`, so the check is a
+  structural no-op there.
+
+  A forced liquidation is a real trade — it pays commission and slippage
+  through the normal execution path, just like a strategy-initiated exit, and
+  shows up in `trades` (`reason: "margin_call"`) and `margin_events`
+  (`action: "forced_sell"` / `"forced_cover"`).
+
+  **This changes existing `long_short` results.** A book that used to report a
+  return below -100% was describing an account that couldn't exist — margin
+  calls now step in before that happens, the same way a real broker would.
+
 ## Universe A/B comparison (the go/no-go)
 
 `gefion backtest ab-compare` answers a specific question: is a **wider

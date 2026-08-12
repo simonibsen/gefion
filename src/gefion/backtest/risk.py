@@ -4,6 +4,7 @@ Risk management for backtesting.
 Provides stop loss, take profit, position limits, and drawdown controls.
 All limits are optional and composable.
 """
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -40,8 +41,14 @@ class RiskLimits:
     # Short-side limits (spec 009)
     max_short_exposure: Optional[float] = None  # Max Σ|short notional| / equity
     max_gross_exposure: Optional[float] = None  # Max Σ|all notional| / equity
-    initial_margin: Optional[float] = None      # Reg-T initial (e.g. 0.50)
-    maintenance_margin: Optional[float] = None  # Reg-T maintenance (e.g. 0.25)
+
+    # Maintenance margin (#217): forces a partial liquidation when mark-to-market
+    # equity / gross_exposure drops below `maintenance_margin`, evaluated every
+    # bar (not just at rebalance) -- #211 only bounds gross exposure at entry, so
+    # nothing otherwise stops a losing long_short book from compounding past a
+    # -100% (unfunded) return. Defaults are on (Reg-T); set to None to disable.
+    initial_margin: Optional[float] = 0.50      # Reg-T initial (e.g. 0.50)
+    maintenance_margin: Optional[float] = 0.25  # Reg-T maintenance (e.g. 0.25)
 
 
 class RiskManager:
@@ -54,6 +61,12 @@ class RiskManager:
     - Signal filtering (remove blocked signals)
     - Exit signal generation (for positions hitting limits)
     """
+
+    # Headroom above `maintenance_margin` that a liquidation restores to (#217).
+    # Without it, a partial close would land exactly on the breach line and the
+    # very next bar's mark-to-market would re-trigger it on the smallest further
+    # adverse tick -- a small buffer absorbs that noise.
+    _MARGIN_BUFFER = 0.02
 
     def __init__(self, limits: RiskLimits):
         """
@@ -264,6 +277,7 @@ class RiskManager:
             List of sell signals for positions to exit
         """
         exits = []
+        already_exiting = set()
 
         for symbol, position in portfolio.positions.items():
             entry_price = position.get("avg_price", 0)
@@ -300,6 +314,83 @@ class RiskManager:
                         "shares": shares,
                         "reason": reason,
                     })
+                already_exiting.add(symbol)
+
+        exits.extend(self._margin_call_exits(portfolio, prices, already_exiting))
+        return exits
+
+    def _margin_call_exits(
+        self,
+        portfolio: "Portfolio",
+        prices: Dict[str, float],
+        already_exiting: set,
+    ) -> List[Dict[str, Any]]:
+        """
+        Portfolio-level maintenance-margin check (#217).
+
+        Liquidates -- largest unrealised loser first -- just enough to restore
+        mark-to-market equity / gross_exposure above `maintenance_margin` plus
+        `_MARGIN_BUFFER`. Positions already covered by `already_exiting` (a
+        stop-loss/take-profit exit generated above, same bar) are skipped so
+        the same symbol isn't double-closed.
+
+        Gross/equity use the same cost-basis fallback as
+        `Portfolio.calculate_equity` (a symbol with no price this bar marks at
+        its avg_price) so the ratio checked here agrees with what the engine
+        reports elsewhere.
+        """
+        if self.limits.maintenance_margin is None:
+            return []
+
+        positions = portfolio.positions
+        if not positions:
+            return []
+
+        equity = portfolio.calculate_equity(prices)
+        gross = 0.0
+        unrealized: Dict[str, float] = {}
+        for symbol, position in positions.items():
+            shares = position.get("shares", 0)
+            if shares == 0:
+                continue
+            avg_price = position.get("avg_price", 0.0)
+            price = prices.get(symbol, avg_price)
+            gross += abs(shares) * price
+            unrealized[symbol] = (
+                (price - avg_price) * shares if shares > 0
+                else (avg_price - price) * abs(shares)
+            )
+
+        if gross <= 0 or equity / gross >= self.limits.maintenance_margin:
+            return []
+
+        target_ratio = self.limits.maintenance_margin + self._MARGIN_BUFFER
+        # Dollars of gross notional to remove to bring the ratio back up to
+        # target_ratio; a deeply negative equity needs more than 100% of gross
+        # closed, which is impossible, so this clamps to a full liquidation.
+        close_budget = min(gross, gross - equity / target_ratio)
+
+        exits = []
+        for symbol in sorted(unrealized, key=unrealized.get):  # biggest loss first
+            if close_budget <= 0:
+                break
+            if symbol in already_exiting or symbol not in prices:
+                continue
+            position = positions[symbol]
+            shares = position["shares"]
+            price = prices[symbol]
+            if price <= 0:
+                continue
+            close_shares = min(abs(shares), math.ceil(close_budget / price))
+            if close_shares <= 0:
+                continue
+            close_budget -= close_shares * price
+            exits.append({
+                "symbol": symbol,
+                "action": "sell" if shares > 0 else "cover",
+                "shares": int(close_shares),
+                "reason": "margin_call",
+            })
 
         return exits
 

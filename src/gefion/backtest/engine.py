@@ -11,13 +11,13 @@ from datetime import date
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from gefion.backtest.portfolio import Portfolio
+from gefion.backtest.risk import RiskLimits, RiskManager
 from gefion.observability import create_span, set_attributes
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from gefion.backtest.costs import TransactionCosts
-    from gefion.backtest.risk import RiskManager
     from gefion.backtest.sizing import PositionSizer
     from gefion.backtest.slippage import SlippageModel
 
@@ -93,6 +93,17 @@ class BacktestEngine:
         self.costs = costs
         self.slippage = slippage
         self.risk_manager = risk_manager
+        # Maintenance margin (#217): a broker enforces this whether or not the
+        # caller wires up a RiskManager, mirroring how #211's gross-exposure
+        # budget above defaults on for long_short. Auto-attach a margin-only
+        # RiskManager (RiskLimits() defaults maintenance_margin=0.25 /
+        # initial_margin=0.50, Reg-T) only when the caller left risk_manager
+        # unset; an explicit RiskManager (any mode) is used as configured.
+        # long_only is untouched -- cash-funded buys keep equity/gross >= 1
+        # always, so the check is a structural no-op there and the
+        # reproducibility gate holds regardless.
+        if self.risk_manager is None and mode == "long_short":
+            self.risk_manager = RiskManager(RiskLimits())
         self.position_sizer = position_sizer
         self.volume_data = volume_data or {}
         self.volatility_data = volatility_data or {}
@@ -325,16 +336,30 @@ class BacktestEngine:
                 )
                 if executed_trade:
                     trades.append(executed_trade)
+                    reason = signal.get("reason")
                     # A risk-driven forced cover on a losing short is a margin
                     # event (spec 009) — bounds unbounded loss, logged.
-                    if (executed_trade.get("action") == "cover"
-                            and signal.get("reason") == "stop_loss"):
+                    if executed_trade.get("action") == "cover" and reason == "stop_loss":
                         pnl = executed_trade.get("pnl", 0.0)
                         self._margin_events.append({
                             "date": current_date,
                             "symbol": executed_trade["symbol"],
                             "loss": max(0.0, -pnl),
                             "action": "forced_cover",
+                        })
+                    elif reason == "margin_call":
+                        # Maintenance-margin liquidation (#217) — the account-
+                        # level forced de-risk, sell or cover, largest
+                        # unrealised loser first.
+                        pnl = executed_trade.get("pnl", 0.0)
+                        forced_action = ("forced_cover"
+                                         if executed_trade.get("action") == "cover"
+                                         else "forced_sell")
+                        self._margin_events.append({
+                            "date": current_date,
+                            "symbol": executed_trade["symbol"],
+                            "loss": max(0.0, -pnl),
+                            "action": forced_action,
                         })
 
             # 2. Get strategy signals
