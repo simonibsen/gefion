@@ -185,9 +185,33 @@ one. Two independent controls keep it physical:
 
 ## Equity floor: a backtest can never report below -100% (#255)
 
-Whatever happens intra-book — a margin call that fires too late, a gap the
-maintenance-margin check couldn't see coming — **the reported result is
-floored at -100%.** Once mark-to-market equity reaches `<= 0` on a bar:
+**This floor only applies to an account with a margin model attached** — an
+engine constructed with an explicit `RiskManager` whose `maintenance_margin`
+is set (not `None`). The clamp represents a broker's intervention, so it
+only exists where a broker does:
+
+- **No `risk_manager` passed to `BacktestEngine` at all** → there's no
+  broker, so equity is never clamped — a `long_short` book can (and, if it
+  blows up violently enough, will) report a return below -100%, negative
+  equity included. This is deliberate — see
+  `test_negative_equity_is_represented_not_clamped` in
+  `tests/test_backtest_short_risk.py`.
+- **An explicit `RiskManager(RiskLimits())` passed in** (`maintenance_margin`
+  defaults to `0.25`) → the floor is live.
+
+This is a narrower condition than the maintenance-margin *call* described
+above: that one auto-attaches for `long_short` even when you pass no
+`risk_manager` at all, so a plain `mode="long_short"` engine already gets
+per-bar forced liquidations with zero configuration. The #255 floor does
+**not** piggyback on that auto-attach — a `mode="long_short"` engine with no
+explicit `risk_manager` gets #217's reactive margin calls but not the #255
+hard floor; only an explicitly-configured `RiskManager` opts an engine into
+both.
+
+Whatever happens intra-book once a margin model IS attached — a margin call
+that fires too late, a gap the maintenance-margin check couldn't see coming —
+**the reported result is floored at -100%.** Once mark-to-market equity
+reaches `<= 0` on a bar:
 
 - all remaining positions are closed and equity is set to **exactly `0.0`**;
 - the account is marked **blown**, with the date it happened recorded
@@ -214,7 +238,11 @@ and per-arm in `gefion backtest ab-compare` — an arm that was wiped is **not
 comparable** to one that traded through, even if both happen to show a bad
 `total_return`, so the report and the human-readable table call it out
 explicitly (`Blown: YES (2020-06-01)` vs `Blown: no`) rather than letting a
-flat `-100%` for one arm blend in with an ordinary bad number.
+flat `-100%` for one arm blend in with an ordinary bad number. Note that
+`ab-compare`'s own engine construction does not currently pass an explicit
+`risk_manager`, so per the condition above its arms get #217's reactive
+margin calls but not the #255 floor — `Blown` will read `no` even for an arm
+that reports below -100%, until that call site is updated to attach one.
 
 `long_only` cannot reach this floor: a cash-funded book always has
 `equity / gross_exposure >= 1.0` (the same reasoning #211 and #217 rely on),

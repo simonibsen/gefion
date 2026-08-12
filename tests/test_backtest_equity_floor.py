@@ -5,11 +5,18 @@ per-bar off that bar's own mark-to-market price, so a book of correlated
 shorts can gap straight through zero equity in a single bar before the check
 ever gets a chance to de-risk it (confirmed diagnosis: 6-month A/B run,
 v0.62.0, arm B `total_return: -1.958`, i.e. final equity of -51,178 on
-100,000 initial). A backtest must never REPORT a return below -100% -- past
-zero the number describes an account that can't exist. This module tests the
-clamp: once mark-to-market equity reaches <= 0, positions are force-closed,
-equity is set to exactly 0.0, the account is marked blown (with the date),
-and no further signals/trades happen for the remainder of the run.
+100,000 initial). This module tests the clamp: once mark-to-market equity
+reaches <= 0, positions are force-closed, equity is set to exactly 0.0, the
+account is marked blown (with the date), and no further signals/trades
+happen for the remainder of the run.
+
+The clamp represents a broker's intervention, so it only fires where a
+broker exists: an engine with an explicit maintenance-margin RiskManager
+attached. With no risk manager at all, there is nothing to enforce a floor
+and the engine reports true (possibly negative) equity -- see
+`test_no_risk_manager_means_no_clamp` below, and the pre-existing invariant
+this revision must not break, `test_negative_equity_is_represented_not_clamped`
+in tests/test_backtest_short_risk.py.
 
 Does NOT touch #217's maintenance-margin threshold, #211's gross cap, or the
 liquidation logic itself -- those are a live, separate modelling question.
@@ -19,8 +26,14 @@ import datetime as dt
 from gefion.backtest.engine import BacktestEngine
 from gefion.backtest.metrics import calculate_metrics
 from gefion.backtest.portfolio import Portfolio
+from gefion.backtest.risk import RiskLimits, RiskManager
 
 D = dt.date
+
+
+def _margin_rm():
+    """A RiskManager with the (default) maintenance-margin broker attached."""
+    return RiskManager(RiskLimits())
 
 
 def _price_path(start_price, days, daily_growth):
@@ -72,7 +85,7 @@ def test_wipeout_floors_total_return_at_exactly_negative_one():
     engine = BacktestEngine(
         price_data=prices, strategy=_short_once(200), initial_cash=cash,
         start_date=prices[0]["date"], end_date=prices[-1]["date"],
-        mode="long_short",
+        mode="long_short", risk_manager=_margin_rm(),
     )
     result = engine.run()
 
@@ -92,7 +105,7 @@ def test_bad_but_surviving_run_never_gets_clamped_toward_the_floor():
     engine = BacktestEngine(
         price_data=prices, strategy=_short_once(200), initial_cash=cash,
         start_date=prices[0]["date"], end_date=prices[-1]["date"],
-        mode="long_short",
+        mode="long_short", risk_manager=_margin_rm(),
     )
     result = engine.run()
 
@@ -111,7 +124,7 @@ def test_blown_account_stops_trading_for_remainder_of_run():
     engine = BacktestEngine(
         price_data=prices, strategy=strat, initial_cash=cash,
         start_date=prices[0]["date"], end_date=prices[-1]["date"],
-        mode="long_short",
+        mode="long_short", risk_manager=_margin_rm(),
     )
     result = engine.run()
 
@@ -143,7 +156,7 @@ def test_engine_result_carries_blown_flag_and_date():
     engine = BacktestEngine(
         price_data=prices, strategy=_short_once(200), initial_cash=cash,
         start_date=prices[0]["date"], end_date=prices[-1]["date"],
-        mode="long_short",
+        mode="long_short", risk_manager=_margin_rm(),
     )
     result = engine.run()
 
@@ -162,7 +175,7 @@ def test_engine_result_reports_blown_false_and_no_date_when_untouched():
     engine = BacktestEngine(
         price_data=prices, strategy=noop_strat, initial_cash=cash,
         start_date=prices[0]["date"], end_date=prices[-1]["date"],
-        mode="long_short",
+        mode="long_short", risk_manager=_margin_rm(),
     )
     result = engine.run()
 
@@ -182,7 +195,7 @@ def test_surviving_account_reports_ordinary_return_not_flagged():
     engine = BacktestEngine(
         price_data=prices, strategy=_short_once(50), initial_cash=cash,
         start_date=prices[0]["date"], end_date=prices[-1]["date"],
-        mode="long_short",
+        mode="long_short", risk_manager=_margin_rm(),
     )
     result = engine.run()
 
@@ -280,3 +293,41 @@ def test_boundary_reproduced_end_to_end_via_calculate_metrics():
     metrics = calculate_metrics(curve, initial_capital=10_000.0)
     assert metrics["total_return"] == -1.0
     assert metrics["max_drawdown"] == -1.0
+
+
+# --------------------------------------------------------------------------- #
+# 7. The floor represents a broker's intervention -- with no margin model
+#    attached, there is no broker, so equity is represented faithfully, even
+#    negative. This is the invariant a prior revision of #255 broke; also
+#    asserted (as the pre-existing, deliberate spec-009 test that caught it)
+#    in tests/test_backtest_short_risk.py::test_negative_equity_is_represented_not_clamped.
+# --------------------------------------------------------------------------- #
+def test_no_risk_manager_means_no_clamp():
+    """long_short with NO risk_manager at all: equity goes negative and is
+    reported as-is -- there's no broker to foreclose the account."""
+    cash = 10_000.0
+    closes = [100.0, 1000.0]  # 200 shares short @ 100 -> 10x overnight gap
+    prices = _prices(closes)
+    engine = BacktestEngine(
+        price_data=prices, strategy=_short_once(200), initial_cash=cash,
+        start_date=prices[0]["date"], end_date=prices[-1]["date"],
+        mode="long_short", risk_manager=None,
+    )
+    result = engine.run()
+
+    assert result["blown"] is False
+    assert result["blown_date"] is None
+    assert result["equity_curve"][-1]["equity"] == 10_000.0 - 200 * (1000.0 - 100.0)
+    assert result["metrics"]["total_return"] < -1.0  # allowed to go past -100%
+
+
+def test_has_margin_model_false_when_risk_manager_has_no_maintenance_margin():
+    """An explicit RiskManager that opted OUT of maintenance margin
+    (maintenance_margin=None) is not a broker either -- no clamp."""
+    rm = RiskManager(RiskLimits(maintenance_margin=None))
+    engine = BacktestEngine(
+        price_data=[], strategy=lambda *a: [], initial_cash=10_000.0,
+        start_date=D(2025, 1, 1), end_date=D(2025, 1, 1), mode="long_short",
+        risk_manager=rm,
+    )
+    assert engine._has_margin_model() is False
