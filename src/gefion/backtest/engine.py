@@ -93,15 +93,6 @@ class BacktestEngine:
         self.costs = costs
         self.slippage = slippage
         self.risk_manager = risk_manager
-        # Whether the CALLER configured a maintenance-margin broker (#255) --
-        # captured before the #217 auto-attach below fills in a default, so
-        # the #255 equity floor (a broker's intervention) only engages where
-        # a caller actually opted into that broker, not merely because
-        # long_short silently got one. See _has_margin_model().
-        self._explicit_margin_model = (
-            risk_manager is not None
-            and risk_manager.limits.maintenance_margin is not None
-        )
         # Maintenance margin (#217): a broker enforces this whether or not the
         # caller wires up a RiskManager, mirroring how #211's gross-exposure
         # budget above defaults on for long_short. Auto-attach a margin-only
@@ -263,14 +254,18 @@ class BacktestEngine:
     def _has_margin_model(self) -> bool:
         """Whether a broker enforcing maintenance margin exists (#255).
 
-        The #255 equity floor represents a broker's intervention, so it only
-        applies where the caller actually configured one (an explicit
-        RiskManager with `maintenance_margin` set) -- not the #217 default
-        that `long_short` silently auto-attaches when the caller passed
-        nothing at all. No configured broker -> no clamp; equity is
-        represented faithfully, negative or not.
+        The #255 equity floor represents a broker's intervention, so it
+        applies whenever the engine actually has a margin model attached --
+        whether the caller passed a RiskManager explicitly or #217's
+        long_short auto-attach supplied one. Only a RiskManager with
+        `maintenance_margin` explicitly set to None disables it; no
+        configured broker -> no clamp, equity is represented faithfully,
+        negative or not.
         """
-        return self._explicit_margin_model
+        return (
+            self.risk_manager is not None
+            and self.risk_manager.limits.maintenance_margin is not None
+        )
 
     def _apply_equity_floor(
         self, portfolio: Portfolio, current_prices: Dict[str, float],

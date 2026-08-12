@@ -70,6 +70,11 @@ def test_max_short_exposure_blocks_an_oversized_short():
 
 
 def test_negative_equity_is_represented_not_clamped():
-    # a runaway short with no guardrail: price rockets, equity goes negative
-    result = _engine([100.0, 1200.0]).run()               # no risk_manager
+    # a runaway short with no guardrail: price rockets, equity goes negative.
+    # Since #217, long_short engines auto-attach a maintenance-margin model
+    # by default, so "no guardrail" has to be stated explicitly rather than
+    # assumed from omitting risk_manager — pass one with maintenance_margin
+    # disabled to genuinely turn the broker off (#255 round 2).
+    rm = RiskManager(RiskLimits(maintenance_margin=None))
+    result = _engine([100.0, 1200.0], risk_manager=rm).run()
     assert result["equity_curve"][-1]["equity"] == -1_000.0   # 10k − 10×(1200−100)

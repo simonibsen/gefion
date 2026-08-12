@@ -10,13 +10,20 @@ reaches <= 0, positions are force-closed, equity is set to exactly 0.0, the
 account is marked blown (with the date), and no further signals/trades
 happen for the remainder of the run.
 
-The clamp represents a broker's intervention, so it only fires where a
-broker exists: an engine with an explicit maintenance-margin RiskManager
-attached. With no risk manager at all, there is nothing to enforce a floor
-and the engine reports true (possibly negative) equity -- see
-`test_no_risk_manager_means_no_clamp` below, and the pre-existing invariant
-this revision must not break, `test_negative_equity_is_represented_not_clamped`
-in tests/test_backtest_short_risk.py.
+The clamp represents a broker's intervention, so it fires whenever the
+ENGINE actually has a margin model attached -- whether the caller passed a
+RiskManager explicitly, or #217's long_short auto-attach supplied the
+default one, because both represent a real broker enforcing maintenance
+margin. Only a RiskManager with `maintenance_margin` explicitly set to
+`None` turns the broker off -- see
+`test_default_long_short_with_no_risk_manager_kwarg_still_clamps` (the
+`ab_compare.run_arm` shape -- this was the dead path round 1 shipped) and
+`test_has_margin_model_false_when_risk_manager_has_no_maintenance_margin`
+(the genuine opt-out) below. The pre-existing invariant this revision must
+not break -- that an explicitly disabled margin model reports true,
+possibly negative, equity -- is asserted in
+`test_negative_equity_is_represented_not_clamped` in
+tests/test_backtest_short_risk.py.
 
 Does NOT touch #217's maintenance-margin threshold, #211's gross cap, or the
 liquidation logic itself -- those are a live, separate modelling question.
@@ -296,29 +303,35 @@ def test_boundary_reproduced_end_to_end_via_calculate_metrics():
 
 
 # --------------------------------------------------------------------------- #
-# 7. The floor represents a broker's intervention -- with no margin model
-#    attached, there is no broker, so equity is represented faithfully, even
-#    negative. This is the invariant a prior revision of #255 broke; also
-#    asserted (as the pre-existing, deliberate spec-009 test that caught it)
-#    in tests/test_backtest_short_risk.py::test_negative_equity_is_represented_not_clamped.
+# 7. The floor represents a broker's intervention -- it fires whenever the
+#    ENGINE has a margin model attached, regardless of how it got there.
+#    Since #217, `long_short` auto-attaches one by default, so the only way
+#    to have NO broker is to explicitly disable it (`maintenance_margin=
+#    None`); that is the pre-existing invariant a prior revision of #255
+#    broke, asserted (as the pre-existing, deliberate spec-009 test that
+#    caught it) in
+#    tests/test_backtest_short_risk.py::test_negative_equity_is_represented_not_clamped.
 # --------------------------------------------------------------------------- #
-def test_no_risk_manager_means_no_clamp():
-    """long_short with NO risk_manager at all: equity goes negative and is
-    reported as-is -- there's no broker to foreclose the account."""
+def test_default_long_short_with_no_risk_manager_kwarg_still_clamps():
+    """The `ab_compare.run_arm` shape: mode="long_short", no risk_manager
+    kwarg at all. #217 auto-attaches a default maintenance-margin broker, so
+    the #255 floor must still apply -- round 1 silently left this dead
+    because it gated the floor on caller explicitness rather than on the
+    engine actually having a margin model."""
     cash = 10_000.0
     closes = [100.0, 1000.0]  # 200 shares short @ 100 -> 10x overnight gap
     prices = _prices(closes)
     engine = BacktestEngine(
         price_data=prices, strategy=_short_once(200), initial_cash=cash,
         start_date=prices[0]["date"], end_date=prices[-1]["date"],
-        mode="long_short", risk_manager=None,
+        mode="long_short",
     )
     result = engine.run()
 
-    assert result["blown"] is False
-    assert result["blown_date"] is None
-    assert result["equity_curve"][-1]["equity"] == 10_000.0 - 200 * (1000.0 - 100.0)
-    assert result["metrics"]["total_return"] < -1.0  # allowed to go past -100%
+    assert result["blown"] is True
+    assert result["blown_date"] == D(2025, 1, 2)
+    assert result["equity_curve"][-1] == {"date": D(2025, 1, 2), "equity": 0.0}
+    assert result["metrics"]["total_return"] == -1.0
 
 
 def test_has_margin_model_false_when_risk_manager_has_no_maintenance_margin():
