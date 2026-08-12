@@ -315,6 +315,17 @@ the top/bottom-decile cut. Pass `--selection rank` to trade
 `--max-positions` by conviction per side, see #237); the default `absolute`
 selection matches the behavior above and every existing invocation.
 
+Pass `--gross-exposure` to override the engine's entry-sizing budget (#211,
+[above](#account-model-gross-exposure-budget-and-maintenance-margin)) for both
+arms. It is matched like every other control here — one `MatchedConfig`, so it
+can't differ per arm — and echoed in the report's `config` block for
+provenance. Omit it and behavior is unchanged: the engine's own
+mode-dependent default applies (`2.0` for `long_short`). This exists because a
+heavily one-sided book (e.g. rank selection under a model with a negative
+median q50) can blow both arms' accounts at the default leverage before the
+comparison produces a signal — lowering it is a way to test that hypothesis
+without editing code.
+
 The actual NASDAQ vs NASDAQ+NYSE run is gated on a real NYSE ingest (epic
 #179 phases 1-2); this command is the harness, ready to run. Also available as
 the `backtest_ab_compare` MCP tool.

@@ -97,6 +97,13 @@ class MatchedConfig:
     # horizon). None => run_arm falls back to 2%/5%. Shared across arms.
     weak_thresholds: Optional[List[float]] = None
     strong_thresholds: Optional[List[float]] = None
+    # BacktestEngine's entry-sizing budget (#211): opening trades are scaled
+    # down so post-bar gross notional stays within equity * max_gross_exposure.
+    # None (default) => run_arm passes no kwarg at all, so the engine's own
+    # mode-dependent default (2.0 for long_short, 1.0 for long_only) applies
+    # exactly as it does today. Shared across arms like every other control
+    # here -- it must never differ per arm, or the comparison is confounded.
+    max_gross_exposure: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """JSON-serializable echo of the matched config (for the report)."""
@@ -111,6 +118,7 @@ class MatchedConfig:
             "initial_capital": self.initial_capital,
             "weak_thresholds": self.weak_thresholds,
             "strong_thresholds": self.strong_thresholds,
+            "max_gross_exposure": self.max_gross_exposure,
         }
 
 
@@ -661,7 +669,7 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
             return strat.generate_signals(
                 current_date, portfolio, prices, config.initial_capital)
 
-        engine = BacktestEngine(
+        engine_kwargs: Dict[str, Any] = dict(
             price_data=price_data,
             strategy=strategy_fn,
             initial_cash=config.initial_capital,
@@ -669,6 +677,9 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
             end_date=config.end_date,
             mode="long_short",
         )
+        if config.max_gross_exposure is not None:
+            engine_kwargs["max_gross_exposure"] = config.max_gross_exposure
+        engine = BacktestEngine(**engine_kwargs)
         bt = engine.run()
         ledger = _build_positions_ledger(
             bt.get("trades", []), price_data, config.horizon_days)

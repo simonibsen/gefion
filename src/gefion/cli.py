@@ -10328,6 +10328,11 @@ def backtest_ab_compare(
         20, "--rebalance-days", help="Days between rebalances (match the horizon)"),
     max_positions: int = typer.Option(
         20, "--max-positions", help="Max concurrent positions per side"),
+    gross_exposure: Optional[float] = typer.Option(
+        None, "--gross-exposure",
+        help="BacktestEngine's max_gross_exposure, matched across both arms "
+             "(default: unset, so the engine's own mode-dependent default "
+             "applies -- 2.0 for long_short, #211)"),
     selection: str = typer.Option(
         "absolute", "--selection",
         help="MLSignalStrategy candidate selection mode: 'absolute' "
@@ -10382,6 +10387,12 @@ def backtest_ab_compare(
             json_output=json_output,
         )
 
+    if gross_exposure is not None and gross_exposure <= 0:
+        emit_error(
+            f"Invalid --gross-exposure '{gross_exposure}'; must be > 0",
+            json_output=json_output,
+        )
+
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -10414,6 +10425,7 @@ def backtest_ab_compare(
             initial_capital=initial_cash,
             weak_thresholds=weak_list,
             strong_thresholds=strong_list,
+            max_gross_exposure=gross_exposure,
         )
 
         db_url = os.getenv("DATABASE_URL", SETTINGS.database_url)
