@@ -58,8 +58,8 @@ def conn():
                 "INSERT INTO stocks (symbol, status, industry, asset_type) "
                 "VALUES (%s, 'Active', %s, %s)", (sym, ind, at))
             cur.execute(
-                "INSERT INTO stock_ohlcv (data_id, date, close) "
-                "SELECT id, '2024-01-02', 10.0 FROM stocks WHERE symbol = %s",
+                "INSERT INTO stock_ohlcv (data_id, date, close, split_coefficient) "
+                "SELECT id, '2024-01-02', 10.0, 1.0 FROM stocks WHERE symbol = %s",
                 (sym,))
     yield c
     _cleanup(c)

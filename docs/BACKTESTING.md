@@ -183,6 +183,45 @@ one. Two independent controls keep it physical:
   before it gets a chance to de-risk anything. The equity floor below is the
   backstop for exactly that case.
 
+## Point-in-time universe gating in the A/B (#179)
+
+`backtest ab-compare` hands the backtest its **universe name**, never a
+pre-resolved symbol list. This matters more than it looks:
+
+- `universe_members(conn, name)` defaults to `as_of=date.today()`.
+- `load_price_data_for_backtest` treats explicit `symbols=` as a **documented
+  bypass** of its date-aware universe gate.
+
+Together those meant a 2023 backtest ran against *today's* universe. Measured
+on production for the epic #179 window:
+
+```
+members as-of TODAY      : 3,641
+members as-of 2023-08-04 : 4,087
+
+ADIL  in-today=True  in-2023-08-04=False
+FFAI  in-today=True  in-2023-08-04=False
+MNTS  in-today=True  in-2023-08-04=False
+SMX   in-today=True  in-2023-08-04=False
+```
+
+That is why the universe never protected the A/B. All four names that blew up
+the account were sub-$1 on the trade date and were correctly excluded by the
+universe's own `no-penny-stocks` rule (`close < 1.0`). They are members *today*
+only because of the reverse splits that killed the account. The rule worked —
+the A/B never asked it.
+
+Both biases were present at once: **184 symbols qualify today but were not
+tradeable then** (look-ahead), and the historical universe was *larger*, so
+roughly **630 companies that traded then have since delisted** and were absent
+entirely (survivorship).
+
+Predictions resolve membership at **both window endpoints** and union them, so
+the set covers names that have since delisted. A superset is harmless — the
+date-aware gate decides what is actually tradeable on each bar. Residual, stated
+rather than hidden: a symbol that both enters *and* exits strictly inside the
+window is still missed.
+
 ## Split-adjusted pricing (#262, using #264's recovered data)
 
 Backtests price on raw `close`, which is **not** split-adjusted, so a split is

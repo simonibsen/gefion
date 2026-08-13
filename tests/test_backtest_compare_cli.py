@@ -337,6 +337,7 @@ def _create_sample_price_data(days=30):
                 "low": price * 0.98,
                 "close": price,
                 "volume": 1000000,
+                "split_coefficient": 1.0,
             })
 
     return price_data

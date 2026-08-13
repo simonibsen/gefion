@@ -94,6 +94,7 @@ def test_backtest_data_loader_with_symbols(conn):
                 "low": 99.0 + i,
                 "close": 101.0 + i,
                 "volume": 1000000,
+                "split_coefficient": 1.0,
             }]
         )
         insert_stock_ohlcv(
@@ -106,6 +107,7 @@ def test_backtest_data_loader_with_symbols(conn):
                 "low": 199.0 + i,
                 "close": 201.0 + i,
                 "volume": 2000000,
+                "split_coefficient": 1.0,
             }]
         )
 
@@ -154,6 +156,7 @@ def test_backtest_data_loader_with_date_range(conn):
                 "low": 99.0,
                 "close": 101.0,
                 "volume": 1000000,
+                "split_coefficient": 1.0,
             }]
         )
 
@@ -215,6 +218,7 @@ def test_backtest_run_end_to_end(conn):
                 "low": close * 0.99,
                 "close": close,
                 "volume": 1000000,
+                "split_coefficient": 1.0,
             }]
         )
 
@@ -325,6 +329,7 @@ def test_get_available_symbols(conn):
                 "low": 99.0,
                 "close": 101.0,
                 "volume": 1000000,
+                "split_coefficient": 1.0,
             }]
         )
 
@@ -363,6 +368,7 @@ def test_backtest_with_limit(conn):
                 "low": 99.0,
                 "close": 101.0,
                 "volume": 1000000,
+                "split_coefficient": 1.0,
             }]
         )
 
