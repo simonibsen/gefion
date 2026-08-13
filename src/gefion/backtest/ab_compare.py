@@ -215,7 +215,7 @@ def _capacity_proxy(positions: List[Dict[str, Any]]) -> float:
     return float(statistics.median(vols))
 
 
-def _none_if_nan(value: float) -> Optional[float]:
+def _none_if_nan(value: Optional[float]) -> Optional[float]:
     """`calculate_metrics` reports an undefined Sharpe as ``float('nan')``
     (#248) -- a real float, so it's fine for internal arithmetic, but a bare
     NaN token is not valid JSON (Python's ``json`` module emits one anyway;
@@ -223,13 +223,27 @@ def _none_if_nan(value: float) -> Optional[float]:
     too). Report-surfaced fields translate it to ``None`` at the boundary,
     same as `_shared_edge`'s `total_pnl` (#248 defect 1) -- explicitly
     absent, never a value that merely looks like a number.
+
+    ``value`` may already be ``None`` -- a checkpoint round-trip (#261)
+    stores an undefined Sharpe as JSON ``null`` and reads it back as
+    ``None`` rather than ``float('nan')``; both spellings of "undefined"
+    pass through unchanged.
     """
+    if value is None:
+        return None
     return None if math.isnan(value) else value
 
 
 def compute_arm_summary(arm: ArmResult) -> Dict[str, Any]:
-    """Roll a realized ArmResult up to the comparison metrics (per #197)."""
-    total_return = float(arm.metrics.get("total_return", 0.0))
+    """Roll a realized ArmResult up to the comparison metrics (per #197).
+
+    Indexes ``arm.metrics`` directly rather than via ``.get(key, 0.0)``: a
+    missing key means the pipeline failed to report a metric it always
+    reports, and a KeyError at the point of use beats a measured-looking
+    0.0 nobody measured (CLAUDE.md failure semantics; the #248 ``p.get("pnl",
+    0.0)`` defect shape).
+    """
+    total_return = float(arm.metrics["total_return"])
     longs = [p for p in arm.positions if p["side"] == "long"]
     shorts = [p for p in arm.positions if p["side"] == "short"]
     return {
@@ -238,8 +252,8 @@ def compute_arm_summary(arm: ArmResult) -> Dict[str, Any]:
         "trade_universe": arm.trade_universe,
         "total_return": total_return,
         "annualized_return": _annualized_return(total_return, arm.n_trading_days),
-        "sharpe": _none_if_nan(float(arm.metrics.get("sharpe_ratio", 0.0))),
-        "max_drawdown": float(arm.metrics.get("max_drawdown", 0.0)),
+        "sharpe": _none_if_nan(arm.metrics["sharpe_ratio"]),
+        "max_drawdown": float(arm.metrics["max_drawdown"]),
         "position_breadth": _position_breadth(arm.positions),
         "tail_richness": _tail_richness(arm.positions),
         "capacity_proxy": _capacity_proxy(arm.positions),
@@ -791,11 +805,17 @@ def _deserialize_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _arm_result_to_dict(result: ArmResult) -> Dict[str, Any]:
+    # `calculate_metrics` may report an undefined Sharpe as float('nan')
+    # (#248) -- fine for internal arithmetic, but a bare NaN token isn't
+    # valid JSON (#261). Translate any non-finite metric to None before it
+    # hits the checkpoint file, same boundary treatment as the report.
+    metrics = {k: (_none_if_nan(v) if isinstance(v, float) else v)
+               for k, v in result.metrics.items()}
     return {
         "label": result.label,
         "train_universe": result.train_universe,
         "trade_universe": result.trade_universe,
-        "metrics": result.metrics,
+        "metrics": metrics,
         "equity_curve": _serialize_rows(result.equity_curve),
         "positions": _serialize_rows(result.positions),
         "n_trading_days": result.n_trading_days,
@@ -844,8 +864,11 @@ def load_arm_checkpoint(checkpoint_dir: Path, key: str) -> Optional[ArmResult]:
 def save_arm_checkpoint(checkpoint_dir: Path, key: str, result: ArmResult) -> None:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     path = _checkpoint_path(checkpoint_dir, key)
+    # allow_nan=False: any non-finite value that slips past the sanitizing
+    # above must raise here, at the write, rather than silently producing a
+    # checkpoint file no strict JSON parser can read (#261).
     path.write_text(json.dumps(_arm_result_to_dict(result), indent=2,
-                               sort_keys=True, default=str))
+                               sort_keys=True, default=str, allow_nan=False))
 
 
 # --------------------------------------------------------------------------- #
