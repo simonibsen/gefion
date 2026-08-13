@@ -842,3 +842,83 @@ class TestCheckpointDir:
             checkpoint_dir=tmp_path,
         )
         assert calls == ["A", "B"]
+
+
+# --------------------------------------------------------------------------- #
+# 7. Checkpoint files must be valid JSON — bare NaN is not (issue #261).
+# --------------------------------------------------------------------------- #
+def _strict_json_loads(text):
+    """Reject the bare ``NaN``/``Infinity`` tokens Python's json module
+    accepts by default but which no other JSON parser (jq, PostgreSQL jsonb,
+    ...) does."""
+    import json
+
+    def _reject(_token):
+        raise ValueError(f"non-finite token in JSON: {_token}")
+
+    return json.loads(text, parse_constant=_reject)
+
+
+class TestCheckpointJSONValidity:
+    def test_undefined_sharpe_serializes_as_null_not_bare_nan(self, tmp_path):
+        from gefion.backtest.ab_compare import save_arm_checkpoint
+
+        arm = _arm_result("A", "u", "u", [], sharpe=float("nan"))
+        save_arm_checkpoint(tmp_path, "some-key", arm)
+
+        raw = (tmp_path / "some-key.json").read_text()
+        data = _strict_json_loads(raw)  # must not raise
+        assert data["metrics"]["sharpe_ratio"] is None
+
+    def test_undefined_sharpe_round_trips_as_none_not_zero(self, tmp_path):
+        from gefion.backtest.ab_compare import load_arm_checkpoint, save_arm_checkpoint
+
+        arm = _arm_result("A", "u", "u", [], sharpe=float("nan"))
+        save_arm_checkpoint(tmp_path, "some-key", arm)
+
+        loaded = load_arm_checkpoint(tmp_path, "some-key")
+        assert loaded.metrics["sharpe_ratio"] is None
+        assert loaded.metrics["sharpe_ratio"] != 0.0
+
+    def test_finite_sharpe_round_trips_unchanged(self, tmp_path):
+        from gefion.backtest.ab_compare import load_arm_checkpoint, save_arm_checkpoint
+
+        arm = _arm_result("A", "u", "u", [], sharpe=1.75)
+        save_arm_checkpoint(tmp_path, "some-key", arm)
+
+        loaded = load_arm_checkpoint(tmp_path, "some-key")
+        assert loaded.metrics["sharpe_ratio"] == 1.75
+
+    def test_compute_arm_summary_handles_a_checkpoint_round_tripped_none_sharpe(
+            self, tmp_path):
+        """A Sharpe that round-tripped through a checkpoint as ``None``
+        (rather than the in-memory ``float('nan')``) must still summarize as
+        an undefined Sharpe, not raise and not become 0.0."""
+        from gefion.backtest.ab_compare import (
+            compute_arm_summary, load_arm_checkpoint, save_arm_checkpoint)
+
+        arm = _arm_result("A", "u", "u", [], sharpe=float("nan"))
+        save_arm_checkpoint(tmp_path, "some-key", arm)
+        loaded = load_arm_checkpoint(tmp_path, "some-key")
+
+        summary = compute_arm_summary(loaded)
+        assert summary["sharpe"] is None
+
+
+class TestComputeArmSummaryMissingMetrics:
+    def test_raises_on_missing_metrics_key_instead_of_reporting_zero(self):
+        """A metrics dict missing a key must raise, not silently report a
+        measured-looking 0.0 (the #248 ``p.get("pnl", 0.0)`` failure shape)."""
+        from gefion.backtest.ab_compare import ArmResult, compute_arm_summary
+
+        arm = ArmResult(
+            label="A",
+            train_universe="u",
+            trade_universe="u",
+            metrics={"sharpe_ratio": 1.0, "max_drawdown": -0.1},  # total_return missing
+            equity_curve=[],
+            positions=[],
+            n_trading_days=252,
+        )
+        with pytest.raises(KeyError):
+            compute_arm_summary(arm)
