@@ -188,11 +188,14 @@ def test_loader_applies_the_guard(monkeypatch):
     backtest through; the guard belongs there, not at each call site."""
     import gefion.backtest.data_loader as dl
 
+    # Trailing column is split_coefficient (#264). 1.0 throughout, so ADIL's
+    # jump is UNEXPLAINED by any split and must still be refused -- the guard
+    # and the split adjustment compose rather than one masking the other.
     rows = [
-        ("ADIL", date(2023, 8, 1), 0.2365, 0.23, 0.24, 0.23, 1000),
-        ("ADIL", date(2023, 8, 2), 6.22, 6.0, 6.3, 6.0, 1000),
-        ("GOOD", date(2023, 8, 1), 10.0, 10.0, 10.0, 10.0, 1000),
-        ("GOOD", date(2023, 8, 2), 10.5, 10.5, 10.5, 10.5, 1000),
+        ("ADIL", date(2023, 8, 1), 0.2365, 0.23, 0.24, 0.23, 1000, 1.0),
+        ("ADIL", date(2023, 8, 2), 6.22, 6.0, 6.3, 6.0, 1000, 1.0),
+        ("GOOD", date(2023, 8, 1), 10.0, 10.0, 10.0, 10.0, 1000, 1.0),
+        ("GOOD", date(2023, 8, 2), 10.5, 10.5, 10.5, 10.5, 1000, 1.0),
     ]
 
     class _Cur:

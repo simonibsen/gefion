@@ -183,6 +183,63 @@ one. Two independent controls keep it physical:
   before it gets a chance to de-risk anything. The equity floor below is the
   backstop for exactly that case.
 
+## Split-adjusted pricing (#262, using #264's recovered data)
+
+Backtests price on raw `close`, which is **not** split-adjusted, so a split is
+indistinguishable from a price move. `load_price_data_for_backtest` now
+back-adjusts using `stock_ohlcv.split_coefficient`, recovered by #264's
+backfill (5,501 corporate actions where the database previously held none).
+
+**Convention**, verified against production rather than assumed: a bar's
+coefficient applies **on that bar** — its close is already post-split. So a bar
+at time `t` is **divided** by the product of coefficients on dates *strictly
+later* than `t`:
+
+| | raw close | coefficient | adjusted |
+|---|---|---|---|
+| WMT 2024-02-23 | 175.56 | 1.0 | 175.56 / 3 = 58.52 |
+| WMT 2024-02-26 | 59.60 | 3.0 (3:1) | 59.60 |
+| ADIL 2023-08-04 | 0.2365 | 1.0 | 0.2365 / 0.04 = 5.91 |
+| ADIL 2023-08-07 | 6.22 | 0.04 (1:25 reverse) | 6.22 |
+
+The coefficient **divides**: forward splits (coefficient > 1) push earlier
+prices down, reverse splits (coefficient < 1) push them up. Volume moves the
+opposite way, so dollar volume stays invariant.
+
+**The direction is load-bearing and pinned by tests.** An implementation that
+multiplies where it should divide is internally consistent, passes every
+continuity check, and is silently backwards — and for ADIL's 0.04 coefficient
+it is a *625x* error rather than a 25x one. `tests/test_backtest_split_adjustment.py`
+plants known 2:1 and 1:25 splits and asserts the direction explicitly, because
+an internally-consistent inversion survived every other layer of review in #010.
+
+**A missing, zero, or negative coefficient drops the symbol**, named in a
+warning. An unknown split history makes every earlier price in that series
+untrustworthy, and unknown is not the same as "no split". 87 symbols came out
+of the #264 backfill still unpopulated; this is what refuses them.
+
+Measured on production data across the four #262 blowup names and the four
+forward splits that defeated the guard below:
+
+| symbol | worst move raw | adjusted |
+|---|---|---|
+| ADIL | 26.30x | 0.847x |
+| MNTS | 37.37x | 0.747x |
+| FFAI | 60.96x | 0.762x |
+| SMX | 18.28x | 0.828x |
+| AAPL | 0.26x | 0.920x |
+| TSLA | 0.33x | 0.973x |
+| WMT | 0.34x | 1.018x |
+| PANW | 0.52x | 0.938x |
+
+All eight become continuous, and none are dropped by the guard afterwards.
+
+**Order matters: adjust first, then guard.** A recorded split is an *explained*
+move, and adjusting removes it from the series. Running the guard first would
+drop every reverse-splitter before its split could be applied — exactly the
+symbols this fix makes tradeable. After adjustment the guard sees only moves
+that nothing accounts for.
+
 ## Price integrity: unexplained moves block the symbol (#262)
 
 Backtests price positions on raw `close`, which is **not split-adjusted**. A
