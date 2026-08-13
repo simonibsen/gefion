@@ -178,6 +178,19 @@ class MLSignalStrategy:
       agreement is the floor. Thin days under-fill rather than trading
       against the signal's own sign. The exit/sell check is unaffected by
       `selection` in both prediction paths.
+    - "pure_rank": no sign floor at all. Candidates are ranked by conviction
+      (q50 for quantile; net probability p_up - p_down for classifier) and
+      the top max_positions go long, the bottom max_positions go short -- a
+      name is shorted because it ranks in the bottom K, not because its
+      score is negative. Balanced by construction whenever there are >= 2x
+      max_positions candidates. return_threshold / confidence_threshold do
+      not apply (they are level filters; pure_rank trades the ordering, not
+      the level). downside_limit still applies to longs. A name is never
+      both long and short: long slots are filled first, and the short pool
+      excludes whatever was already taken long. Measured motivation: a
+      directionally-biased model can rank well (positive out-of-sample rank
+      IC) while its level is biased low, which turns "rank"'s sign floor
+      into a one-sided book -- pure_rank ignores the level entirely.
     """
 
     def __init__(
@@ -202,7 +215,8 @@ class MLSignalStrategy:
         # biased model can starve one side of. "rank" instead requires only
         # sign agreement (q50 > 0 for longs, q50 < 0 for shorts) and takes the
         # top max_positions by conviction on each side -- balanced by
-        # construction. See #220.
+        # construction. See #220. "pure_rank" drops the sign floor too: top/
+        # bottom max_positions by conviction, full stop -- see class docstring.
         selection: str = "absolute",
         # Database
         db_url: Optional[str] = None,
@@ -235,8 +249,8 @@ class MLSignalStrategy:
             max_positions: Maximum concurrent positions per side
             rebalance_days: Days between signal evaluation
             mode: "long_only" or "long_short"
-            selection: "absolute" (default, today's behavior) or "rank" --
-                see class docstring / #220
+            selection: "absolute" (default, today's behavior), "rank", or
+                "pure_rank" -- see class docstring / #220
             db_url: Database connection URL
         """
         self.model_name = model_name
@@ -247,10 +261,11 @@ class MLSignalStrategy:
 
         # Quantile params. return_threshold's default depends on selection
         # mode: 0.02 keeps "absolute" byte-identical to pre-#220 behavior;
-        # "rank" defaults to 0.0 since the sign check is the floor. An
+        # "rank" and "pure_rank" default to 0.0 (rank: sign check is the
+        # floor; pure_rank: the value is unused as an entry gate at all). An
         # explicit value always wins.
         if return_threshold is None:
-            return_threshold = 0.0 if selection == "rank" else 0.02
+            return_threshold = 0.0 if selection in ("rank", "pure_rank") else 0.02
         self.return_threshold = return_threshold
         self.downside_limit = downside_limit
 
@@ -381,30 +396,51 @@ class MLSignalStrategy:
         # Find buy candidates. downside_limit always applies to longs (#220:
         # "stays as-is"). The entry floor itself differs by selection mode:
         # "absolute" keeps the pre-#220 magnitude cutoff; "rank" requires only
-        # sign agreement (q50 > 0) plus the optional return_threshold floor.
-        buy_candidates = []
-        for symbol, pred in predictions.items():
-            if symbol not in current_prices:
-                continue
-            if symbol in positions:
-                continue
-            if pred["q10"] < self.downside_limit:
-                continue
-
-            if self.selection == "rank":
-                qualifies = pred["q50"] > 0 and pred["q50"] >= self.return_threshold
-            else:
-                qualifies = pred["q50"] >= self.return_threshold
-
-            if qualifies:
-                buy_candidates.append({
+        # sign agreement (q50 > 0) plus the optional return_threshold floor;
+        # "pure_rank" drops the sign floor too -- return_threshold does not
+        # apply, candidates are ranked by q50 alone.
+        all_ranked_candidates = None
+        if self.selection == "pure_rank":
+            all_ranked_candidates = []
+            for symbol, pred in predictions.items():
+                if symbol not in current_prices:
+                    continue
+                if symbol in positions:
+                    continue
+                all_ranked_candidates.append({
                     "symbol": symbol,
                     "q50": pred["q50"],
                     "q10": pred["q10"],
                     "q90": pred.get("q90", pred["q50"]),
                 })
+            all_ranked_candidates.sort(key=lambda x: x["q50"], reverse=True)
+            buy_candidates = [
+                c for c in all_ranked_candidates if c["q10"] >= self.downside_limit
+            ]
+        else:
+            buy_candidates = []
+            for symbol, pred in predictions.items():
+                if symbol not in current_prices:
+                    continue
+                if symbol in positions:
+                    continue
+                if pred["q10"] < self.downside_limit:
+                    continue
 
-        buy_candidates.sort(key=lambda x: x["q50"], reverse=True)
+                if self.selection == "rank":
+                    qualifies = pred["q50"] > 0 and pred["q50"] >= self.return_threshold
+                else:
+                    qualifies = pred["q50"] >= self.return_threshold
+
+                if qualifies:
+                    buy_candidates.append({
+                        "symbol": symbol,
+                        "q50": pred["q50"],
+                        "q10": pred["q10"],
+                        "q90": pred.get("q90", pred["q50"]),
+                    })
+
+            buy_candidates.sort(key=lambda x: x["q50"], reverse=True)
 
         # max_positions is enforced PER SIDE (#210): count only existing longs
         # against the long budget (a short must not steal a long slot), and take
@@ -413,7 +449,8 @@ class MLSignalStrategy:
         n_sells = len([s for s in signals if s["action"] == "sell"])
         long_slots = max(0, self.max_positions - existing_longs + n_sells)
 
-        for candidate in buy_candidates[:long_slots]:
+        chosen_longs = buy_candidates[:long_slots]
+        for candidate in chosen_longs:
             symbol = candidate["symbol"]
             price = current_prices[symbol]
             position_value = initial_cash * self.position_size
@@ -432,7 +469,17 @@ class MLSignalStrategy:
         # than shorting every bearish name (the ~2000-short book that degenerated
         # the A/B). Existing shorts consume the short budget.
         if self.mode == "long_short":
-            if self.selection == "rank":
+            if self.selection == "pure_rank":
+                # Bottom-K by q50, excluding whatever already filled a long
+                # slot -- a name is never both long and short. downside_limit
+                # does not apply here: it's a long-side filter only.
+                chosen_long_symbols = {c["symbol"] for c in chosen_longs}
+                short_candidates = [
+                    {"symbol": c["symbol"], "q50": c["q50"]}
+                    for c in all_ranked_candidates
+                    if c["symbol"] not in chosen_long_symbols
+                ]
+            elif self.selection == "rank":
                 short_candidates = [
                     {"symbol": s, "q50": p["q50"]}
                     for s, p in predictions.items()
@@ -488,34 +535,56 @@ class MLSignalStrategy:
                         })
 
         # Find buy candidates. Class membership (trend_classes) is the sign
-        # floor in both modes. "absolute" additionally hard-gates on
+        # floor in "absolute"/"rank". "absolute" additionally hard-gates on
         # confidence_threshold; "rank" drops that gate for entries -- sign
         # agreement plus top-K by margin is the floor, same principle as the
-        # quantile path's return_threshold treatment (#220). The exit/sell
-        # check below is untouched in both modes (out of scope: #220 only
-        # covers entry candidate selection).
-        buy_candidates = []
-        for symbol, pred in predictions.items():
-            if symbol not in current_prices:
-                continue
-            if symbol in positions:
-                continue
-
-            if pred["predicted_class"] in self.trend_classes:
-                prob = pred.get(f"p_{pred['predicted_class']}", 0)
-                qualifies = (
-                    True if self.selection == "rank"
-                    else prob >= self.confidence_threshold
+        # quantile path's return_threshold treatment (#220). "pure_rank" drops
+        # class membership too: candidates are ranked by a net probability
+        # score (p_up - p_down, the classifier's analogue of q50) regardless
+        # of predicted_class, and confidence_threshold does not apply. The
+        # exit/sell check below is untouched by `selection` in all modes.
+        all_ranked_candidates = None
+        if self.selection == "pure_rank":
+            all_ranked_candidates = []
+            for symbol, pred in predictions.items():
+                if symbol not in current_prices:
+                    continue
+                if symbol in positions:
+                    continue
+                net_score = (
+                    pred.get("p_strong_up", 0.0) + pred.get("p_weak_up", 0.0)
+                    - pred.get("p_weak_down", 0.0) - pred.get("p_strong_down", 0.0)
                 )
-                if qualifies:
-                    buy_candidates.append({
-                        "symbol": symbol,
-                        "class": pred["predicted_class"],
-                        "probability": prob,
-                        "margin": pred.get("margin", 0),
-                    })
+                all_ranked_candidates.append({
+                    "symbol": symbol,
+                    "class": pred["predicted_class"],
+                    "net_score": net_score,
+                })
+            all_ranked_candidates.sort(key=lambda x: x["net_score"], reverse=True)
+            buy_candidates = list(all_ranked_candidates)
+        else:
+            buy_candidates = []
+            for symbol, pred in predictions.items():
+                if symbol not in current_prices:
+                    continue
+                if symbol in positions:
+                    continue
 
-        buy_candidates.sort(key=lambda x: x["margin"], reverse=True)
+                if pred["predicted_class"] in self.trend_classes:
+                    prob = pred.get(f"p_{pred['predicted_class']}", 0)
+                    qualifies = (
+                        True if self.selection == "rank"
+                        else prob >= self.confidence_threshold
+                    )
+                    if qualifies:
+                        buy_candidates.append({
+                            "symbol": symbol,
+                            "class": pred["predicted_class"],
+                            "probability": prob,
+                            "margin": pred.get("margin", 0),
+                        })
+
+            buy_candidates.sort(key=lambda x: x["margin"], reverse=True)
 
         # max_positions PER SIDE (#210): count only existing longs against the
         # long budget; take the highest-margin longs up to the cap.
@@ -523,38 +592,57 @@ class MLSignalStrategy:
         n_sells = len([s for s in signals if s["action"] == "sell"])
         long_slots = max(0, self.max_positions - existing_longs + n_sells)
 
-        for candidate in buy_candidates[:long_slots]:
+        chosen_longs = buy_candidates[:long_slots]
+        for candidate in chosen_longs:
             symbol = candidate["symbol"]
             price = current_prices[symbol]
             position_value = initial_cash * self.position_size
             shares = int(position_value / price)
 
             if shares > 0:
+                if self.selection == "pure_rank":
+                    reason = (
+                        f"ML pure-rank signal ({candidate['class']}, "
+                        f"net_prob={candidate['net_score']:.2%})"
+                    )
+                else:
+                    reason = f"ML classifier ({candidate['class']}, p={candidate['probability']:.2%})"
                 signals.append({
                     "action": "buy",
                     "symbol": symbol,
                     "shares": shares,
-                    "reason": f"ML classifier ({candidate['class']}, p={candidate['probability']:.2%})",
+                    "reason": reason,
                 })
 
         # Short the most-confident bearish names (long_short only), capped at
         # max_positions PER SIDE (#210): rank by probability, take the top slots.
         if self.mode == "long_short":
-            short_candidates = []
-            for symbol, pred in predictions.items():
-                if symbol in positions or symbol not in current_prices:
-                    continue
-                if pred["predicted_class"] in bearish_classes:
-                    prob = pred.get(f"p_{pred['predicted_class']}", 0)
-                    qualifies = (
-                        True if self.selection == "rank"
-                        else prob >= self.confidence_threshold
-                    )
-                    if qualifies:
-                        short_candidates.append(
-                            {"symbol": symbol,
-                             "cls": pred["predicted_class"], "prob": prob})
-            short_candidates.sort(key=lambda x: x["prob"], reverse=True)
+            if self.selection == "pure_rank":
+                # Bottom-K by net_score, excluding whatever already filled a
+                # long slot -- a name is never both long and short.
+                chosen_long_symbols = {c["symbol"] for c in chosen_longs}
+                short_candidates = [
+                    {"symbol": c["symbol"], "cls": c["class"], "net_score": c["net_score"]}
+                    for c in all_ranked_candidates
+                    if c["symbol"] not in chosen_long_symbols
+                ]
+                short_candidates.sort(key=lambda x: x["net_score"])  # most bearish first
+            else:
+                short_candidates = []
+                for symbol, pred in predictions.items():
+                    if symbol in positions or symbol not in current_prices:
+                        continue
+                    if pred["predicted_class"] in bearish_classes:
+                        prob = pred.get(f"p_{pred['predicted_class']}", 0)
+                        qualifies = (
+                            True if self.selection == "rank"
+                            else prob >= self.confidence_threshold
+                        )
+                        if qualifies:
+                            short_candidates.append(
+                                {"symbol": symbol,
+                                 "cls": pred["predicted_class"], "prob": prob})
+                short_candidates.sort(key=lambda x: x["prob"], reverse=True)
             existing_shorts = sum(1 for sh in positions.values() if sh < 0)
             n_covers = len([s for s in signals if s["action"] == "cover"])
             short_slots = max(0, self.max_positions - existing_shorts + n_covers)
@@ -564,9 +652,16 @@ class MLSignalStrategy:
                 price = current_prices[symbol]
                 shares = int((initial_cash * self.position_size) / price)
                 if shares > 0:
+                    if self.selection == "pure_rank":
+                        reason = (
+                            f"ML pure-rank bearish short ({candidate['cls']}, "
+                            f"net_prob={candidate['net_score']:.2%})"
+                        )
+                    else:
+                        reason = f"ML bearish short ({candidate['cls']}, p={candidate['prob']:.2%})"
                     signals.append({
                         "action": "short", "symbol": symbol, "shares": shares,
-                        "reason": f"ML bearish short ({candidate['cls']}, p={candidate['prob']:.2%})",
+                        "reason": reason,
                     })
 
         return signals

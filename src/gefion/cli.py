@@ -10336,7 +10336,8 @@ def backtest_ab_compare(
     selection: str = typer.Option(
         "absolute", "--selection",
         help="MLSignalStrategy candidate selection mode: 'absolute' "
-             "(default, today's behavior) or 'rank' (opt-in, #237)"),
+             "(default, today's behavior), 'rank' (opt-in, #237), or "
+             "'pure_rank' (top/bottom-K by conviction, no sign floor)"),
     algorithm: str = typer.Option(
         "xgboost", "--algorithm", help="Pooled model algorithm"),
     n_estimators: Optional[int] = typer.Option(
@@ -10379,7 +10380,7 @@ def backtest_ab_compare(
     from gefion.backtest import ab_compare
     from gefion.cli_helpers import db_connection
 
-    valid_selections = ("absolute", "rank")
+    valid_selections = ("absolute", "rank", "pure_rank")
     if selection not in valid_selections:
         emit_error(
             f"Invalid --selection '{selection}'; must be one of: "

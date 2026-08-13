@@ -80,7 +80,11 @@ BUILTIN_STRATEGIES: Dict[str, Dict[str, Any]] = {
     "ml_signal": {
         "module_path": "gefion.strategies.ml_signal",
         "class_name": "MLSignalStrategy",
-        "description": "ML-based strategy using quantile or classifier predictions",
+        "description": "ML-based strategy using quantile or classifier "
+                        "predictions; selection: 'absolute' (magnitude "
+                        "cutoff), 'rank' (sign floor + top-K), or "
+                        "'pure_rank' (top/bottom-K by conviction, no sign "
+                        "floor)",
         "default_params": {
             "model_name": "quantile",
             "model_version": "latest",

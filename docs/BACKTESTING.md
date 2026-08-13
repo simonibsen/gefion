@@ -315,16 +315,17 @@ the top/bottom-decile cut. Pass `--selection rank` to trade
 `--max-positions` by conviction per side, see #237); the default `absolute`
 selection matches the behavior above and every existing invocation.
 
-Pass `--gross-exposure` to override the engine's entry-sizing budget (#211,
-[above](#account-model-gross-exposure-budget-and-maintenance-margin)) for both
-arms. It is matched like every other control here — one `MatchedConfig`, so it
-can't differ per arm — and echoed in the report's `config` block for
-provenance. Omit it and behavior is unchanged: the engine's own
-mode-dependent default applies (`2.0` for `long_short`). This exists because a
-heavily one-sided book (e.g. rank selection under a model with a negative
-median q50) can blow both arms' accounts at the default leverage before the
-comparison produces a signal — lowering it is a way to test that hypothesis
-without editing code.
+Pass `--selection pure_rank` to drop the sign floor entirely: candidates are
+ranked purely by conviction and the top `--max-positions` go long, the bottom
+`--max-positions` go short — a name can be shorted with a positive q50 (or
+longed with a negative one) if that's where it ranks. `--return-threshold`
+does **not** apply in this mode — it is a level filter, and pure_rank ignores
+the level and trades only the ordering. Use it when a model's per-date rank
+IC is positive (the ordering has skill) but its q50 level is biased (a `rank`
+sign floor would then produce a one-sided book — see the measured case that
+motivated this mode: median q50 -0.97%, ranking well out-of-sample, but a
+19-20-short/5-6-long book under `rank` that lost the account regardless of
+gross exposure).
 
 The actual NASDAQ vs NASDAQ+NYSE run is gated on a real NYSE ingest (epic
 #179 phases 1-2); this command is the harness, ready to run. Also available as
