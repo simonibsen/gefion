@@ -5,13 +5,38 @@ Loads historical price data from the database for use in backtesting.
 """
 from __future__ import annotations
 
+import logging
+from collections import defaultdict
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg
 from psycopg import sql
 
 from gefion.observability import create_span, set_attributes
+
+logger = logging.getLogger(__name__)
+
+
+# Day-over-day close ratio beyond which a move is not a market move (#262).
+#
+# The backtest prices on raw `close`, which is NOT split-adjusted, so a 1:20
+# reverse split is indistinguishable from a 20x rally -- and a short held
+# through one loses 1900%. Every account blowup in the epic #179 A/B was this:
+# six runs, six blowups, each on a reverse-split date in a shorted name
+# (ADIL 26.3x, MNTS 37.4x, FFAI 61.0x, SMX 18.3x).
+#
+# We cannot adjust correctly instead: `stock_ohlcv.split_coefficient` is 100%
+# NULL (0 of 1,962,612 rows in 2023 -- no split is recorded anywhere) and
+# `adjusted_close` is corrupt for exactly these serial reverse-splitters
+# (SMX: close $0.129 vs adjusted_close $3.45e9; 2.2% of rows exceed 100x
+# their close). Nor may we INFER the ratio from the jump: a genuine 20x move
+# would then be silently rewritten as a split, which is the plausible-value
+# substitution the failure-semantics rule exists to prevent.
+#
+# So the guard blocks rather than guesses. 4.0 sits well above real single-day
+# equity moves and well below the smallest reverse split we observed.
+IMPLAUSIBLE_MOVE_RATIO = 4.0
 
 
 def resolve_backtest_universe(
@@ -32,6 +57,83 @@ def resolve_backtest_universe(
         return {"universe_name": "explicit", "universe_fingerprint": None}
     with psycopg.connect(db_url) as conn:
         return resolve_universe(conn, universe).provenance()
+
+
+def filter_implausible_price_moves(
+    price_data: List[Dict[str, Any]],
+    max_ratio: float = IMPLAUSIBLE_MOVE_RATIO,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Drop symbols whose close series contains a move we cannot explain (#262).
+
+    A day-over-day close ratio at or beyond ``max_ratio`` (or its reciprocal)
+    is a data event, not a market event -- almost always an unrecorded reverse
+    split. Since no split data exists to adjust with, the symbol is removed
+    from the backtest entirely and named in a warning.
+
+    Dropping the whole symbol rather than the offending bar is deliberate: a
+    position marked at a stale price is worse than one never opened, and the
+    prices on both sides of an unadjusted split are on different scales, so
+    neither side is usable once a split sits between them.
+
+    A non-positive or missing close is treated the same way. The ratio is then
+    undefined, and undefined is not "no move" -- it blocks, exactly as an
+    unparseable config does.
+
+    Args:
+        price_data: Rows of {symbol, date, close, ...}, any order.
+        max_ratio: Blocking threshold, must be > 1.
+
+    Returns:
+        (kept_rows, dropped) where ``dropped`` maps symbol -> the first
+        offending {date, ratio, prev_close, close}. Callers that report should
+        surface ``dropped``; it is never silent.
+
+    Raises:
+        ValueError: if ``max_ratio`` <= 1, which would drop every symbol or
+            none and leave the backtest with a guard that means nothing.
+    """
+    if max_ratio <= 1:
+        raise ValueError(
+            f"max_ratio must be > 1 to be meaningful, got {max_ratio!r}")
+
+    by_symbol: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for row in price_data:
+        by_symbol[row["symbol"]].append(row)
+
+    dropped: Dict[str, Dict[str, Any]] = {}
+    for symbol, rows in by_symbol.items():
+        # Callers order by (date, symbol), so per-symbol order is not
+        # guaranteed by list position -- sort explicitly or a jump gets
+        # measured against the wrong bar.
+        rows.sort(key=lambda r: r["date"])
+        prev = None
+        for row in rows:
+            close = row["close"]
+            if close is None or close <= 0:
+                dropped[symbol] = {"date": row["date"], "ratio": None,
+                                   "prev_close": prev, "close": close}
+                break
+            if prev is not None:
+                ratio = close / prev
+                if ratio >= max_ratio or ratio <= 1.0 / max_ratio:
+                    dropped[symbol] = {"date": row["date"], "ratio": ratio,
+                                       "prev_close": prev, "close": close}
+                    break
+            prev = close
+
+    if dropped:
+        for symbol, info in sorted(dropped.items()):
+            ratio = info["ratio"]
+            logger.warning(
+                "backtest price integrity (#262): dropping %s — close moved "
+                "%s -> %s on %s (%s), which is not a market move and no split "
+                "data exists to adjust it; the symbol is excluded from this "
+                "backtest",
+                symbol, info["prev_close"], info["close"], info["date"],
+                f"{ratio:.1f}x" if ratio is not None else "unusable close")
+
+    kept = [row for row in price_data if row["symbol"] not in dropped]
+    return kept, dropped
 
 
 def load_price_data_for_backtest(
@@ -153,7 +255,16 @@ def load_price_data_for_backtest(
                     for row in rows
                 ]
 
-                set_attributes(span, row_count=len(price_data), table="stock_ohlcv")
+                # Price integrity gate (#262). This function is the single
+                # door price data enters a backtest through, so the guard
+                # belongs here rather than at each call site.
+                raw_row_count = len(price_data)
+                price_data, dropped = filter_implausible_price_moves(price_data)
+
+                set_attributes(span, row_count=len(price_data),
+                               table="stock_ohlcv",
+                               raw_row_count=raw_row_count,
+                               dropped_symbol_count=len(dropped))
                 return price_data
 
 

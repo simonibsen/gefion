@@ -183,6 +183,45 @@ one. Two independent controls keep it physical:
   before it gets a chance to de-risk anything. The equity floor below is the
   backstop for exactly that case.
 
+## Price integrity: unexplained moves block the symbol (#262)
+
+Backtests price positions on raw `close`, which is **not split-adjusted**. A
+1:20 reverse split therefore looks exactly like a 20x overnight rally, and a
+short held through one loses 1900% — enough to end an account on a single
+name. This is not hypothetical: every account blowup in the epic #179 A/B was
+this, six runs for six, each on a reverse-split date in a shorted name (ADIL
+26.3x, MNTS 37.4x, FFAI 61.0x, SMX 18.3x).
+
+So `load_price_data_for_backtest` — the single door price data enters a
+backtest through — drops any symbol whose day-over-day close ratio reaches
+`IMPLAUSIBLE_MOVE_RATIO` (4.0) or its reciprocal, and warns naming the symbol,
+the date, and the ratio. A missing or non-positive close blocks the same way:
+the ratio is undefined, and undefined is not "no move".
+
+**Why it refuses instead of adjusting.** There is nothing trustworthy to
+adjust *with*. `stock_ohlcv.split_coefficient` is 100% NULL (0 of 1,962,612
+rows in 2023 — no split is recorded anywhere), and `adjusted_close` is corrupt
+for precisely these serial reverse-splitters (SMX: close $0.129 against an
+adjusted_close of $3.45 billion; 2.2% of rows exceed 100x their own close), so
+switching columns would make things worse. Inferring the ratio from the jump
+itself is also out: a genuine 20x move would be silently rewritten as a split,
+which is the plausible-value substitution the failure-semantics rule exists to
+prevent. Blocking is the only honest option until real split data lands.
+
+**Why the whole symbol, not the bar.** Prices on either side of an unadjusted
+split are on different scales, so neither side is usable once a split sits
+between them; and a position marked at a stale price is worse than one never
+opened.
+
+Measured cost on production data (2023 H2, all 8,237 symbols with data): 207
+symbols dropped, or 2.51%. Every liquid name tested (AAPL, MSFT, NVDA, TSLA,
+AMZN, GOOGL, META, TXNM) is retained; all four blowup names are caught.
+
+The exclusion is a real limitation, not a free win — it biases a backtest away
+from reverse-splitting micro-caps. That is the correct direction to be wrong
+in (those names are untradeable in this data), but it is a bias, and it is why
+the drop is warned rather than silent.
+
 ## Equity floor: a backtest can never report below -100% (#255)
 
 **This floor applies to any `long_short` backtest with a margin model
