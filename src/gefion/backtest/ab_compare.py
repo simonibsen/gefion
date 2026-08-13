@@ -484,11 +484,17 @@ def format_ab_report(report: Dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 # The real per-arm runner (reuse; integration-exercised, gated on NYSE ingest).
 # --------------------------------------------------------------------------- #
-def _default_universe_resolver(conn, name: str) -> Set[str]:
-    """Resolve a universe name to its member symbol set (spec 015)."""
+def _default_universe_resolver(conn, name: str,
+                               as_of: Optional[date] = None) -> Set[str]:
+    """Resolve a universe name to its member symbol set (spec 015).
+
+    ``as_of`` is explicit because the default is a trap: `universe_members`
+    falls back to `date.today()`, and resolving a historical backtest's
+    universe as-of-today imports both look-ahead and survivorship bias.
+    """
     from gefion.universe import universe_members
 
-    return set(universe_members(conn, name))
+    return set(universe_members(conn, name, as_of=as_of))
 
 
 def _run_cli(cmd: List[str]) -> None:
@@ -640,8 +646,24 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
         _run_cli(train_cmd)
 
         # 3) Predict across the TRADE universe over the backtest window.
-        trade_members = sorted(_default_universe_resolver(conn, spec.trade_universe)) \
-            if conn is not None else None
+        # Predictions must COVER the window, so resolve membership at both
+        # endpoints and union them. As-of-today alone would miss every company
+        # that was tradeable during the window and has since delisted (~630 for
+        # the epic #179 window: 4,087 members on 2023-08-04 vs 3,641 today) --
+        # the survivorship half of the same bug. A superset is harmless: the
+        # loader's date-aware gate decides what is actually tradeable per bar,
+        # and predictions for names it excludes are simply never used.
+        #
+        # Residual, stated rather than hidden: a symbol that both enters AND
+        # exits strictly inside the window is still missed.
+        if conn is not None:
+            members = set(_default_universe_resolver(
+                conn, spec.trade_universe, as_of=config.start_date))
+            members |= set(_default_universe_resolver(
+                conn, spec.trade_universe, as_of=config.end_date))
+            trade_members = sorted(members)
+        else:
+            trade_members = None
         predict_cmd = [
             "ml", "predict",
             "--model-name", model_name, "--model-version", model_version,
@@ -653,12 +675,22 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
         _run_cli(predict_cmd)
 
         # 4) Backtest long/short on q50 rank, restricted to the trade universe.
+        #
+        # Pass the universe NAME, never a pre-resolved symbol list. Explicit
+        # symbols are a documented BYPASS of `load_price_data_for_backtest`'s
+        # date-aware gate, and `universe_members()` defaults to as_of=today --
+        # so the old `symbols=trade_members` ran a 2023 backtest against 2026's
+        # universe. Measured on prod for the epic #179 window: 3,641 members
+        # today vs 4,087 on 2023-08-04. ADIL/MNTS/FFAI/SMX were all sub-$1 then
+        # and correctly excluded by the universe's own no-penny-stocks rule;
+        # they are members TODAY only because of the reverse splits that blew
+        # up the account. The rule worked -- the A/B never asked it. Naming the
+        # universe binds each bar to its own date.
         price_data = load_price_data_for_backtest(
             db_url,
-            symbols=trade_members,
             start_date=config.start_date,
             end_date=config.end_date,
-            universe=None if trade_members else spec.trade_universe,
+            universe=spec.trade_universe,
         )
         dropped = [k for k in config.strategy_params
                    if k not in _STRATEGY_PARAM_KEYS]
