@@ -183,6 +183,102 @@ one. Two independent controls keep it physical:
   before it gets a chance to de-risk anything. The equity floor below is the
   backstop for exactly that case.
 
+## Point-in-time universe gating in the A/B (#179)
+
+`backtest ab-compare` hands the backtest its **universe name**, never a
+pre-resolved symbol list. This matters more than it looks:
+
+- `universe_members(conn, name)` defaults to `as_of=date.today()`.
+- `load_price_data_for_backtest` treats explicit `symbols=` as a **documented
+  bypass** of its date-aware universe gate.
+
+Together those meant a 2023 backtest ran against *today's* universe. Measured
+on production for the epic #179 window:
+
+```
+members as-of TODAY      : 3,641
+members as-of 2023-08-04 : 4,087
+
+ADIL  in-today=True  in-2023-08-04=False
+FFAI  in-today=True  in-2023-08-04=False
+MNTS  in-today=True  in-2023-08-04=False
+SMX   in-today=True  in-2023-08-04=False
+```
+
+That is why the universe never protected the A/B. All four names that blew up
+the account were sub-$1 on the trade date and were correctly excluded by the
+universe's own `no-penny-stocks` rule (`close < 1.0`). They are members *today*
+only because of the reverse splits that killed the account. The rule worked —
+the A/B never asked it.
+
+Both biases were present at once: **184 symbols qualify today but were not
+tradeable then** (look-ahead), and the historical universe was *larger*, so
+roughly **630 companies that traded then have since delisted** and were absent
+entirely (survivorship).
+
+Predictions resolve membership at **both window endpoints** and union them, so
+the set covers names that have since delisted. A superset is harmless — the
+date-aware gate decides what is actually tradeable on each bar. Residual, stated
+rather than hidden: a symbol that both enters *and* exits strictly inside the
+window is still missed.
+
+## Split-adjusted pricing (#262, using #264's recovered data)
+
+Backtests price on raw `close`, which is **not** split-adjusted, so a split is
+indistinguishable from a price move. `load_price_data_for_backtest` now
+back-adjusts using `stock_ohlcv.split_coefficient`, recovered by #264's
+backfill (5,501 corporate actions where the database previously held none).
+
+**Convention**, verified against production rather than assumed: a bar's
+coefficient applies **on that bar** — its close is already post-split. So a bar
+at time `t` is **divided** by the product of coefficients on dates *strictly
+later* than `t`:
+
+| | raw close | coefficient | adjusted |
+|---|---|---|---|
+| WMT 2024-02-23 | 175.56 | 1.0 | 175.56 / 3 = 58.52 |
+| WMT 2024-02-26 | 59.60 | 3.0 (3:1) | 59.60 |
+| ADIL 2023-08-04 | 0.2365 | 1.0 | 0.2365 / 0.04 = 5.91 |
+| ADIL 2023-08-07 | 6.22 | 0.04 (1:25 reverse) | 6.22 |
+
+The coefficient **divides**: forward splits (coefficient > 1) push earlier
+prices down, reverse splits (coefficient < 1) push them up. Volume moves the
+opposite way, so dollar volume stays invariant.
+
+**The direction is load-bearing and pinned by tests.** An implementation that
+multiplies where it should divide is internally consistent, passes every
+continuity check, and is silently backwards — and for ADIL's 0.04 coefficient
+it is a *625x* error rather than a 25x one. `tests/test_backtest_split_adjustment.py`
+plants known 2:1 and 1:25 splits and asserts the direction explicitly, because
+an internally-consistent inversion survived every other layer of review in #010.
+
+**A missing, zero, or negative coefficient drops the symbol**, named in a
+warning. An unknown split history makes every earlier price in that series
+untrustworthy, and unknown is not the same as "no split". 87 symbols came out
+of the #264 backfill still unpopulated; this is what refuses them.
+
+Measured on production data across the four #262 blowup names and the four
+forward splits that defeated the guard below:
+
+| symbol | worst move raw | adjusted |
+|---|---|---|
+| ADIL | 26.30x | 0.847x |
+| MNTS | 37.37x | 0.747x |
+| FFAI | 60.96x | 0.762x |
+| SMX | 18.28x | 0.828x |
+| AAPL | 0.26x | 0.920x |
+| TSLA | 0.33x | 0.973x |
+| WMT | 0.34x | 1.018x |
+| PANW | 0.52x | 0.938x |
+
+All eight become continuous, and none are dropped by the guard afterwards.
+
+**Order matters: adjust first, then guard.** A recorded split is an *explained*
+move, and adjusting removes it from the series. Running the guard first would
+drop every reverse-splitter before its split could be applied — exactly the
+symbols this fix makes tradeable. After adjustment the guard sees only moves
+that nothing accounts for.
+
 ## Price integrity: unexplained moves block the symbol (#262)
 
 Backtests price positions on raw `close`, which is **not split-adjusted**. A

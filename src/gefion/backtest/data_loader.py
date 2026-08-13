@@ -59,6 +59,91 @@ def resolve_backtest_universe(
         return resolve_universe(conn, universe).provenance()
 
 
+def split_adjust_prices(
+    price_data: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Back-adjust prices for stock splits (#262, using #264's recovered data).
+
+    Backtests price on raw ``close``, which is not split-adjusted, so a split
+    is indistinguishable from a price move: a 1:25 reverse split reads as a
+    2500% rally and destroys any short held through it. #263 blocks the
+    extreme cases, but it cannot separate a 3:1 forward split (ratio 0.33)
+    from a genuine -67% crash. Only real split data can, and #264's backfill
+    recovered it.
+
+    CONVENTION (verified against production data, not assumed): a bar's
+    ``split_coefficient`` applies ON that bar -- its close is ALREADY
+    post-split. So a bar at time t is divided by the product of coefficients
+    on dates STRICTLY LATER than t::
+
+        WMT  2024-02-23  175.56  coef 1.0  ->  175.56 / 3    = 58.52
+        WMT  2024-02-26   59.60  coef 3.0  ->   59.60 / 1    = 59.60
+        ADIL 2023-08-04    0.2365 coef 1.0 ->    0.2365/0.04 =  5.91
+        ADIL 2023-08-07    6.22   coef 0.04 ->    6.22 / 1   =  6.22
+
+    Both series become continuous. Note the coefficient DIVIDES: forward
+    splits (coef > 1) push earlier prices DOWN, reverse splits (coef < 1)
+    push them UP. Inverting this is internally consistent and silently wrong
+    -- for ADIL's 0.04 it is a 625x error, not a 25x one. The direction is
+    pinned by tests in tests/test_backtest_split_adjustment.py.
+
+    Volume moves the other way (price halves, share count doubles), keeping
+    dollar volume invariant.
+
+    A missing, zero, or negative coefficient makes every earlier price in
+    that symbol untrustworthy, so the SYMBOL is dropped and named in a
+    warning -- unknown is not the same as "no split". 87 symbols came out of
+    the #264 backfill still unpopulated; this is what refuses them.
+
+    Returns:
+        (adjusted_rows, dropped) where ``dropped`` maps symbol -> reason.
+    """
+    by_symbol: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for row in price_data:
+        by_symbol[row["symbol"]].append(row)
+
+    adjusted: List[Dict[str, Any]] = []
+    dropped: Dict[str, Dict[str, Any]] = {}
+
+    for symbol, rows in by_symbol.items():
+        # Callers order by (date, symbol); per-symbol order is not implied by
+        # list position, and this walks the series backwards, so sort first.
+        rows = sorted(rows, key=lambda r: r["date"])
+
+        bad = next((r for r in rows
+                    if r.get("split_coefficient") is None
+                    or float(r["split_coefficient"]) <= 0), None)
+        if bad is not None:
+            dropped[symbol] = {"date": bad["date"],
+                               "split_coefficient": bad.get("split_coefficient")}
+            continue
+
+        # Walk backwards accumulating the product of LATER coefficients.
+        out_rev: List[Dict[str, Any]] = []
+        divisor = 1.0
+        for row in reversed(rows):
+            new = dict(row)
+            if divisor != 1.0:
+                for field in ("open", "high", "low", "close"):
+                    if new.get(field) is not None:
+                        new[field] = new[field] / divisor
+                if new.get("volume") is not None:
+                    new["volume"] = int(round(new["volume"] * divisor))
+            out_rev.append(new)
+            # This bar's own coefficient applies to everything BEFORE it.
+            divisor *= float(row["split_coefficient"])
+        adjusted.extend(reversed(out_rev))
+
+    for symbol, info in sorted(dropped.items()):
+        logger.warning(
+            "backtest split adjustment (#262): dropping %s — split_coefficient "
+            "is %r on %s, so its split history is unknown and every earlier "
+            "price is untrustworthy; the symbol is excluded from this backtest",
+            symbol, info["split_coefficient"], info["date"])
+
+    return adjusted, dropped
+
+
 def filter_implausible_price_moves(
     price_data: List[Dict[str, Any]],
     max_ratio: float = IMPLAUSIBLE_MOVE_RATIO,
@@ -230,7 +315,8 @@ def load_price_data_for_backtest(
                     o.open,
                     o.high,
                     o.low,
-                    o.volume
+                    o.volume,
+                    o.split_coefficient
                 FROM stocks s
                 JOIN stock_ohlcv o ON s.id = o.data_id
                 WHERE {where_sql}
@@ -251,20 +337,31 @@ def load_price_data_for_backtest(
                         "high": float(row[4]) if row[4] is not None else None,
                         "low": float(row[5]) if row[5] is not None else None,
                         "volume": int(row[6]) if row[6] is not None else None,
+                        "split_coefficient": (
+                            float(row[7]) if row[7] is not None else None),
                     }
                     for row in rows
                 ]
 
-                # Price integrity gate (#262). This function is the single
-                # door price data enters a backtest through, so the guard
-                # belongs here rather than at each call site.
+                # Price integrity (#262). This function is the single door
+                # price data enters a backtest through, so both stages belong
+                # here rather than at each call site.
                 raw_row_count = len(price_data)
-                price_data, dropped = filter_implausible_price_moves(price_data)
+
+                # ORDER MATTERS. Adjust FIRST: a recorded split is an
+                # explained move, and adjusting removes it from the series.
+                # Running the guard first would drop every reverse-splitter
+                # before its split could be applied -- exactly the symbols
+                # this fix exists to make tradeable. After adjustment the
+                # guard sees only moves nothing accounts for.
+                price_data, unadjustable = split_adjust_prices(price_data)
+                price_data, implausible = filter_implausible_price_moves(price_data)
 
                 set_attributes(span, row_count=len(price_data),
                                table="stock_ohlcv",
                                raw_row_count=raw_row_count,
-                               dropped_symbol_count=len(dropped))
+                               unadjustable_symbol_count=len(unadjustable),
+                               dropped_symbol_count=len(implausible))
                 return price_data
 
 
