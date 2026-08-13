@@ -183,111 +183,6 @@ def load_listings_from_file(path: Path) -> List[Mapping[str, object]]:
     return parse_listing_status(payload)
 
 
-def _batch_insert_prices(conn: psycopg.Connection, data_id: int, rows: list,
-                         update_existing: bool) -> int:
-    """Write parsed daily bars to ``stock_ohlcv``.
-
-    Module-level (not nested inside ``ingest_prices_for_symbols``) so it can
-    be tested directly — the 9-column bug in #264 survived because nothing
-    could reach this function to assert on it.
-
-    Persists every column the provider returns, including
-    ``split_coefficient`` and ``dividend_amount``. Those two were previously
-    absent from the column list, the params, and the conflict clause, leaving
-    them NULL in 100% of rows (0 of 29,190,617) — the upstream cause of #262,
-    where unrecorded reverse splits read as 16-60x rallies and killed shorts,
-    and of short dividend liabilities being charged as zero.
-
-    An absent field stays NULL. A missing split coefficient means "unknown",
-    not "no split" (1.0), and a missing dividend means "unknown", not 0.0 —
-    substituting either would be the plausible-value guess that fail-closed
-    semantics exist to prevent.
-    """
-    if not rows:
-        return 0
-    total = 0
-    chunk_size = 200
-
-    def safe_num(val):
-        if val is None:
-            return None
-        try:
-            if abs(float(val)) >= 1e12:
-                return None
-            return val
-        except Exception:
-            return None
-
-    for i in range(0, len(rows), chunk_size):
-        batch = rows[i: i + chunk_size]
-        values_sql = []
-        params = []
-        for r in batch:
-            open_v = safe_num(r.get("open"))
-            high_v = safe_num(r.get("high"))
-            low_v = safe_num(r.get("low"))
-            close_v = safe_num(r.get("close"))
-            adj_v = safe_num(r.get("adjusted_close"))
-            if all(v is None for v in [open_v, high_v, low_v, close_v, adj_v]):
-                continue
-            date_val = r.get("date")
-            parsed_date = None
-            if isinstance(date_val, (datetime,)):
-                parsed_date = date_val.date()
-            elif isinstance(date_val, str):
-                try:
-                    parsed_date = datetime.fromisoformat(date_val).date()
-                except Exception:
-                    continue
-            else:
-                parsed_date = date_val  # assume date or None
-            if parsed_date is None:
-                continue
-            values_sql.append(
-                "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
-            params.extend(
-                [
-                    data_id,
-                    parsed_date,
-                    open_v,
-                    high_v,
-                    low_v,
-                    close_v,
-                    adj_v,
-                    safe_num(r.get("dividend_amount")),
-                    safe_num(r.get("split_coefficient")),
-                    safe_num(r.get("volume")),
-                    r.get("source", "alphavantage"),
-                ]
-            )
-        if not values_sql:
-            continue
-        conflict = (
-            "ON CONFLICT (data_id, date) DO UPDATE SET "
-            "open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, "
-            "close = EXCLUDED.close, adjusted_close = EXCLUDED.adjusted_close, "
-            "dividend_amount = EXCLUDED.dividend_amount, "
-            "split_coefficient = EXCLUDED.split_coefficient, "
-            "volume = EXCLUDED.volume, source = EXCLUDED.source"
-            if update_existing
-            else "ON CONFLICT (data_id, date) DO NOTHING"
-        )
-        sql_stmt = (
-            "INSERT INTO stock_ohlcv "
-            "(data_id, date, open, high, low, close, adjusted_close, "
-            "dividend_amount, split_coefficient, volume, source) VALUES "
-            + ",".join(values_sql)
-            + " "
-            + conflict
-        )
-        with conn.cursor() as cur:
-            cur.execute(sql_stmt, params)
-            # Use rowcount to get ACTUAL inserts (excludes ON CONFLICT skipped rows)
-            total += cur.rowcount
-    conn.commit()
-    return total
-
-
 def ingest_prices_for_symbols(
     db_url: str,
     client: AlphaVantageClient,
@@ -427,7 +322,7 @@ def ingest_prices_for_symbols(
                         while True:
                             try:
                                 # data_id already obtained by fetch_worker, no need to upsert again
-                                inserted = _batch_insert_prices(conn, data_id, rows, update_existing)
+                                inserted = insert_stock_ohlcv(conn, data_id, rows, update_existing)
                                 break
                             except errors.DeadlockDetected:
                                 time.sleep(0.1 + random.random() * 0.2)

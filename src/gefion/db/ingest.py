@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Iterable, Mapping, Optional, Sequence, Dict, List, Tuple
 
 import psycopg
@@ -685,9 +685,24 @@ def insert_stock_ohlcv(
         except Exception:
             return None
 
+    def parse_row_date(val):
+        """Accept a datetime, an ISO date string, or a date; None if unparseable."""
+        if isinstance(val, datetime):
+            return val.date()
+        if isinstance(val, str):
+            try:
+                return datetime.fromisoformat(val).date()
+            except Exception:
+                return None
+        return val
+
     # Prepare data with validation
     prepared = []
     for row in rows_list:
+        row_date = parse_row_date(row.get("date"))
+        if row_date is None:
+            continue
+
         open_v = safe_num(row.get("open"))
         high_v = safe_num(row.get("high"))
         low_v = safe_num(row.get("low"))
@@ -702,7 +717,7 @@ def insert_stock_ohlcv(
 
         prepared.append((
             data_id,
-            row["date"],
+            row_date,
             open_v,
             high_v,
             low_v,
