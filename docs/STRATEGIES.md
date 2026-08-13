@@ -285,7 +285,7 @@ trade them directly without additional filters.
 | prediction_type | str | quantile | "quantile" or "classifier" |
 | return_threshold | float | 0.02 | Min q50 to buy (quantile mode) |
 | max_positions | int | 10 | Maximum concurrent positions |
-| selection | str | absolute | "absolute": filter candidates by return_threshold/confidence_threshold. "rank": require only sign agreement (q50>0/q50<0, or class membership) and take the top max_positions by conviction per side -- balances the book under a directionally-biased model (#220) |
+| selection | str | absolute | "absolute": filter candidates by return_threshold/confidence_threshold. "rank": require only sign agreement (q50>0/q50<0, or class membership) and take the top max_positions by conviction per side -- balances the book under a directionally-biased model (#220). "pure_rank": no sign floor at all -- rank every candidate by conviction (q50 for quantile; net probability p_up-p_down for classifier) and long the top max_positions / short the bottom max_positions. return_threshold/confidence_threshold do not apply (they filter the level; pure_rank ignores the level and trades the ordering). downside_limit still applies to longs. A name is never both long and short. Use when the model's ranking has skill but its level is biased (a "rank" sign floor turns level bias into a one-sided book) |
 
 **Quantile Mode Example:**
 
