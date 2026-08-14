@@ -584,6 +584,14 @@ def ml_dataset_build(
              "peak memory to roughly one batch's price/label history "
              "regardless of universe size. Default 200; lower it for very "
              "long histories, raise it on hosts with more memory to spare."),
+    coverage_audit: bool = typer.Option(
+        True, "--coverage-audit/--no-coverage-audit",
+        help="Run the #191 coverage-bias audit after --export (default on). "
+             "Disable it on long windows: its accumulators scale with "
+             "features x symbols x dates and are NOT bounded by "
+             "--symbol-batch-size, which OOM-killed a 6-year full-universe "
+             "build at 13.9 GB (#271). The audit is advisory and never fails "
+             "a build."),
     out_dir: Path = typer.Option(Path("datasets"), help="Output directory for dataset manifest"),
     export: bool = typer.Option(False, "--export/--no-export", help="Export dataset artifacts (requires DB data)"),
     force: bool = typer.Option(False, "--force", help="Overwrite existing dataset if it exists"),
@@ -678,6 +686,8 @@ def ml_dataset_build(
         **({"start_date": start_date} if start_date else {}),
         **({"end_date": end_date} if end_date else {}),
         **({"symbol_batch_size": symbol_batch_size} if symbol_batch_size else {}),
+        # Only written when disabled, so an untouched manifest is unchanged.
+        **({} if coverage_audit else {"coverage_audit": False}),
         "name": name,
         "version": version,
         "universe": universe,
@@ -10340,6 +10350,12 @@ def backtest_ab_compare(
              "resulting dataset. Lower it for long windows -- the 6-year run "
              "OOM-killed at 14.0 GB RSS on a 15 GB box (#205, #209). Default: "
              "unset, so the build's own default (200) applies."),
+    coverage_audit: bool = typer.Option(
+        True, "--coverage-audit/--no-coverage-audit",
+        help="Run the #191 coverage-bias audit during each arm's dataset "
+             "build (default on), matched across both arms. Disable it for "
+             "long windows: the audit's accumulators are unbounded by "
+             "--symbol-batch-size and OOM-killed the 6-year run (#271)."),
     selection: str = typer.Option(
         "absolute", "--selection",
         help="MLSignalStrategy candidate selection mode: 'absolute' "
@@ -10435,6 +10451,7 @@ def backtest_ab_compare(
             strong_thresholds=strong_list,
             max_gross_exposure=gross_exposure,
             symbol_batch_size=symbol_batch_size,
+            coverage_audit=coverage_audit,
         )
 
         db_url = os.getenv("DATABASE_URL", SETTINGS.database_url)

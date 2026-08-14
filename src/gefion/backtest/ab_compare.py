@@ -113,6 +113,13 @@ class MatchedConfig:
     # 6-year run needs a smaller batch than a 6-month one: the full A/B
     # OOM-killed at 14.0 GB RSS on sloth's 15 GB box (#205, #209).
     symbol_batch_size: Optional[int] = None
+    # Run the #191 coverage-bias audit during each arm's dataset build.
+    # Default True = today's behavior. Its accumulators scale with
+    # features x symbols x dates and are NOT bounded by symbol_batch_size,
+    # so a long window must be able to switch it off (#271). Advisory and
+    # non-blocking, so disabling it cannot change any measured outcome --
+    # matched across arms regardless, like every other control here.
+    coverage_audit: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         """JSON-serializable echo of the matched config (for the report)."""
@@ -129,6 +136,7 @@ class MatchedConfig:
             "strong_thresholds": self.strong_thresholds,
             "max_gross_exposure": self.max_gross_exposure,
             "symbol_batch_size": self.symbol_batch_size,
+            "coverage_audit": self.coverage_audit,
         }
 
 
@@ -637,6 +645,8 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
         ]
         if config.symbol_batch_size is not None:
             ds_cmd.extend(["--symbol-batch-size", str(config.symbol_batch_size)])
+        if not config.coverage_audit:
+            ds_cmd.append("--no-coverage-audit")
         _run_cli(ds_cmd)
 
         # 2) Train the pooled model with the matched hyperparameters.

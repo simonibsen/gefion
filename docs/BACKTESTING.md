@@ -183,6 +183,38 @@ one. Two independent controls keep it physical:
   before it gets a chance to de-risk anything. The equity floor below is the
   backstop for exactly that case.
 
+## Long windows also need `--no-coverage-audit` (#271)
+
+`--symbol-batch-size` (below) bounds the dataset **write** path. It does not
+bound the #191 coverage-bias audit, which keeps two whole-build accumulators:
+
+```python
+grid_labels: Dict[Any, float]      # one entry per (symbol, date)
+feature_presence: dict[str, set]   # per feature, every (symbol, date) seen
+```
+
+These scale with **features × symbols × dates** and are folded per batch but
+never released. On a 6-year full-universe window `feature_presence` alone is
+~200 features against millions of `(symbol, date)` pairs. Measured on sloth:
+
+```
+13,974,632 kB RSS  -> OOM-killed          (no batch flag)
+11,746,932 kB RSS at 7m22s, still climbing (--symbol-batch-size 50, verified
+                                            in /proc/<pid>/cmdline)
+```
+
+Six months fits at batch 200; six years dies at batch 50. No batch size helps,
+because the accumulators do not live in the batched path.
+
+The audit is **advisory and explicitly non-blocking** — it never raises and
+never changes a dataset. It was simply making the process die before finishing.
+`--no-coverage-audit` disables it, on both `ml dataset-build` and
+`backtest ab-compare` (matched across arms, echoed in the report config).
+
+Disabling it **stops the accumulation**, not merely the audit call — the memory
+is spent long before the audit runs, so gating only the call would save
+nothing. Default is on, so existing builds are unchanged.
+
 ## Bounding dataset-build memory: `--symbol-batch-size` (#205, #209)
 
 `backtest ab-compare --symbol-batch-size N` sets how many symbols each
