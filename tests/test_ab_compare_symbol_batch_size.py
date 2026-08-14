@@ -130,7 +130,11 @@ class TestAbCompareCliSymbolBatchSize:
         assert "--symbol-batch-size" in result.output
 
     def test_cli_forwards_it_into_the_matched_config(self, monkeypatch):
+        import contextlib
+
         from typer.testing import CliRunner
+
+        import gefion.cli as cli
         from gefion.cli import app
         from gefion.backtest import ab_compare as ac
 
@@ -140,6 +144,16 @@ class TestAbCompareCliSymbolBatchSize:
             seen["config"] = kwargs.get("config") or (args[2] if len(args) > 2 else None)
             return {"status": "ok", "arms": {}, "deltas": {}}
 
+        # The CLI opens a real connection (`with db_connection(db_url) as conn`)
+        # before it reaches run_ab_compare, so without this the command dies on
+        # the unit-test runner, which has no database. Stubbing it keeps the
+        # test hermetic; the assertion below catches it if this ever stops
+        # working, instead of passing vacuously.
+        @contextlib.contextmanager
+        def _fake_conn(*a, **k):
+            yield object()
+
+        monkeypatch.setattr(cli, "db_connection", _fake_conn)
         monkeypatch.setattr(ac, "run_ab_compare", _fake_run)
         CliRunner().invoke(app, [
             "backtest", "ab-compare", "--arm-a", "u1", "--arm-b", "u2",
