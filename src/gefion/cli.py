@@ -10333,6 +10333,13 @@ def backtest_ab_compare(
         help="BacktestEngine's max_gross_exposure, matched across both arms "
              "(default: unset, so the engine's own mode-dependent default "
              "applies -- 2.0 for long_short, #211)"),
+    symbol_batch_size: Optional[int] = typer.Option(
+        None, "--symbol-batch-size",
+        help="Symbols per dataset-build chunk, matched across both arms. A "
+             "CAPACITY knob: it bounds peak memory and never changes the "
+             "resulting dataset. Lower it for long windows -- the 6-year run "
+             "OOM-killed at 14.0 GB RSS on a 15 GB box (#205, #209). Default: "
+             "unset, so the build's own default (200) applies."),
     selection: str = typer.Option(
         "absolute", "--selection",
         help="MLSignalStrategy candidate selection mode: 'absolute' "
@@ -10427,6 +10434,7 @@ def backtest_ab_compare(
             weak_thresholds=weak_list,
             strong_thresholds=strong_list,
             max_gross_exposure=gross_exposure,
+            symbol_batch_size=symbol_batch_size,
         )
 
         db_url = os.getenv("DATABASE_URL", SETTINGS.database_url)

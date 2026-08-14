@@ -104,6 +104,15 @@ class MatchedConfig:
     # exactly as it does today. Shared across arms like every other control
     # here -- it must never differ per arm, or the comparison is confounded.
     max_gross_exposure: Optional[float] = None
+    # Symbols per dataset-build chunk (#238's streaming build). A CAPACITY
+    # knob, not a modelling one: it bounds peak memory and never changes the
+    # resulting dataset. None => pass no flag, so the CLI default (200)
+    # applies exactly as today. Matched across arms like every other control
+    # here -- a per-arm value would change each arm's export path and
+    # confound the comparison. Peak memory scales with batch x window, so a
+    # 6-year run needs a smaller batch than a 6-month one: the full A/B
+    # OOM-killed at 14.0 GB RSS on sloth's 15 GB box (#205, #209).
+    symbol_batch_size: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """JSON-serializable echo of the matched config (for the report)."""
@@ -119,6 +128,7 @@ class MatchedConfig:
             "weak_thresholds": self.weak_thresholds,
             "strong_thresholds": self.strong_thresholds,
             "max_gross_exposure": self.max_gross_exposure,
+            "symbol_batch_size": self.symbol_batch_size,
         }
 
 
@@ -614,7 +624,7 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
         strong_csv = ",".join(str(s) for s in strong)
 
         # 1) Build dataset over the TRAIN universe (pooled — all members).
-        _run_cli([
+        ds_cmd = [
             "ml", "dataset-build",
             "--name", ds_name, "--version", ds_version,
             "--universe", spec.train_universe,
@@ -624,7 +634,10 @@ def run_arm(spec: ArmSpec, config: MatchedConfig, conn=None) -> ArmResult:
             "--weak-thresholds", weak_csv,
             "--strong-thresholds", strong_csv,
             "--export", "--force",
-        ])
+        ]
+        if config.symbol_batch_size is not None:
+            ds_cmd.extend(["--symbol-batch-size", str(config.symbol_batch_size)])
+        _run_cli(ds_cmd)
 
         # 2) Train the pooled model with the matched hyperparameters.
         train_cmd = [
