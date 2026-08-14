@@ -379,6 +379,7 @@ def export_dataset_artifacts(
     manifest: Dict[str, Any],
     out_dir: Path,
     on_progress: Any = None,
+    coverage_audit: bool = True,
 ) -> None:
     """
     Export dataset artifacts.
@@ -398,7 +399,8 @@ def export_dataset_artifacts(
     with create_span("ml.dataset_export", symbols=n_symbols, horizons=n_horizons,
                       format=manifest.get("format", "csv")):
         _export_dataset_artifacts_impl(conn, manifest=manifest, out_dir=out_dir,
-                                        on_progress=on_progress)
+                                        on_progress=on_progress,
+                                        coverage_audit=coverage_audit)
 
 
 def _run_coverage_audit(conn, *, manifest, symbols, labels_df,
@@ -440,7 +442,8 @@ def _run_coverage_audit(conn, *, manifest, symbols, labels_df,
             on_progress(f"⚠️  Coverage audit skipped: {e}")
 
 
-def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None):
+def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None,
+                                   coverage_audit: bool = True):
     def emit_progress(msg: str) -> None:
         if on_progress:
             on_progress(msg)
@@ -509,6 +512,16 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
     price_count = 0
     labels_count = 0
     labels_error: Optional[Exception] = None
+    # #271: the coverage audit's accumulators (grid_labels below and
+    # feature_presence further down) scale with features x symbols x dates and
+    # are NOT bounded by symbol_batch_size -- they are folded per batch but
+    # never released. On a 6-year full-universe window that reached 13.9 GB and
+    # was OOM-killed, and still hit 11.7 GB with --symbol-batch-size 50. The
+    # audit is advisory and explicitly non-blocking, so it must never be the
+    # reason a build cannot run. Disabling it has to stop the ACCUMULATION,
+    # not merely skip the audit call -- the memory is spent long before then.
+    coverage_audit = bool(coverage_audit) and bool(
+        manifest.get("coverage_audit", True))
     grid_labels: Dict[Any, float] = {}
 
     price_writer: Any = None
@@ -535,7 +548,8 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
                 if not batch_labels_df.empty:
                     labels_writer.write_df(batch_labels_df)
                     labels_count += len(batch_labels_df)
-                    _accumulate_grid_labels(grid_labels, batch_labels_df)
+                    if coverage_audit:
+                        _accumulate_grid_labels(grid_labels, batch_labels_df)
 
         price_writer.close()
         if labels_writer is not None:
@@ -589,6 +603,8 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
     feature_presence: dict[str, set] = {}
 
     def _record_presence(mapped_row: dict[str, Any]) -> None:
+        if not coverage_audit:
+            return
         if mapped_row["value"] is not None:
             feature_presence.setdefault(mapped_row["feature_name"], set()).add(
                 (mapped_row["symbol"], str(mapped_row["date"])))
@@ -697,7 +713,10 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None)
             # the audit doesn't reintroduce the memory blowup this ticket
             # removed from the write path. Advisory + NON-BLOCKING — never
             # fail the build.
-            _run_coverage_audit(conn, manifest=manifest, symbols=symbols,
-                                labels_df=grid_labels_df,
-                                feature_presence=feature_presence,
-                                on_progress=emit_progress)
+            if coverage_audit:
+                _run_coverage_audit(conn, manifest=manifest, symbols=symbols,
+                                    labels_df=grid_labels_df,
+                                    feature_presence=feature_presence,
+                                    on_progress=emit_progress)
+            else:
+                emit_progress("Coverage audit skipped (--no-coverage-audit, #271)")
