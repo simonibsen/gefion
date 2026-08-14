@@ -183,6 +183,38 @@ one. Two independent controls keep it physical:
   before it gets a chance to de-risk anything. The equity floor below is the
   backstop for exactly that case.
 
+## Bounding dataset-build memory: `--symbol-batch-size` (#205, #209)
+
+`backtest ab-compare --symbol-batch-size N` sets how many symbols each
+dataset-build chunk holds. It is a **capacity** knob, not a modelling one: it
+bounds peak memory and never changes the resulting dataset. Matched across both
+arms like every other control here.
+
+Peak memory scales with `batch_size × window`, so a long window needs a smaller
+batch. The streaming build (#238) chunks by symbol at a default of 200, which is
+fine for a six-month smoke and fatal for six years — the full A/B run was
+OOM-killed on sloth:
+
+```
+Out of memory: Killed process (python)
+  total-vm: 19,655,332 kB   anon-rss: 13,974,632 kB
+```
+
+14.0 GB resident on a 15 GB box, the same ceiling recorded in #209. Before this
+flag the harness always built at 200 regardless of window length.
+
+Rules of thumb on a 15 GB host, full NASDAQ+NYSE universe:
+
+| window | batch size |
+|---|---|
+| ~6 months | default (200) |
+| 2-3 years | 100 |
+| 6 years | 50 |
+
+Omit the flag and behavior is unchanged: no argument is passed, so the build's
+own default applies. The value is echoed in the report's `config` block, so a
+run's memory budget is readable from its own output.
+
 ## Point-in-time universe gating in the A/B (#179)
 
 `backtest ab-compare` hands the backtest its **universe name**, never a
