@@ -134,7 +134,7 @@ class TestAbCompareCliSymbolBatchSize:
 
         from typer.testing import CliRunner
 
-        import gefion.cli as cli
+        import gefion.cli_helpers as cli_helpers
         from gefion.cli import app
         from gefion.backtest import ab_compare as ac
 
@@ -145,15 +145,20 @@ class TestAbCompareCliSymbolBatchSize:
             return {"status": "ok", "arms": {}, "deltas": {}}
 
         # The CLI opens a real connection (`with db_connection(db_url) as conn`)
-        # before it reaches run_ab_compare, so without this the command dies on
-        # the unit-test runner, which has no database. Stubbing it keeps the
-        # test hermetic; the assertion below catches it if this ever stops
-        # working, instead of passing vacuously.
+        # before it reaches run_ab_compare, so the unit-test runner -- which has
+        # no database -- would otherwise die first.
+        #
+        # Patch it on gefion.cli_helpers, NOT on gefion.cli: the command body
+        # does `from gefion.cli_helpers import db_connection` as a LOCAL import,
+        # so it rebinds the name at call time and a patch on the cli module is
+        # simply ignored. Patching the wrong module is why this test failed CI
+        # twice while passing locally, where a real database was reachable.
         @contextlib.contextmanager
         def _fake_conn(*a, **k):
+            seen["conn_stubbed"] = True
             yield object()
 
-        monkeypatch.setattr(cli, "db_connection", _fake_conn)
+        monkeypatch.setattr(cli_helpers, "db_connection", _fake_conn)
         monkeypatch.setattr(ac, "run_ab_compare", _fake_run)
         CliRunner().invoke(app, [
             "backtest", "ab-compare", "--arm-a", "u1", "--arm-b", "u2",
@@ -163,6 +168,12 @@ class TestAbCompareCliSymbolBatchSize:
         # Assert the capture happened FIRST. A bare `if cfg is not None`
         # would let this test pass silently when run_ab_compare is never
         # reached -- a test that cannot fail is worse than no test.
+        # Assert the STUB was used before asserting on what it captured. This
+        # separates "the patch missed its target" from "the flag did not
+        # forward" -- without it, a mis-targeted patch and a real regression
+        # look identical, which is exactly how this failed CI twice.
+        assert seen.get("conn_stubbed"), (
+            "db_connection stub was never used -- patched the wrong module?")
         cfg = seen.get("config")
         assert cfg is not None, "run_ab_compare was never called"
         assert cfg.symbol_batch_size == 50
