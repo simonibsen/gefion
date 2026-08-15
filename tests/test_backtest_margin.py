@@ -178,3 +178,98 @@ def test_margin_call_liquidation_pays_costs():
     margin_trades = [t for t in result["trades"] if t.get("reason") == "margin_call"]
     assert margin_trades
     assert all(t.get("cost", 0) > 0 for t in margin_trades)
+
+
+def test_stop_loss_and_margin_call_same_bar_does_not_double_liquidate():
+    """#252: a stop-loss exit and a margin breach landing on the SAME bar must
+    not cause the margin check to also close an untouched position. AAA moves
+    far enough (15%) to trip its own 10% stop-loss; BBB only moves 5% and
+    would never trip a stop or a margin call on its own. Once AAA's exposure
+    is (correctly) excluded from the margin sizing pass, equity/gross for the
+    remaining book alone already clears maintenance_margin + buffer, so BBB
+    must be left alone."""
+    limits = RiskLimits(stop_loss_pct=0.10, maintenance_margin=0.25)
+    rm = RiskManager(limits)
+
+    portfolio = Portfolio(initial_cash=0.0)
+    portfolio.positions = {
+        "AAA": {"shares": -100, "avg_price": 100.0},
+        "BBB": {"shares": -100, "avg_price": 100.0},
+    }
+    prices = {"AAA": 115.0, "BBB": 105.0}  # AAA -15%, BBB -5%
+    portfolio.cash = 24_992.0  # equity ~= 2_992 -> equity/gross(full) ~= 0.136
+
+    equity = portfolio.calculate_equity(prices)
+    gross_full = 100 * prices["AAA"] + 100 * prices["BBB"]
+    assert equity / gross_full < 0.25  # sanity: full book looks breached
+
+    exits = rm.generate_exit_signals(portfolio, prices)
+
+    assert len(exits) == 1
+    assert exits[0]["symbol"] == "AAA"
+    assert exits[0]["reason"] == "stop_loss"
+    assert not any(e["reason"] == "margin_call" for e in exits), \
+        "BBB must not be liquidated for a margin shortfall that no longer " \
+        "exists once AAA's exposure leaves the book"
+
+
+def test_stop_loss_alone_insufficient_still_triggers_margin_call():
+    """Same shape as above, but the remaining book (after AAA's stop-loss
+    exposure is excluded) still breaches maintenance margin -- the fix must
+    not disable margin calls outright, only stop over-closing. The margin
+    call should close only what's necessary on BBB, not all of it."""
+    limits = RiskLimits(stop_loss_pct=0.10, maintenance_margin=0.25)
+    rm = RiskManager(limits)
+
+    portfolio = Portfolio(initial_cash=0.0)
+    portfolio.positions = {
+        "AAA": {"shares": -100, "avg_price": 100.0},
+        "BBB": {"shares": -100, "avg_price": 100.0},
+    }
+    prices = {"AAA": 115.0, "BBB": 105.0}  # AAA -15%, BBB -5%
+    portfolio.cash = 24_000.0  # equity = 2_000 -- deep enough that BBB alone
+                                # (gross 10_500) still breaches 0.25 + buffer
+
+    equity = portfolio.calculate_equity(prices)
+    assert equity == 2_000.0
+    gross_bbb_only = 100 * prices["BBB"]
+    assert equity / gross_bbb_only < 0.27  # sanity: still breached post-AAA
+
+    exits = rm.generate_exit_signals(portfolio, prices)
+
+    stop_loss_exits = [e for e in exits if e["reason"] == "stop_loss"]
+    margin_exits = [e for e in exits if e["reason"] == "margin_call"]
+
+    assert len(stop_loss_exits) == 1
+    assert stop_loss_exits[0]["symbol"] == "AAA"
+
+    assert len(margin_exits) == 1
+    assert margin_exits[0]["symbol"] == "BBB"
+    assert 0 < margin_exits[0]["shares"] < 100  # partial, not a full close
+    assert margin_exits[0]["shares"] == 30  # exact -- sized to just the shortfall
+
+
+def test_no_stop_loss_configured_margin_behaviour_is_byte_identical():
+    """Regression: with stop_loss_pct=None, already_exiting is always empty,
+    so the #252 fix (excluding already_exiting from the sizing pass) must be
+    a complete no-op here. Exact expected values are hand-computed from the
+    unchanged formula to prove the bound didn't move."""
+    limits = RiskLimits(stop_loss_pct=None, maintenance_margin=0.25)
+    rm = RiskManager(limits)
+
+    portfolio = Portfolio(initial_cash=0.0)
+    portfolio.positions = {
+        "AAA": {"shares": -50, "avg_price": 100.0},
+        "BBB": {"shares": -50, "avg_price": 100.0},
+    }
+    prices = {"AAA": 140.0, "BBB": 110.0}
+    gross = 50 * 140.0 + 50 * 110.0
+    portfolio.cash = 2_000.0 + gross  # equity = 2_000
+
+    exits = rm.generate_exit_signals(portfolio, prices)
+
+    assert len(exits) == 1
+    assert exits[0]["symbol"] == "AAA"
+    assert exits[0]["action"] == "cover"
+    assert exits[0]["reason"] == "margin_call"
+    assert exits[0]["shares"] == 37  # hand-computed: unchanged close_budget math

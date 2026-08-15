@@ -331,8 +331,12 @@ class RiskManager:
         Liquidates -- largest unrealised loser first -- just enough to restore
         mark-to-market equity / gross_exposure above `maintenance_margin` plus
         `_MARGIN_BUFFER`. Positions already covered by `already_exiting` (a
-        stop-loss/take-profit exit generated above, same bar) are skipped so
-        the same symbol isn't double-closed.
+        stop-loss/take-profit exit generated above, same bar) are excluded
+        from the sizing pass entirely (#252) -- their notional is leaving the
+        book this bar, so it must not count toward `gross`, or the budget is
+        sized against exposure that's already gone and over-closes other
+        positions. They're also skipped in the closing loop below so the same
+        symbol isn't double-closed.
 
         Gross/equity use the same cost-basis fallback as
         `Portfolio.calculate_equity` (a symbol with no price this bar marks at
@@ -350,6 +354,8 @@ class RiskManager:
         gross = 0.0
         unrealized: Dict[str, float] = {}
         for symbol, position in positions.items():
+            if symbol in already_exiting:
+                continue
             shares = position.get("shares", 0)
             if shares == 0:
                 continue
