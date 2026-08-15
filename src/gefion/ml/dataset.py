@@ -839,8 +839,11 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None,
         else:
             feature_rows.extend(entity_attribute_rows)
             _write_to_file(feature_rows, features_path, features_header, export_format)
-        for row in entity_attribute_rows:
-            _record_presence(row)
+        # Deliberately NOT fed to _record_presence / the coverage audit
+        # (#191): a one-hot entity-attribute column is *defined* to be
+        # present for ~100% of its own cohort and ~0% elsewhere, so it would
+        # trip the cohort-disparity check against itself on every partial
+        # category — that's what the column measures, not coverage bias.
         feature_count += len(entity_attribute_rows)
         emit_progress(f"Entity attributes exported: {len(entity_attribute_rows):,} records")
 

@@ -35,6 +35,7 @@ def db_conn():
         init_schema_tables(conn, [
             "stocks", "stock_ohlcv", "stocks_fundamentals",
             "feature_definitions", "computed_features", "ml_datasets",
+            "system_observations",
         ])
         yield conn
         with conn.cursor() as cur:
@@ -47,6 +48,10 @@ def db_conn():
                 "(SELECT id FROM stocks WHERE symbol LIKE 'ENTATTR_%')"
             )
             cur.execute("DELETE FROM stocks WHERE symbol LIKE 'ENTATTR_%'")
+            cur.execute(
+                "DELETE FROM system_observations WHERE evidence->>'dataset' LIKE 'ENTATTR_%'"
+            )
+            cur.execute("DELETE FROM ml_datasets WHERE name LIKE 'ENTATTR_%'")
         conn.commit()
 
 
@@ -230,6 +235,119 @@ class TestSlugging:
 
         names = _feature_names(tmp_path, "ENTATTR_SLUG")
         assert "sector_financial_services" in names
+
+
+class TestCoverageAuditExclusion:
+    """A one-hot sector column is present for ~100% of its own sector and
+    ~0% of every other sector by construction — that's what a categorical
+    identity column IS, not a coverage defect (review finding #1). Entity-
+    attribute rows must therefore never reach the #191 coverage audit's
+    feature_presence input, or every populated sector would be permanently
+    flagged as cohort-biased against itself."""
+
+    def test_sector_columns_never_flagged_or_recorded_by_coverage_audit(
+            self, db_conn, tmp_path):
+        name, version = "ENTATTR_COV", "v1"
+
+        symbols = []
+        with db_conn.cursor() as cur:
+            for i in range(6):
+                sector = "Technology" if i < 3 else "Healthcare"
+                sym = f"ENTATTR_COV{i}"
+                symbols.append(sym)
+                cur.execute(
+                    "INSERT INTO stocks (symbol, exchange, sector) "
+                    "VALUES (%s, 'NASDAQ', %s) RETURNING id", (sym, sector))
+                data_id = cur.fetchone()[0]
+                # 5 daily bars so a 2-day-horizon label exists.
+                for d in range(1, 6):
+                    cur.execute(
+                        "INSERT INTO stock_ohlcv (data_id, date, open, high, "
+                        "low, close, adjusted_close, volume) VALUES "
+                        "(%s, %s, %s, %s, %s, %s, %s, 1000)",
+                        (data_id, date(2026, 7, d), 100 + d + i, 101 + d + i,
+                         99 + d + i, 100 + d + i, 100 + d + i))
+                cur.execute(
+                    "INSERT INTO stocks_fundamentals (data_id, date, sector) "
+                    "VALUES (%s, %s, %s)",
+                    (data_id, date(2026, 7, 1), sector))
+        db_conn.commit()
+
+        from gefion.ml.store import upsert_ml_dataset
+        upsert_ml_dataset(db_conn, {
+            "name": name, "version": version,
+            "universe": {"symbols": symbols},
+            "feature_names": [], "lookback_days": 200,
+            "horizons_days": [2], "label_spec": {"thresholds": {}},
+            "split_spec": {"type": "walk_forward"},
+            "artifact_uri": "x", "checksum": "x",
+        })
+
+        manifest = {
+            "name": name, "version": version,
+            "universe": {"symbols": symbols},
+            "horizons_days": [2],
+            "label_spec": {"thresholds": {"2": {"weak": 0.001, "strong": 0.01}}},
+            "format": "csv",
+            # Low enough that a 3-vs-3 sector split would trip cohort_bias
+            # if sector_* rows leaked into the audit's presence input.
+            "coverage_audit": {"min_cohort_size": 2},
+        }
+        from gefion.ml.dataset import export_dataset_artifacts
+        export_dataset_artifacts(db_conn, manifest=manifest, out_dir=tmp_path)
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT universe FROM ml_datasets WHERE name = %s AND version = %s",
+                (name, version))
+            stored = cur.fetchone()[0]
+        coverage = stored.get("coverage") or {}
+        assert not any(f.startswith("sector_") for f in coverage.get("features", {})), (
+            f"sector_* features leaked into the coverage report: {coverage}")
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM system_observations "
+                "WHERE evidence->>'dataset' = %s AND evidence->>'feature' LIKE 'sector_%%'",
+                (name,))
+            assert cur.fetchone()[0] == 0
+
+
+class TestPassthroughEncoding:
+
+    def test_passthrough_emits_single_numeric_row(self, db_conn, tmp_path):
+        from gefion.ml.dataset import EntityAttributeSpec, export_dataset_artifacts
+
+        data_id = _insert_stock(db_conn, "ENTATTR_PASS")
+        _insert_prices(db_conn, data_id, [date(2026, 7, 10)])
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO stocks_fundamentals (data_id, date, pe_ratio) "
+                "VALUES (%s, %s, %s) "
+                "ON CONFLICT (data_id, date) DO UPDATE SET "
+                "pe_ratio = EXCLUDED.pe_ratio",
+                (data_id, date(2026, 7, 7), 42.5),
+            )
+        db_conn.commit()
+
+        pe_spec = EntityAttributeSpec(
+            name="pe_ratio", table="stocks_fundamentals", key_column="data_id",
+            as_of_column="date", value_column="pe_ratio",
+            encoding="passthrough", prefix="entity_pe_ratio",
+        )
+        manifest = {
+            "universe": {"symbols": ["ENTATTR_PASS"]},
+            "horizons_days": [],
+            "format": "csv",
+        }
+        export_dataset_artifacts(
+            db_conn, manifest=manifest, out_dir=tmp_path,
+            entity_attribute_specs=[pe_spec],
+        )
+
+        names = _feature_names(tmp_path, "ENTATTR_PASS")
+        assert names == {"entity_pe_ratio"}
+        assert _feature_value(tmp_path, "ENTATTR_PASS", "entity_pe_ratio") == 42.5
 
 
 class TestGenerality:
