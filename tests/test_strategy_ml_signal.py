@@ -372,3 +372,110 @@ class TestGetPositionsFromEnginePortfolio:
 
         assert strategy._get_positions({"AAPL": {"shares": 7}}) == {"AAPL": 7}
         assert strategy._get_positions({"AAPL": 7}) == {"AAPL": 7}
+
+
+class TestNullQuantilesAreSkippedNotFabricated:
+    """A NULL q10/q50/q90 must never become a measured-looking 0.0 (CLAUDE.md
+    failure semantics): a 0.0 q10 would silently PASS the downside_limit gate
+    that a NULL prediction should never pass. The symbol must be dropped from
+    the result and a warning logged naming it -- not scored."""
+
+    @patch("gefion.strategies.ml_signal.psycopg.connect")
+    def test_null_q10_skips_symbol_and_warns(self, mock_connect, caplog):
+        from gefion.strategies.ml_signal import get_predictions_for_date
+
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            ("GOOD", 0.01, 0.05, 0.10),
+            ("BADQ10", None, 0.05, 0.10),
+        ]
+        mock_connect.return_value.__enter__.return_value.cursor \
+            .return_value.__enter__.return_value = mock_cursor
+
+        with caplog.at_level("WARNING"):
+            predictions = get_predictions_for_date(
+                "postgresql://fake", "model", "v1", date(2024, 1, 1), 7
+            )
+
+        assert predictions == {"GOOD": {"q10": 0.01, "q50": 0.05, "q90": 0.10}}
+        assert "BADQ10" not in predictions
+        assert any("BADQ10" in r.message for r in caplog.records)
+
+    @patch("gefion.strategies.ml_signal.psycopg.connect")
+    def test_null_q50_skips_symbol_and_warns(self, mock_connect, caplog):
+        from gefion.strategies.ml_signal import get_predictions_for_date
+
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [("BADQ50", 0.01, None, 0.10)]
+        mock_connect.return_value.__enter__.return_value.cursor \
+            .return_value.__enter__.return_value = mock_cursor
+
+        with caplog.at_level("WARNING"):
+            predictions = get_predictions_for_date(
+                "postgresql://fake", "model", "v1", date(2024, 1, 1), 7
+            )
+
+        assert predictions == {}
+        assert any("BADQ50" in r.message for r in caplog.records)
+
+    @patch("gefion.strategies.ml_signal.psycopg.connect")
+    def test_null_q90_skips_symbol_and_warns(self, mock_connect, caplog):
+        from gefion.strategies.ml_signal import get_predictions_for_date
+
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [("BADQ90", 0.01, 0.05, None)]
+        mock_connect.return_value.__enter__.return_value.cursor \
+            .return_value.__enter__.return_value = mock_cursor
+
+        with caplog.at_level("WARNING"):
+            predictions = get_predictions_for_date(
+                "postgresql://fake", "model", "v1", date(2024, 1, 1), 7
+            )
+
+        assert predictions == {}
+        assert any("BADQ90" in r.message for r in caplog.records)
+
+    @patch("gefion.strategies.ml_signal.psycopg.connect")
+    def test_zero_quantiles_are_not_confused_with_null(self, mock_connect):
+        """A genuine measured 0.0 (Decimal('0')) is not a NULL and must survive."""
+        from gefion.strategies.ml_signal import get_predictions_for_date
+
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [("ZERO", 0.0, 0.0, 0.0)]
+        mock_connect.return_value.__enter__.return_value.cursor \
+            .return_value.__enter__.return_value = mock_cursor
+
+        predictions = get_predictions_for_date(
+            "postgresql://fake", "model", "v1", date(2024, 1, 1), 7
+        )
+
+        assert predictions == {"ZERO": {"q10": 0.0, "q50": 0.0, "q90": 0.0}}
+
+
+class TestPredictionOrderingHasTotalOrder:
+    """The SQL feeding buy_candidates must have a full tiebreaker, not just
+    `ORDER BY q50 DESC` -- see test_backtest_determinism.py for the behavioral
+    regression this guards. This is a lightweight source-level check that the
+    tiebreaker survives future edits to the query text."""
+
+    def test_quantile_query_orders_by_symbol_as_tiebreaker(self):
+        import inspect
+        from gefion.strategies.ml_signal import get_predictions_for_date
+
+        source = inspect.getsource(get_predictions_for_date)
+        order_by_line = [l for l in source.splitlines() if "ORDER BY" in l][0]
+        assert "s.symbol" in order_by_line, (
+            "ORDER BY q50 DESC alone is underdetermined for ties: "
+            f"{order_by_line!r}"
+        )
+
+    def test_classifier_query_orders_by_symbol_as_tiebreaker(self):
+        import inspect
+        from gefion.strategies.ml_signal import get_classifier_predictions_for_date
+
+        source = inspect.getsource(get_classifier_predictions_for_date)
+        order_by_line = [l for l in source.splitlines() if "ORDER BY" in l][0]
+        assert "s.symbol" in order_by_line, (
+            "ORDER BY margin DESC alone is underdetermined for ties: "
+            f"{order_by_line!r}"
+        )

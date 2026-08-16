@@ -377,7 +377,10 @@ class RiskManager:
         close_budget = min(gross, gross - equity / target_ratio)
 
         exits = []
-        for symbol in sorted(unrealized, key=unrealized.get):  # biggest loss first
+        # secondary key on symbol: ties in unrealised loss must not silently
+        # inherit `positions` dict insertion order (which is itself only as
+        # deterministic as whatever produced it upstream)
+        for symbol in sorted(unrealized, key=lambda s: (unrealized[s], s)):  # biggest loss first
             if close_budget <= 0:
                 break
             if symbol in already_exiting or symbol not in prices:
