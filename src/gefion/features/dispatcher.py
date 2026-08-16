@@ -8,6 +8,7 @@ calls appropriate compute functions, and stores results.
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Callable, Any, Tuple, Mapping
+import logging
 import queue
 import threading
 import time
@@ -18,6 +19,8 @@ import warnings
 import inspect
 import psycopg
 from psycopg import sql
+
+logger = logging.getLogger(__name__)
 
 try:
     import psutil
@@ -1381,10 +1384,18 @@ def _fetch_from_stock_ohlcv(
     lookback_before: Optional[date] = None,
     lookback_rows: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    """Fetch from stock_ohlcv table."""
+    """Fetch from stock_ohlcv table, split-adjusted (#272).
+
+    Raw ``close`` is not split-adjusted and ``adjusted_close`` is corrupt for
+    serial reverse-splitters (SMX: close $0.129 vs adjusted_close
+    $3,452,451,366) — every stock-scope feature function was fed one of the
+    two. #264 backfilled ``split_coefficient``, so both series are now
+    corrected here, once, before any feature function sees them; see
+    ``_split_adjust_stock_rows`` for the convention.
+    """
     # For OHLC-based features, we fetch all price columns
     # Column parameter specifies which column is primary, but we fetch all for flexibility
-    cols = "date, open, high, low, close, adjusted_close, volume"
+    cols = "date, open, high, low, close, adjusted_close, volume, split_coefficient"
     if lookback_before is not None and lookback_rows is not None:
         # bounded: last N rows at/before the cutoff + everything after
         query = f"""
@@ -1417,18 +1428,104 @@ def _fetch_from_stock_ohlcv(
         cur.execute(query, query_params)
         rows = cur.fetchall()
 
-    return [
+    price_rows = [
         {
             'date': row[0],
-            'open': row[1],
-            'high': row[2],
-            'low': row[3],
-            'close': row[4],
-            'adjusted_close': row[5],
+            'open': float(row[1]) if row[1] is not None else None,
+            'high': float(row[2]) if row[2] is not None else None,
+            'low': float(row[3]) if row[3] is not None else None,
+            'close': float(row[4]) if row[4] is not None else None,
+            'adjusted_close': float(row[5]) if row[5] is not None else None,
             'volume': row[6],
+            'split_coefficient': row[7],
         }
         for row in rows
     ]
+
+    adjusted, dropped = _split_adjust_stock_rows(price_rows)
+    if dropped is not None:
+        symbol = _symbol_for_data_id(conn, data_id) or f"data_id={data_id}"
+        logger.warning(
+            "feature dispatch split adjustment (#272): dropping %s — "
+            "split_coefficient is %r on %s, so its split history is "
+            "unknown and every earlier price is untrustworthy; no "
+            "stock-scope features computed for this pass",
+            symbol, dropped["split_coefficient"], dropped["date"])
+        return []
+
+    for row in adjusted:
+        row.pop('split_coefficient', None)
+    return adjusted
+
+
+def _symbol_for_data_id(conn: psycopg.Connection, data_id: int) -> Optional[str]:
+    """Best-effort symbol lookup for a data_id, used only in drop warnings."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT symbol FROM stocks WHERE id = %s", (data_id,))
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+def _split_adjust_stock_rows(
+    rows: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Back-adjust one stock's price series for splits (#272).
+
+    Same convention as ``backtest/data_loader.py::split_adjust_prices``
+    (#262/#264, read first, mirrored exactly): a bar's ``split_coefficient``
+    applies ON that bar — its close is ALREADY post-split — so a bar at time
+    t is divided by the product of coefficients on dates STRICTLY LATER than
+    t. The coefficient DIVIDES: forward splits (coef > 1) push earlier
+    prices DOWN, reverse splits (coef < 1) push them UP. Multiplying instead
+    is internally consistent and silently backwards (a 0.04 coefficient
+    would become a 625x error instead of a 25x correction).
+
+    Extended here (vs. the backtest version) to also adjust
+    ``adjusted_close``: the backtest doesn't use that column at all since
+    it's the corrupt one, but every indicator function prefers it when
+    present, so it must carry the same correction as ``close`` or the
+    corruption survives unchanged for half the registered functions.
+
+    ``rows`` must already belong to a single symbol (the caller fetches one
+    data_id at a time) and carry a ``split_coefficient`` key; order does not
+    matter, this sorts by date itself.
+
+    A missing, zero, or negative coefficient anywhere in the series means
+    the split history is unknown, so the WHOLE series is dropped rather than
+    guessed at — unknown is not the same as "no split".
+
+    Returns:
+        (adjusted_rows, dropped) where ``dropped`` is None when nothing was
+        dropped, else ``{"date": ..., "split_coefficient": ...}`` of the
+        first offending bar.
+    """
+    if not rows:
+        return [], None
+
+    ordered = sorted(rows, key=lambda r: r["date"])
+
+    bad = next((r for r in ordered
+                if r.get("split_coefficient") is None
+                or float(r["split_coefficient"]) <= 0), None)
+    if bad is not None:
+        return [], {"date": bad["date"],
+                     "split_coefficient": bad.get("split_coefficient")}
+
+    out_rev: List[Dict[str, Any]] = []
+    divisor = 1.0
+    for row in reversed(ordered):
+        new = dict(row)
+        if divisor != 1.0:
+            for field in ("open", "high", "low", "close", "adjusted_close"):
+                if new.get(field) is not None:
+                    new[field] = new[field] / divisor
+            if new.get("volume") is not None:
+                new["volume"] = int(round(new["volume"] * divisor))
+        out_rev.append(new)
+        # This bar's own coefficient applies to everything BEFORE it.
+        divisor *= float(row["split_coefficient"])
+
+    return list(reversed(out_rev)), None
 
 
 def _fetch_from_generic_table(

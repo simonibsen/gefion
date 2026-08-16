@@ -65,7 +65,7 @@ def world():
             close = 100.0 + i
             cur.execute(
                 """INSERT INTO stock_ohlcv (data_id, date, open, high, low,
-                   close, volume) VALUES (%s,%s,%s,%s,%s,%s,1000)
+                   close, volume, split_coefficient) VALUES (%s,%s,%s,%s,%s,%s,1000,1.0)
                    ON CONFLICT DO NOTHING""",
                 (sid, base + dt.timedelta(days=i), close, close, close, close))
 
