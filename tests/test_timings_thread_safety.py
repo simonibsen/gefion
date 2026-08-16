@@ -65,11 +65,11 @@ def setup_db(db_conn):
         for i in range(200):
             cur.execute(
                 """
-                INSERT INTO stock_ohlcv (data_id, date, open, high, low, close, adjusted_close, volume)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO stock_ohlcv (data_id, date, open, high, low, close, adjusted_close, volume, split_coefficient)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (data_id, date) DO NOTHING
                 """,
-                (stock_id, base_date + timedelta(days=i), 100.0, 102.0, 99.0, 101.0, 101.0, 1000000)
+                (stock_id, base_date + timedelta(days=i), 100.0, 102.0, 99.0, 101.0, 101.0, 1000000, 1.0)
             )
 
     # Register test compute function in feature_functions table
