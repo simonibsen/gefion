@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import csv
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from psycopg import sql
 
 from gefion.observability import create_span, set_attributes
 
@@ -30,6 +34,128 @@ manifest['max_batch_price_rows'].
 class DatasetBuildTooLargeError(ValueError):
     """Even a single symbol-batch would exceed the row guardrail — narrow
     --start-date/--end-date, or lower --symbol-batch-size, and retry."""
+
+
+@dataclass(frozen=True)
+class EntityAttributeSpec:
+    """Declares one static, per-entity attribute (e.g. sector) to emit as
+    synthetic rows into the features export (spec 007-entity-model follow-up).
+
+    Attributes are NOT stored in computed_features (that would write the same
+    constant for every stock on every date — see module docstring context in
+    the spec doc). Instead they are resolved AS-OF each exported row's date
+    from ``table`` at dataset-assembly time. Adding a new attribute (industry,
+    exchange, asset_type, ...) is a new entry in ENTITY_ATTRIBUTE_SPECS below
+    — no other code changes.
+    """
+
+    name: str
+    table: str
+    key_column: str
+    as_of_column: str
+    value_column: str
+    encoding: str  # 'one_hot' | 'passthrough'
+    prefix: str
+    enabled: bool = True
+
+
+ENTITY_ATTRIBUTE_SPECS: List[EntityAttributeSpec] = [
+    EntityAttributeSpec(
+        name="sector", table="stocks_fundamentals", key_column="data_id",
+        as_of_column="date", value_column="sector", encoding="one_hot",
+        prefix="sector",
+    ),
+    # industry/exchange/asset_type addable here later WITHOUT code changes.
+]
+
+
+def _slugify_attribute_value(value: Any) -> str:
+    """'FINANCIAL SERVICES' -> 'financial_services' (lowercased, non-
+    alphanumeric runs collapsed to a single underscore)."""
+    return re.sub(r"[^a-z0-9]+", "_", str(value).strip().lower()).strip("_")
+
+
+def _fetch_entity_attribute_snapshots(
+    conn, spec: EntityAttributeSpec, symbols: List[str]
+) -> Dict[str, List[Any]]:
+    """Return ``{symbol: [(as_of_date, value), ...]}`` ascending by as-of
+    date, for the given spec and symbols. Rows with a NULL value are excluded
+    (unknown, not a snapshot to as-of against). Table/column names come from
+    the spec and are interpolated as identifiers, never string-formatted."""
+    if not symbols:
+        return {}
+    query = sql.SQL(
+        "SELECT s.symbol, t.{as_of_col}, t.{value_col} "
+        "FROM {table} t "
+        "JOIN stocks s ON s.id = t.{key_col} "
+        "WHERE s.symbol = ANY(%s) AND t.{value_col} IS NOT NULL "
+        "ORDER BY s.symbol, t.{as_of_col}"
+    ).format(
+        as_of_col=sql.Identifier(spec.as_of_column),
+        value_col=sql.Identifier(spec.value_column),
+        table=sql.Identifier(spec.table),
+        key_col=sql.Identifier(spec.key_column),
+    )
+    with conn.cursor() as cur:
+        cur.execute(query, (list(symbols),))
+        rows = cur.fetchall()
+    snapshots: Dict[str, List[Any]] = {}
+    for symbol, as_of, value in rows:
+        snapshots.setdefault(symbol, []).append((as_of, value))
+    return snapshots
+
+
+def _resolve_entity_attribute_value(snapshots_for_symbol, row_date):
+    """AS-OF resolution for one (symbol, date) row: the latest snapshot with
+    as_of <= row_date. If row_date predates every snapshot, backdate to the
+    EARLIEST snapshot (owner-approved — see EntityAttributeSpec docstring)
+    and report it as such. Returns (value, is_backdated); (None, False) when
+    the symbol has no known snapshot at all."""
+    if not snapshots_for_symbol:
+        return None, False
+    best = None
+    for as_of, value in snapshots_for_symbol:  # ascending as-of order
+        if as_of <= row_date:
+            best = value
+        else:
+            break
+    if best is not None:
+        return best, False
+    return snapshots_for_symbol[0][1], True
+
+
+def _accumulate_entity_attribute_rows(
+    conn, batch_df, specs: List[EntityAttributeSpec], rows_out: List[Dict[str, Any]],
+    provenance: Dict[str, bool],
+) -> None:
+    """Emit synthetic feature rows for every (symbol, date) pair in this
+    price batch — the same trading-calendar grid every other per-stock
+    feature appears on, without ever storing the (static) attribute
+    densely in computed_features. Mutates rows_out and provenance in place
+    so callers can accumulate across symbol batches."""
+    enabled_specs = [s for s in specs if s.enabled]
+    if not enabled_specs or batch_df.empty:
+        return
+    symbols_in_batch = sorted(batch_df["symbol"].unique().tolist())
+    pairs = batch_df[["symbol", "date"]].drop_duplicates()
+    for spec in enabled_specs:
+        snapshots = _fetch_entity_attribute_snapshots(conn, spec, symbols_in_batch)
+        for symbol, row_date in pairs.itertuples(index=False):
+            value, backdated = _resolve_entity_attribute_value(
+                snapshots.get(symbol), row_date)
+            if value is None:
+                continue
+            if backdated:
+                provenance["point_in_time"] = False
+            if spec.encoding == "one_hot":
+                slug = _slugify_attribute_value(value)
+                rows_out.append({"symbol": symbol, "date": row_date,
+                                 "feature_name": f"{spec.prefix}_{slug}", "value": 1.0})
+                rows_out.append({"symbol": symbol, "date": row_date,
+                                 "feature_name": f"{spec.prefix}_known", "value": 1.0})
+            elif spec.encoding == "passthrough":
+                rows_out.append({"symbol": symbol, "date": row_date,
+                                 "feature_name": spec.prefix, "value": float(value)})
 
 
 def _write_to_file(
@@ -380,19 +506,23 @@ def export_dataset_artifacts(
     out_dir: Path,
     on_progress: Any = None,
     coverage_audit: bool = True,
+    entity_attribute_specs: Optional[List[EntityAttributeSpec]] = None,
 ) -> None:
     """
     Export dataset artifacts.
 
     Exports:
       - prices (stock_ohlcv)
-      - features (computed_features joined to feature_definitions)
+      - features (computed_features joined to feature_definitions, plus
+        synthetic entity-attribute rows — see ENTITY_ATTRIBUTE_SPECS)
       - labels (forward returns + 5-class labels per horizon)
 
     Supports CSV (default) and Parquet formats via manifest['format'].
 
     Args:
         on_progress: Optional callback(message: str) for progress updates.
+        entity_attribute_specs: Overrides ENTITY_ATTRIBUTE_SPECS for this
+            build (mainly for tests proving the mechanism is general).
     """
     n_symbols = len(manifest.get("symbols", []))
     n_horizons = len(manifest.get("horizons", []))
@@ -400,7 +530,8 @@ def export_dataset_artifacts(
                       format=manifest.get("format", "csv")):
         _export_dataset_artifacts_impl(conn, manifest=manifest, out_dir=out_dir,
                                         on_progress=on_progress,
-                                        coverage_audit=coverage_audit)
+                                        coverage_audit=coverage_audit,
+                                        entity_attribute_specs=entity_attribute_specs)
 
 
 def _run_coverage_audit(conn, *, manifest, symbols, labels_df,
@@ -443,7 +574,8 @@ def _run_coverage_audit(conn, *, manifest, symbols, labels_df,
 
 
 def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None,
-                                   coverage_audit: bool = True):
+                                   coverage_audit: bool = True,
+                                   entity_attribute_specs=None):
     def emit_progress(msg: str) -> None:
         if on_progress:
             on_progress(msg)
@@ -524,6 +656,17 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None,
         manifest.get("coverage_audit", True))
     grid_labels: Dict[Any, float] = {}
 
+    # Entity attributes (sector, etc. — see ENTITY_ATTRIBUTE_SPECS): synthetic
+    # feature rows resolved AS-OF each priced (symbol, date), accumulated
+    # alongside the price batches above so no separate full-universe scan is
+    # needed. attributes_provenance flips to point_in_time=False the moment
+    # any row had to backdate to a stock's earliest snapshot (spec 007
+    # follow-up: recorded on the manifest, never silently dropped).
+    specs = entity_attribute_specs if entity_attribute_specs is not None else ENTITY_ATTRIBUTE_SPECS
+    enabled_entity_specs = [s for s in specs if s.enabled]
+    entity_attribute_rows: List[Dict[str, Any]] = []
+    attributes_provenance: Dict[str, bool] = {"point_in_time": True}
+
     price_writer: Any = None
     labels_writer: Any = None
     try:
@@ -537,6 +680,9 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None,
                                              end_date=end_date, header=prices_header)
             price_writer.write_df(batch_df)
             price_count += len(batch_df)
+
+            _accumulate_entity_attribute_rows(conn, batch_df, enabled_entity_specs,
+                                              entity_attribute_rows, attributes_provenance)
 
             if labels_writer is not None and labels_error is None and not batch_df.empty:
                 try:
@@ -586,6 +732,8 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None,
         labels_count = 0
         labels_error = None
         grid_labels = {}
+        entity_attribute_rows = []
+        attributes_provenance = {"point_in_time": True}
         _write_to_file([], prices_path, prices_header, export_format)
         if valid_horizons:
             labels_path.unlink(missing_ok=True)
@@ -679,6 +827,28 @@ def _export_dataset_artifacts_impl(conn, *, manifest, out_dir, on_progress=None,
                 _write_to_file(feature_rows, features_path, features_header, export_format)
     except Exception:
         _write_to_file([], features_path, features_header, export_format)
+        feature_rows = []
+
+    # Append entity-attribute rows (sector, etc.) accumulated during the
+    # price batch loop above — independent of whether the computed_features
+    # query itself succeeded, since they come from stocks_fundamentals.
+    if entity_attribute_rows:
+        if export_format == "csv":
+            with features_path.open("a", newline="") as f:
+                csv.DictWriter(f, fieldnames=features_header).writerows(entity_attribute_rows)
+        else:
+            feature_rows.extend(entity_attribute_rows)
+            _write_to_file(feature_rows, features_path, features_header, export_format)
+        # Deliberately NOT fed to _record_presence / the coverage audit
+        # (#191): a one-hot entity-attribute column is *defined* to be
+        # present for ~100% of its own cohort and ~0% elsewhere, so it would
+        # trip the cohort-disparity check against itself on every partial
+        # category — that's what the column measures, not coverage bias.
+        feature_count += len(entity_attribute_rows)
+        emit_progress(f"Entity attributes exported: {len(entity_attribute_rows):,} records")
+
+    if enabled_entity_specs:
+        manifest["attributes_point_in_time"] = attributes_provenance["point_in_time"]
 
     if feature_count == 0:
         emit_progress("⚠️  WARNING: No features exported. Training will fail without features.")
