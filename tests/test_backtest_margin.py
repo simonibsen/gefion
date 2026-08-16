@@ -134,6 +134,34 @@ def test_liquidation_order_is_largest_unrealised_loser_first():
     assert exits[0]["symbol"] == "AAA"  # the bigger loser closes first
 
 
+def test_liquidation_tie_break_is_order_independent():
+    """Two positions with EXACTLY equal unrealised loss must liquidate in a
+    deterministic order regardless of the order `portfolio.positions` happens
+    to iterate in -- `sorted(unrealized, key=unrealized.get)` is stable, so
+    without a secondary key a tie silently inherits dict insertion order."""
+    limits = RiskLimits(maintenance_margin=0.25)
+
+    def _exits_for(order):
+        rm = RiskManager(limits)
+        portfolio = Portfolio(initial_cash=0.0)
+        all_positions = {
+            "AAA": {"shares": -50, "avg_price": 100.0},
+            "BBB": {"shares": -50, "avg_price": 100.0},
+        }
+        portfolio.positions = {sym: all_positions[sym] for sym in order}
+        prices = {"AAA": 140.0, "BBB": 140.0}  # identical unrealised loss
+        gross = 50 * 140.0 + 50 * 140.0
+        portfolio.cash = 2_000.0 + gross  # same breach as the test above
+        return rm.generate_exit_signals(portfolio, prices)
+
+    order_forward = [e["symbol"] for e in _exits_for(["AAA", "BBB"])]
+    order_reversed = [e["symbol"] for e in _exits_for(["BBB", "AAA"])]
+
+    assert order_forward == order_reversed, (
+        "tie-break order must not depend on portfolio.positions dict order"
+    )
+
+
 def test_long_only_byte_identical_with_or_without_default_margin_risk_manager():
     """long_only must be unaffected: cash-funded buys keep equity/gross >= 1
     always, so the maintenance-margin check (default-on for long_short) is a

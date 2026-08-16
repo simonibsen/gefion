@@ -65,16 +65,26 @@ def get_predictions_for_date(
                           AND p.prediction_date = %s
                           AND p.horizon_days = %s
                           AND m.active = TRUE
-                        ORDER BY (p.prediction_values->>'q50')::NUMERIC DESC
+                        ORDER BY (p.prediction_values->>'q50')::NUMERIC DESC, s.symbol
                         """,
                         (model_name, model_version, prediction_date, horizon_days),
                     )
 
                     for symbol, q10, q50, q90 in cur.fetchall():
+                        # A NULL quantile means this prediction is unusable --
+                        # never fabricate a measured-looking 0.0 (a 0.0 q10
+                        # would silently pass the downside_limit gate that a
+                        # NULL must never pass). Skip and warn, don't score.
+                        if q10 is None or q50 is None or q90 is None:
+                            logger.warning(
+                                f"Skipping {symbol}: NULL quantile prediction "
+                                f"(q10={q10}, q50={q50}, q90={q90})"
+                            )
+                            continue
                         predictions[symbol] = {
-                            "q10": float(q10) if q10 else 0.0,
-                            "q50": float(q50) if q50 else 0.0,
-                            "q90": float(q90) if q90 else 0.0,
+                            "q10": float(q10),
+                            "q50": float(q50),
+                            "q90": float(q90),
                         }
         except Exception as e:
             logger.debug(f"Error fetching predictions: {e}")
@@ -129,21 +139,46 @@ def get_classifier_predictions_for_date(
                           AND p.prediction_date = %s
                           AND p.horizon_days = %s
                           AND m.active = TRUE
-                        ORDER BY (p.prediction_values->>'margin')::NUMERIC DESC
+                        ORDER BY (p.prediction_values->>'margin')::NUMERIC DESC, s.symbol
                         """,
                         (model_name, model_version, prediction_date, horizon_days),
                     )
 
                     for row in cur.fetchall():
                         symbol = row[0]
+                        predicted_class = row[1]
+                        p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin = row[2:8]
+                        # A NULL probability/margin means this prediction is
+                        # unusable -- never fabricate a measured-looking 0.0
+                        # (see get_predictions_for_date above: a fabricated
+                        # 0.0 is a plausible, tie-eligible value that can win
+                        # a max_positions boundary against a real candidate).
+                        # Skip and warn, don't score.
+                        if (
+                            predicted_class is None
+                            or p_strong_up is None
+                            or p_weak_up is None
+                            or p_neutral is None
+                            or p_weak_down is None
+                            or p_strong_down is None
+                            or margin is None
+                        ):
+                            logger.warning(
+                                f"Skipping {symbol}: NULL classifier prediction "
+                                f"(predicted_class={predicted_class}, "
+                                f"p_strong_up={p_strong_up}, p_weak_up={p_weak_up}, "
+                                f"p_neutral={p_neutral}, p_weak_down={p_weak_down}, "
+                                f"p_strong_down={p_strong_down}, margin={margin})"
+                            )
+                            continue
                         predictions[symbol] = {
-                            "predicted_class": row[1],
-                            "p_strong_up": float(row[2]) if row[2] else 0.0,
-                            "p_weak_up": float(row[3]) if row[3] else 0.0,
-                            "p_neutral": float(row[4]) if row[4] else 0.0,
-                            "p_weak_down": float(row[5]) if row[5] else 0.0,
-                            "p_strong_down": float(row[6]) if row[6] else 0.0,
-                            "margin": float(row[7]) if row[7] else 0.0,
+                            "predicted_class": predicted_class,
+                            "p_strong_up": float(p_strong_up),
+                            "p_weak_up": float(p_weak_up),
+                            "p_neutral": float(p_neutral),
+                            "p_weak_down": float(p_weak_down),
+                            "p_strong_down": float(p_strong_down),
+                            "margin": float(margin),
                         }
         except Exception as e:
             logger.debug(f"Error fetching classifier predictions: {e}")
@@ -413,7 +448,7 @@ class MLSignalStrategy:
                     "q10": pred["q10"],
                     "q90": pred.get("q90", pred["q50"]),
                 })
-            all_ranked_candidates.sort(key=lambda x: x["q50"], reverse=True)
+            all_ranked_candidates.sort(key=lambda x: (x["q50"], x["symbol"]), reverse=True)
             buy_candidates = [
                 c for c in all_ranked_candidates if c["q10"] >= self.downside_limit
             ]
@@ -440,7 +475,7 @@ class MLSignalStrategy:
                         "q90": pred.get("q90", pred["q50"]),
                     })
 
-            buy_candidates.sort(key=lambda x: x["q50"], reverse=True)
+            buy_candidates.sort(key=lambda x: (x["q50"], x["symbol"]), reverse=True)
 
         # max_positions is enforced PER SIDE (#210): count only existing longs
         # against the long budget (a short must not steal a long slot), and take
@@ -493,7 +528,7 @@ class MLSignalStrategy:
                     if s not in positions and s in current_prices
                     and p["q50"] <= -self.return_threshold
                 ]
-            short_candidates.sort(key=lambda x: x["q50"])  # most negative first
+            short_candidates.sort(key=lambda x: (x["q50"], x["symbol"]))  # most negative first
             existing_shorts = sum(1 for sh in positions.values() if sh < 0)
             n_covers = len([s for s in signals if s["action"] == "cover"])
             short_slots = max(0, self.max_positions - existing_shorts + n_covers)
@@ -560,7 +595,7 @@ class MLSignalStrategy:
                     "class": pred["predicted_class"],
                     "net_score": net_score,
                 })
-            all_ranked_candidates.sort(key=lambda x: x["net_score"], reverse=True)
+            all_ranked_candidates.sort(key=lambda x: (x["net_score"], x["symbol"]), reverse=True)
             buy_candidates = list(all_ranked_candidates)
         else:
             buy_candidates = []
@@ -584,7 +619,7 @@ class MLSignalStrategy:
                             "margin": pred.get("margin", 0),
                         })
 
-            buy_candidates.sort(key=lambda x: x["margin"], reverse=True)
+            buy_candidates.sort(key=lambda x: (x["margin"], x["symbol"]), reverse=True)
 
         # max_positions PER SIDE (#210): count only existing longs against the
         # long budget; take the highest-margin longs up to the cap.
@@ -626,7 +661,7 @@ class MLSignalStrategy:
                     for c in all_ranked_candidates
                     if c["symbol"] not in chosen_long_symbols
                 ]
-                short_candidates.sort(key=lambda x: x["net_score"])  # most bearish first
+                short_candidates.sort(key=lambda x: (x["net_score"], x["symbol"]))  # most bearish first
             else:
                 short_candidates = []
                 for symbol, pred in predictions.items():
@@ -642,7 +677,7 @@ class MLSignalStrategy:
                             short_candidates.append(
                                 {"symbol": symbol,
                                  "cls": pred["predicted_class"], "prob": prob})
-                short_candidates.sort(key=lambda x: x["prob"], reverse=True)
+                short_candidates.sort(key=lambda x: (x["prob"], x["symbol"]), reverse=True)
             existing_shorts = sum(1 for sh in positions.values() if sh < 0)
             n_covers = len([s for s in signals if s["action"] == "cover"])
             short_slots = max(0, self.max_positions - existing_shorts + n_covers)

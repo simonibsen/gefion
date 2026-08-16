@@ -279,7 +279,7 @@ def load_price_data_for_backtest(
                      JOIN stock_ohlcv o ON s.id = o.data_id
                      WHERE s.status = 'Active'
                      GROUP BY s.id
-                     ORDER BY COUNT(*) DESC
+                     ORDER BY COUNT(*) DESC, s.id
                      LIMIT {limit})
                 """
                 # Replace symbol filters with IN clause
@@ -401,7 +401,7 @@ def get_available_symbols(
                 {where_clause}
                 GROUP BY s.symbol
                 HAVING COUNT(*) > 50
-                ORDER BY COUNT(*) DESC
+                ORDER BY COUNT(*) DESC, s.symbol
                 {limit_clause}
             """
 
