@@ -146,14 +146,39 @@ def get_classifier_predictions_for_date(
 
                     for row in cur.fetchall():
                         symbol = row[0]
+                        predicted_class = row[1]
+                        p_strong_up, p_weak_up, p_neutral, p_weak_down, p_strong_down, margin = row[2:8]
+                        # A NULL probability/margin means this prediction is
+                        # unusable -- never fabricate a measured-looking 0.0
+                        # (see get_predictions_for_date above: a fabricated
+                        # 0.0 is a plausible, tie-eligible value that can win
+                        # a max_positions boundary against a real candidate).
+                        # Skip and warn, don't score.
+                        if (
+                            predicted_class is None
+                            or p_strong_up is None
+                            or p_weak_up is None
+                            or p_neutral is None
+                            or p_weak_down is None
+                            or p_strong_down is None
+                            or margin is None
+                        ):
+                            logger.warning(
+                                f"Skipping {symbol}: NULL classifier prediction "
+                                f"(predicted_class={predicted_class}, "
+                                f"p_strong_up={p_strong_up}, p_weak_up={p_weak_up}, "
+                                f"p_neutral={p_neutral}, p_weak_down={p_weak_down}, "
+                                f"p_strong_down={p_strong_down}, margin={margin})"
+                            )
+                            continue
                         predictions[symbol] = {
-                            "predicted_class": row[1],
-                            "p_strong_up": float(row[2]) if row[2] else 0.0,
-                            "p_weak_up": float(row[3]) if row[3] else 0.0,
-                            "p_neutral": float(row[4]) if row[4] else 0.0,
-                            "p_weak_down": float(row[5]) if row[5] else 0.0,
-                            "p_strong_down": float(row[6]) if row[6] else 0.0,
-                            "margin": float(row[7]) if row[7] else 0.0,
+                            "predicted_class": predicted_class,
+                            "p_strong_up": float(p_strong_up),
+                            "p_weak_up": float(p_weak_up),
+                            "p_neutral": float(p_neutral),
+                            "p_weak_down": float(p_weak_down),
+                            "p_strong_down": float(p_strong_down),
+                            "margin": float(margin),
                         }
         except Exception as e:
             logger.debug(f"Error fetching classifier predictions: {e}")

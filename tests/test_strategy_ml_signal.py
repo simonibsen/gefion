@@ -452,6 +452,102 @@ class TestNullQuantilesAreSkippedNotFabricated:
         assert predictions == {"ZERO": {"q10": 0.0, "q50": 0.0, "q90": 0.0}}
 
 
+class TestNullClassifierPredictionsAreSkippedNotFabricated:
+    """The classifier path (get_classifier_predictions_for_date) is the sibling
+    of get_predictions_for_date and must uphold the same failure semantics: a
+    NULL probability/margin is an unusable prediction, not a measured 0.0. A
+    fabricated 0.0 is a plausible, tie-eligible net_score/margin that could win
+    a max_positions boundary against a real candidate (see net_score at
+    ml_signal.py and margin-based buy_candidates sort)."""
+
+    @patch("gefion.strategies.ml_signal.psycopg.connect")
+    def test_null_probability_skips_symbol_and_warns(self, mock_connect, caplog):
+        from gefion.strategies.ml_signal import get_classifier_predictions_for_date
+
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            ("GOOD", "strong_up", 0.6, 0.2, 0.1, 0.05, 0.05, 0.4),
+            ("BADPROB", "strong_up", None, 0.2, 0.1, 0.05, 0.05, 0.4),
+        ]
+        mock_connect.return_value.__enter__.return_value.cursor \
+            .return_value.__enter__.return_value = mock_cursor
+
+        with caplog.at_level("WARNING"):
+            predictions = get_classifier_predictions_for_date(
+                "postgresql://fake", "model", "v1", date(2024, 1, 1), 7
+            )
+
+        assert "GOOD" in predictions
+        assert "BADPROB" not in predictions
+        assert any("BADPROB" in r.message for r in caplog.records)
+
+    @patch("gefion.strategies.ml_signal.psycopg.connect")
+    def test_null_margin_skips_symbol_and_warns(self, mock_connect, caplog):
+        from gefion.strategies.ml_signal import get_classifier_predictions_for_date
+
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            ("BADMARGIN", "strong_up", 0.6, 0.2, 0.1, 0.05, 0.05, None),
+        ]
+        mock_connect.return_value.__enter__.return_value.cursor \
+            .return_value.__enter__.return_value = mock_cursor
+
+        with caplog.at_level("WARNING"):
+            predictions = get_classifier_predictions_for_date(
+                "postgresql://fake", "model", "v1", date(2024, 1, 1), 7
+            )
+
+        assert predictions == {}
+        assert any("BADMARGIN" in r.message for r in caplog.records)
+
+    @patch("gefion.strategies.ml_signal.psycopg.connect")
+    def test_null_predicted_class_skips_symbol_and_warns(self, mock_connect, caplog):
+        from gefion.strategies.ml_signal import get_classifier_predictions_for_date
+
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            ("BADCLASS", None, 0.6, 0.2, 0.1, 0.05, 0.05, 0.4),
+        ]
+        mock_connect.return_value.__enter__.return_value.cursor \
+            .return_value.__enter__.return_value = mock_cursor
+
+        with caplog.at_level("WARNING"):
+            predictions = get_classifier_predictions_for_date(
+                "postgresql://fake", "model", "v1", date(2024, 1, 1), 7
+            )
+
+        assert predictions == {}
+        assert any("BADCLASS" in r.message for r in caplog.records)
+
+    @patch("gefion.strategies.ml_signal.psycopg.connect")
+    def test_zero_probabilities_are_not_confused_with_null(self, mock_connect):
+        """A genuine measured 0.0 (Decimal('0')) is not a NULL and must survive."""
+        from gefion.strategies.ml_signal import get_classifier_predictions_for_date
+
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            ("ZERO", "neutral", 0.0, 0.0, 1.0, 0.0, 0.0, 0.0),
+        ]
+        mock_connect.return_value.__enter__.return_value.cursor \
+            .return_value.__enter__.return_value = mock_cursor
+
+        predictions = get_classifier_predictions_for_date(
+            "postgresql://fake", "model", "v1", date(2024, 1, 1), 7
+        )
+
+        assert predictions == {
+            "ZERO": {
+                "predicted_class": "neutral",
+                "p_strong_up": 0.0,
+                "p_weak_up": 0.0,
+                "p_neutral": 1.0,
+                "p_weak_down": 0.0,
+                "p_strong_down": 0.0,
+                "margin": 0.0,
+            }
+        }
+
+
 class TestPredictionOrderingHasTotalOrder:
     """The SQL feeding buy_candidates must have a full tiebreaker, not just
     `ORDER BY q50 DESC` -- see test_backtest_determinism.py for the behavioral
